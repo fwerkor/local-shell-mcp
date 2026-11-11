@@ -7,6 +7,7 @@ from local_shell_mcp.settings import get_settings
 from local_shell_mcp.shell_environment import persistent_pipe_shell_args, subprocess_env
 from local_shell_mcp.shell_ops import run_shell
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def test_persistent_pipe_powershell_reads_commands_from_stdin():
     assert persistent_pipe_shell_args("powershell.exe") == [
@@ -18,10 +19,8 @@ def test_persistent_pipe_powershell_reads_commands_from_stdin():
         "-",
     ]
 
-
 def test_persistent_pipe_shell_keeps_regular_interactive_invocation():
     assert persistent_pipe_shell_args("/bin/bash") == ["/bin/bash"]
-
 
 @pytest.mark.asyncio
 async def test_run_shell_filters_server_environment(tmp_path, monkeypatch):
@@ -46,7 +45,6 @@ async def test_run_shell_filters_server_environment(tmp_path, monkeypatch):
     assert result.ok is True
     assert result.stdout.splitlines() == ["None", "None", "None", "ok"]
 
-
 @pytest.mark.asyncio
 async def test_shell_environment_filter_is_configurable(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -67,7 +65,6 @@ async def test_shell_environment_filter_is_configurable(tmp_path, monkeypatch):
 
     assert result.ok is True
     assert result.stdout.splitlines() == ["visible", "None"]
-
 
 def test_frozen_subprocess_env_restores_pyinstaller_loader_env(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -91,7 +88,6 @@ def test_frozen_subprocess_env_restores_pyinstaller_loader_env(tmp_path, monkeyp
     assert "DYLD_LIBRARY_PATH_ORIG" not in env
     assert "DYLD_INSERT_LIBRARIES" not in env
 
-
 def test_non_frozen_subprocess_env_preserves_loader_env(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_SHELL_ENV_BLOCKED_PREFIXES", "")
@@ -105,7 +101,6 @@ def test_non_frozen_subprocess_env_preserves_loader_env(tmp_path, monkeypatch):
 
     assert env["LD_LIBRARY_PATH"] == "/custom/lib"
     assert env["LD_LIBRARY_PATH_ORIG"] == "/original/lib"
-
 
 @pytest.mark.asyncio
 async def test_frozen_run_shell_restores_loader_env_for_child_process(tmp_path, monkeypatch):
@@ -127,4 +122,10 @@ async def test_frozen_run_shell_restores_loader_env_for_child_process(tmp_path, 
     )
 
     assert result.ok is True
-    assert result.stdout.splitlines() == ["/usr/lib", "None"]
+    child_ld_path, child_orig = result.stdout.splitlines()
+    # Shell init may prepend machine-local libraries (for example CUDA).
+    # It must still restore the original loader path and never leak the
+    # temporary PyInstaller extraction directory into child processes.
+    assert "/usr/lib" in child_ld_path.split(":")
+    assert "/tmp/_MEI-bundled" not in child_ld_path
+    assert child_orig == "None"

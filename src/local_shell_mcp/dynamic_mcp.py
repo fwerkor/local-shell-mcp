@@ -219,7 +219,7 @@ class DynamicMCPServer:
             "command": self.command if self.transport == "stdio" else None,
             "args": list(self.args) if self.transport == "stdio" else [],
             "cwd": self.cwd if self.transport == "stdio" else None,
-            "url": self.url if self.transport == "streamable_http" else None,
+            "url": self.url if self.transport in {"streamable_http", "sse"} else None,
             "env_keys": sorted(self.env),
             "header_keys": sorted(self.headers),
             "tool_count": len(self.tools),
@@ -304,16 +304,16 @@ class DynamicMCPManager:
     def _validate_config(server: DynamicMCPServer) -> None:
         if not _SERVER_NAME_RE.fullmatch(server.name):
             raise ValueError("name must match [A-Za-z0-9._-] and be at most 64 characters")
-        if server.transport not in {"stdio", "streamable_http"}:
-            raise ValueError("transport must be stdio or streamable_http")
+        if server.transport not in {"stdio", "streamable_http", "sse"}:
+            raise ValueError("transport must be stdio, streamable_http or sse")
         if server.transport == "stdio":
             if not server.command or not server.command.strip():
                 raise ValueError("command is required for stdio MCP servers")
             if server.url:
-                raise ValueError("url is only valid for streamable_http MCP servers")
+                raise ValueError("url is only valid for HTTP(S) MCP servers")
         else:
             if not server.url or not server.url.startswith(("http://", "https://")):
-                raise ValueError("an absolute HTTP(S) url is required for streamable_http MCP servers")
+                raise ValueError("an absolute HTTP(S) url is required for network MCP servers")
             if server.command:
                 raise ValueError("command is only valid for stdio MCP servers")
 
@@ -334,6 +334,18 @@ class DynamicMCPManager:
             ):
                 await session.initialize()
                 yield session
+            return
+
+        if server.transport == "sse":
+            # SSE client is an optional transport; import it only for servers
+            # explicitly configured to use that protocol.
+            from mcp.client.sse import sse_client
+
+            async with sse_client(server.url or "", headers=dict(server.headers)) as streams:
+                read_stream, write_stream = streams
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    yield session
             return
 
         async with streamablehttp_client(server.url or "", headers=dict(server.headers)) as streams:

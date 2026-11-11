@@ -14,6 +14,7 @@ from local_shell_mcp import dynamic_mcp
 from local_shell_mcp.dynamic_mcp import DynamicMCPManager
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 @pytest.fixture(autouse=True)
 def _settings(tmp_path, monkeypatch):
@@ -24,7 +25,6 @@ def _settings(tmp_path, monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
-
 
 def _server_script(path: Path) -> Path:
     script = path / "demo_mcp.py"
@@ -44,7 +44,6 @@ if __name__ == "__main__":
         encoding="utf-8",
     )
     return script
-
 
 @pytest.mark.asyncio
 async def test_stdio_gateway_round_trip_persists_cache_and_redacts_config(tmp_path):
@@ -106,7 +105,6 @@ async def test_stdio_gateway_round_trip_persists_cache_and_redacts_config(tmp_pa
     assert removed["removed"] is True
     assert (await reloaded.manage(action="list"))["servers"] == []
 
-
 @pytest.mark.asyncio
 async def test_register_without_refresh_and_refresh_failure_are_recoverable(tmp_path, monkeypatch):
     manager = DynamicMCPManager(tmp_path / ".state")
@@ -159,7 +157,6 @@ async def test_register_without_refresh_and_refresh_failure_are_recoverable(tmp_
         "broken",
         "cold",
     }
-
 
 @pytest.mark.asyncio
 async def test_http_transport_pagination_call_and_tool_limit(tmp_path, monkeypatch):
@@ -233,7 +230,6 @@ async def test_http_transport_pagination_call_and_tool_limit(tmp_path, monkeypat
     with pytest.raises(ValueError, match="more than 1 tools"):
         await manager.refresh("web")
 
-
 def test_config_redaction_only_treats_secret_like_values_as_substrings():
     server = dynamic_mcp.DynamicMCPServer(
         name="demo",
@@ -295,7 +291,6 @@ def test_config_redaction_only_treats_secret_like_values_as_substrings():
     assert "db-pass" not in repr(redacted)
     assert "storage-secret" not in repr(redacted)
 
-
 def test_config_redaction_preserves_call_tool_result_root_keys():
     server = dynamic_mcp.DynamicMCPServer(
         name="demo",
@@ -320,7 +315,6 @@ def test_config_redaction_preserves_call_tool_result_root_keys():
     assert redacted["isError"] is True
     assert redacted["structuredContent"] == {"<redacted>": "<redacted>"}
     assert redacted["_meta"] == {"<redacted>": "<redacted>"}
-
 
 @pytest.mark.asyncio
 async def test_legacy_stdio_registry_without_cwd_uses_workspace(tmp_path):
@@ -353,7 +347,6 @@ async def test_legacy_stdio_registry_without_cwd_uses_workspace(tmp_path):
     server = (await manager.manage(action="get", name="legacy"))["server"]
     assert server["cwd"] == str(tmp_path.resolve())
 
-
 @pytest.mark.asyncio
 async def test_registry_uses_same_compact_encoding_as_schema_limits(tmp_path):
     state_dir = tmp_path / ".state"
@@ -367,7 +360,6 @@ async def test_registry_uses_same_compact_encoding_as_schema_limits(tmp_path):
     raw = (state_dir / "dynamic-mcp.json").read_text(encoding="utf-8")
     assert "\n  " not in raw
     assert json.loads(raw)["servers"][0]["name"] == "compact"
-
 
 @pytest.mark.asyncio
 async def test_tool_schema_cache_enforces_descriptor_and_total_byte_limits(tmp_path, monkeypatch):
@@ -400,7 +392,6 @@ async def test_tool_schema_cache_enforces_descriptor_and_total_byte_limits(tmp_p
     with pytest.raises(ValueError, match="cache exceeds"):
         await manager._fetch_tools(server)
 
-
 @pytest.mark.asyncio
 async def test_validation_policy_and_registry_error_paths(tmp_path, monkeypatch):
     manager = DynamicMCPManager(tmp_path / ".state", max_timeout_s=5)
@@ -409,7 +400,7 @@ async def test_validation_policy_and_registry_error_paths(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="name must match"):
         await manager.manage(action="register", name="bad name", command=sys.executable)
     with pytest.raises(ValueError, match="transport"):
-        await manager.manage(action="register", name="bad", transport="sse", command="python")
+        await manager.manage(action="register", name="bad", transport="unsupported", command="python")
     with pytest.raises(ValueError, match="command is required"):
         await manager.manage(action="register", name="missing", transport="stdio")
     with pytest.raises(ValueError, match="absolute HTTP"):
@@ -500,7 +491,6 @@ async def test_validation_policy_and_registry_error_paths(tmp_path, monkeypatch)
     with pytest.raises(TypeError, match="unsupported MCP tool descriptor"):
         dynamic_mcp._tool_json(Unsupported())
 
-
 @pytest.mark.asyncio
 async def test_refresh_detects_removal_race(tmp_path, monkeypatch):
     manager = DynamicMCPManager(tmp_path / ".state")
@@ -513,7 +503,6 @@ async def test_refresh_detects_removal_race(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "_fetch_tools", remove_during_fetch)
     with pytest.raises(ValueError, match="removed while refreshing"):
         await manager.refresh("demo")
-
 
 @pytest.mark.asyncio
 async def test_refresh_discards_tools_when_configuration_changes(tmp_path, monkeypatch):
@@ -530,3 +519,57 @@ async def test_refresh_discards_tools_when_configuration_changes(tmp_path, monke
     searched = await manager.search(server="demo")
     assert searched["tools"] == []
     assert searched["unrefreshed_servers"] == ["demo"]
+
+
+@pytest.mark.asyncio
+async def test_transport_reconfiguration_invalidates_tools_and_honors_local_policy(tmp_path, monkeypatch):
+    manager = DynamicMCPManager(tmp_path / ".state")
+    await manager.manage(action="register", name="switch", transport="streamable_http",
+                         url="https://mcp.example.test/api", refresh=False)
+    changed = await manager.manage(action="update", name="switch", transport="stdio",
+                                   command=sys.executable, args=["-V"], cwd=str(tmp_path),
+                                   env={"API_KEY": "secret"}, headers={"X-Test": "value"})
+    assert changed["refreshed"] is False
+    assert changed["server"]["tool_count"] == 0
+    assert changed["server"]["transport"] == "stdio"
+    assert "secret" not in repr(changed)
+    monkeypatch.setattr(dynamic_mcp, "get_settings", lambda: SimpleNamespace(disable_local=True, state_backend="file"))
+    with pytest.raises(ValueError, match="stdio dynamic MCP servers are disabled"):
+        await manager.manage(action="update", name="switch", args=[])
+    monkeypatch.undo()
+    changed = await manager.manage(action="update", name="switch", transport="streamable_http",
+                                   url="https://new.example.test/api", env={}, headers={})
+    assert changed["server"]["transport"] == "streamable_http"
+    assert changed["server"]["url"] == "https://new.example.test/api"
+    assert changed["server"]["command"] is None
+    assert changed["server"]["args"] == []
+
+
+@pytest.mark.asyncio
+async def test_optional_sse_transport_initializes_session(tmp_path, monkeypatch):
+    import mcp.client.sse
+
+    calls = []
+
+    @asynccontextmanager
+    async def transport(url, headers):
+        calls.append((url, headers))
+        yield "read", "write"
+
+    class Session:
+        def __init__(self, read, write):
+            assert (read, write) == ("read", "write")
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def initialize(self):
+            calls.append("initialized")
+
+    monkeypatch.setattr(mcp.client.sse, "sse_client", transport)
+    monkeypatch.setattr(dynamic_mcp, "ClientSession", Session)
+    server = dynamic_mcp.DynamicMCPServer(name="events", transport="sse",
+                url="https://mcp.example.test/sse", headers={"Authorization": "token"})
+    async with DynamicMCPManager(tmp_path)._session(server) as session:
+        assert isinstance(session, Session)
+    assert calls == [(server.url, server.headers), "initialized"]

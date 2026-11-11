@@ -37,6 +37,7 @@ from local_shell_mcp.tools import (
     build_mcp,
 )
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _reserve_claim(sessions: SessionRuntimeManager, session_id: str) -> dict:
     claim = sessions.claim_plan_continuation(session_id)
@@ -44,7 +45,6 @@ def _reserve_claim(sessions: SessionRuntimeManager, session_id: str) -> dict:
     validation = sessions.validate_plan_continuation(session_id, claim["claim_id"])
     assert validation["valid"] is True
     return claim
-
 
 def _configure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, auth: str = "oauth") -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -59,7 +59,6 @@ def _configure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, auth: str = "
         session_runtime_module, "_MANAGER", SessionRuntimeManager(tmp_path / ".state")
     )
 
-
 def test_live_workspace_resource_uri_stays_stable_with_versioned_alias():
     asset = (
         Path(live_channel_module.__file__).resolve().parent / "ui_static" / "live-workspace.html"
@@ -69,7 +68,6 @@ def test_live_workspace_resource_uri_stays_stable_with_versioned_alias():
     assert f"ui://local-shell-mcp/live-workspace-{digest}.html" == LIVE_RESOURCE_VERSIONED_URI
     assert LIVE_RESOURCE_VERSIONED_URI not in LIVE_RESOURCE_COMPAT_URIS
     assert "ui://local-shell-mcp/live-workspace-508d16533a186095.html" in LIVE_RESOURCE_COMPAT_URIS
-
 
 @pytest.mark.asyncio
 async def test_remote_only_live_workspace_rejects_local_git_shell(tmp_path, monkeypatch):
@@ -85,7 +83,6 @@ async def test_remote_only_live_workspace_rejects_local_git_shell(tmp_path, monk
             timeout_s=5,
             max_output_bytes=1024,
         )
-
 
 def test_live_workspace_tokens_rotate_and_events_are_bounded():
     manager = LiveChannelManager()
@@ -122,7 +119,6 @@ def test_live_workspace_tokens_rotate_and_events_are_bounded():
     assert channel.events[-1]["data"]["index"] == LIVE_EVENT_LIMIT + 49
     assert channel.events[0]["seq"] == channel.seq - LIVE_EVENT_LIMIT + 1
 
-
 def test_live_channel_public_state_resolves_and_tolerates_missing_logical_session(
     tmp_path, monkeypatch
 ):
@@ -152,7 +148,6 @@ def test_live_channel_public_state_resolves_and_tolerates_missing_logical_sessio
     assert missing["session_id"] == "s_missing"
     assert missing["session"] is None
     assert missing["plan"] is None
-
 
 def test_app_reattach_does_not_shorten_shared_channel_expiry():
     manager = LiveChannelManager()
@@ -186,7 +181,6 @@ def test_app_reattach_does_not_shorten_shared_channel_expiry():
     assert manager.authenticate(app_token) is None
     assert manager.authenticate(token) is channel
 
-
 def test_empty_app_reattach_recovers_unique_recent_explicit_workspace():
     manager = LiveChannelManager()
     channel, model_token = manager.open(
@@ -212,7 +206,6 @@ def test_empty_app_reattach_recovers_unique_recent_explicit_workspace():
     assert app_token != model_token
     assert manager.authenticate(app_token) is channel
 
-
 def test_empty_app_reattach_refuses_ambiguous_recent_workspaces():
     manager = LiveChannelManager()
     first, _ = manager.open(
@@ -234,7 +227,6 @@ def test_empty_app_reattach_refuses_ambiguous_recent_workspaces():
             app_reattach=True,
         )
 
-
 def test_empty_app_reattach_refuses_to_replace_existing_workspace_after_claim_expires():
     manager = LiveChannelManager()
     channel, _ = manager.open(
@@ -253,7 +245,6 @@ def test_empty_app_reattach_refuses_to_replace_existing_workspace_after_claim_ex
 
     assert list(manager._channels.values()) == [channel]
     assert channel.logical_session_id == "s_task"
-
 
 def test_live_workspace_can_reattach_a_second_mcp_session_by_live_id():
     manager = LiveChannelManager()
@@ -287,7 +278,6 @@ def test_live_workspace_can_reattach_a_second_mcp_session_by_live_id():
             scopes=tuple(ALL_OAUTH_SCOPES),
             live_id=channel.live_id,
         )
-
 
 @pytest.mark.asyncio
 async def test_live_workspace_expiry_publish_and_wait_paths():
@@ -346,7 +336,6 @@ async def test_live_workspace_expiry_publish_and_wait_paths():
     assert manager.authenticate(token) is None
     assert manager.by_id(channel.live_id) is None
 
-
 def test_plan_state_machine_and_auto_promotion(tmp_path):
     sessions = SessionRuntimeManager(tmp_path / ".state")
     started_session = sessions.manage(
@@ -381,7 +370,6 @@ def test_plan_state_machine_and_auto_promotion(tmp_path):
     assert finished["plan"]["status"] == "completed"
     assert sessions.plan_state(session_id)["status"] == "completed"
 
-
 def test_plan_requires_logical_session_and_block_stops_continuation(tmp_path, monkeypatch):
     sessions = SessionRuntimeManager(tmp_path / ".state")
     with pytest.raises(ValueError, match="Unknown logical session"):
@@ -413,7 +401,6 @@ def test_plan_requires_logical_session_and_block_stops_continuation(tmp_path, mo
     resumed = sessions.manage_plan(session_id, action="resume")
     assert resumed["plan"]["status"] == "active"
     assert resumed["plan"]["continuation_due"] is False
-
 
 def test_plan_continuation_lease_rejection_and_hard_cap(tmp_path, monkeypatch):
     sessions = SessionRuntimeManager(tmp_path / ".state")
@@ -459,7 +446,6 @@ def test_plan_continuation_lease_rejection_and_hard_cap(tmp_path, monkeypatch):
     now[0] += session_runtime_module.PLAN_EXECUTION_LEASE_S + 1
     assert sessions.claim_plan_continuation(session_id) is None
     assert sessions.plan_state(session_id)["auto_continue_exhausted"] is True
-
 
 @pytest.mark.asyncio
 async def test_mcp_app_resource_and_render_result_hide_live_token(tmp_path, monkeypatch):
@@ -565,7 +551,6 @@ async def test_mcp_app_resource_and_render_result_hide_live_token(tmp_path, monk
         assert contents[0].mime_type == LIVE_RESOURCE_MIME
         assert "local-shell-mcp-live-workspace" in str(contents[0].content)
 
-
 @pytest.mark.asyncio
 async def test_empty_app_remount_recovers_recent_workspace_tool_result(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
@@ -592,7 +577,6 @@ async def test_empty_app_remount_recovers_recent_workspace_tool_result(tmp_path,
     assert reconnected.structuredContent["live_id"] == old_live_id
     assert reconnected.structuredContent["session_id"] == session_id
     assert reconnected.structuredContent["cwd"] == "/workspace/project"
-
 
 @pytest.mark.asyncio
 async def test_live_workspace_reconnect_restores_persisted_logical_session(tmp_path, monkeypatch):
@@ -643,7 +627,6 @@ async def test_live_workspace_reconnect_restores_persisted_logical_session(tmp_p
     assert recovered is not None
     assert recovered.logical_session_id == session_id
 
-
 @pytest.mark.asyncio
 async def test_live_workspace_reconnect_ignores_deleted_cached_session(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
@@ -678,7 +661,6 @@ async def test_live_workspace_reconnect_ignores_deleted_cached_session(tmp_path,
 
     assert reconnected.structuredContent["session_id"] is None
     assert channel.logical_session_id is None
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -718,7 +700,6 @@ async def test_terminal_session_remains_visible_without_capturing_unattached_too
         if event["type"].startswith("tool.")
     )
 
-
 @pytest.mark.asyncio
 async def test_live_workspace_reconnect_drops_attachment_after_principal_change(
     tmp_path, monkeypatch
@@ -745,7 +726,6 @@ async def test_live_workspace_reconnect_drops_attachment_after_principal_change(
     assert reconnected.structuredContent["session_id"] is None
     with pytest.raises(PermissionError, match="different principal"):
         session_runtime_module.get_session_runtime_manager().get(session_id, subject="bob")
-
 
 @pytest.mark.asyncio
 async def test_cancelled_tool_call_releases_logical_inflight_lease(tmp_path, monkeypatch):
@@ -793,7 +773,6 @@ async def test_cancelled_tool_call_releases_logical_inflight_lease(tmp_path, mon
     assert begin_threads and all(thread_id != event_loop_thread for thread_id in begin_threads)
     assert finish_threads and all(thread_id != event_loop_thread for thread_id in finish_threads)
 
-
 @pytest.mark.asyncio
 async def test_cancelled_thread_mutation_holds_logical_lease_until_worker_finishes(
     tmp_path, monkeypatch
@@ -839,7 +818,6 @@ async def test_cancelled_thread_mutation_holds_logical_lease_until_worker_finish
     assert manager._sessions[session_id].in_flight_calls == {}
     assert (tmp_path / "threaded.txt").read_text(encoding="utf-8") == "completed after cancellation"
 
-
 @pytest.mark.asyncio
 async def test_predispatch_failure_releases_logical_inflight_lease(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
@@ -865,7 +843,6 @@ async def test_predispatch_failure_releases_logical_inflight_lease(tmp_path, mon
 
     assert manager._sessions[session_id].in_flight_calls == {}
     assert not (tmp_path / "never.txt").exists()
-
 
 @pytest.mark.asyncio
 async def test_lease_heartbeat_survives_renewal_audit_failure(monkeypatch):
@@ -896,7 +873,6 @@ async def test_lease_heartbeat_survives_renewal_audit_failure(monkeypatch):
     )
 
     assert calls == 2
-
 
 @pytest.mark.asyncio
 async def test_completed_tool_retries_durable_lease_cleanup(tmp_path, monkeypatch):
@@ -943,7 +919,6 @@ async def test_completed_tool_retries_durable_lease_cleanup(tmp_path, monkeypatc
     restored.get(session_id, subject="local-mcp-client")
     assert restored._in_flight_count_locked(session_id) == 0
 
-
 @pytest.mark.asyncio
 async def test_session_lease_cleanup_retry_queue_is_bounded(monkeypatch):
     class BrokenManager:
@@ -973,7 +948,6 @@ async def test_session_lease_cleanup_retry_queue_is_bounded(monkeypatch):
     assert queue_key not in tools_module._SESSION_LEASE_CLEANUP_QUEUES
     assert queue_key not in tools_module._SESSION_LEASE_CLEANUP_TASKS
 
-
 @pytest.mark.asyncio
 async def test_tool_does_not_execute_when_start_lease_persistence_fails(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
@@ -998,7 +972,6 @@ async def test_tool_does_not_execute_when_start_lease_persistence_fails(tmp_path
             },
         )
     assert not (tmp_path / "completed.txt").exists()
-
 
 @pytest.mark.asyncio
 async def test_ambiguous_start_persistence_failure_retries_lease_cleanup(tmp_path, monkeypatch):
@@ -1043,7 +1016,6 @@ async def test_ambiguous_start_persistence_failure_retries_lease_cleanup(tmp_pat
     restored.get(session_id, subject="local-mcp-client")
     assert restored._in_flight_count_locked(session_id) == 0
 
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("auth_type", ["local-cli", "native-tui"])
 async def test_trusted_local_workspace_open_uses_existing_session_owner(
@@ -1073,7 +1045,6 @@ async def test_trusted_local_workspace_open_uses_existing_session_owner(
     assert channel is not None
     assert channel.logical_session_id == session_id
     assert channel.subject == "local-user"
-
 
 @pytest.mark.asyncio
 async def test_live_workspace_keeps_model_and_human_mutations_collaborative(tmp_path, monkeypatch):
@@ -1115,7 +1086,6 @@ async def test_live_workspace_keeps_model_and_human_mutations_collaborative(tmp_
     )
     event_types = [event["type"] for event in channel.events]
     assert "tool.completed" in event_types
-
 
 def test_live_continuation_failed_before_validation_releases_claim(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="oauth")
@@ -1172,7 +1142,6 @@ def test_live_continuation_failed_before_validation_releases_claim(tmp_path, mon
     assert plan["continuation_pending"] is False
     assert plan["continuation_reserved"] is False
     assert plan["continuation_count"] == 0
-
 
 def test_live_http_token_cors_and_collaborative_human_mutation(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="oauth")
@@ -1352,7 +1321,6 @@ def test_live_http_token_cors_and_collaborative_human_mutation(tmp_path, monkeyp
         )
         assert mcp_attempt.status_code in {401, 403}
 
-
 def test_live_http_token_authenticates_when_global_auth_is_disabled(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
     manager = live_channel_module.get_live_channel_manager()
@@ -1414,7 +1382,6 @@ def test_live_http_token_authenticates_when_global_auth_is_disabled(tmp_path, mo
     assert manager.authenticate(token) is channel
     assert manager.authenticate(replacement) is not channel
 
-
 def test_live_events_empty_batch_does_not_advance_cursor(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
     manager = live_channel_module.get_live_channel_manager()
@@ -1452,7 +1419,6 @@ def test_live_events_empty_batch_does_not_advance_cursor(tmp_path, monkeypatch):
     assert data["cursor"] == 0
     assert manager.events_since(manager.authenticate(token), 0)[-1]["data"]["tool"] == "late"
 
-
 def test_live_workspace_is_hidden_when_ui_is_disabled(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
     monkeypatch.setenv("LOCAL_SHELL_MCP_UI_ENABLED", "false")
@@ -1473,7 +1439,6 @@ def test_live_workspace_is_hidden_when_ui_is_disabled(tmp_path, monkeypatch):
     with TestClient(app, base_url="http://testserver") as client:
         assert client.get("/api/live/snapshot").status_code == 404
 
-
 def test_live_workspace_is_hidden_when_feature_is_disabled(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
     monkeypatch.setenv("LOCAL_SHELL_MCP_UI_ENABLED", "true")
@@ -1491,11 +1456,16 @@ def test_live_workspace_is_hidden_when_feature_is_disabled(tmp_path, monkeypatch
     assert "open_live_workspace" not in tools
     assert LIVE_RESOURCE_URI not in resources
 
+    from local_shell_mcp.webui.frontend import frontend_routes
+
     app = _build_mcp_http_app(mcp)
+    app.router.routes[-1:-1] = frontend_routes()
     with TestClient(app, base_url="http://testserver") as client:
         assert client.get("/api/live/snapshot").status_code == 404
-        assert client.get("/ui/").status_code == 200
-
+        response = client.get("/ui/")
+        assert response.status_code == 200
+        assert 'id="root"' in response.text
+        assert response.url.path == "/c/new"
 
 def test_live_workspace_is_hidden_in_stdio_mode(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
@@ -1512,7 +1482,6 @@ def test_live_workspace_is_hidden_in_stdio_mode(tmp_path, monkeypatch):
     assert "workspace_open" not in tools
     assert "open_live_workspace" not in tools
     assert LIVE_RESOURCE_URI not in resources
-
 
 def test_live_git_routes_remote_inspection_to_selected_machine(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="oauth")
@@ -1565,7 +1534,6 @@ def test_live_git_routes_remote_inspection_to_selected_machine(tmp_path, monkeyp
     assert all(call[0] == "worker" and call[1] == "run_shell_tool" for call in fake_remote.calls)
     assert all(call[2]["_human"] is True for call in fake_remote.calls)
 
-
 def test_live_route_helpers_reject_missing_or_expired_workspace(monkeypatch):
     request = Request(
         {"type": "http", "method": "GET", "path": "/api/live/snapshot", "headers": []}
@@ -1587,7 +1555,6 @@ def test_live_route_helpers_reject_missing_or_expired_workspace(monkeypatch):
     with pytest.raises(Exception, match="Live workspace expired"):
         live_routes._live_channel(request)
 
-
 def test_live_route_principal_falls_back_to_request_verification(monkeypatch):
     request = Request(
         {"type": "http", "method": "GET", "path": "/api/live/snapshot", "headers": []}
@@ -1597,12 +1564,10 @@ def test_live_route_principal_falls_back_to_request_verification(monkeypatch):
     monkeypatch.setattr(live_routes, "verify_request", lambda _request: expected)
     assert live_routes._principal(request) is expected
 
-
 def test_live_route_generic_error_response():
     response = live_routes._error(RuntimeError("boom"))
     assert response.status_code == 400
     assert b"boom" in response.body
-
 
 @pytest.mark.asyncio
 async def test_live_remote_git_shell_rejects_failed_and_invalid_payloads(monkeypatch):
@@ -1641,7 +1606,6 @@ async def test_live_remote_git_shell_rejects_failed_and_invalid_payloads(monkeyp
             max_output_bytes=80_000,
         )
 
-
 @pytest.mark.asyncio
 async def test_live_snapshot_returns_missing_token_error():
     request = Request(
@@ -1655,7 +1619,6 @@ async def test_live_snapshot_returns_missing_token_error():
     response = await live_routes.live_snapshot(request)
     assert response.status_code == 403
     assert b"live-workspace token" in response.body
-
 
 @pytest.mark.asyncio
 async def test_live_events_detaches_channel_when_durable_session_disappears(monkeypatch):
@@ -1693,7 +1656,6 @@ async def test_live_events_detaches_channel_when_durable_session_disappears(monk
     assert channel.logical_session_id is None
     assert "s_deleted_elsewhere" not in manager._logical_session_channels
 
-
 def test_live_workspace_stale_live_id_falls_back_to_logical_channel():
     manager = LiveChannelManager()
     channel, _ = manager.open(
@@ -1713,7 +1675,6 @@ def test_live_workspace_stale_live_id_falls_back_to_logical_channel():
     assert manager.active_for_logical_session("s_task", subject="user") is channel
     assert len(manager._channels) == 1
 
-
 def test_live_workspace_detaches_deleted_logical_session():
     manager = LiveChannelManager()
     channel, _ = manager.open(
@@ -1728,7 +1689,6 @@ def test_live_workspace_detaches_deleted_logical_session():
     assert channel.logical_session_id is None
     assert "s_deleted" not in manager._logical_session_channels
     assert channel.events[-1]["type"] == "session.detached"
-
 
 @pytest.mark.asyncio
 async def test_live_workspace_session_lookups_run_off_event_loop(tmp_path, monkeypatch):
@@ -1755,7 +1715,6 @@ async def test_live_workspace_session_lookups_run_off_event_loop(tmp_path, monke
     )
 
     assert owner_threads and all(thread_id != loop_thread for thread_id in owner_threads)
-
 
 def test_live_resource_fallbacks_and_explicit_channel_rebinding(tmp_path, monkeypatch):
     missing = tmp_path / "missing.html"
@@ -1789,7 +1748,6 @@ def test_live_resource_fallbacks_and_explicit_channel_rebinding(tmp_path, monkey
     detached = manager.detach_logical_session("s_two")
     assert detached == [channel]
     assert channel.logical_session_id is None
-
 
 def test_live_routes_reject_binding_churn_and_stale_continuation(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="oauth")
@@ -1872,7 +1830,6 @@ def test_live_routes_reject_binding_churn_and_stale_continuation(tmp_path, monke
         )
         assert stale.status_code == 409
     assert session_manager.plan_state(session_id)["continuation_pending"] is False
-
 
 def test_live_git_route_reports_local_failure(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="oauth")

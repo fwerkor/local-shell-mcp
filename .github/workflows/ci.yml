@@ -166,6 +166,32 @@ jobs:
           bun run typecheck
           bun run build
 
+      - name: Build and validate the integrated React workspace
+        working-directory: ui/workspace
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+          bun run test:client
+
+      - name: Compare original-source contracts and test React interactions
+        env:
+          LSM_REQUIRE_SOURCE_ORACLES: "1"
+        run: |
+          python -m pytest -q \
+            tests/test_webui_browser_e2e.py tests/test_webui_ask_user_browser.py \
+            tests/test_webui_ask_user_source_port.py tests/test_webui_tool_approval_source_port.py \
+            tests/test_webui_generation_protocol.py tests/test_webui_subagents_source_port.py \
+            tests/test_webui_handoff_source_port.py tests/test_webui_checkpoints.py \
+            tests/test_webui_approval_runtime.py tests/test_webui_agent_config_source.py \
+            tests/test_webui_agent_execution.py tests/test_webui_agent_runtime.py \
+            tests/test_webui_agent_runner.py tests/test_webui_approval_store.py \
+            tests/test_webui_resource_source.py \
+            tests/test_webui_graph_topology.py tests/test_webui_graph_admission_runtime.py \
+            tests/test_webui_direct_login.py tests/test_webui_provider_browser.py \
+            tests/test_webui_artifacts_source.py tests/test_webui_artifact_routes.py \
+            tests/test_webui_artifact_browser.py
+
       - name: Run OAuth, PTY, navigation, and responsive browser smoke test
         run: python scripts/ui-smoke.py
 
@@ -536,6 +562,15 @@ jobs:
           bun run typecheck
           bun run build:web
 
+      - name: Build the integrated React payload
+        working-directory: ui/workspace
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Embed the integrated React payload
+        run: python scripts/embed-react-webui.py
+
       - name: Build self-contained executable
         shell: bash
         run: |
@@ -554,6 +589,7 @@ jobs:
             --collect-all zstandard
             --exclude-module cryptography
             --exclude-module playwright
+            --add-data ui/workspace/frontend.tar.gz:local_shell_mcp/webui
             --add-data src/local_shell_mcp/browser_sessions.py:local_shell_mcp/browser_external
             --add-data src/local_shell_mcp/browser_external_service.py:local_shell_mcp/browser_external
             --add-data src/local_shell_mcp/browser_external_paths.py:local_shell_mcp/browser_external
@@ -657,7 +693,7 @@ jobs:
           image=local-shell-mcp:ci-${{ matrix.suffix }}
           docker run --rm "$image" local-shell-mcp --version
           docker run --rm "$image" local-shell-mcp version
-          docker run --rm --entrypoint python "$image" -c 'import pathlib, zstandard; assert not pathlib.Path("/app/src/local_shell_mcp/ui_runtime").exists(); assert pathlib.Path("/app/src/local_shell_mcp/ui_static/web.js").is_file()'
+          docker run --rm --entrypoint python "$image" -c 'import pathlib, tarfile, zstandard; assert not pathlib.Path("/app/src/local_shell_mcp/ui_runtime").exists(); assert not pathlib.Path("/app/src/local_shell_mcp/ui_static/web.js").exists(); assert "index.html" in tarfile.open("/app/src/local_shell_mcp/webui/frontend.tar.gz").getnames(); assert pathlib.Path("/app/src/local_shell_mcp/ui_static/live-workspace.html").is_file()'
           docker run --rm --entrypoint sh "$image" -c 'for tool in local-shell-mcp-tui gcc clang rustc cargo go javac node npm libreoffice; do ! command -v "$tool" || exit 1; done'
           docker run --rm --entrypoint python "$image" -c 'import importlib.util, os, pathlib; assert importlib.util.find_spec("playwright") is None; assert not pathlib.Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]).exists()'
           docker image inspect --format 'Lean Docker image size: {{.Size}} bytes' "$image"

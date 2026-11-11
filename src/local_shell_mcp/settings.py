@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import os
 import secrets
+import sys
 import threading
 from collections.abc import Mapping
 from functools import lru_cache
@@ -28,7 +29,18 @@ except Exception:  # pragma: no cover - exercised when vendored native deps do n
 else:
     _PYDANTIC_AVAILABLE = True
 
-DEFAULT_WORKSPACE_ROOT = Path("/workspace")
+def _default_workspace_root() -> Path:
+    """Keep frozen Controller output next to its one-file executable.
+
+    Source installations retain their historical /workspace behavior. The
+    configured workspace/state directories always take precedence.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path("/workspace")
+
+
+DEFAULT_WORKSPACE_ROOT = _default_workspace_root()
 DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
 DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
 DEFAULT_AGENT_CONFIG_DIR = DEFAULT_STATE_DIR / "agent_config"
@@ -235,6 +247,25 @@ def _ensure_oauth_jwt_secret(settings: Settings) -> Settings:
         )
     if current not in _WEAK_OAUTH_SECRET_VALUES:
         return settings
+    if settings.state_backend == "sqlite":
+        from .sqlite_store import SQLiteDatabase
+
+        database = SQLiteDatabase(settings.state_dir)
+        with database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT value FROM state WHERE key=?", (OAUTH_JWT_SECRET_FILE_NAME,)).fetchone()
+            if row:
+                stored = bytes(row[0]).decode("utf-8").strip()
+            else:
+                legacy_path = settings.state_dir / OAUTH_JWT_SECRET_FILE_NAME
+                legacy = _read_oauth_secret(legacy_path)
+                if legacy_path.exists() and not legacy:
+                    raise RuntimeError(f"OAuth secret file exists but is invalid: {legacy_path}")
+                stored = legacy or secrets.token_urlsafe(48)
+                db.execute("INSERT INTO state(key, value) VALUES(?,?)", (OAUTH_JWT_SECRET_FILE_NAME, stored.encode()))
+            if len(stored.encode("utf-8")) < 32:
+                raise RuntimeError("OAuth secret file exists but is invalid (migrated to SQLite)")
+        return _replace_settings(settings, oauth_jwt_secret=stored)
     return _replace_settings(
         settings,
         oauth_jwt_secret=_get_or_create_oauth_secret(settings.state_dir),
@@ -345,7 +376,7 @@ class _SettingsFields:
     # Run the controller without persistent local state. This implies disable_local
     # and defaults the state backend to process memory unless Redis is configured.
     stateless_controller: bool = False
-    state_backend: Literal["file", "memory", "redis"] = "file"
+    state_backend: Literal["sqlite", "file", "memory", "redis"] = "sqlite"
     state_backend_url: str | None = None
     state_backend_prefix: str = "local-shell-mcp"
 
@@ -379,11 +410,6 @@ class _SettingsFields:
 
     # Durable Logical Sessions and optional Goal plans exposed through MCP.
     logical_sessions_enabled: bool = True
-    # Self-hosted BYOK chat/MCP Apps host (no model provider configured by default).
-    hosted_chat_enabled: bool = True
-    # Explicit administrator opt-in for loopback/private HTTP(S) model APIs.
-    hosted_chat_allow_private_endpoints: bool = False
-
     # Human-facing OpenTUI/WebUI. The browser interface is mounted on the same
     # ASGI service and launches the exact same TUI executable as the local CLI.
     ui_enabled: bool = True
@@ -547,7 +573,7 @@ if _PYDANTIC_AVAILABLE:
             _validate_numeric_settings(self)
             if self.stateless_controller:
                 self.disable_local = True
-                if self.state_backend == "file":
+                if self.state_backend in {"file", "sqlite"}:
                     self.state_backend = "memory"
                 self.file_download_enabled = False
                 self.ui_wallpaper = "none"
@@ -618,7 +644,7 @@ else:
             _validate_numeric_settings(self)
             if self.stateless_controller:
                 self.disable_local = True
-                if self.state_backend == "file":
+                if self.state_backend in {"file", "sqlite"}:
                     self.state_backend = "memory"
                 self.file_download_enabled = False
                 self.ui_wallpaper = "none"
@@ -675,10 +701,16 @@ def get_settings() -> Settings:
     settings = settings.with_workspace_relative_defaults()
     if not settings.stateless_controller:
         settings.workspace_root.mkdir(parents=True, exist_ok=True)
-    if settings.state_backend == "file":
+    if settings.state_backend in {"file", "sqlite"}:
         settings.state_dir.mkdir(parents=True, exist_ok=True)
+    if settings.state_backend == "sqlite":
+        # Import legacy identity and operation state before consulting OAuth.
+        # Both SQLite and its migration use the standard library only.
+        from .sqlite_store import SQLiteStateStore
+
+        SQLiteStateStore(settings.state_dir)
     settings = _ensure_oauth_jwt_secret(settings)
-    if settings.state_backend == "file":
+    if settings.state_backend in {"file", "sqlite"}:
         settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         settings.agent_config_dir.mkdir(parents=True, exist_ok=True)
     return settings

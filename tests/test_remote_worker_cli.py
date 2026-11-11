@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
 import subprocess
 import sys
+import tarfile
 
 import pytest
 
@@ -33,6 +35,42 @@ import local_shell_mcp.remote_worker_cli  # noqa: F401
 assert "local_shell_mcp.audit_archive_codec" not in sys.modules
 '''
     subprocess.run([sys.executable, "-c", script], check=True, env=os.environ.copy())
+
+
+def test_real_worker_bundle_never_requires_controller_sqlite(tmp_path):
+    from local_shell_mcp.remote_worker_routes import worker_bundle_bytes
+
+    with tarfile.open(fileobj=io.BytesIO(worker_bundle_bytes()), mode="r:gz") as archive:
+        archive.extractall(tmp_path, filter="data")
+
+    env = os.environ.copy()
+    env.update(
+        PYTHONPATH=str(tmp_path),
+        HOME=str(tmp_path),
+        LOCAL_SHELL_MCP_WORKSPACE_ROOT=str(tmp_path),
+        LOCAL_SHELL_MCP_STATE_BACKEND="sqlite",
+    )
+    script = """
+import sys
+from pathlib import Path
+from local_shell_mcp.remote_worker import main
+
+assert str(Path(__import__('local_shell_mcp').__file__).resolve()).startswith(sys.argv[1])
+main(["status"])
+import os
+assert os.environ["LOCAL_SHELL_MCP_STATE_BACKEND"] == "sqlite"
+assert "local_shell_mcp.sqlite_store" not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        env=env,
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_worker_entrypoint_only_dispatches_worker_management(monkeypatch, capsys):
@@ -123,6 +161,9 @@ def test_enrollment_payload_overrides_and_restores_existing_environment(tmp_path
 
 @pytest.mark.asyncio
 async def test_run_worker_overrides_stale_scope(tmp_path, monkeypatch):
+    # The controller test host can have a real Worker outbox; isolate the
+    # Worker state before evaluating first-connect / polling behavior.
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_STATE_DIR", str(tmp_path / "worker-state"))
     monkeypatch.setattr(cli.remote, "_worker_result_outbox_dir", lambda: tmp_path / "outbox")
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "/stale/workspace")
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")

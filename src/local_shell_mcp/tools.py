@@ -1166,7 +1166,7 @@ async def _renew_session_tool_lease(
             return
 
 
-def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
+def _install_mcp_tool_watchdogs(mcp: FastMCP, *, agent_dispatch: bool = False) -> None:
     for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
         original = tool.fn
         tool_name = tool.name
@@ -1175,7 +1175,13 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
             if scheme.get("type") == "oauth2":
                 required_scopes.extend(str(scope) for scope in scheme.get("scopes", []))
                 break
-        tool_required_scopes = tuple(dict.fromkeys(required_scopes))
+        # The public MCP contract intentionally asks clients for the entire
+        # OAuth scope bundle. First-party Agents instead enforce their frozen
+        # actual OAuth grant plus per-machine operation policy at the WebUI
+        # dispatch boundary. Do not reject a read-only Agent for lacking
+        # unrelated browser/file-share privileges; retain every other native
+        # watchdog, preflight, auditing and Worker routing behavior.
+        tool_required_scopes = () if agent_dispatch else tuple(dict.fromkeys(required_scopes))
         signature = inspect.signature(original)
 
         async def wrapped(  # noqa: ANN202
@@ -4915,7 +4921,7 @@ def _register_live_workspace_tools(
         )
 
 
-def build_mcp() -> FastMCP:
+def build_mcp(*, agent_dispatch: bool = False) -> FastMCP:
     settings = get_settings()
     mcp = FastMCP(
         "local-shell-mcp",
@@ -4964,5 +4970,5 @@ def build_mcp() -> FastMCP:
     _install_tool_annotations(mcp)
     if settings.logical_sessions_enabled:
         _install_logical_session_arguments(mcp)
-    _install_mcp_tool_watchdogs(mcp)
+    _install_mcp_tool_watchdogs(mcp, agent_dispatch=agent_dispatch)
     return mcp

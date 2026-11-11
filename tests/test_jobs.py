@@ -22,6 +22,7 @@ from local_shell_mcp.jobs import (
 )
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 async def _wait_for_shell_job_completion(job_id: str, timeout_s: float = 15.0):
     deadline = time.monotonic() + timeout_s
@@ -32,7 +33,6 @@ async def _wait_for_shell_job_completion(job_id: str, timeout_s: float = 15.0):
         if row["status"] != "running" or time.monotonic() >= deadline:
             return row
         await asyncio.sleep(0.1)
-
 
 def test_job_store_lock_retries_then_succeeds(tmp_path, monkeypatch):
     lock_path = tmp_path / "jobs.lock"
@@ -51,7 +51,6 @@ def test_job_store_lock_retries_then_succeeds(tmp_path, monkeypatch):
 
     assert attempts == 3
 
-
 def test_job_store_lock_timeout_is_actionable(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -67,7 +66,6 @@ def test_job_store_lock_timeout_is_actionable(tmp_path, monkeypatch):
         jobs_module._store_transaction(),
     ):
         raise AssertionError("transaction body must not run")
-
 
 def test_job_store_thread_lock_timeout_is_actionable(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -101,7 +99,6 @@ def test_job_store_thread_lock_timeout_is_actionable(tmp_path, monkeypatch):
 
     assert not holder.is_alive()
 
-
 def test_runner_command_invokes_powershell_executable_and_quotes_arguments():
     command = jobs_module._runner_command(
         [
@@ -119,7 +116,6 @@ def test_runner_command_invokes_powershell_executable_and_quotes_arguments():
         "'local_shell_mcp.main' '--status-file' "
         "'C:\\state dir\\job''s-status.json'"
     )
-
 
 def test_runner_environment_policy_is_shell_neutral_and_round_trips(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -151,7 +147,6 @@ def test_runner_environment_policy_is_shell_neutral_and_round_trips(tmp_path, mo
     powershell_command = jobs_module._runner_command(argv, "powershell.exe")
     assert blocklist_payload in powershell_command
     assert prefixes_payload in powershell_command
-
 
 @pytest.mark.asyncio
 async def test_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
@@ -204,7 +199,6 @@ async def test_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
     assert retried["status"] == "running"
     assert retried["attempts"] == 2
     assert retried["session_id"] != job["session_id"]
-
 
 
 
@@ -270,7 +264,6 @@ def test_managed_job_state_updates_retry_store_contention(tmp_path, monkeypatch)
     assert stored["progress"] == {"phase": "copying"}
     assert stored["status"] == "succeeded"
     assert stored["result"] == {"copied": True}
-
 
 def test_managed_job_state_updates_defer_after_bounded_contention(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -370,7 +363,6 @@ def test_managed_job_state_updates_defer_after_bounded_contention(tmp_path, monk
     assert stored["result"] == {"copied": True}
     assert jobs_module.MANAGED_DEFERRED_APPLIED_KEY not in stored
 
-
 def test_managed_deferred_update_records_are_validated(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
     deferred_dir = state_dir / "jobs" / "deferred"
@@ -457,7 +449,6 @@ def test_managed_deferred_update_records_are_validated(tmp_path, monkeypatch):
         if name != "unreadable.json"
     )
 
-
 def test_managed_deferred_reconciliation_handles_stale_records(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
     deferred_dir = state_dir / "jobs" / "deferred"
@@ -516,7 +507,6 @@ def test_managed_deferred_reconciliation_handles_stale_records(tmp_path, monkeyp
     with pytest.raises(ValueError, match="unsupported managed update operation"):
         jobs_module._apply_managed_update(job, "unknown", {})
 
-
 def test_managed_store_updates_handle_missing_jobs(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
     runtime_dir = state_dir / "jobs"
@@ -531,7 +521,6 @@ def test_managed_store_updates_handle_missing_jobs(tmp_path, monkeypatch):
     assert not (runtime_dir / "deferred").exists()
     with pytest.raises(KeyError, match="job not found"):
         jobs_module._update_managed_progress("job_missing", {"phase": "missing"})
-
 
 @pytest.mark.asyncio
 async def test_stop_managed_job_finishes_after_deferred_cancellation_updates(tmp_path, monkeypatch):
@@ -575,7 +564,6 @@ async def test_stop_managed_job_finishes_after_deferred_cancellation_updates(tmp
     deferred_dir = state_dir / "jobs" / "deferred"
     assert deferred_dir.is_dir()
     assert not list(deferred_dir.iterdir())
-
 
 @pytest.mark.asyncio
 async def test_managed_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
@@ -627,7 +615,6 @@ async def test_managed_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
     assert current["status"] == "succeeded"
     assert (await get_job(job["job_id"]))["job"]["result"] == {"value": 7}
 
-
 def test_managed_job_validation_and_lost_recovery():
     async def first_handler(context, payload):  # noqa: ARG001
         return payload
@@ -662,7 +649,6 @@ def test_managed_job_validation_and_lost_recovery():
     )
     assert stopping["status"] == "stopped"
     assert stopping["error"] is None
-
 
 @pytest.mark.asyncio
 async def test_managed_job_failure_and_launch_cleanup(tmp_path, monkeypatch):
@@ -703,7 +689,6 @@ async def test_managed_job_failure_and_launch_cleanup(tmp_path, monkeypatch):
         f"{failed['job_id']}-attempt-1.log"
     ]
 
-
 @pytest.mark.asyncio
 async def test_job_list_marks_missing_running_session_lost(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -727,7 +712,6 @@ async def test_job_list_marks_missing_running_session_lost(tmp_path, monkeypatch
     assert listed["jobs"][0]["status"] == "lost"
     assert listed["jobs"][0]["exit_code"] is None
 
-
 @pytest.mark.asyncio
 async def test_completed_job_retains_output_and_exit_code(tmp_path, monkeypatch):
     if os.name != "nt" and not shutil.which("tmux"):
@@ -745,7 +729,6 @@ async def test_completed_job_retains_output_and_exit_code(tmp_path, monkeypatch)
     assert tail["output"] == "completed-output\n"
     assert tail["message"] == "job completed with exit code 3"
 
-
 @pytest.mark.asyncio
 async def test_job_log_is_bounded_and_reports_truncation(tmp_path, monkeypatch):
     if os.name != "nt" and not shutil.which("tmux"):
@@ -762,7 +745,6 @@ async def test_job_log_is_bounded_and_reports_truncation(tmp_path, monkeypatch):
     assert row["log_truncated"] is True
     tail = await tail_job(job["job_id"])
     assert len(tail["output"].encode()) <= 32
-
 
 def test_concurrent_job_starts_preserve_every_record(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -810,7 +792,6 @@ def test_concurrent_job_starts_preserve_every_record(tmp_path, monkeypatch):
     listed = asyncio.run(list_jobs())
     assert {job["job_id"] for job in listed["jobs"]} == {job["job_id"] for job in started}
     assert listed["counts"] == {"running": 8}
-
 
 def test_job_list_limit_prioritizes_active_jobs_and_reports_truncation(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -895,7 +876,6 @@ def test_job_list_limit_prioritizes_active_jobs_and_reports_truncation(tmp_path,
     assert active_only["returned"] == 1
     assert active_only["truncated"] is True
 
-
 def test_finished_job_history_and_attempt_files_are_bounded(tmp_path, monkeypatch):
     state_dir = tmp_path / ".local-shell-mcp"
     runtime_dir = state_dir / "jobs"
@@ -939,7 +919,6 @@ def test_finished_job_history_and_attempt_files_are_bounded(tmp_path, monkeypatc
     assert list(runtime_dir.glob("job_2-attempt-*"))
     assert list(runtime_dir.glob("job_3-attempt-*"))
 
-
 @pytest.mark.asyncio
 async def test_stop_failure_restores_retryable_job_state(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -968,7 +947,6 @@ async def test_stop_failure_restores_retryable_job_state(tmp_path, monkeypatch):
     listed = await list_jobs()
     assert listed["jobs"][0]["status"] == "running"
     assert "stop failed" in (await get_job(job["job_id"]))["job"]["error"]
-
 
 @pytest.mark.asyncio
 async def test_job_list_recovers_interrupted_stopping_and_retrying_states(tmp_path, monkeypatch):
@@ -1059,7 +1037,6 @@ async def test_job_list_recovers_interrupted_stopping_and_retrying_states(tmp_pa
     assert recovered["job_retry_live"]["session_id"] == "live-retry-session"
     assert recovered["job_retry_live"]["attempts"] == 2
 
-
 @pytest.mark.asyncio
 async def test_job_store_migrates_v1_without_losing_history(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -1113,7 +1090,6 @@ async def test_job_store_migrates_v1_without_losing_history(tmp_path, monkeypatc
             "job_legacy_live",
         }
 
-
 @pytest.mark.asyncio
 async def test_job_start_does_not_launch_shell_when_store_is_invalid(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -1140,7 +1116,6 @@ async def test_job_start_does_not_launch_shell_when_store_is_invalid(tmp_path, m
     runtime_dir = state_dir / "jobs"
     assert not runtime_dir.exists() or not list(runtime_dir.iterdir())
 
-
 @pytest.mark.asyncio
 async def test_job_start_records_shell_launch_failure(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -1165,7 +1140,6 @@ async def test_job_start_records_shell_launch_failure(tmp_path, monkeypatch):
     assert "operation_id" not in job
     runtime_dir = state_dir / "jobs"
     assert not list(runtime_dir.iterdir())
-
 
 @pytest.mark.asyncio
 async def test_job_start_kills_shell_when_running_state_cannot_be_committed(tmp_path, monkeypatch):
@@ -1198,7 +1172,6 @@ async def test_job_start_kills_shell_when_running_state_cannot_be_committed(tmp_
     runtime_dir = state_dir / "jobs"
     assert not list(runtime_dir.iterdir())
 
-
 @pytest.mark.asyncio
 async def test_job_start_kills_shell_if_reserved_job_changes(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -1225,7 +1198,6 @@ async def test_job_start_kills_shell_if_reserved_job_changes(tmp_path, monkeypat
     assert len(killed) == 1
     runtime_dir = state_dir / "jobs"
     assert not list(runtime_dir.iterdir())
-
 
 @pytest.mark.asyncio
 async def test_job_list_recovers_interrupted_start(tmp_path, monkeypatch):
@@ -1282,7 +1254,6 @@ async def test_job_list_recovers_interrupted_start(tmp_path, monkeypatch):
     stored = json.loads((state_dir / jobs_module.JOB_STORE_FILE_NAME).read_text(encoding="utf-8"))
     assert all("operation_id" not in job for job in stored["jobs"])
 
-
 @pytest.mark.asyncio
 async def test_job_store_recovers_from_atomic_backup(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -1317,7 +1288,6 @@ async def test_job_store_recovers_from_atomic_backup(tmp_path, monkeypatch):
     assert [job["job_id"] for job in listed["jobs"]] == ["job_saved"]
     assert json.loads(store_path.read_text(encoding="utf-8"))["jobs"][0]["job_id"] == "job_saved"
 
-
 @pytest.mark.asyncio
 async def test_job_store_refuses_to_overwrite_unrecoverable_corruption(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
@@ -1337,7 +1307,6 @@ async def test_job_store_refuses_to_overwrite_unrecoverable_corruption(tmp_path,
         await list_jobs()
     assert store_path.read_text(encoding="utf-8") == "{broken"
     assert not (state_dir / jobs_module.JOB_STORE_BACKUP_FILE_NAME).exists()
-
 
 @pytest.mark.asyncio
 async def test_job_list_does_not_interrupt_active_start(tmp_path, monkeypatch):
@@ -1375,7 +1344,6 @@ async def test_job_list_does_not_interrupt_active_start(tmp_path, monkeypatch):
     started = await start_task
     assert started["status"] == "running"
     assert (await list_jobs())["jobs"][0]["status"] == "running"
-
 
 @pytest.mark.asyncio
 async def test_job_list_does_not_interrupt_active_stop(tmp_path, monkeypatch):
@@ -1419,7 +1387,6 @@ async def test_job_list_does_not_interrupt_active_stop(tmp_path, monkeypatch):
     stopped = await stop_task
     assert stopped["job"]["status"] == "stopped"
     assert (await list_jobs())["jobs"][0]["status"] == "stopped"
-
 
 @pytest.mark.asyncio
 async def test_job_list_does_not_interrupt_active_retry(tmp_path, monkeypatch):
@@ -1484,7 +1451,6 @@ async def test_job_list_does_not_interrupt_active_retry(tmp_path, monkeypatch):
     assert retried["status"] == "running"
     assert retried["attempts"] == 2
 
-
 @pytest.mark.asyncio
 async def test_job_start_idempotency_key_reuses_job_and_rejects_changed_request(
     tmp_path, monkeypatch
@@ -1510,7 +1476,6 @@ async def test_job_start_idempotency_key_reuses_job_and_rejects_changed_request(
     assert len(started) == 1
     with pytest.raises(ValueError, match="different request"):
         await start_job("echo twice", cwd=".", name="dedup", idempotency_key="request-1")
-
 
 @pytest.mark.asyncio
 async def test_job_retry_idempotency_key_reuses_retry_across_replays(tmp_path, monkeypatch):
@@ -1540,7 +1505,6 @@ async def test_job_retry_idempotency_key_reuses_retry_across_replays(tmp_path, m
     assert replay["job_id"] == first_retry["job_id"]
     assert replay["attempts"] == 2
     assert len(starts) == 2
-
 
 @pytest.mark.asyncio
 async def test_cancelled_job_start_reconciles_state_and_cleans_created_shell(
@@ -1585,7 +1549,6 @@ async def test_cancelled_job_start_reconciles_state_and_cleans_created_shell(
         assert row["status"] == "failed"
         assert "operation_id" not in row
     assert not active
-
 
 @pytest.mark.asyncio
 async def test_cancelled_job_retry_reconciles_state_and_cleans_created_shell(
@@ -1641,7 +1604,6 @@ async def test_cancelled_job_retry_reconciles_state_and_cleans_created_shell(
         assert "pending_attempt" not in row
     assert not active
 
-
 @pytest.mark.asyncio
 async def test_cancelled_job_stop_reconciles_state_after_shell_termination(
     tmp_path, monkeypatch
@@ -1688,6 +1650,43 @@ async def test_cancelled_job_stop_reconciles_state_after_shell_termination(
     assert not active
 
 
+
+def test_runner_succeeds_without_stdout_under_pythonw(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    command = tmp_path / "command.txt"
+    log = tmp_path / "runner.log"
+    status = tmp_path / "runner.json"
+    command.write_text("echo restored-runner-output", encoding="utf-8")
+    shell = "cmd.exe" if os.name == "nt" else "/bin/sh"
+    args = [
+        "--command-file", str(command),
+        "--log-file", str(log),
+        "--status-file", str(status),
+        "--cwd", str(tmp_path),
+        "--shell", shell,
+        "--max-log-bytes", "10000",
+    ]
+    script = """
+import sys
+from local_shell_mcp.jobs import run_job_runner_cli
+sys.stdout = None
+sys.stderr = None
+run_job_runner_cli(sys.argv[1:])
+"""
+    from pathlib import Path
+
+    result = subprocess.run(
+        [sys.executable, "-c", script, *args],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(Path(jobs_module.__file__).resolve().parents[1])},
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "restored-runner-output" in log.read_text()
+    assert json.loads(status.read_text())["exit_code"] == 0
 def test_job_runner_without_console_streams_preserves_log_and_receipt(
     tmp_path, monkeypatch
 ):

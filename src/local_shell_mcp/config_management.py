@@ -27,7 +27,7 @@ _MAX_CONFIG_BYTES = 256 * 1024
 _CHOICES = {
     "mode": ["mcp", "http", "both", "stdio"],
     "auth_mode": ["oauth", "none"],
-    "state_backend": ["file", "memory", "redis"],
+    "state_backend": ["sqlite", "file", "memory", "redis"],
     "ui_wallpaper": ["bing", "aurora", "none"],
     "remote_transfer_strategy": ["auto", "relay", "direct", "object_store"],
 }
@@ -81,7 +81,7 @@ def _env_locked(name: str) -> bool:
 def _group(name: str) -> str:
     if name.startswith(("oauth_", "auth_", "require_auth", "public_base_url")):
         return "Authentication"
-    if name.startswith(("ui_", "hosted_chat_", "live_workspace_")):
+    if name.startswith(("ui_", "live_workspace_")):
         return "Web UI & Chat"
     if name.startswith(("remote_", "file_download_")):
         return "Remotes & Transfers"

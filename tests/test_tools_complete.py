@@ -12,6 +12,7 @@ from local_shell_mcp.errors import PathNotFoundError
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _configure(
     tmp_path,
@@ -28,7 +29,6 @@ def _configure(
     monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", str(disable_local).lower())
     monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "http://testserver")
     get_settings.cache_clear()
-
 
 @pytest.mark.asyncio
 async def test_disable_local_requires_remote_targets_and_hides_local_only_tools(
@@ -73,7 +73,6 @@ async def test_disable_local_requires_remote_targets_and_hides_local_only_tools(
     assert local_job_result.isError is True
     assert "Local access is disabled" in local_job_result.structuredContent["message"]
 
-
 def _result() -> CommandResult:
     return CommandResult(
         ok=True,
@@ -87,18 +86,15 @@ def _result() -> CommandResult:
         truncated=False,
     )
 
-
 def _raw_tool(mcp, name: str):
     wrapped = mcp._tool_manager._tools[name].fn
     original = wrapped.__kwdefaults__["__original"]
     return original
 
-
 def _handled_error_data(result: CallToolResult) -> dict:
     assert result.isError is True
     assert result.structuredContent["ok"] is False
     return result.structuredContent["data"]
-
 
 @pytest.mark.asyncio
 async def test_gui_list_explicitly_requires_execute_scope(tmp_path, monkeypatch):
@@ -121,7 +117,6 @@ async def test_gui_list_explicitly_requires_execute_scope(tmp_path, monkeypatch)
 
     assert result["ok"] is True
     assert ("shell:read", "shell:execute") in required
-
 
 @pytest.mark.asyncio
 async def test_gui_state_explicitly_requires_execute_scope(tmp_path, monkeypatch):
@@ -147,7 +142,6 @@ async def test_gui_state_explicitly_requires_execute_scope(tmp_path, monkeypatch
     assert result["ok"] is True
     assert ("shell:read", "shell:execute") in required
 
-
 @pytest.mark.asyncio
 async def test_dynamic_mcp_downstream_error_is_exposed_as_tool_error(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -167,7 +161,6 @@ async def test_dynamic_mcp_downstream_error_is_exposed_as_tool_error(tmp_path, m
     data = _handled_error_data(result)
     assert data["name"] == "demo:fail"
     assert data["result"]["isError"] is True
-
 
 class FakeRemoteManager:
     def __init__(self):
@@ -194,7 +187,6 @@ class FakeRemoteManager:
 
     def rename(self, machine, new_name):
         return {"old_name": machine, "new_name": new_name}
-
 
 @pytest.mark.asyncio
 async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
@@ -413,7 +405,6 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     job_get_call = next(call for call in fake_remote.calls if call[1] == "job_get")
     assert job_get_call[2] == {"job_id": "j"}
 
-
 @pytest.mark.asyncio
 async def test_tool_wrapper_error_paths_and_remote_disabled(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -493,7 +484,6 @@ async def test_tool_wrapper_error_paths_and_remote_disabled(tmp_path, monkeypatc
     _configure(tmp_path, monkeypatch, remote_enabled=False)
     disabled = tools.build_mcp()
     assert not any(name.startswith("remote_") for name in disabled._tool_manager._tools)
-
 
 def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -632,7 +622,6 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
     audit_path.unlink()
     assert tools._read_audit_tail_entries(10) == {"entries": []}
 
-
 @pytest.mark.asyncio
 async def test_apply_patch_stops_after_failed_preflight(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -672,7 +661,6 @@ async def test_apply_patch_stops_after_failed_preflight(tmp_path, monkeypatch):
     assert "&&" not in commands[0]
     assert target.read_text(encoding="utf-8") == original
 
-
 @pytest.mark.asyncio
 async def test_apply_patch_honors_nested_cwd_in_git_worktree(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -698,7 +686,6 @@ async def test_apply_patch_honors_nested_cwd_in_git_worktree(tmp_path, monkeypat
 
     assert result["exit_code"] == 0, result
     assert target.read_text(encoding="utf-8").endswith("def target():\n    return 2\n")
-
 
 def test_transport_security_secret_helpers_and_remote_unwrap(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -750,7 +737,6 @@ def test_transport_security_secret_helpers_and_remote_unwrap(tmp_path, monkeypat
             tool="stat",
         )
 
-
 def test_handled_error_missing_path_and_sync(monkeypatch, tmp_path):
     _configure(tmp_path, monkeypatch)
     result = tools._handled_error(PathNotFoundError("missing.txt"))
@@ -768,7 +754,6 @@ def test_handled_error_missing_path_and_sync(monkeypatch, tmp_path):
         assert tools._sync(value()) == 42
     finally:
         loop.close()
-
 
 @pytest.mark.asyncio
 async def test_remote_shell_failure_returns_mcp_error(tmp_path, monkeypatch):

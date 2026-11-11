@@ -338,6 +338,25 @@ async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
         ) from exc
 
 
+async def _await_process_start(awaitable):
+    """Register the process handle before allowing cancellation to unwind.
+
+    A Windows child can run before asyncio finishes connecting its pipes. If
+    process creation is cancelled in that interval, killing only the untracked
+    shell loses its descendant tree. Keep this short creation phase owned, then
+    let the caller terminate the registered process with the normal native path.
+    """
+    task = asyncio.create_task(awaitable)
+    cancelled = False
+    while True:
+        try:
+            return await asyncio.shield(task), cancelled
+        except asyncio.CancelledError:
+            if task.cancelled():
+                raise
+            cancelled = True
+
+
 async def _read_stream_tail(stream: asyncio.StreamReader | None, tail: TailBuffer) -> None:
     if stream is None:
         return
@@ -356,7 +375,42 @@ async def _wait_for_process_exit(proc: asyncio.subprocess.Process, timeout_s: in
         return False
 
 
+async def _terminate_windows_process_tree(proc: asyncio.subprocess.Process) -> str:
+    """Stop the owned shell and descendants before losing the tree root PID."""
+    if proc.returncode is not None:
+        return ""
+    windows = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
+    executable = str(Path(windows) / "System32" / "taskkill.exe") if windows else "taskkill"
+    killer = None
+    error = ""
+    try:
+        killer = await asyncio.create_subprocess_exec(
+            executable, "/PID", str(proc.pid), "/T", "/F",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            **managed_process_kwargs(),
+        )
+        await asyncio.wait_for(killer.wait(), timeout=GRACEFUL_TERMINATION_TIMEOUT_S + KILL_TERMINATION_TIMEOUT_S)
+        if killer.returncode and proc.returncode is None:
+            error = f"Windows process tree termination failed (exit {killer.returncode})"
+    except (OSError, TimeoutError) as exc:
+        error = "Windows process tree termination failed (" + type(exc).__name__ + ")"
+    finally:
+        if killer is not None and killer.returncode is None:
+            killer.kill()
+            await killer.wait()
+    if error and proc.returncode is None:
+        # Still reap the root on OS-helper failure, but never report tree cleanup
+        # as successful when descendant termination could not be established.
+        with suppress(ProcessLookupError):
+            proc.kill()
+    if await _wait_for_process_exit(proc, KILL_TERMINATION_TIMEOUT_S):
+        return error
+    return error or "Windows process did not exit after tree termination"
+
+
 async def _terminate_process_group(proc: asyncio.subprocess.Process) -> str:
+    if sys.platform == "win32":
+        return await _terminate_windows_process_tree(proc)
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     except Exception:
@@ -426,7 +480,9 @@ async def run_shell(
 
     async def spawn_and_wait() -> None:
         nonlocal proc
-        proc = await _spawn_process(command, str(resolved_cwd))
+        proc, cancelled = await _await_process_start(_spawn_process(command, str(resolved_cwd)))
+        if cancelled:
+            raise asyncio.CancelledError
         reader_tasks.extend(
             [
                 asyncio.create_task(_read_stream_tail(proc.stdout, stdout_tail)),
@@ -456,15 +512,16 @@ async def run_shell(
                 await asyncio.shield(_terminate_process_group(proc))
             raise
     finally:
-        if acquired:
-            semaphore.release()
-
-    try:
-        if reader_tasks:
-            await _finish_reader_tasks(reader_tasks)
-    finally:
-        if proc is not None:
-            await _close_process_transport(proc)
+        try:
+            if reader_tasks:
+                await _finish_reader_tasks(reader_tasks)
+        finally:
+            try:
+                if proc is not None:
+                    await _close_process_transport(proc)
+            finally:
+                if acquired:
+                    semaphore.release()
 
     if termination_error:
         stderr_tail.append(termination_error.encode())
@@ -529,7 +586,7 @@ async def _run_exec(
 
     async def spawn_and_wait() -> None:
         nonlocal proc
-        proc = await asyncio.create_subprocess_exec(
+        proc, cancelled = await _await_process_start(asyncio.create_subprocess_exec(
             *argv,
             cwd=str(resolved_cwd),
             env=env,
@@ -537,7 +594,9 @@ async def _run_exec(
             stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"),
             **managed_process_kwargs(),
-        )
+        ))
+        if cancelled:
+            raise asyncio.CancelledError
         reader_tasks.extend(
             [
                 asyncio.create_task(_read_stream_tail(proc.stdout, stdout_tail)),
@@ -567,15 +626,16 @@ async def _run_exec(
                 await asyncio.shield(_terminate_process_group(proc))
             raise
     finally:
-        if acquired and semaphore is not None:
-            semaphore.release()
-
-    try:
-        if reader_tasks:
-            await _finish_reader_tasks(reader_tasks)
-    finally:
-        if proc is not None:
-            await _close_process_transport(proc)
+        try:
+            if reader_tasks:
+                await _finish_reader_tasks(reader_tasks)
+        finally:
+            try:
+                if proc is not None:
+                    await _close_process_transport(proc)
+            finally:
+                if acquired and semaphore is not None:
+                    semaphore.release()
 
     if termination_error:
         stderr_tail.append(termination_error.encode())

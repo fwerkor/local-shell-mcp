@@ -446,6 +446,43 @@ async def test_lane_aware_worker_routes_transfer_jobs_separately(tmp_path, monke
 
 
 @pytest.mark.asyncio
+async def test_upgrade_hold_preserves_compatible_worker_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_WORKER_UPGRADE_HOLD", "worker-a")
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(
+        name="worker-a",
+        token="token-a",
+        info={"poll_protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION},
+    )
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+
+    worker.queue.put_nowait({"id": "hold-job", "tool": "list_files", "args": {}})
+    response = await manager.poll(worker.token, {
+        "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+        "worker_version": "6.0.0",
+    })
+    assert response["upgrade"]["required"] is False
+    assert response["job"]["id"] == "hold-job"
+
+    outdated = await manager.poll(worker.token, {
+        "protocol_version": 1,
+        "worker_version": "6.0.0",
+    })
+    assert outdated["upgrade"]["required"] is True
+
+    monkeypatch.delenv("LOCAL_SHELL_MCP_REMOTE_WORKER_UPGRADE_HOLD")
+    normal = await manager.poll(worker.token, {
+        "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+        "worker_version": "6.0.0",
+    })
+    assert normal["upgrade"]["required"] is True
+
+
+@pytest.mark.asyncio
 async def test_invalid_worker_poll_protocol_uses_legacy_queue(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
@@ -1067,7 +1104,7 @@ async def test_upgrade_worker_runtime_validates_manifest_version(monkeypatch):
     monkeypatch.setattr(
         remote_worker_service,
         "refresh_installed_service_definition",
-        lambda: calls.append("refresh"),
+        lambda **kwargs: calls.append(("refresh", kwargs)),
     )
     monkeypatch.setattr(remote_worker_state, "install_launcher", lambda: calls.append("launcher"))
     monkeypatch.setattr(remote, "_reexec_updated_worker_runtime", lambda: calls.append("reexec"))

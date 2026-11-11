@@ -5,6 +5,7 @@ import io
 import json
 import subprocess
 import tarfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -715,3 +716,91 @@ def test_windows_upgrade_retains_previous_runtime_until_healthy_poll(tmp_path, m
     assert not prior.exists()
     assert not pending.exists()
     assert state.read_worker_config()["runtime_digest"] == digest
+
+
+@pytest.mark.parametrize("requirement,version", [
+    ("unversioned", "1.0"),
+    ("demo>=1.0,<2", None),
+    ("demo>=1.0,<2", "unknown"),
+])
+def test_gui_requirement_rejects_unverifiable_distribution(monkeypatch, requirement, version):
+    monkeypatch.setattr(installer.importlib, "import_module", lambda name: object())
+    def distribution_version(name):
+        if version is None:
+            raise installer.importlib.metadata.PackageNotFoundError(name)
+        return version
+    monkeypatch.setattr(installer.importlib.metadata, "version", distribution_version)
+    assert not installer._gui_requirement_satisfied("demo", requirement)  # noqa: SLF001
+
+
+@pytest.mark.parametrize("url", ["file:///tmp/bundle", "https:///missing-host"])
+def test_download_rejects_non_network_sources(url):
+    with pytest.raises(ValueError, match="HTTP"):
+        installer._fetch_bytes(url)  # noqa: SLF001
+
+
+def test_urllib_download_rejects_oversized_response(monkeypatch):
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer, "_MAX_WORKER_DOWNLOAD_BYTES", 3)
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, size):
+            assert size == 4
+            return b"abcd"
+    monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **kw: Response())
+    with pytest.raises(ValueError, match="maximum bundle size"):
+        installer._fetch_bytes("https://example.test/bundle")  # noqa: SLF001
+
+
+def test_preflight_pythonw_requires_console_interpreter(tmp_path, monkeypatch):
+    package = tmp_path / "local_shell_mcp"
+    package.mkdir()
+    for name in ("__init__.py", "remote_worker.py", "remote_worker_cli.py", "settings.py"):
+        (package / name).write_text("")
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.sys, "executable", str(tmp_path / "pythonw.exe"))
+    with pytest.raises(RuntimeError, match="python.exe is required"):
+        installer._preflight_runtime(tmp_path, tmp_path)  # noqa: SLF001
+    (tmp_path / "python.exe").touch()
+    def timeout(argv, **kwargs):
+        assert argv[0] == str(tmp_path / "python.exe")
+        assert kwargs["env"]["LOCAL_SHELL_MCP_STATE_BACKEND"] == "file"
+        raise subprocess.TimeoutExpired(argv, 20)
+    monkeypatch.setattr(installer.subprocess, "run", timeout)
+    with pytest.raises(RuntimeError, match="startup timed out"):
+        installer._preflight_runtime(tmp_path, tmp_path)  # noqa: SLF001
+
+
+def test_runtime_transaction_recovers_failed_swap(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    runtime = state.worker_runtime_dir()
+    runtime.mkdir(parents=True)
+    (runtime / "known-good").write_text("original")
+    state.update_runtime_metadata("old-digest", "old-version")
+    backup = state.worker_state_dir() / "runtime.previous"
+    backup.mkdir()
+    (backup / "stale").touch()
+    payload = _bundle()
+    monkeypatch.setattr(installer, "fetch_manifest", lambda server: {
+        "sha256": hashlib.sha256(payload).hexdigest(), "bundle_version": "3.0.1",
+        "url": "https://example.test/bundle",
+    })
+    monkeypatch.setattr(installer, "_fetch_bytes", lambda *args, **kwargs: payload)
+    replace = Path.replace
+    def fail_candidate(path, target):
+        if path.name.startswith("runtime.next."):
+            raise OSError("disk failure installing candidate")
+        return replace(path, target)
+    monkeypatch.setattr(Path, "replace", fail_candidate)
+    with pytest.raises(OSError, match="disk failure"):
+        installer.install_or_update_runtime("https://example.test")
+    assert (runtime / "known-good").read_text() == "original"
+    assert state.read_worker_config()["runtime_digest"] == "old-digest"
+    assert not (state.worker_state_dir() / "runtime.pending.json").exists()
+    assert not backup.exists()
+    assert not list(state.worker_state_dir().glob("runtime.next.*"))
+    assert installer.rollback_pending_runtime() is False
+    installer.confirm_runtime_healthy()

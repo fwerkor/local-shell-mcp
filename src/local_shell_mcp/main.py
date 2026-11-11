@@ -131,8 +131,24 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
 
     @asynccontextmanager
     async def lifespan(app):  # noqa: ANN001
+        from .settings import get_settings
+
+        current = get_settings()
+        enabled = current.ui_enabled and current.state_backend == "sqlite"
+        if enabled:
+            # A crash can leave an old generation marked as running. Replay
+            # final 'interrupted' events before admitting new chat requests.
+            from .webui.generation_routes import _generation_store
+
+            _generation_store().recover_orphans()
         async with inner_app.router.lifespan_context(inner_app):
-            yield
+            try:
+                yield
+            finally:
+                if enabled:
+                    from .webui.generation_routes import shutdown_generations
+
+                    await shutdown_generations()
 
     routes = [
         Route("/healthz", lambda request: JSONResponse({"ok": True}), methods=["GET"]),
@@ -152,8 +168,30 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
         routes[2:2] = live_channel_routes()
     if settings.ui_enabled:
         routes[2:2] = ui_routes()
+        if settings.state_backend == "sqlite":
+            from .webui.agent_routes import agent_routes
+            from .webui.auth import auth_routes
+            from .webui.config_routes import config_routes
+            from .webui.controller_routes import controller_routes
+            from .webui.conversation_routes import conversation_routes
+            from .webui.generation_routes import generation_routes
+            from .webui.misc_routes import misc_routes
+            from .webui.routes import webui_routes
+
+            routes[2:2] = webui_routes()
+            routes[2:2] = auth_routes()
+            routes[2:2] = config_routes()
+            routes[2:2] = conversation_routes()
+            routes[2:2] = agent_routes()
+            routes[2:2] = generation_routes()
+            routes[2:2] = misc_routes()
+            routes[2:2] = controller_routes()
     if settings.remote_enabled:
         routes[2:2] = remote_routes()
+    if settings.ui_enabled and settings.state_backend == "sqlite":
+        from .webui.frontend import frontend_routes
+
+        routes[-1:-1] = frontend_routes()
     return Starlette(
         routes=routes,
         lifespan=lifespan,

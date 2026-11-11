@@ -42,10 +42,20 @@ def test_tui_availability_detects_external_and_embedded_runtimes(monkeypatch, tm
     assert ui.tui_runtime_available() is True
 
 
-def test_webui_config_hides_tui_when_not_installed(monkeypatch):
-    monkeypatch.setattr(ui, "get_settings", lambda: SimpleNamespace(ui_path="/ui"))
-    monkeypatch.setattr(ui, "tui_runtime_available", lambda: False)
-    html = ui._ui_index_html()
-    assert '"tuiAvailable": false' in html
-    monkeypatch.setattr(ui, "tui_runtime_available", lambda: True)
-    assert '"tuiAvailable": true' in ui._ui_index_html()
+def test_webui_bootstrap_reports_tui_availability(monkeypatch):
+    import asyncio
+    import json
+
+    from starlette.requests import Request
+
+    settings = SimpleNamespace(remote_enabled=False, state_backend="sqlite",
+                               live_workspace_enabled=False, ui_wallpaper="none")
+    monkeypatch.setattr(ui, "get_settings", lambda: settings)
+    monkeypatch.setattr(ui, "_require_ui_scopes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ui, "_machine_rows", lambda: [])
+    request = Request({"type": "http", "method": "GET", "path": "/api/ui/bootstrap", "headers": []})
+    for available in (False, True):
+        monkeypatch.setattr(ui, "tui_runtime_available", lambda value=available: value)
+        response = asyncio.run(ui.api_bootstrap(request))
+        assert response.status_code == 200
+        assert json.loads(response.body)["data"]["features"]["tui"] is available

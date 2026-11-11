@@ -511,8 +511,10 @@ def _store_transaction():  # noqa: ANN201
         try:
             with state_lock("jobs"):
                 store = _load_store()
+                deferred_paths = _reconcile_managed_deferred_updates(store)
                 yield store
                 _save_store(store)
+                _remove_managed_deferred_updates(deferred_paths)
         finally:
             _JOB_STORE_THREAD_LOCK.release()
         return
@@ -1976,6 +1978,23 @@ async def stop_job(job_id: str) -> dict[str, Any]:
         _ACTIVE_JOB_OPERATIONS.discard(operation_id)
 
 
+def job_retry_machine_requirements(job_id: str) -> list[tuple[str, str]]:
+    """Return persisted endpoints before an Agent retries a managed job.
+
+    This does not execute or refresh the job. Unknown managed handlers need
+    their own audited policy before they can be retried by an Agent.
+    """
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if job.get("kind") != "managed":
+            return []
+        if job.get("managed_kind") != "transfer":
+            raise PermissionError("Managed job has no audited Agent retry policy")
+        payload = job.get("managed_payload") or {}
+        return [(payload.get("source_machine") or "local", "read"),
+                (payload.get("destination_machine") or "local", "write")]
+
+
 async def retry_job(
     job_id: str, idempotency_key: str | None = None
 ) -> dict[str, Any]:
@@ -2264,6 +2283,8 @@ def run_job_runner_cli(argv: list[str] | None = None) -> None:
                 if not chunk:
                     break
                 output_bytes += len(chunk)
+                # A Windows scheduled Worker uses pythonw.exe without stdio.
+                # The job log remains authoritative even without stdout.
                 output_stream = getattr(sys.stdout, "buffer", None)
                 if output_stream is not None:
                     output_stream.write(chunk)

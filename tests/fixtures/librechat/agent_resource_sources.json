@@ -1,0 +1,18 @@
+{
+  "commit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+  "files": {
+    "packages/data-schemas/src/methods/agent.ts": "876bad9c93e267afa94ffb1cf53dbae1e874d91ace1057abf333c428c4383f72"
+  },
+  "functions": [
+    "hasOperatorKeys",
+    "resolveDocumentPath",
+    "deleteDocumentPath",
+    "addToSetCandidates",
+    "operatorsMutateDocument",
+    "isDuplicateVersion",
+    "updateAgent",
+    "addAgentResourceFile",
+    "removeAgentResourceFiles"
+  ],
+  "boundary": "Original resource/update functions; Mongo storage and no-code-environment dependency are supplied by a strict test adapter. No OCR/RAG/runtime parity claim."
+}

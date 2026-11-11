@@ -26,6 +26,7 @@ from local_shell_mcp.settings import get_settings
 from local_shell_mcp.shell_ops import check_command_policy
 from local_shell_mcp.tools import build_mcp
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def test_write_read_edit(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -34,7 +35,6 @@ def test_write_read_edit(tmp_path, monkeypatch):
     assert read_text("a.txt")["content"] == "hello world"
     edit_text("a.txt", [{"old": "world", "new": "mcp"}])
     assert read_text("a.txt")["content"] == "hello mcp"
-
 
 @pytest.mark.parametrize(
     ("edit", "message"),
@@ -58,7 +58,6 @@ def test_edit_text_rejects_invalid_edit_objects(tmp_path, monkeypatch, edit, mes
 
     assert path.read_text(encoding="utf-8") == "hello hello"
 
-
 def test_read_text_refuses_binary_without_decoding(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
@@ -75,7 +74,6 @@ def test_read_text_refuses_binary_without_decoding(tmp_path, monkeypatch):
         "message": "Refusing to read binary file as text",
     }
 
-
 def test_read_text_binary_preview_is_explicit_and_limited(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
@@ -87,7 +85,6 @@ def test_read_text_binary_preview_is_explicit_and_limited(tmp_path, monkeypatch)
     assert result["preview"] == "0001"
     assert result["preview_encoding"] == "hex"
     assert result["preview_bytes"] == 2
-
 
 def test_binary_preview_does_not_read_entire_file(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -103,7 +100,6 @@ def test_binary_preview_does_not_read_entire_file(tmp_path, monkeypatch):
 
     assert result["preview"] == "0001"
 
-
 def test_read_text_reports_original_size_and_truncation(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "5")
@@ -118,7 +114,6 @@ def test_read_text_reports_original_size_and_truncation(tmp_path, monkeypatch):
     assert result["truncated"] is True
     assert result["content"] == "hello"
 
-
 def test_write_content_decodes_base64_without_changing_bytes(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
@@ -131,7 +126,6 @@ def test_write_content_decodes_base64_without_changing_bytes(tmp_path, monkeypat
     assert result["bytes"] == len(payload)
     assert result["sha256"] == hashlib.sha256(payload).hexdigest()
 
-
 def test_write_content_rejects_invalid_base64(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
@@ -140,7 +134,6 @@ def test_write_content_rejects_invalid_base64(tmp_path, monkeypatch):
         write_content("blob.bin", "not base64!", encoding="base64")
 
     assert not (tmp_path / "blob.bin").exists()
-
 
 def test_write_content_applies_limit_to_decoded_bytes(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -151,14 +144,12 @@ def test_write_content_applies_limit_to_decoded_bytes(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="Refusing to write 4 bytes; max is 3"):
         write_content("blob.bin", encoded, encoding="base64")
 
-
 def test_write_content_rejects_unknown_encoding(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
 
     with pytest.raises(ValueError, match="encoding must be 'utf-8' or 'base64'"):
         write_content("blob.bin", "data", encoding="hex")
-
 
 def test_write_text_does_not_read_existing_file_before_overwrite(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -174,7 +165,6 @@ def test_write_text_does_not_read_existing_file_before_overwrite(tmp_path, monke
 
     assert result["created"] is False
     assert (tmp_path / "existing.txt").read_bytes().decode("utf-8") == "new"
-
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation requires privileges on Windows")
@@ -202,7 +192,6 @@ def test_file_mutations_operate_on_symlink_instead_of_target(tmp_path, monkeypat
     assert not link.exists()
     assert not link.is_symlink()
     assert (target / "important.txt").read_text(encoding="utf-8") == "keep"
-
 
 def test_expected_revision_write_is_serialized(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -243,7 +232,6 @@ def test_edit_refuses_files_above_write_limit(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="Refusing to edit"):
         edit_text("large.txt", [{"old": "world", "new": "mcp"}])
 
-
 def test_edits_refuse_binary_files(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
@@ -256,7 +244,6 @@ def test_edits_refuse_binary_files(tmp_path, monkeypatch):
         edit_text("blob.bin", [{"old": "world", "new": "mcp"}])
 
     assert (tmp_path / "blob.bin").read_bytes() == original
-
 
 @pytest.mark.asyncio
 async def test_read_file_rejects_too_many_files(tmp_path, monkeypatch):
@@ -277,14 +264,12 @@ async def test_read_file_rejects_too_many_files(tmp_path, monkeypatch):
         "message": "Refusing to read 2 files; max is 1",
     }
 
-
 def test_reject_path_escape(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
     get_settings.cache_clear()
     with pytest.raises(ValueError):
         resolve_path("/etc/passwd")
-
 
 def test_full_container_mode_disables_builtin_restrictions(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -299,7 +284,6 @@ def test_full_container_mode_disables_builtin_restrictions(tmp_path, monkeypatch
     assert resolved.parts[-2:] == ("etc", "passwd")
     check_command_policy("mount /dev/null /mnt || true")
 
-
 def test_read_text_handles_truncated_utf8_sequence(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "4")
@@ -311,7 +295,6 @@ def test_read_text_handles_truncated_utf8_sequence(tmp_path, monkeypatch):
     assert result["truncated"] is True
     assert result["bytes_read"] == 4
     assert result["content"] == "你�"
-
 
 def test_read_text_allows_utf8_character_split_at_binary_sample_boundary(
     tmp_path, monkeypatch
@@ -326,7 +309,6 @@ def test_read_text_allows_utf8_character_split_at_binary_sample_boundary(
     assert result["binary"] is False
     assert result["content"] == content
 
-
 def test_read_text_rejects_invalid_utf8_after_binary_sample_boundary(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
@@ -336,7 +318,6 @@ def test_read_text_rejects_invalid_utf8_after_binary_sample_boundary(tmp_path, m
     result = read_text("invalid-boundary.bin")
 
     assert result["binary"] is True
-
 
 def test_path_lock_state_and_lock_files_are_bounded(tmp_path, monkeypatch):
     from local_shell_mcp.fs_ops import _PATH_LOCKS, _path_lock
@@ -353,7 +334,6 @@ def test_path_lock_state_and_lock_files_are_bounded(tmp_path, monkeypatch):
     lock_files = list((tmp_path / ".state" / "locks").glob("*.lock"))
     assert len(lock_files) <= 256
     assert all(path.name.startswith("shard-") for path in lock_files)
-
 
 def test_multi_path_lock_deduplicates_colliding_file_shards(tmp_path, monkeypatch):
     from local_shell_mcp.fs_ops import _path_locks
@@ -392,7 +372,6 @@ def test_multi_path_lock_deduplicates_colliding_file_shards(tmp_path, monkeypatc
 
     assert completed.is_set(), "colliding lock shards deadlocked"
     assert errors == []
-
 
 def test_file_actions_exist_ok_requires_matching_object_type(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))

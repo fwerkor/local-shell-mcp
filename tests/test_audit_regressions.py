@@ -36,13 +36,13 @@ from local_shell_mcp.transfer_ops import (
     transfer_write_chunk,
 )
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _configure_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
     get_settings.cache_clear()
-
 
 @pytest.mark.parametrize(
     "updates",
@@ -57,7 +57,6 @@ def _configure_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 def test_settings_reject_invalid_numeric_ranges(updates):
     with pytest.raises(ValueError):
         Settings(**updates)
-
 
 def test_path_policy_uses_components_and_edit_rejects_empty_search(tmp_path, monkeypatch):
     workspace = tmp_path / "secrets-project"
@@ -80,7 +79,6 @@ def test_path_policy_uses_components_and_edit_rejects_empty_search(tmp_path, mon
         edit_text("README.md", [{"old": "", "new": "Z"}])
     assert (workspace / "README.md").read_text(encoding="utf-8") == "abc"
 
-
 def test_command_policy_is_case_insensitive_and_session_names_never_empty(
     tmp_path, monkeypatch
 ):
@@ -89,7 +87,6 @@ def test_command_policy_is_case_insensitive_and_session_names_never_empty(
         check_command_policy("SHUTDOWN /s /t 0")
     assert _tmux_session_name("   ").startswith("mcp-")
     assert _tmux_session_name("💥").startswith("mcp-")
-
 
 def test_job_runner_filters_service_environment(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
@@ -144,7 +141,6 @@ def test_job_runner_filters_service_environment(tmp_path, monkeypatch):
     assert "DOCKER_HOST" not in captured["env"]
     assert "CLOUDFLARE_TUNNEL_TOKEN" not in captured["env"]
 
-
 def test_transfer_requires_complete_non_overlapping_ranges(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
     begin = transfer_begin_write("sparse.bin", expected_bytes=8)
@@ -159,7 +155,6 @@ def test_transfer_requires_complete_non_overlapping_ranges(tmp_path, monkeypatch
         transfer_write_chunk("overlap.bin", begin["transfer_id"], 2, "eg==")
     transfer_abort_write("overlap.bin", begin["transfer_id"])
 
-
 def test_directory_pack_rejects_invalid_compression_and_special_files(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
     source = tmp_path / "source"
@@ -172,7 +167,6 @@ def test_directory_pack_rejects_invalid_compression_and_special_files(tmp_path, 
         os.mkfifo(source / "pipe")
         with pytest.raises(ValueError, match="special files"):
             transfer_pack_dir("source", "gz")
-
 
 def test_remote_registry_recovers_backup_and_refuses_total_corruption(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
@@ -200,7 +194,6 @@ def test_remote_registry_recovers_backup_and_refuses_total_corruption(tmp_path, 
     assert registry.read_text(encoding="utf-8") == "{broken again"
     assert backup.read_text(encoding="utf-8") == "{also broken"
 
-
 def test_remote_download_ticket_serves_verified_snapshot(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
     original = b"abcdefgh"
@@ -216,7 +209,6 @@ def test_remote_download_ticket_serves_verified_snapshot(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.content == original
     assert response.headers["x-content-sha256"] == hashlib.sha256(original).hexdigest()
-
 
 @pytest.mark.asyncio
 async def test_controller_timeout_is_visible_to_running_worker(tmp_path, monkeypatch):
@@ -238,7 +230,6 @@ async def test_controller_timeout_is_visible_to_running_worker(tmp_path, monkeyp
     heartbeat = await manager.heartbeat(worker.token, {"job_id": job_id})
     assert heartbeat["accepted"] is False
     assert heartbeat["cancelled"] is True
-
 
 @pytest.mark.asyncio
 async def test_claimed_remote_mutation_waits_for_definitive_result(tmp_path, monkeypatch):
@@ -269,7 +260,6 @@ async def test_claimed_remote_mutation_waits_for_definitive_result(tmp_path, mon
     result = await call
     assert result["data"]["path"] == "target.txt"
 
-
 @pytest.mark.asyncio
 async def test_worker_cancels_cooperative_task_when_controller_rejects_heartbeat(monkeypatch):
     completed = False
@@ -298,7 +288,6 @@ async def test_worker_cancels_cooperative_task_when_controller_rejects_heartbeat
         )
     assert completed is False
 
-
 @pytest.mark.asyncio
 async def test_mcp_mutation_does_not_return_before_thread_finishes(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
@@ -321,7 +310,6 @@ async def test_mcp_mutation_does_not_return_before_thread_finishes(tmp_path, mon
     assert payload["data"]["path"] == "target.txt"
     assert marker.read_text(encoding="utf-8") == "done"
 
-
 def test_rest_mutation_does_not_return_before_thread_finishes(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
     monkeypatch.setattr(http_app_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
@@ -339,7 +327,6 @@ def test_rest_mutation_does_not_return_before_thread_finishes(tmp_path, monkeypa
     )
     assert response.status_code == 200
     assert marker.read_text(encoding="utf-8") == "done"
-
 
 @pytest.mark.asyncio
 async def test_python_and_playwright_tools_honor_configured_interpreter_and_clear_stale_output(
@@ -381,7 +368,6 @@ async def test_python_and_playwright_tools_honor_configured_interpreter_and_clea
     assert result["capture_path"] is None
     assert not stale.exists()
 
-
 def test_rest_validation_and_readiness(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
     client = TestClient(build_http_app())
@@ -403,7 +389,6 @@ def test_rest_validation_and_readiness(tmp_path, monkeypatch):
     assert invalid_integer.json()["error"] == "validation_error"
 
 
-
 def test_secret_scan_fallback_respects_gitignore(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_RG_BIN", str(tmp_path / "missing-rg"))
@@ -418,7 +403,6 @@ def test_secret_scan_fallback_respects_gitignore(tmp_path, monkeypatch):
 
     findings = tools_module._secret_scan_sync(".", None, 20)["findings"]
     assert {item["path"] for item in findings} == {"visible.txt"}
-
 
 @pytest.mark.asyncio
 async def test_failed_remote_directory_pull_removes_local_archive(tmp_path, monkeypatch):
@@ -471,7 +455,6 @@ async def test_failed_remote_directory_pull_removes_local_archive(tmp_path, monk
         await tools_module._copy_remote_dir_to_local("node", "source", "dest")
     assert not archive.exists()
 
-
 @pytest.mark.asyncio
 async def test_wallpaper_retries_after_transient_failure(tmp_path, monkeypatch):
     _configure_workspace(tmp_path, monkeypatch)
@@ -516,7 +499,6 @@ async def test_wallpaper_retries_after_transient_failure(tmp_path, monkeypatch):
     assert first.status_code == 204
     assert second.status_code == 204
     assert calls == 2
-
 
 def test_vscode_extension_uses_posix_process_group_shutdown():
     source = Path("vscode-extension/src/extension.ts").read_text(encoding="utf-8")

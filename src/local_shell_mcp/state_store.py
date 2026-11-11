@@ -306,8 +306,12 @@ def get_state_store() -> StateStore:
     with _STORE_CACHE_LOCK:
         if _STORE_CACHE is not None and _STORE_CACHE[0] == signature:
             return _STORE_CACHE[1]
-        if settings.state_backend == "file":
-            store: StateStore = FileStateStore(settings.state_dir)
+        if settings.state_backend == "sqlite":
+            from .sqlite_store import SQLiteStateStore
+
+            store: StateStore = SQLiteStateStore(settings.state_dir)
+        elif settings.state_backend == "file":
+            store = FileStateStore(settings.state_dir)
         elif settings.state_backend == "memory":
             store = MemoryStateStore(settings.state_backend_prefix)
         elif settings.state_backend == "redis":

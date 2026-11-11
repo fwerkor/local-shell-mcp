@@ -42,9 +42,10 @@ def wait_for_http(
     deadline = time.monotonic() + timeout_s
     checks = {
         "/healthz": None,
+        "/c/new": b"<div id=\"root\"",
+        "/api/config": b"local-shell-mcp",
         "/ui": b"local-shell-mcp",
-        "/ui/assets/web.js": None,
-        "/ui/assets/web.css": None,
+        "/control/files": b'id="root"',
     }
     pending = dict(checks)
     while pending and time.monotonic() < deadline:
@@ -303,9 +304,6 @@ def main() -> int:
             try:
                 wait_for_http(port, process, stdout_path, stderr_path)
                 if args.web_only:
-                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/ui", timeout=10) as response:  # noqa: S310
-                        if b'"tuiAvailable": false' not in response.read():
-                            raise AssertionError("WebUI must report that OpenTUI is unavailable")
                     asyncio.run(exercise_missing_tui(port))
                 else:
                     asyncio.run(exercise_websocket(port))

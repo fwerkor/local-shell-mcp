@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
+<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
 # مساحة عمل الويب الموحدة
 
 **مساحة عمل ويب LSM الموحدة** هي الطريقة الموصى بها لاستخدام local-shell-mcp يومًا بعد يوم. فهو يجمع بين دردشة الذكاء الاصطناعي وسجل المشروع ومستوى التحكم LSM في واجهة واحدة سريعة الاستجابة، استنادًا إلى واجهة LibreChat الأمامية المعدلة والمقدمة من البائع. لا يزال بإمكانك توصيل عملاء MCP الخارجيين مثل [ChatGPT](chatgpt-connector.md) أو [Gemini](gemini-spark.md).
@@ -23,46 +23,34 @@
 
 ## قم بنشر مكدس الدردشة الاختياري
 
-1. [Install and start an LSM Controller](quickstart.md) مع OAuth، ومساحة عمل معزولة بشكل مناسب وتخزين حالة `file` أو `redis` المستمر. قم بتثبيت Docker Compose واستنساخ المستودع إلى المضيف الذي يقوم بتشغيل مكدس الويب.
-2. قم بتوفير **أصلي HTTPS على نفس الموقع**، مثل `https://lsm.example.org` لوحدة التحكم و`https://chat.example.org` لمساحة العمل. لا يتم عرض خدمة الدردشة مباشرة على شبكة غير موثوقة.
-3. قم بإنشاء سر جسر واحد باستخدام `openssl rand -hex 32`. قم بتكوين متغيرات البيئة هذه على **خدمة وحدة التحكم**، باستخدام هذا السر، ثم أعد تشغيلها:
+1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
+2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
+3. To override the defaults, configure the Controller service environment:
 
 ```env
-LOCAL_SHELL_MCP_LIBRECHAT_URL=https://chat.example.org
-LOCAL_SHELL_MCP_LIBRECHAT_BRIDGE_SECRET=paste-the-same-64-hex-character-secret-on-both-services
+LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
+LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. في عملية سحب المستودع، قم بتكوين حزمة الويب الاختيارية. استخدم ملف بيئة خاصًا، أو قم بتصدير القيم الموضحة أدناه؛ توليد أسرار قوية وفريدة، وعدم ارتكابها:
+4. Start the Controller from its Python package or standalone executable:
 
 ```sh
-export LSM_PUBLIC_ORIGIN=https://lsm.example.org
-export LIBRECHAT_PUBLIC_URL=https://chat.example.org
-export LSM_LIBRECHAT_BRIDGE_SECRET="paste-the-secret-from-controller-config"
-export JWT_SECRET="$(openssl rand -hex 32)"
-export JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
-export CREDS_KEY="$(openssl rand -hex 32)"
-export CREDS_IV="$(openssl rand -hex 16)"
-export MEILI_MASTER_KEY="$(openssl rand -hex 32)"
-export LSM_DOCKER_NETWORK=local-shell-mcp_default
+local-shell-mcp --mode mcp
 ```
 
-5. قم بعرض التكوين الخاص، ثم أنشئ وابدأ تشغيل حزمة الدردشة المنشورة بشكل منفصل:
+5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
 
-```sh
-python3 integrations/librechat/render_config.py
-docker compose -f integrations/librechat/compose.yaml build chat
-docker compose -f integrations/librechat/compose.yaml up -d
-```
+Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
 
-عند استخدام نشر Docker Compose الجذري، تنتمي متغيرات وحدة التحكم أعلاه إلى الجذر `.env` ويتم إعادة توجيهها إلى الحاوية. يمكن توفير قيم خدمة الدردشة من خلال صادرات Shell أو ملف بيئة خاص. يجب أن تكون حاوية وحدة التحكم قابلة للوصول من حاوية الدردشة على `http://local-shell-mcp:8765` على شبكة Docker المسماة. منفذ الوكيل العكسي `127.0.0.1:3080` إلى أصل HTTPS للدردشة، واحتفظ بالمضيف الخارجي، واتبع [deployment and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md) في المستودع. تعمل حزمة الويب على تشغيل Node.js وMongoDB وMeilisearch وSearXNG؛ هم **غير** مدرجين في العمال. لم يبدأ هذا النشر المنفصل بواسطة `docker compose up -d` عادي في جذر المستودع.
+**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
 
 ## تسجيل الدخول واستخدام الدردشة
 
-1. افتح `https://lsm.example.org/ui`، وقم بالمصادقة باستخدام تسجيل الدخول **LSM Controller**، واتبع عملية التسليم لمرة واحدة في مساحة عمل الويب. لا تقم بإنشاء حساب مستخدم LibreChat ثانٍ.
-2. تكوين موفر النموذج. تعرض حزمة الويب الاختيارية بيانات اعتماد OpenAI وAnthropic وGoogle كـ `user_provided` بشكل افتراضي: أدخل مفتاح الموفر الخاص بك في إعدادات نقطة نهاية الدردشة، أو قم بتعيين `OPENAI_API_KEY` أو `ANTHROPIC_API_KEY` أو `GOOGLE_KEY` في بيئة إنشاء الدردشة قبل البدء. اختر نموذجًا مدعومًا في الدردشة. **لا يتضمن LSM نماذج أو أرصدة واجهة برمجة التطبيقات (API).** اتصال MCP الخارجي لـ Gemini Spark منفصل عن تكوين نموذج Gemini هنا.
-3. قم بإنشاء محادثة. يتم تمكين أدوات بحث الويب وLSM بشكل افتراضي، مع مراعاة أذونات وحدة التحكم. استخدم عناصر التحكم **الويب** و**LSM** و**External MCP** و**الذاكرة** لكل محادثة حسب الحاجة.
-4. ابدأ بطلب للقراءة فقط: "تحقق من حالة وحدة التحكم وأدرج جذر مساحة العمل. لا تقم بتعديل الملفات."
-5. انتقل إلى **الملفات** أو **المحطات الطرفية** أو **سطح المكتب** أو **الجلسات** أو **أجهزة التحكم عن بعد** أو **التدقيق** للفحص والتحكم المباشر.
+1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
+2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
+3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
+4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
+5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
 
 يتم تخزين تحميلات الدردشة (ما يصل إلى 32 ميجابايت) ضمن مساحة عمل وحدة التحكم ويتم توفير مساراتها المطلقة للنموذج. لا تمنح عمليات تحميل المتصفح أذونات إضافية للملفات. تمر استدعاءات الأداة التي تواجه النموذج من خلال ترخيص LSM والتدقيق وجهاز توجيه العامل عن بعد.
 
@@ -70,16 +58,16 @@ docker compose -f integrations/librechat/compose.yaml up -d
 
 استخدم الشريط الجانبي لمساحة العمل MCP لإدارة خوادم MCP الخارجية المتداخلة. وهذا يدعم خوادم stdio المحلية وخوادم HTTP، بما في ذلك متغيرات البيئة الخاصة المنفصلة ورؤوس الطلبات. لا يتم إرجاع الأسرار إلى المتصفح. يتيح تبديل الدردشة **External MCP** إمكانية البحث عن الأدوات المتداخلة وفحصها واستدعاءها؛ ولا يمنح النموذج `mcp_manage` عند تعطيل أدوات LSM الأصلية. إدارة واجهة المستخدم محمية بترخيص وحدة التحكم العادي.
 
-يتم تخزين رسائل الدردشة والمشاريع والمحفوظات من جانب الخادم في MongoDB الخاص بمكدس الويب؛ يستخدم البحث Meilisearch. يمتلك جهاز التحكم بشكل منفصل أذونات الأداة وهويات العامل وحالة الجلسة والتدقيق. قم بعمل نسخة احتياطية من مخزني البيانات إذا كنت بحاجة إلى الاحتفاظ بالمحفوظات بالكامل. الواجهة الخلفية للدردشة هي مستخدم واحد ضمن تسجيل دخول LSM؛ لا تعرض واجهة برمجة التطبيقات الداخلية أو قواعد البيانات الخاصة بها للجمهور.
+Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
 
-واجهة المستخدم عبارة عن تطبيق عالي المستوى، **وليس iframe**. إذا لم يتم تكوين خدمة الدردشة الاختيارية، فسيستمر `/ui` في خدمة LSM WebUI الأصلية. يظل OpenTUI الأصلي والعملاء الخارجيون مدعومين.
+The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
 
 ## استكشاف الأخطاء وإصلاحها
 
-- **تبقى إعادة التوجيه على واجهة المستخدم الأصلية:** تحقق من `LOCAL_SHELL_MCP_LIBRECHAT_URL` والواجهة الخلفية لحالة وحدة التحكم المستمرة والوكيل العكسي HTTPS الخاص بمكدس الويب.
-- **فشل تسجيل الدخول أو التسليم:** تحقق من نفس سر الجسر الذي يبلغ 32 بايت أو أطول على كلا الجانبين، مع مطابقة أصول الموقع نفسه، وHTTPS وساعات الخادم.
-- **يتم تحميل الدردشة ولكن لا يمكن الرد عليها:** قم بإعداد نقطة نهاية نموذج فعلية أو بيانات اعتماد واجهة برمجة التطبيقات (API) وتحقق من سجلات حاوية الدردشة.
-- **أدوات MCP مفقودة:** التحقق من نطاقات وحدة التحكم وعمليات التبديل لكل محادثة؛ سجل الخادم المتداخل منفصل عن قاعدة بيانات LibreChat MCP.
-- **تظهر الملفات أو الجلسات فارغة:** تأكد من وصول الدردشة إلى وحدة التحكم ومساحة العمل الصحيحة، وافحص سجلات مصادقة API الخاصة بها.
+- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
+- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
+- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
+- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
+- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
 
-للحصول على تفاصيل التنفيذ والتحديثات، راجع [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md) و[human interface guide](../guides/human-interface.md).
+للحصول على تفاصيل التنفيذ والتحديثات، راجع [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) و[human interface guide](../guides/human-interface.md).

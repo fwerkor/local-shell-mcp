@@ -1,0 +1,9 @@
+{
+  "commit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+  "source": "packages/api/src/artifacts/update.ts",
+  "sourceSha256": "231fdb14c172324c7f653dea777b189104ecc8d2b2ab75067d5f4ed97a05516a",
+  "fixtureSha256": "ad3cbf942abce9ba4ff36ad13a1b687283f13881e6eaafe90e8a67ce0eb32a31",
+  "latexSource": "packages/api/src/utils/latex.ts",
+  "latexSourceSha256": "177aa21b44ac8268724f85b55664cc90d9ba053c330afed301d59c83b08326ae",
+  "latexFixtureSha256": "b970857c2410f26713887ebc52540b85bebeb33a84113d9419ee724cf0bfd568"
+}

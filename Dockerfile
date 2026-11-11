@@ -5,6 +5,14 @@ WORKDIR /source
 COPY ui /source/ui
 COPY src/local_shell_mcp /source/src/local_shell_mcp
 RUN cd /source/ui && bun install --frozen-lockfile && bun run build:web
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    cd /source/ui/workspace && bun install --frozen-lockfile --network-concurrency 4 && bun run build
+
+FROM python:3.12-slim-bookworm AS react-bundler
+WORKDIR /source
+COPY --from=ui-builder /source/ui/workspace/client/dist /source/ui/workspace/client/dist
+COPY scripts/embed-react-webui.py /source/scripts/embed-react-webui.py
+RUN python /source/scripts/embed-react-webui.py --destination /out/frontend.tar.gz
 
 FROM alpine:3.22 AS tmux-builder
 ARG TMUX_VERSION=3.5a
@@ -90,14 +98,16 @@ RUN set -eux; \
   install -m 0755 /tmp/local-shell-mcp-tmux "/app/src/local_shell_mcp/helpers/linux-${helper_arch}/tmux"; \
   rm -f /tmp/local-shell-mcp-tmux
 COPY --from=ui-builder /source/src/local_shell_mcp/ui_static /app/src/local_shell_mcp/ui_static
+COPY --from=react-bundler /out/frontend.tar.gz /app/src/local_shell_mcp/webui/frontend.tar.gz
 # Browser automation is optional; neither Playwright nor browser runtimes
 # belong in the base image.
 RUN pip install --no-cache-dir -e . \
   && rm -rf /root/.cache/pip \
   && python -c "import zstandard" \
-  && test -s /app/src/local_shell_mcp/ui_static/index.html \
-  && test -s /app/src/local_shell_mcp/ui_static/web.js \
-  && test -s /app/src/local_shell_mcp/ui_static/web.css \
+  && test -s /app/src/local_shell_mcp/webui/frontend.tar.gz \
+  && test -s /app/src/local_shell_mcp/ui_static/live-workspace.html \
+  && test ! -e /app/src/local_shell_mcp/ui_static/web.js \
+  && test ! -e /app/src/local_shell_mcp/ui_static/index.html \
   && test ! -e /app/src/local_shell_mcp/ui_runtime \
   && test ! -d "${PLAYWRIGHT_BROWSERS_PATH}"
 

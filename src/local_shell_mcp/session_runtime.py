@@ -239,7 +239,7 @@ class SessionRuntimeManager:
         self._loaded_storage = signature
 
     def _uses_shared_state_backend(self) -> bool:
-        return self._state_dir_override is None and get_settings().state_backend == "redis"
+        return self._state_dir_override is None and get_settings().state_backend in {"redis", "sqlite"}
 
     def _load_session_from_store_locked(self, session_id: str) -> LogicalSession | None:
         raw = self._state_store().read_bytes(f"sessions/{session_id}.json")

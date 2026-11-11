@@ -22,14 +22,14 @@ import local_shell_mcp.tools as tools
 from local_shell_mcp.remote_worker_routes import remote_routes, worker_bundle_bytes
 from local_shell_mcp.settings import get_settings
 
-ROOT = Path(__file__).resolve().parents[1]
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
+ROOT = Path(__file__).resolve().parents[1]
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
-
 
 def _wait_until(predicate, timeout: float = 15.0) -> None:
     deadline = time.monotonic() + timeout
@@ -43,7 +43,6 @@ def _wait_until(predicate, timeout: float = 15.0) -> None:
         time.sleep(0.05)
     raise TimeoutError(f"condition was not met within {timeout}s: {last_error!r}")
 
-
 def _stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
     if process.poll() is None:
         process.terminate()
@@ -52,7 +51,6 @@ def _stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
         except subprocess.TimeoutExpired:
             process.kill()
     return process.communicate(timeout=5)
-
 
 def _worker_environment(worker_root: Path) -> dict[str, str]:
     env = os.environ.copy()
@@ -76,7 +74,6 @@ def _worker_environment(worker_root: Path) -> dict[str, str]:
         env["COVERAGE_PROCESS_START"] = str(ROOT / "pyproject.toml")
         env["COVERAGE_FILE"] = str(ROOT / ".coverage")
     return env
-
 
 def _start_worker(base_url: str, invite: str, worker_root: Path) -> subprocess.Popen[str]:
     workspace = worker_root / "workspace"
@@ -110,7 +107,6 @@ def _start_worker(base_url: str, invite: str, worker_root: Path) -> subprocess.P
         text=True,
         start_new_session=(os.name != "nt"),
     )
-
 
 @pytest.mark.skipif(
     sys.platform != "linux" or platform.machine().lower() not in {"x86_64", "amd64"},

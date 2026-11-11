@@ -12,6 +12,7 @@ from local_shell_mcp.config_management import config_file, config_snapshot, save
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 @pytest.fixture
 def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -24,29 +25,27 @@ def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     yield tmp_path
     get_settings.cache_clear()
 
-
 def test_default_path_save_restart_loading_and_reset(configured):
     snapshot = config_snapshot()
     assert Path(snapshot["path"]) == configured / ".local-shell-mcp" / "config.yaml"
     assert len(snapshot["fields"]) >= 80
-    initial = get_settings().hosted_chat_enabled
+    initial = get_settings().live_workspace_enabled
     changed = not initial
 
-    saved = save_config({"hosted_chat_enabled": changed, "ui_wallpaper": "none"}, snapshot["revision"])
+    saved = save_config({"live_workspace_enabled": changed, "ui_wallpaper": "none"}, snapshot["revision"])
     assert saved["restart_required"]
-    upcoming = next(field for field in config_snapshot()["fields"] if field["name"] == "hosted_chat_enabled")
+    upcoming = next(field for field in config_snapshot()["fields"] if field["name"] == "live_workspace_enabled")
     assert upcoming["value"] is changed and upcoming["pending"] is True
     assert stat.S_IMODE(config_file().stat().st_mode) == 0o600 if os.name != "nt" else config_file().exists()
     get_settings.cache_clear()
-    assert get_settings().hosted_chat_enabled is changed
+    assert get_settings().live_workspace_enabled is changed
     assert get_settings().ui_wallpaper == "none"
-    assert next(field for field in config_snapshot()["fields"] if field["name"] == "hosted_chat_enabled")["pending"] is False
-    assert next(f for f in config_snapshot()["fields"] if f["name"] == "hosted_chat_enabled")["source"] == "config"
+    assert next(field for field in config_snapshot()["fields"] if field["name"] == "live_workspace_enabled")["pending"] is False
+    assert next(f for f in config_snapshot()["fields"] if f["name"] == "live_workspace_enabled")["source"] == "config"
 
-    save_config({"hosted_chat_enabled": None}, saved["revision"])
+    save_config({"live_workspace_enabled": None}, saved["revision"])
     get_settings.cache_clear()
-    assert get_settings().hosted_chat_enabled is initial
-
+    assert get_settings().live_workspace_enabled is initial
 
 def test_validation_failure_does_not_write(configured):
     before = config_snapshot()
@@ -55,7 +54,6 @@ def test_validation_failure_does_not_write(configured):
             save_config(changes, before["revision"])
         assert config_snapshot()["revision"] == before["revision"]
         assert not config_file().exists()
-
 
 def test_env_lock_and_optimistic_revision(configured, monkeypatch):
     original = config_snapshot()
@@ -67,7 +65,6 @@ def test_env_lock_and_optimistic_revision(configured, monkeypatch):
     with pytest.raises(RuntimeError, match="refresh"):
         save_config({"max_jobs": 10}, original["revision"])
     assert config_snapshot()["revision"] == saved["revision"]
-
 
 def test_secret_never_returned_and_yaml_sections(configured):
     document = config_file()
@@ -82,7 +79,6 @@ def test_secret_never_returned_and_yaml_sections(configured):
     assert "admin_pin: new-top-secret-pin" in document.read_text()
     assert "ui_wallpaper: aurora" in document.read_text()
 
-
 def test_explicit_config_and_symbolic_link_rejected(configured, monkeypatch):
     path = configured / "custom.yaml"
     path.write_text("max_jobs: 17\n")
@@ -96,14 +92,12 @@ def test_explicit_config_and_symbolic_link_rejected(configured, monkeypatch):
     with pytest.raises(ValueError, match="symbolic"):
         config_snapshot()
 
-
 def test_anonymous_remote_cannot_manage_config(configured):
     with TestClient(build_http_app()) as client:
         result = client.get("/api/ui/settings/view")
         assert result.status_code == 403
         result = client.post("/api/ui/settings/save", json={"revision": hashlib.sha256(b"").hexdigest(), "changes": {"max_jobs": 1}})
         assert result.status_code == 403
-
 
 def test_oauth_management_scope_and_same_origin(configured, monkeypatch):
     from local_shell_mcp.oauth import issue_access_token
@@ -127,7 +121,6 @@ def test_oauth_management_scope_and_same_origin(configured, monkeypatch):
     assert client.post("/api/ui/settings/save", headers=same_origin, json=params).status_code == 200
     assert config_snapshot()["fields"]
 
-
 def test_direct_localhost_config_writes_with_public_url(configured, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://controller.example.test")
     get_settings.cache_clear()
@@ -140,7 +133,6 @@ def test_direct_localhost_config_writes_with_public_url(configured, monkeypatch)
         path = "/api/ui/settings/save"
         assert client.post(path, headers={"Origin": "http://127.0.0.1:8765"}, json=params).status_code == 200
         assert client.post(path, headers={"Origin": "https://evil.example.test"}, json=params).status_code in {401, 403}
-
 
 def test_proxy_origin_requires_same_host_even_with_advertised_https(configured, monkeypatch):
     from starlette.requests import Request
@@ -161,7 +153,6 @@ def test_proxy_origin_requires_same_host_even_with_advertised_https(configured, 
     assert not _settings_same_origin(request("localhost:8765", "https://controller.example.test"))
     assert not _settings_same_origin(request("controller.example.test", "https://attacker.example.test"))
 
-
 def test_yaml_state_dir_does_not_anchor_default_subpaths(configured):
     chosen_state = configured / "separate-state"
     config_file().parent.mkdir(parents=True, exist_ok=True)
@@ -173,7 +164,6 @@ def test_yaml_state_dir_does_not_anchor_default_subpaths(configured):
     assert settings.agent_config_dir == chosen_state / "agent_config"
     fields = {row["name"]: row for row in config_snapshot()["fields"]}
     assert fields["audit_log_path"]["value"] == str(chosen_state / "audit.jsonl")
-
 
 def test_stateless_oauth_requires_explicit_secret_before_saving(configured, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
@@ -188,7 +178,6 @@ def test_stateless_oauth_requires_explicit_secret_before_saving(configured, monk
     assert get_settings().stateless_controller
     assert get_settings().oauth_jwt_secret == secret
 
-
 def test_cli_and_tui_discover_default_yaml_endpoint(configured):
     from local_shell_mcp.cli_call import _apply_yaml_controller_values
     path = config_file()
@@ -200,7 +189,6 @@ def test_cli_and_tui_discover_default_yaml_endpoint(configured):
     assert resolved["LOCAL_SHELL_MCP_MAX_TIMEOUT_S"] == "120"
     assert resolved["LOCAL_SHELL_MCP_STATE_DIR"] == str(configured / ".local-shell-mcp")
     assert _apply_yaml_controller_values({**values, "LOCAL_SHELL_MCP_PORT": "19991"})["LOCAL_SHELL_MCP_PORT"] == "19991"
-
 
 def test_invalid_config_formats_and_size(configured, monkeypatch):
     from local_shell_mcp import config_management as cfg
@@ -221,7 +209,6 @@ def test_invalid_config_formats_and_size(configured, monkeypatch):
     monkeypatch.setattr(cfg, "_MAX_CONFIG_BYTES", 8)
     with pytest.raises(ValueError, match="256 KiB"):
         config_snapshot()
-
 
 def test_reject_invalid_changes_and_preserve_file_on_write_failure(configured, monkeypatch):
     from local_shell_mcp import config_management as cfg
@@ -245,7 +232,6 @@ def test_reject_invalid_changes_and_preserve_file_on_write_failure(configured, m
     assert not config_file().exists()
     assert not list(config_file().parent.glob(".config-*.tmp"))
 
-
 def test_reject_oversized_config_write(configured, monkeypatch):
     from local_shell_mcp import config_management as cfg
 
@@ -255,7 +241,6 @@ def test_reject_oversized_config_write(configured, monkeypatch):
     with pytest.raises(ValueError, match="256 KiB"):
         save_config({"state_backend_prefix": "a" * 50}, data["revision"])
     assert not path.exists()
-
 
 def test_nested_yaml_reset_and_update(configured):
     path = config_file()
@@ -268,7 +253,6 @@ def test_nested_yaml_reset_and_update(configured):
     assert "admin_pin:" not in path.read_text()
     assert "code_ttl_s:" in path.read_text()
     save_config({"ui_tui_command": None}, saved["revision"])
-
 
 def test_stateful_oauth_can_be_enabled_without_an_explicit_secret(configured, monkeypatch):
     monkeypatch.delenv("LOCAL_SHELL_MCP_AUTH_MODE", raising=False)
@@ -286,7 +270,6 @@ def test_stateful_oauth_can_be_enabled_without_an_explicit_secret(configured, mo
     assert len(get_settings().oauth_jwt_secret.encode("utf-8")) >= 32
     assert secret_path.is_file()
 
-
 def test_default_config_path_expands_environment_variables(configured, monkeypatch):
     from local_shell_mcp.settings import controller_config_path
 
@@ -299,7 +282,6 @@ def test_default_config_path_expands_environment_variables(configured, monkeypat
     monkeypatch.setenv("LOCAL_SHELL_MCP_CONFIG", "$CONFIG_TEST_BASE/custom.yaml")
     assert controller_config_path() == configured / "custom.yaml"
 
-
 def test_generated_oauth_secret_is_not_marked_pending(configured, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
     get_settings.cache_clear()
@@ -311,7 +293,6 @@ def test_generated_oauth_secret_is_not_marked_pending(configured, monkeypatch):
         assert field["value"] is None
         assert not field["pending"]
         assert not any(field["pending"] for field in snapshot["fields"])
-
 
 def test_invalid_persisted_oauth_secret_rejected_before_saving(configured, monkeypatch):
     secret_path = configured / ".local-shell-mcp" / "oauth-jwt-secret"

@@ -13,9 +13,8 @@ dist
 *.egg-info
 workspaces
 node_modules
-# The optional unified WebUI is built using its own Compose context.
-# Keep the 78 MB vendored source out of the minimal Controller build context.
-integrations/librechat/app
+# React sources are required by the build-only stage.
+ui/workspace/node_modules/
 vscode-extension/node_modules
 vscode-extension/out
 vscode-extension/dist
@@ -26,3 +25,8 @@ yarn-error.log*
 
 # Release images must never ingest generated native OpenTUI payloads.
 src/local_shell_mcp/ui_runtime/
+
+# Never include persistent Controller state or developer environments.
+.local-shell-mcp
+coverage.json
+coverage.xml

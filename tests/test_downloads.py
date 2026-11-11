@@ -9,6 +9,7 @@ from local_shell_mcp.downloads import create_share_link, download_routes, revoke
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _reset(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -17,7 +18,6 @@ def _reset(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "x" * 32)
     get_settings.cache_clear()
-
 
 def test_create_share_link_serves_file(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
@@ -34,7 +34,6 @@ def test_create_share_link_serves_file(tmp_path, monkeypatch):
     assert response.headers["content-disposition"].startswith("attachment;")
     assert "result.txt" in response.headers["content-disposition"]
     assert link["inline"] is False
-
 
 def test_create_share_link_can_render_inline(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
@@ -57,7 +56,6 @@ def test_create_share_link_can_render_inline(tmp_path, monkeypatch):
     assert head_response.headers["content-disposition"].startswith("inline;")
     assert head_response.headers["content-security-policy"] == "sandbox"
 
-
 def test_inline_link_uses_display_filename_as_mime_fallback(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     (tmp_path / "preview").write_bytes(b"not-a-real-png")
@@ -68,7 +66,6 @@ def test_inline_link_uses_display_filename_as_mime_fallback(tmp_path, monkeypatc
     assert link["media_type"] == "image/png"
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
-
 
 def test_share_link_expires_and_can_be_revoked(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
@@ -85,7 +82,6 @@ def test_share_link_expires_and_can_be_revoked(tmp_path, monkeypatch):
     time.sleep(1.05)
     assert TestClient(app).get(link["url"]).status_code == 410
 
-
 def test_final_download_removes_snapshot(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
@@ -98,7 +94,6 @@ def test_final_download_removes_snapshot(tmp_path, monkeypatch):
     assert not list(snapshot_dir.glob("*.bin"))
     assert client.get(link["url"]).status_code == 410
 
-
 def test_share_link_download_limit(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
@@ -108,7 +103,6 @@ def test_share_link_download_limit(tmp_path, monkeypatch):
     assert client.get(link["url"]).status_code == 200
     assert client.get(link["url"]).status_code == 410
 
-
 @pytest.mark.asyncio
 async def test_file_link_tools_are_registered(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
@@ -116,7 +110,6 @@ async def test_file_link_tools_are_registered(tmp_path, monkeypatch):
 
     assert {"link_create", "link_list", "link_revoke"} <= tools.keys()
     assert tools["link_create"].inputSchema["properties"]["inline"]["default"] is False
-
 
 def test_share_link_cannot_be_retargeted_outside_workspace(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
@@ -138,7 +131,6 @@ def test_share_link_cannot_be_retargeted_outside_workspace(tmp_path, monkeypatch
     assert response.text == "hello"
     assert "outside-secret" not in response.text
 
-
 def test_download_audit_does_not_store_bearer_token(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     audit_path = tmp_path / "audit.jsonl"
@@ -154,7 +146,6 @@ def test_download_audit_does_not_store_bearer_token(tmp_path, monkeypatch):
     assert "token_id" in raw
     if os.name != "nt":
         assert audit_path.stat().st_mode & 0o777 == 0o600
-
 
 def test_share_link_is_bound_to_original_file_identity(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
@@ -172,7 +163,6 @@ def test_share_link_is_bound_to_original_file_identity(tmp_path, monkeypatch):
     assert response.text == "original"
     assert "replacement-secret" not in response.text
 
-
 def test_share_link_serves_creation_snapshot_after_in_place_rewrite(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     source = tmp_path / "hello.txt"
@@ -185,7 +175,6 @@ def test_share_link_serves_creation_snapshot_after_in_place_rewrite(tmp_path, mo
     assert response.status_code == 200
     assert response.text == "original"
     assert "new-secret" not in response.text
-
 
 def test_download_filename_strips_header_control_characters(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
@@ -200,7 +189,6 @@ def test_download_filename_strips_header_control_characters(tmp_path, monkeypatc
     assert "\n" not in disposition
     assert "Injected: value.txt" in disposition
 
-
 def test_corrupt_download_store_removes_unreachable_snapshots(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
@@ -214,7 +202,6 @@ def test_corrupt_download_store_removes_unreachable_snapshots(tmp_path, monkeypa
 
     assert list_share_links()["links"] == []
     assert not list(snapshot_dir.glob("*.bin"))
-
 
 def test_missing_download_store_prunes_orphan_snapshots(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)

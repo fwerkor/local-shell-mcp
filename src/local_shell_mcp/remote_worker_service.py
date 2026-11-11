@@ -550,14 +550,17 @@ def _unregister_windows_task() -> None:
     )
 
 
-def refresh_installed_service_definition() -> Path | None:
+def refresh_installed_service_definition(*, register_task: bool = True) -> Path | None:
     kind = service_kind()
     if kind == "launchd" and _launchd_plist_path().exists():
         launcher = _installed_launchd_launcher_path() or worker_launcher_path()
         return _write_launchd_plist(launcher)
     if kind == "scheduled-task" and _windows_task_status() is not None:
         service_file = _write_windows_task_launcher()
-        _register_windows_task(service_file)
+        # Re-registering a currently running Task Scheduler task can terminate
+        # the only active Worker.  Its action already targets this fixed path.
+        if register_task:
+            _register_windows_task(service_file)
         return service_file
     return None
 

@@ -28,6 +28,7 @@ from local_shell_mcp.oauth import (
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def test_mcp_discovery_request_classification():
     scope = {"type": "http", "path": "/mcp", "method": "POST"}
@@ -41,7 +42,6 @@ def test_mcp_discovery_request_classification():
     assert not _is_mcp_discovery_request({**scope, "method": "GET"}, None)
     assert not _is_mcp_discovery_request({**scope, "method": "DELETE"}, None)
     assert _is_mcp_discovery_request({**scope, "method": "OPTIONS"}, None)
-
 
 @pytest.mark.asyncio
 async def test_request_body_limit_counts_chunked_payloads(tmp_path, monkeypatch):
@@ -84,7 +84,6 @@ async def test_request_body_limit_counts_chunked_payloads(tmp_path, monkeypatch)
     assert called is False
     assert sent[0]["type"] == "http.response.start"
     assert sent[0]["status"] == 413
-
 
 @pytest.mark.asyncio
 async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
@@ -139,7 +138,6 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert structured["data"]["settings"]["default_timeout_s"] == 10
     assert structured["data"]["settings"]["max_timeout_s"] == 3600
 
-
 @pytest.mark.asyncio
 async def test_mcp_tool_execution_uses_one_full_scope_bundle(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -174,7 +172,6 @@ async def test_mcp_tool_execution_uses_one_full_scope_bundle(tmp_path, monkeypat
 
     assert (tmp_path / "written.txt").read_text(encoding="utf-8") == "yes"
 
-
 @pytest.mark.asyncio
 async def test_file_write_accepts_base64_binary_content(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -191,7 +188,6 @@ async def test_file_write_accepts_base64_binary_content(tmp_path, monkeypatch):
     assert result["data"]["sha256"] == hashlib.sha256(payload).hexdigest()
     assert (tmp_path / "blob.bin").read_bytes() == payload
 
-
 @pytest.mark.asyncio
 async def test_machine_argument_requires_remote_scope(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -207,7 +203,6 @@ async def test_machine_argument_requires_remote_scope(tmp_path, monkeypatch):
             await mcp.call_tool("environment_get", {"machine": "worker"})
     finally:
         _CURRENT_PRINCIPAL.reset(principal_token)
-
 
 @pytest.mark.asyncio
 async def test_tool_annotations_are_conservative_and_mode_independent(tmp_path, monkeypatch):
@@ -267,7 +262,6 @@ async def test_tool_annotations_are_conservative_and_mode_independent(tmp_path, 
     restricted = {tool.name: tool for tool in await build_mcp().list_tools()}
     assert restricted["run_shell"].annotations == command
 
-
 def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "test-secret-that-is-at-least-32-bytes")
@@ -287,7 +281,6 @@ def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
     assert claims["client_id"] == "test-client"
     assert claims["scope"] == "shell:execute"
 
-
 def _oauth_test_client() -> TestClient:
     return TestClient(
         Starlette(
@@ -297,7 +290,6 @@ def _oauth_test_client() -> TestClient:
             ]
         )
     )
-
 
 def test_oauth_registration_validates_redirects_and_authorize_requires_registered_s256_client(
     tmp_path, monkeypatch
@@ -368,7 +360,6 @@ def test_oauth_registration_validates_redirects_and_authorize_requires_registere
     )
     assert "Unsupported OAuth scope" not in ignored_scope.text
 
-
 def test_oauth_authorize_form_escapes_reflected_fields(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
@@ -387,7 +378,6 @@ def test_oauth_authorize_form_escapes_reflected_fields(tmp_path, monkeypatch):
 
     assert marker not in body
     assert "&lt;unsafe&gt;" in body
-
 
 @pytest.mark.asyncio
 async def test_read_only_tools_have_read_only_hint(tmp_path, monkeypatch):
@@ -419,7 +409,6 @@ async def test_read_only_tools_have_read_only_hint(tmp_path, monkeypatch):
         assert tools[name].annotations is not None, name
         assert tools[name].annotations.readOnlyHint is True, name
 
-
 def _mcp_initialize_payload() -> dict:
     return {
         "jsonrpc": "2.0",
@@ -432,14 +421,12 @@ def _mcp_initialize_payload() -> dict:
         },
     }
 
-
 def _mcp_headers(**extra: str) -> dict[str, str]:
     return {
         "accept": "application/json, text/event-stream",
         "content-type": "application/json",
         **extra,
     }
-
 
 def _mcp_response_json(response) -> dict:  # noqa: ANN001
     if response.headers.get("content-type", "").startswith("application/json"):
@@ -451,7 +438,6 @@ def _mcp_response_json(response) -> dict:  # noqa: ANN001
     ]
     assert data_lines, response.text
     return json.loads(data_lines[-1])
-
 
 def test_cached_open_live_workspace_recipient_executes_over_http(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -510,7 +496,6 @@ def test_cached_open_live_workspace_recipient_executes_over_http(tmp_path, monke
     assert live_token
     assert live_token not in (tmp_path / "audit.jsonl").read_text(encoding="utf-8")
 
-
 def test_mcp_requires_auth_for_initialize_and_delete_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
@@ -566,7 +551,6 @@ def test_mcp_requires_auth_for_initialize_and_delete_by_default(tmp_path, monkey
             ),
         )
         assert ping.status_code == 200
-
 
 def test_mcp_sessions_have_idle_timeout_and_hard_limit(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
