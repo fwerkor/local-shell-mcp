@@ -36,9 +36,9 @@
       "path": "api/server/controllers/agents/resume.js",
       "sha256": "9c6ae6e847aa8a7defb124022fbd23c08a2876a9c45087cafc3599778f58fa1d",
       "symbols": "resume / checkpoint ownership CAS",
-      "python_lsm": "webui/generation_routes.py:resume_generation",
+      "python_lsm": "webui/generation_routes.py; generations.py; agent_runner.py",
       "status": "部分",
-      "difference": "批审批claim、已审核证据、owner/generation checkpoint与pending tools重放已接入；完整actor/steer/子中断聚合仍缺失"
+      "difference": "原版HTTP resuming、owner/epoch/agent校验与数据库事务claim，重复同请求恢复；steer、actor、跨进程执行lease待图运行时任务。"
     },
     {
       "repository": "LibreChat",
@@ -54,9 +54,9 @@
       "path": "api/server/controllers/agents/client.js",
       "sha256": "9b2f6accf56544096aa530d5bccff4b1cc5b76651a746da2a8aee94cc20020e1",
       "symbols": "AgentClient / history / run lifecycle",
-      "python_lsm": "webui/generations.py; generation_routes.py",
+      "python_lsm": "webui/generation_routes.py; generations.py",
       "status": "部分",
-      "difference": "未移植完整AgentClient和事件actor生命周期"
+      "difference": "原版React status.resumeState、SSE sync游标、Ask User/审批刷新恢复已Chromium验证；完整event actor仍不等价。"
     },
     {
       "repository": "LibreChat",
@@ -126,9 +126,9 @@
       "path": "packages/api/src/agents/hitl/resume.ts",
       "sha256": "9fb798731c45a310d3deb88407e9f74d74116c006f8fc21186686dc0aad00ec5",
       "symbols": "resolveAskUserQuestionResume / mapToolApprovalResolutions",
-      "python_lsm": "webui/generations.py:answer_question / claim_approval; webui/tool_approval.py",
+      "python_lsm": "webui/ask_user_tools.py; tool_approval.py; approval_runtime.py; generations.py",
       "status": "部分",
-      "difference": "Ask User恢复校验与原Node函数91组输入差分一致，答案按id保存与恢复；approval仍缺批次/edit/respond等原版语义；审批决策映射/校验60组原Node差分一致并接入claim；实际批次执行仍未完成"
+      "difference": "Ask User 91组和审批60组Node差分，批量edit/respond/reject执行、SQLite审查证据及恢复测试通过；完整子图仍待验收。"
     },
     {
       "repository": "LibreChat",
@@ -144,18 +144,18 @@
       "path": "packages/api/src/agents/hitl/policy.ts",
       "sha256": "30ca40677e43c5d12fe539da85262bf6d335eb238836ad8705b480789e0661ce",
       "symbols": "approval rules / deny-ask-allow / policy hashing",
-      "python_lsm": "webui/nested_mcp.py",
+      "python_lsm": "webui/approval_runtime.py; agent_runner.py",
       "status": "未实现",
-      "difference": "当前对所有nested MCP强制approval，不是原版policy机制"
+      "difference": "原版Ask User审批默认豁免及显式ask/deny覆盖；固定24h TTL；可选checkpointer TTL配置仍未完成。"
     },
     {
       "repository": "LibreChat",
       "path": "packages/api/src/agents/checkpointer.ts",
       "sha256": "63f0390a025a550ec4a572145f6db7dcb190797d181ac11d0bb707f364d75302",
       "symbols": "durable checkpointer",
-      "python_lsm": "webui/checkpoints.py; agent_runner.py",
+      "python_lsm": "webui/checkpoints.py; generations.py; agent_runner.py",
       "status": "部分",
-      "difference": "统一SQLite tuple/pending-write存储、owner/generation隔离、proposal/结果/完成状态恢复已接入；完整LangChain类序列化与graph actor链未实现"
+      "difference": "持久checkpoint和同事务人工交互claim、重启repark恢复；跨进程租约、完整图checkpoint待验收。"
     },
     {
       "repository": "LibreChat",
