@@ -6,7 +6,7 @@
     "LibreChat": 1892,
     "agents": 258
   },
-  "reviewed_mapping_count": 47,
+  "reviewed_mapping_count": 48,
   "modules": [
     {
       "repository": "LibreChat",
@@ -8193,10 +8193,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/guard.ts",
       "sha256": "b68203af3b24f14eb8f7db171afe5550e228957a27fd5391956a4e42fe99e35c",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_task_host.py:SQLiteSubagentTaskHost.start/_execute/_settle_child_registration; webui/generations.py:GenerationStore.begin(trusted_new_conversation_id); requires PR #352 webui/child_thread_activity.py",
+      "status": "部分（依赖 Draft PR #352 的 source-pinned Artifacts guard）",
+      "reviewed_mapping": true,
+      "difference": "Graph host reserves UUID and parent-run ownership in existing SQLite task record before creating child; optional PR352 ActiveChildThreads.activate/settle interop registers read-only marker and leaves it after settle. Persisted child_registered admission bit fences concurrent idempotent caller; crash only resumes after owner-scoped registered marker. PR352 artifact route owns its separate live-child write guard and table, which are not duplicated here."
     },
     {
       "repository": "LibreChat",

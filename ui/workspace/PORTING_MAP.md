@@ -353,3 +353,25 @@ host task/thread store and message-protocol PRs land.
 跨 Controller 的外部 event/control routing、所有 Hook 回调和富媒体 RunStepState，
 以及全量自动问答/审批事件的 host actor 恢复。上述不应以当前子任务成功测试冒充
 整个 LibreChat 运行时等价。保持全局 ≥95% 和单模块 ≥90% 的覆盖门槛不变。
+
+### 2026-11-12 — 与 Artifacts Draft PR #352 的原版 child-thread guard 接口
+
+按 PR #352 明确公开的接口而非臆造 UUID/提示词识别：
+`packages/api/src/agents/guard.ts:isSubagentThreadWriteBlocked` 的 Python Artifacts
+实现依赖 `webui/child_thread_activity.py:ActiveChildThreads` 和
+`active_subagent_threads` 表。这个模块仍归 PR #352 所有；**本 PR 不复制其表或写入路由**。
+后台任务宿主现在在首个原子 task intent 中保存 host 产生的 UUID 和 parent run
+身份；`ActiveChildThreads.activate(owner, childConversationId, parentRunId)`
+发生在 `GenerationStore.begin(trusted_new_conversation_id=...)` 创建 child conversation
+**之前**，而非在文件编辑时推断。另一个同幂等键调用在 `child_registered=1`
+持久确认之前不能执行子模型。如果进程在 marker 持久化后、task admission 确认前崩溃，
+恢复时仅凭 `(owner,child_id,parent_run_id)` 的原版宿主标记重建 admission；无可信
+标记则拒绝启动。运行最终完成/取消/错误后，调用
+`ActiveChildThreads.settle(owner, childConversationId, parentRunId)`，不删除已登记子线程，
+以便 PR #352 的 artifact mutation guard 按源码一直保持只读。
+
+`tests/test_webui_subagent_task_artifact_guard.py` 在无 PR #352 情况下使用其实际
+`activate/settle` API 的可验证契约替身，覆盖创建前登记、所有者范围、正常终态、取消、
+幂等重放、缺失可信 marker 的 fail-closed、恢复重建以及非法外部 conversation ID。
+待 PR #352 合入，需要用其真实 `ActiveChildThreads` 与 Artifact 编辑路由联合测试，
+才可以把本项由“部分/依赖 PR #352”提升为完整等价；此前不声称写保护端到端验收。

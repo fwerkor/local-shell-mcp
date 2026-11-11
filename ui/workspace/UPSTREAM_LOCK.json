@@ -435,6 +435,15 @@
       "python_lsm": "webui/subagent_task_host.py; webui/agent_runner.py",
       "status": "部分",
       "difference": "check_background_task name+argument schema, poll/list/cancel/queue/steer/interrupt/cancel_message, durable control invocation fencing and one-time claim; native ordinary tool backgrounding and automatic completion wakeup pending separate integration."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/guard.ts",
+      "sha256": "b68203af3b24f14eb8f7db171afe5550e228957a27fd5391956a4e42fe99e35c",
+      "symbols": "isSubagentThreadWriteBlocked / live child task ownership / reserved child UUID",
+      "python_lsm": "webui/subagent_task_host.py:SQLiteSubagentTaskHost.start/_execute/_settle_child_registration; webui/generations.py:GenerationStore.begin(trusted_new_conversation_id); requires PR #352 webui/child_thread_activity.py",
+      "status": "部分（依赖 Draft PR #352 的 source-pinned Artifacts guard）",
+      "difference": "Graph host reserves UUID and parent-run ownership in existing SQLite task record before creating child; optional PR352 ActiveChildThreads.activate/settle interop registers read-only marker and leaves it after settle. Persisted child_registered admission bit fences concurrent idempotent caller; crash only resumes after owner-scoped registered marker. PR352 artifact route owns its separate live-child write guard and table, which are not duplicated here."
     }
   ],
   "runtime_dependency_lock": {
@@ -477,6 +486,7 @@
     "http_recovery": "generation_routes.resume_generation + generations.accumulated_text; cooperative shutdown retains running generation; explicit abort remains terminal",
     "known_gaps": "Full JS BaseMessage/RunStepState callbacks and host automatic background completion wakeups, cross-controller transport control receipts, asynchronous Approval/Ask User replays, arbitrary JS Hook sessions, ordinary-tool backgrounding.",
     "reference_fixture_background": "tests/fixtures/librechat/subagent_task_real_reference.cjs",
-    "background_host": "webui/subagent_task_host.py; Owner/child generation + lease CAS, scoped thread continuation and source schema; startup recover_subagent_tasks"
+    "background_host": "webui/subagent_task_host.py; Owner/child generation + lease CAS, scoped thread continuation and source schema; startup recover_subagent_tasks",
+    "artifacts_integration": "Child conversation identity pre-reserved/registered with optional PR352 ActiveChildThreads.activate before GenerationStore.begin and settled after terminal; no duplicate guard table or artifact route. PR #352 must be integrated before claiming child edit protection."
   }
 }
