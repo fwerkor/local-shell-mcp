@@ -5,7 +5,12 @@ import httpx
 import pytest
 
 from local_shell_mcp.webui.provider_tool_protocols import native_messages
-from local_shell_mcp.webui.providers import ModelThought, ModelToolCall, ProviderConfig, stream_model_with_tools
+from local_shell_mcp.webui.providers import (
+    ModelThought,
+    ModelToolCall,
+    ProviderConfig,
+    stream_model_with_tools,
+)
 
 TOOLS = [{"type": "function", "function": {"name": "file_read", "description": "Read file",
     "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}}]

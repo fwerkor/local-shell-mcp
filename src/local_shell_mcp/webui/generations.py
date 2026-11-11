@@ -415,7 +415,17 @@ class GenerationStore:
                             legacy = {"role": "assistant", "content": content if isinstance(content, list) else row["text"],
                                       "metadata": metadata}
                             try:
-                                groups.append(format_agent_messages([legacy]))
+                                legacy_steps = format_agent_messages([legacy])
+                                # Legacy React artifact edits store a text block
+                                # while history API originally exposed its text.
+                                # Keep the scalar-text contract when no media or
+                                # tool anchors exist, without losing rich blocks.
+                                for step in legacy_steps:
+                                    parts = step.get("content")
+                                    if (step.get("role") == "assistant" and isinstance(parts, list)
+                                            and all(isinstance(p, dict) and p.get("type") == "text" for p in parts)):
+                                        step["content"] = "".join(p.get("text", "") for p in parts)
+                                groups.append(legacy_steps)
                             except ValueError:
                                 groups.append([{"role": "assistant", "content": row["text"]}])
                     else:
