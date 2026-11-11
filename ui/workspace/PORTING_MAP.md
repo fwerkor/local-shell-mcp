@@ -272,3 +272,5 @@ React schema remains unchanged.
 - compaction：前置模型调用生成摘要，只有完整非空结果才存入当前run的 `summaryCheckpoint` 并在结束事务中提交为有效message part。旧消息永不删除。读取完整活动分支，遇最后有效summary载体停止回溯；失败/取消/崩溃或无效summary不替换历史。图检查点继续使用原有 `SQLiteCheckpointSaver`。
 - 已验证：纯函数2079组源向量、memory SQLite CRUD+并发/配额/隔离、51轮长会话/tool结果配对/思考内容、失败与取消、完整HTTP/SSE summarizer和原版React浏览器下一轮及刷新后恢复。
 - 未完全等价：source RBAC/filters接入、SDK模型token校准和按provider native消息格式计算、跨tool pair的intra-turn fallback、动态semantic index/完整事件actor、自定义摘要策略的Graph reducer；这些仍标记“部分”，不可用这批纯函数向量充当整套图运行时已完成的证据。
+
+**WebUI发行适配：** PyPI Wheel 保持 `webui` 可选 extra；Docker和单二进制发行始终提供完整WebUI，构建时额外安装 `.[webui]` 并收集 tiktoken。Worker 通过显式源文件白名单打包，不携带 tokenizer 或 WebUI 编码数据。
