@@ -282,7 +282,10 @@ The upstream `bun.lock` newer agents version is **not** the runtime baseline.
 | `Run` callbacks and background Subagent hosts | Existing `GenerationStore` event log and graph-node tool events | **Not complete**: durable background child task/thread queue and continuation are not implemented by this PR; current explicit refusal remains. Full structured RunStepState/Graph stream and arbitrary JS BaseMessage/tool-call fidelity remain outstanding and depend on host-message protocol work. |
 
 `pyproject.toml` defines optional `webui-graph` dependency (`langgraph>=1.0.10,<1.1`,
-`langchain-core>=1.2.8,<2`). CI test jobs install this Controller-only extra.
+`langchain-core>=1.2.8,<2`). CI test jobs install this Controller-only extra. The browser/source E2E job
+installs exact original JS npm runtime versions in a temporary oracle-only
+directory, and runs the live original-message classes and graph traces with
+`LSM_REQUIRE_SOURCE_ORACLES=1`, without leaking Node into production.
 Production Worker distribution remains independent of LangGraph, Bun, Node and Mongo.
 No changes to underlying LSM MCP registration/execution, machine permission scopes,
 Shell/Job/File implementations, timeout policy, idempotency or audit hooks.
