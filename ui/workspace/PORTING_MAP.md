@@ -1,6 +1,6 @@
 # LibreChat 源码级移植映射
 
-本清单替代“同名功能即可算完成”的旧判断。PR #343 保持 Draft。
+本清单替代“同名功能即可算完成”的旧判断。PR #343 已合入；Actions 独立 PR #349 保持 Draft。
 
 ## 固定源码基线
 
@@ -262,3 +262,45 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## LibreChat Actions 独立移植（Draft PR #349）
+
+固定上游 `e8f3be08623663d4ad7f7241e693c94469b63bb0`，npm Agent SDK
+`4.0.1` / `c4ffb9b1b78421bf63eba3e56993017f922387f3`。对应文件 SHA-256
+已写入 `UPSTREAM_LOCK.json`；`scripts/generate-actions-oracle.cjs` 直接运行原版
+TypeScript 模块，导出解析器、工具定义与域名验证的原版结果。生成结果封存于
+`tests/fixtures/librechat/actions_source_oracle.json`，并在 Python CI 中逐项比较。
+
+- **Action存储与API（部分）**：`webui/actions.py`、`webui/action_routes.py`、
+  SQLite `action_records`。原 `GET /api/agents/actions`、`POST /api/agents/actions/:agent_id`、
+  `DELETE /api/agents/actions/:agent_id/:action_id` 格式保持；POST响应为
+  `[updatedAgent, updatedAction]`。支持创建、枚举、修改、删除、多操作工具绑定、
+  版本记录和SQLite重启恢复。Agent `actions` 引用与 `tools` 字符串使用原版规则；
+  所有读取/写入都校验用户和Agent所有权，同域不同operationId不互相删除。
+- **模型schema和实际执行（部分）**：`webui/action_spec.py`、
+  `webui/action_runtime.py`、`webui/agent_runner.py`。调用仍进入已有工具审批、
+  已选工具检查和Agent授权路径；Action仅执行指定OpenAPI HTTP接口，
+  不创建第二套LSM文件、命令或嵌套MCP执行器。原工具名和标准化形态保持一致。
+- **安全（已测的范围）**：`api_key/oauth_client_id/oauth_client_secret`与普通metadata
+  分离，使用Fernet加密的SQLite blob和仅属主可读的
+  `.local-shell-mcp/actions-fernet.key`。敏感字段不进入Model schema、普通Action GET、
+  Agent配置、历史版本；响应回显密钥也会脱敏。原React的两处凭据调试日志已移除。
+  防SSRF：限制HTTP/HTTPS及同域、验证DNS全部返回地址、公网IP默认允许、
+  内网需操作员显式白名单、实际请求连接固定经检验的IP；不跟随HTTP跳转、不使用
+  环境代理；HTTPS保留SNI/校验证书；响应上限256KiB，HTTP超时20秒，
+  async CancelledError向上传播。`LSM_ACTION_ALLOWED_DOMAINS`可选限制目标域，
+  `LSM_ACTION_ALLOWED_ADDRESSES`仅管理员环境白名单（`host:port`，不可由模型设置）。
+- **认证及不可误判的阻塞**：API Key的basic/bearer/custom和无认证可执行。
+  OAuth客户端凭据已隔离、配置可保存，但**原版OAuth Action交互授权尚未完成**：
+  `/api/actions/:action_id/oauth/bind`、callback的state/CSRF校验、token exchange、
+  refresh、持久化token授权主体关联及 `on_run_step_delta` sign-in、
+  checkpoint中断恢复仍缺失。OAuth实际工具调用按fail-closed返回执行错误；
+  不允许以API Key路径通过冒充OAuth通过。**PR #349 在此完成前不得标记整体Actions全量验收。**
+- **测试**：`tests/test_webui_actions.py`、`test_webui_actions_edges.py`、
+  `test_webui_actions_source_oracle.py`，分别覆盖原React API契约、真实本地
+  HTTP服务的成功/错误/取消/超时、多工具、重启和跨owner隔离；
+  存储和执行的异常/安全分支；原版TypeScript执行所得的10组OpenAPI schema/
+  10组工具名/10组域校验共31个差分断言。测试依赖Node仅在重新生成oracle时需要，
+  生产服务及Worker运行时不引入Node/Mongo。
+  工作区运行命令：`PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_actions*.py`。
+  Actions四个新模块单独统计分支覆盖率均≥90%；全仓总覆盖率须由最新CI验收。
