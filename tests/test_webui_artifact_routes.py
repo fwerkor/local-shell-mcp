@@ -296,7 +296,7 @@ async def test_active_owned_subagent_thread_blocks_artifact_edits_before_lineage
         assert activity.settle("bob", child["conversationId"], run.run_id) is False
         assert (await client.post(edit_url, json=payload)).status_code == 409
         assert activity.settle("alice", child["conversationId"], run.run_id) is True
-        assert (await client.post(edit_url, json=payload)).status_code == 200
+        assert (await client.post(edit_url, json=payload)).status_code == 409
         assert activity.settle("alice", child["conversationId"], run.run_id) is False
 
 
@@ -318,3 +318,69 @@ async def test_concurrent_artifact_edits_cannot_overwrite_same_original(artifact
     assert sorted(response.status_code for response in changes) == [200, 400]
     final = repo.messages("alice", convo["conversationId"])["messages"][0]["text"]
     assert final in {":::artifact\nwinner A\n:::", ":::artifact\nwinner B\n:::"}
+
+
+@pytest.mark.asyncio
+async def test_multi_artifact_edits_preserve_sibling_and_repeated_edit_is_rejected(artifact_app):
+    """The retained editor uses a global source index and CAS original content."""
+    repo, convo, _, app = artifact_app
+    head = ':::artifact{identifier="first" type="text/html"}\n```html\n<p>first</p>\n```\n:::'
+    tail = ':::artifact{identifier="second" type="text/html"}\n```html\n<p>second</p>\n```\n:::'
+    message = repo.add_message("alice", convo["conversationId"], {
+        "role": "assistant", "text": "Do not change the display snapshot",
+        "content": [{"type": "text", "text": head + "\n\n" + tail}],
+        "toolCallMetadata": {"keep": True},
+    })
+    endpoint = "/api/messages/artifact/" + message["messageId"]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test",
+        headers={"x-owner": "alice"},
+    ) as client:
+        edits = [
+            {"index": 1, "original": "<p>second</p>", "updated": "<p>new second</p>"},
+            {"index": 0, "original": "<p>first</p>", "updated": "<p>new first</p>"},
+        ]
+        first = await client.post(endpoint, json=edits[0])
+        assert first.status_code == 200, first.text
+        body = first.json()
+        assert head in body["content"][0]["text"]
+        assert "<p>new second</p>" in body["content"][0]["text"]
+        assert body["text"] == "Do not change the display snapshot"
+        repeat = await client.post(endpoint, json=edits[0])
+        assert repeat.status_code == 400
+        second = await client.post(endpoint, json=edits[1])
+        assert second.status_code == 200, second.text
+    reloaded = repo.messages("alice", convo["conversationId"])["messages"]
+    updated = next(msg for msg in reloaded if msg["messageId"] == message["messageId"])
+    assert "<p>new first</p>" in updated["content"][0]["text"]
+    assert "<p>new second</p>" in updated["content"][0]["text"]
+    assert updated["toolCallMetadata"] == {"keep": True}
+    assert updated["userSubmittedPaths"] == ["/content/0/text"]
+    assert updated["text"] == "Do not change the display snapshot"
+
+
+@pytest.mark.asyncio
+async def test_child_thread_remains_readonly_after_parent_run_deleted(artifact_app):
+    """A settled child cannot become editable if its parent run is GC'd."""
+    from local_shell_mcp.webui.child_thread_activity import ActiveChildThreads
+
+    repo, _, _, app = artifact_app
+    run, _ = GenerationStore(repo.database).begin("alice", {"text": "parent"})
+    child = repo.create_conversation("alice", {"title": "Former child"})
+    message = repo.add_message("alice", child["conversationId"], {
+        "role": "assistant", "text": ":::artifact\nold\n:::",
+    })
+    child_guard = ActiveChildThreads(repo.database)
+    child_guard.activate("alice", child["conversationId"], run.run_id)
+    assert child_guard.settle("alice", child["conversationId"], run.run_id)
+    with repo.database.connect() as db:
+        db.execute("DELETE FROM conversations WHERE id=?", (run.conversation_id,))
+    endpoint = "/api/messages/artifact/" + message["messageId"]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test",
+        headers={"x-owner": "alice"},
+    ) as client:
+        result = await client.post(endpoint, json={
+            "index": 0, "original": "old", "updated": "blocked",
+        })
+    assert result.status_code == 409

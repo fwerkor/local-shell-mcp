@@ -212,3 +212,51 @@ async def test_live_artifact_generation_sse_persistence_and_next_turn(tmp_path, 
     finally:
         await generation_routes.shutdown_generations()
         get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_artifact_stream_preserves_partial_event_and_persistence(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.sqlite_store import shared_database
+    from local_shell_mcp.webui import generation_routes
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    for key, value in {
+        "WORKSPACE_ROOT": str(tmp_path),
+        "STATE_DIR": str(tmp_path / ".local-shell-mcp"),
+        "AUTH_MODE": "none",
+    }.items():
+        monkeypatch.setenv("LOCAL_SHELL_MCP_" + key, value)
+    get_settings.cache_clear()
+    database = shared_database(get_settings().state_dir.resolve())
+    store = GenerationStore(database)
+    profile = ProviderConfig("openai", "test", "http://127.0.0.1:11434/v1/chat/completions", "")
+    first_delta = asyncio.Event()
+
+    async def stream(_profile, _history, **_kwargs):
+        yield ':::artifact{identifier="partial" type="text/html" title="Incomplete"}\n'
+        first_delta.set()
+        await asyncio.Event().wait()
+        yield "<p>Should not arrive</p>"
+
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", stream)
+    run, _ = store.begin("local", {"text": "Generate HTML"})
+    try:
+        await generation_routes._start_task("local", run, profile, None)
+        await asyncio.wait_for(first_delta.wait(), timeout=3)
+        task = generation_routes._TASKS[run.run_id]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        result = store.latest("local", run.conversation_id)
+        assert result.status == "aborted"
+        final = store.events("local", run.run_id)[-1][1]
+        assert final["aborted"] is True
+        assert ":::artifact" in final["responseMessage"]["text"]
+        assert "Should not arrive" not in final["responseMessage"]["text"]
+        assert store.history("local", run.conversation_id)[-1]["content"] == (
+            final["responseMessage"]["text"]
+        )
+    finally:
+        await generation_routes.shutdown_generations()
+        get_settings.cache_clear()

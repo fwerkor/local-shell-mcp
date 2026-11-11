@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS active_subagent_threads (
     owner TEXT NOT NULL,
     thread_id TEXT NOT NULL,
-    parent_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_run_id TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()),

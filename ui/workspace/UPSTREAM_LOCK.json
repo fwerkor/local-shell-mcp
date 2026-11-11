@@ -371,7 +371,7 @@
       "symbols": "POST /artifact/:messageId",
       "python_lsm": "webui/artifact_routes.py",
       "status": "部分",
-      "difference": "Artifact编辑、owner和静态子线程只读不变；新增同事务活动子线程SQLite查询。图任务spawn/settle集成及host content-filter仍未完成。"
+      "difference": "Artifact编辑、owner和静态子线程只读不变；新增同事务owner-scoped子线程SQLite登记查询，settle及父run删除后仍持久只读；图任务spawn/settle集成及host content-filter仍未完成。"
     },
     {
       "repository": "LibreChat",
@@ -416,7 +416,7 @@
       "symbols": "isSubagentThreadWriteBlocked",
       "python_lsm": "webui/child_thread_activity.py; webui/artifact_routes.py",
       "status": "部分",
-      "difference": "新增SQLite活动子线程owner/run校验及编辑事务查询；图任务真正spawn/settle wiring尚待联动"
+      "difference": "新增SQLite owner/run可信活动登记、永久只读记录与编辑事务查询；图任务真正spawn/settle wiring尚待联动"
     },
     {
       "repository": "LibreChat",
@@ -425,7 +425,7 @@
       "symbols": "isThreadActiveForOwner / task routing",
       "python_lsm": "webui/child_thread_activity.py",
       "status": "部分",
-      "difference": "活动登记可信SQLite接口已具备；后台/远端task生命周期及撤权需图/任务PR接入"
+      "difference": "活动登记可信SQLite接口已具备，退出后仍保留只读标记；后台/远端task生命周期及撤权需图/任务PR接入"
     },
     {
       "repository": "LibreChat",

@@ -50,7 +50,7 @@ class ActiveChildThreads:
             )
 
     def settle(self, owner: str, child_thread: str, parent_run: str) -> bool:
-        """Retain the registry record as inactive; persistent child metadata remains read-only."""
+        """Mark inactive while retaining immutable child identity after execution."""
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute(
@@ -61,12 +61,16 @@ class ActiveChildThreads:
             return cursor.rowcount == 1
 
 
-def is_active_child_thread(db, owner: str, thread_id: str) -> bool:
-    """Use the same SQLite connection as message edit's BEGIN IMMEDIATE fence."""
+def is_registered_child_thread(db, owner: str, thread_id: str) -> bool:
+    """Block registered children for life, even without committed lineage metadata.
+
+    The owner-scoped registry also covers the pre-conversation active window.
+    Query within the same BEGIN IMMEDIATE transaction as an editor mutation.
+    """
     return (
         db.execute(
             "SELECT 1 FROM active_subagent_threads "
-            "WHERE owner=? AND thread_id=? AND active=1 LIMIT 1",
+            "WHERE owner=? AND thread_id=? LIMIT 1",
             (owner, thread_id),
         ).fetchone()
         is not None
