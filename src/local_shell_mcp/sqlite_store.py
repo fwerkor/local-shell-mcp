@@ -142,6 +142,38 @@ CREATE TABLE IF NOT EXISTS generation_events (
 );
 CREATE INDEX IF NOT EXISTS idx_generation_events_run ON generation_events(run_id,seq);
 CREATE INDEX IF NOT EXISTS idx_runs_conversation ON runs(conversation_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS agent_durable_tasks (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    run_id TEXT,
+    call_id TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    machine TEXT NOT NULL,
+    requirements TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    idempotency_key TEXT,
+    key_hash TEXT,
+    scopes TEXT NOT NULL,
+    grant_expires INTEGER,
+    native_id TEXT,
+    state TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    next_attempt_at INTEGER,
+    last_error TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_durable_key
+    ON agent_durable_tasks(machine,tool,key_hash) WHERE key_hash IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_durable_native
+    ON agent_durable_tasks(machine,kind,native_id)
+    WHERE native_id IS NOT NULL AND kind != 'retry';
+CREATE INDEX IF NOT EXISTS idx_agent_durable_recovery ON agent_durable_tasks(state,next_attempt_at);
+CREATE TABLE IF NOT EXISTS agent_run_cancellations (
+    run_id TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS attachments (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
