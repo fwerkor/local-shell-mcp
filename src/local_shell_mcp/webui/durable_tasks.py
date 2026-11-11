@@ -276,14 +276,17 @@ def _revoked(row: Any) -> bool:
 
 
 def mark_revoked(owner: str) -> int:
-    """Latch revocation at permission-write time, even if a grant is restored quickly."""
-    with _database().connect() as db:
+    """Latch revocation using the same repository as the WebUI permission write."""
+    from .routes import _repo
+
+    repository = _repo()
+    with repository.database.connect() as db:
         rows = [dict(row) for row in db.execute(
             "SELECT * FROM agent_durable_tasks WHERE owner=? "
             "AND state IN ('reserved','active','unknown')", (owner,))]
     revoked = [row["id"] for row in rows if _revoked(row)]
     if revoked:
-        with _database().connect() as db:
+        with repository.database.connect() as db:
             db.executemany("UPDATE agent_durable_tasks SET state='cancel_pending',updated_at=?,"
                            "next_attempt_at=NULL WHERE id=? AND state IN ('reserved','active','unknown')",
                            [(_stamp(), ident) for ident in revoked])
