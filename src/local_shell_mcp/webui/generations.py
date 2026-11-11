@@ -444,7 +444,12 @@ class GenerationStore:
             # Persist the same part so the error survives history reload too.
             if status in {"error", "interrupted"}:
                 content.append({"type": "error", "error": error or "Generation failed"})
+            from .tool_attachments import response_attachments
+
+            attachments = response_attachments(db, owner, [generation.response_message_id])[
+                generation.response_message_id]
             response_message = {
+                **({"attachments": attachments} if attachments else {}),
                 "messageId": generation.response_message_id,
                 "conversationId": generation.conversation_id,
                 "parentMessageId": generation.user_message_id,
@@ -453,14 +458,15 @@ class GenerationStore:
                 "content": content,
                 "unfinished": status != "complete",
             }
-            if content:
+            if content or attachments:
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",
                     (generation.response_message_id, generation.conversation_id, generation.user_message_id,
                      "assistant", text, _json(response_message["content"]),
                      _json({"sender": "Assistant", "isCreatedByUser": False,
-                            "unfinished": status != "complete"}), now, now),
+                            "unfinished": status != "complete",
+                            **({"attachments": attachments} if attachments else {})}), now, now),
                 )
             db.execute("UPDATE runs SET status=?, updated_at=? WHERE id=?", (status, now, run_id))
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, generation.conversation_id))

@@ -165,6 +165,20 @@ class AgentRunner:
                 },
             }},
         })
+        # LibreChat createToolEndCallback consumes explicit artifact.files,
+        # not arbitrary tool text/path strings. Retain native execution; only
+        # project files previously published to this Controller and owner.
+        from .tool_attachments import controller_tool_file_ids, link_tool_attachment
+
+        for file_id in controller_tool_file_ids(output):
+            try:
+                link_tool_attachment(
+                    self.database, self.owner, self.generation.run_id, call.call_id, file_id,
+                )
+            except (OSError, PermissionError, KeyError, ValueError):
+                # Remote code-environment file IDs are not automatically
+                # Controller file references. Do not invent stored bytes.
+                continue
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool

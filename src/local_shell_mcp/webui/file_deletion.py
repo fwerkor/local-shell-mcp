@@ -103,6 +103,13 @@ class AttachmentDeletionStore:
                            (_json(config), _now(), row["id"]))
 
     def shared_resource_ids(self, db, identities, agent_id, resource):
+        """Find all *other* durable holders under the same SQLite write lock.
+
+        Agent resource links, user-message files and tool-produced attachments
+        are all references. Even when the last Agent is unlinked, history may
+        still depend on its original file. The owner-only global DELETE bypasses
+        this check and explicitly retires all references.
+        """
         shared = set()
         requested = set(identities)
         for row in db.execute("SELECT id,config FROM agents").fetchall():
@@ -111,6 +118,32 @@ class AttachmentDeletionStore:
                     continue
                 if isinstance(value, dict) and isinstance(value.get("file_ids"), list):
                     shared.update(requested.intersection(value["file_ids"]))
+        if not requested:
+            return shared
+        # Files published by tool executions remain in a canonical normalized
+        # table. A competing link publisher uses BEGIN IMMEDIATE and therefore
+        # cannot land between this final check and the deletion commit.
+        ids = sorted(requested - shared)
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            rows = db.execute(
+                "SELECT file_id FROM tool_attachment_links WHERE file_id IN ("
+                + placeholders + ")", ids,
+            ).fetchall()
+            shared.update(row["file_id"] for row in rows)
+        ids = sorted(requested - shared)
+        if ids:
+            # Legacy and new message metadata store file descriptors as JSON.
+            # Their parent conversation owns the references. Querying them at
+            # delete time also covers pre-migration history non-destructively.
+            placeholders = ",".join("?" for _ in ids)
+            rows = db.execute(
+                "SELECT DISTINCT json_extract(j.value,'$.file_id') AS file_id "
+                "FROM messages m JOIN json_each(m.metadata,'$.files') AS j "
+                "WHERE m.role='user' AND json_extract(j.value,'$.file_id') IN ("
+                + placeholders + ")", ids,
+            ).fetchall()
+            shared.update(row["file_id"] for row in rows if row["file_id"])
         return shared
 
     @staticmethod

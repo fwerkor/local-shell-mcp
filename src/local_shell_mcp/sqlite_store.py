@@ -161,8 +161,17 @@ CREATE TABLE IF NOT EXISTS attachment_uploads (
     st_ino TEXT,
     content_sha256 TEXT,
     content_size INTEGER,
+    file_identity TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+CREATE TABLE IF NOT EXISTS tool_attachment_links (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    response_message_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    file_id TEXT NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+    PRIMARY KEY (run_id,tool_call_id,file_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_attachment_response ON tool_attachment_links(response_message_id);
 CREATE TABLE IF NOT EXISTS attachment_deletions (
     file_id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
@@ -203,6 +212,15 @@ class SQLiteDatabase:
             os.close(descriptor)
         with self.connect() as db:
             db.executescript("PRAGMA journal_mode=WAL; " + _SCHEMA)
+            # The first Draft used INTEGER inode columns. SQLite's INTEGER
+            # affinity coerces unsigned Windows file IDs beyond 2^63-1 to
+            # lossy REAL even if Python supplies a string. Append a TEXT
+            # identity instead of destructively rebuilding the table.
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(attachment_uploads)")}
+            if "file_identity" not in columns:
+                db.execute("ALTER TABLE attachment_uploads ADD COLUMN file_identity TEXT")
+            db.commit()
             try:
                 db.executescript(_FTS_SCHEMA)
             except sqlite3.OperationalError as exc:

@@ -71,7 +71,19 @@ def extract_context_text(path: Path, name: str, content_type: str) -> dict:
             raise HTTPException(501, detail="PDF extraction requires the attachments extra") from exc
         try:
             reader = PdfReader(path)
-            value = "\n".join((page.extract_text() or "") for page in reader.pages)
+            if len(reader.pages) > 64:
+                raise HTTPException(413, detail="PDF context exceeds 64 pages")
+            snippets = []
+            total = 0
+            for page in reader.pages:
+                snippet = page.extract_text() or ""
+                total += len(snippet.encode("utf-8"))
+                if total > 128 * 1024:
+                    raise HTTPException(413, detail="Extracted Agent context exceeds 128 KiB")
+                snippets.append(snippet)
+            value = "\n".join(snippets)
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(422, detail="PDF text extraction failed") from exc
         method = "pypdf"
@@ -81,7 +93,16 @@ def extract_context_text(path: Path, name: str, content_type: str) -> dict:
         except ImportError as exc:
             raise HTTPException(501, detail="DOCX extraction requires the attachments extra") from exc
         try:
-            value = "\n".join(paragraph.text for paragraph in Document(path).paragraphs)
+            paragraphs = []
+            total = 0
+            for paragraph in Document(path).paragraphs:
+                total += len(paragraph.text.encode("utf-8"))
+                if total > 128 * 1024:
+                    raise HTTPException(413, detail="Extracted Agent context exceeds 128 KiB")
+                paragraphs.append(paragraph.text)
+            value = "\n".join(paragraphs)
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(422, detail="DOCX text extraction failed") from exc
         method = "docx"
@@ -179,8 +200,8 @@ async def publish_attachment(owner, name, content_type, chunks, state_dir, *, ex
         # protects against precision loss from INTEGER affinity.
         file_signature = str(stats.st_dev), str(stats.st_ino)
         with _repo().database.connect() as db:
-            db.execute("UPDATE attachment_uploads SET st_dev=?,st_ino=? WHERE file_id=? AND owner=?",
-                       (*file_signature, file_id, owner))
+            db.execute("UPDATE attachment_uploads SET file_identity=? WHERE file_id=? AND owner=?",
+                       (":".join(file_signature), file_id, owner))
         from .file_deletion import AttachmentDeletionStore
 
         AttachmentDeletionStore._sync_directory(target.parent)
@@ -423,17 +444,25 @@ def recover_attachment_uploads(database, *, grace_seconds=3600):
                 if path.is_symlink() or root not in path.resolve().parents:
                     raise OSError("Unsafe upload recovery path")
                 stats = path.stat()
-                if (row["st_dev"] is None or row["content_sha256"] is None or
+                # Migrated pre-identity intents are checked against the
+                # original integer columns only when SQLite stored exact
+                # integers; a REAL conversion cannot authorize deletion.
+                old_identity = (
+                    str(row["st_dev"]) + ":" + str(row["st_ino"])
+                    if all(type(value) in {int, str} and str(value).isdigit()
+                           for value in (row["st_dev"], row["st_ino"]))
+                    else None
+                )
+                expected_identity = row["file_identity"] or old_identity
+                if (expected_identity is None or row["content_sha256"] is None or
                     row["content_size"] != stats.st_size or
-                    (str(stats.st_dev), str(stats.st_ino)) !=
-                    (str(row["st_dev"]), str(row["st_ino"]))):
+                    f"{stats.st_dev}:{stats.st_ino}" != expected_identity):
                     raise OSError("Upload file fingerprint changed or unknown")
                 with path.open("rb") as handle:
                     digest = hashlib.file_digest(handle, "sha256").hexdigest()
                     current = os.fstat(handle.fileno())
                 if digest != row["content_sha256"] or (
-                    str(current.st_dev), str(current.st_ino)) != (
-                    str(row["st_dev"]), str(row["st_ino"])):
+                    f"{current.st_dev}:{current.st_ino}" != expected_identity):
                     raise OSError("Upload content changed during recovery")
                 path.unlink()
                 AttachmentDeletionStore._sync_directory(path.parent)
@@ -444,6 +473,30 @@ def recover_attachment_uploads(database, *, grace_seconds=3600):
             log.exception("Upload recovery retained unresolved file")
             retained.append(row["file_id"])
     return {"cleanedFileIds": cleaned, "retainedFileIds": retained}
+
+
+async def file_preview(request: Request):
+    """Original React deferred preview polling; never return another owner's text."""
+    from ..human_ui import _require_ui_scopes
+
+    owner = _owner(request)
+    _require_ui_scopes(request, "shell:read")
+    ident = request.path_params["file_id"]
+    with _repo().database.connect() as db:
+        row = db.execute("SELECT metadata FROM attachments WHERE id=? AND owner=?",
+                         (ident, owner)).fetchone()
+    if row is None:
+        raise HTTPException(404, detail="Attachment not found")
+    metadata = json.loads(row["metadata"])
+    status = metadata.get("status", "ready")
+    if status not in {"pending", "ready", "failed"}:
+        status = "ready"
+    return JSONResponse({
+        "file_id": ident, "status": status,
+        **({"text": metadata["text"], "textFormat": metadata.get("textFormat", "text")}
+           if status == "ready" and isinstance(metadata.get("text"), str) else {}),
+        **({"previewError": metadata.get("previewError") or "parser-error"} if status == "failed" else {}),
+    }, headers={"Cache-Control": "private, no-store"})
 
 
 async def agent_files(request: Request):
@@ -563,6 +616,7 @@ def attachment_routes() -> list[Route]:
         Route("/api/files", delete_react_files, methods=["DELETE"]),
         Route("/api/files/agent/{agent_id}", agent_files, methods=["GET"]),
         Route("/api/files/images", upload_react_file, methods=["POST"]),
+        Route("/api/files/{file_id}/preview", file_preview, methods=["GET"]),
         Route("/api/files/download/{file_id}", download_react_file, methods=["GET"]),
         Route("/api/lsm/controller/attachments/upload", upload_attachment, methods=["POST"]),
     ]

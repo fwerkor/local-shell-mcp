@@ -316,3 +316,66 @@ extraction/chunking/vector storage and cleanup, execute_code/image_edit
 deployment and secondary-storage deletion, provider-native image/audio payload
 conversion, all project-specific retention semantics and true remote-machine
 resource provisioning. These are not silently downgraded to raw upload.
+
+### Canonical tool-generated file attachments and deferred preview
+
+Source: LibreChat `e8f3be08623663d4ad7f7241e693c94469b63bb0`
+`api/server/controllers/agents/callbacks.js:createToolEndCallback`,
+`writeAttachment`, `writeAttachmentUpdate`, `buildResponsesAttachment`,
+`packages/data-provider/src/types/files.ts:TFilePreview`, original
+`client/src/hooks/SSE/useAttachmentHandler.ts` and
+`client/src/hooks/Files/useAttachmentPreviewSync.ts`.
+
+- `webui/tool_attachments.py` now maps *already-published and owned*
+  Controller files (not paths or remote code environment file IDs) to actual
+  Agent tool-call identities. Linking requires the caller's active run,
+  persisted matching `on_run_step` and matching file owner; insertion and
+  replayable `{"event":"attachment","data":...}` happen in a single SQLite
+  transaction. `webui/agent_runner.py:_completed` consumes only explicit
+  native structured `artifact.files[].file_id` metadata from the existing LSM
+  tool executor, refusing guessed ownership and reusing its original file
+  execution logic.
+- The existing React file DTO is used directly, extended with canonical
+  `messageId` (assistant response ID), `toolCallId`, `conversationId`;
+  subsequent status updates reuse the **same file_id**. The original React
+  listener upserts by file identity and tool-call scope. There is no parallel
+  artifact payload or separate file execution engine.
+- `tool_attachment_links` uses SQLite foreign keys with delete cascade, and
+  `webui/generations.py:finish` saves assistant attachments in the final
+  message. `webui/storage.py:WorkspaceRepository.messages` overlays the
+  current owner-filtered link records on reload. Deleted links never reappear
+  through a historical message snapshot; attachment-only assistant turns
+  persist even when the text is empty.
+- `update_attachment_preview` persists `pending/ready/failed` and emits
+  repeat `attachment` events while the run is live. After completion, a
+  canonical file record updates persisted message metadata. Authenticated,
+  owner-scoped `GET /api/files/{file_id}/preview` implements the retained
+  React polling contract; it returns no-store JSON and 404 after deletion.
+  Untrusted arbitrary HTML remains **unsupported** (the original sanitizing
+  office renderer is not ported); previews accept bounded text only.
+- Last-Agent-reference deletion also checks user message file descriptors and
+  canonical tool attachment links in the same `BEGIN IMMEDIATE` transaction.
+  Concurrent message creation and tool linking both participate in SQLite
+  writer serialization. Owner-requested global deletion still removes the file
+  and all links. Removed conversation history may leave an unreferenced blob
+  until explicit owner cleanup; a full retention/TTL sweeper is still blocked.
+
+### Non-destructive Windows upload identity upgrade
+
+Earlier PR drafts recorded `st_dev` / `st_ino` as SQLite `INTEGER`; Windows
+can report unsigned NTFS file IDs greater than signed 64-bit. Fresh databases
+use TEXT and all existing databases are additively migrated with a dedicated
+`file_identity TEXT` column. New upload intents write a decimal device/inode
+pair into the TEXT field; recovery accepts exact legacy INTEGER identities
+only when SQLite retained them without REAL precision loss. Unknown and
+rounded legacy values are retained, never deleted based on a guess.
+A regression starts from a legacy INTEGER schema and verifies original data
+survives and new uploads publish correctly.
+
+The original React file-chip removal button, its deferred DELETE mutation,
+real Chromium upload, SQLite byte deletion and reload were all exercised;
+this does not claim remote machine file staging or full media conversion.
+PDF and DOCX optional text parsers were run against real generated documents,
+with 64-page PDF and 128-KiB extraction limits. Scanned pages still require
+OCR; file_search vector extraction and execution-session file downloads still
+require their dedicated upstream-style processors.
