@@ -42,8 +42,13 @@ def test_snapshot_matches_source_hashes_when_upstream_checkout_present():
     }
     for path, digest in data["sourceSha256"].items():
         assert len(digest) == 64
-        if (UPSTREAM / path).exists():
-            assert hashlib.sha256((UPSTREAM / path).read_bytes()).hexdigest() == digest
+        try:
+            upstream_bytes = (UPSTREAM / path).read_bytes()
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            # The source checkout is optional and can exist but be unreadable
+            # inside Linux CI runners (e.g. /root owned by another user).
+            continue
+        assert hashlib.sha256(upstream_bytes).hexdigest() == digest
 
 
 @pytest.mark.parametrize("endpoint", ["openai", "anthropic", "google", "openai-compatible"])
@@ -84,8 +89,11 @@ def test_prompt_state_and_delegation_instructions():
 
 
 def test_exporter_is_repeatable_when_upstream_checkout_present():
-    if not (UPSTREAM / "packages/api/src/prompts/artifacts/index.ts").exists():
-        pytest.skip("Pinned upstream checkout not available in CI")
+    try:
+        (UPSTREAM / "packages/api/src/prompts/artifacts/index.ts").read_bytes()
+        (UPSTREAM / "packages/api/src/prompts/artifacts/components.ts").read_bytes()
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        pytest.skip("Pinned upstream checkout not readable in CI")
     script = Path(__file__).resolve().parents[1] / "scripts/export-librechat-artifact-prompts.py"
     spec = importlib.util.spec_from_file_location("artifact_prompt_exporter", script)
     module = importlib.util.module_from_spec(spec)
