@@ -56,7 +56,7 @@ async def test_disabled_optional_capabilities_never_claim_unsupported_services(t
         assert (await client.get("/api/files")).json() == []
         assert (await client.get("/api/files/speech/config/get")).json()["speechToText"]["enabled"] is False
         assert (await client.get("/api/roles/USER")).json()["name"] == "USER"
-        assert (await client.get("/api/roles/ADMIN")).json()["permissions"]["agents"]["use"] is True
+        assert (await client.get("/api/roles/ADMIN")).json()["permissions"]["AGENTS"]["USE"] is True
         assert (await client.get("/api/roles/ROOT")).status_code == 404
         assert (await client.get("/api/balance")).json()["autoRefillEnabled"] is False
         assert (await client.get("/api/health")).json()["status"] == "ok"

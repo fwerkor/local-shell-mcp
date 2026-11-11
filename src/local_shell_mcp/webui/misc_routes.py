@@ -81,10 +81,13 @@ async def role(request: Request):
     return JSONResponse({
         "name": name,
         "permissions": {
-            "agents": {"use": True, "create": True, "share": False, "sharePublic": False},
-            "mcpServers": {"use": True, "create": False, "share": False, "sharePublic": False},
-            "prompts": {"use": False, "create": False, "share": False, "sharePublic": False},
-            "memories": {"use": False, "create": False, "update": False, "read": False},
+            # Match the retained React PermissionTypes and Permissions enum
+            # wire values exactly. Lowercase interface config keys are NOT
+            # interchangeable with these RBAC role-permission identifiers.
+            "AGENTS": {"USE": True, "CREATE": True, "SHARE": False, "SHARE_PUBLIC": False},
+            "MCP_SERVERS": {"USE": True, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
+            "PROMPTS": {"USE": False, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
+            "MEMORIES": {"USE": False, "CREATE": False, "UPDATE": False, "READ": False},
         },
     })
 
