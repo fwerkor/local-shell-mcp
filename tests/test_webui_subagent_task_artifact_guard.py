@@ -13,10 +13,68 @@ import types
 
 import pytest
 
-from local_shell_mcp.webui.subagent_task_host import shutdown_subagent_tasks
-from tests.test_webui_subagent_task_host_edges import settle, start_task
+from local_shell_mcp.sqlite_store import SQLiteDatabase
+from local_shell_mcp.webui.agents import AgentRepository
+from local_shell_mcp.webui.generations import GenerationStore
+from local_shell_mcp.webui.providers import ProviderConfig
+from local_shell_mcp.webui.subagent_task_host import SQLiteSubagentTaskHost, shutdown_subagent_tasks
+from local_shell_mcp.webui.subagents import build_subagent_configs
 
-pytest_plugins = ("tests.test_webui_subagent_task_host_edges",)
+
+@pytest.fixture
+def host_environment(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.webui import agent_runner
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    database = SQLiteDatabase(tmp_path / ".local-shell-mcp")
+    monkeypatch.setattr(agent_runner, "provider_config", lambda kind, model: ProviderConfig(
+        "openai", model, "https://stub.invalid", ""))
+    repo = AgentRepository(database)
+    child = repo.create("local", {"name": "child", "provider": "openAI", "model": "child", "tools": []})
+    parent = repo.create("local", {"name": "parent", "provider": "openAI", "model": "parent", "tools": [],
+                                   "subagents": {"enabled": True, "allowSelf": False,
+                                                 "agent_ids": [child["id"]]}})
+    store = GenerationStore(database)
+    generation, _ = store.begin("local", {"text": "delegate"}, parent)
+    yield database, repo, store, child, parent, generation
+    get_settings.cache_clear()
+
+
+async def start_task(env, model, *, call_id="task-1", text="description",
+                     thread_id=None, grant_expires=None, scopes=frozenset(), start=True):
+    from local_shell_mcp.webui.subagents import SubagentInvocation
+
+    database, repo, store, child, parent, generation = env
+    host = SQLiteSubagentTaskHost(database, "local", generation.conversation_id,
+                                  stream_tools=model, stream_text=model)
+    config = build_subagent_configs("local", parent, database)[0]
+    invocation = SubagentInvocation(
+        agent=config.agent, messages=[{"role": "user", "content": text}],
+        selected_tools=tuple(config.agent.get("tools") or []),
+        max_turns=config.max_turns, recursion_limit=config.max_turns * 3,
+        remaining_depth=0, scopes=scopes, grant_expires=grant_expires,
+        owner="local", conversation_id=generation.conversation_id,
+        parent_run_id=generation.run_id, parent_tool_call_id=call_id,
+        subagent_type=child["id"], child_configs=(),
+    )
+    if start:
+        return host, json.loads(await host.start(invocation, thread_id=thread_id))
+    return host, invocation
+
+
+async def settle(host, task_id, *, timeout=4):
+    end = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < end:
+        record = host._get(task_id)
+        if record and record["status"] != "running":
+            return record
+        await asyncio.sleep(.02)
+    raise AssertionError("Task did not settle")
+
+
 
 
 @pytest.mark.asyncio
@@ -188,3 +246,76 @@ def test_trusted_child_uuid_allocation_never_accepts_model_conversation_field(ho
     assert is_new and child_generation.conversation_id == reserved
     with database.connect() as db:
         assert db.execute("SELECT owner FROM conversations WHERE id=?", (reserved,)).fetchone()[0] == "local"
+
+
+@pytest.mark.asyncio
+async def test_artifact_guard_denied_registration_fails_child_closed(host_environment, monkeypatch):
+    class Reject:
+        def __init__(self, database):
+            self.database = database
+
+        def activate(self, owner, child, run):
+            raise PermissionError("Original child owner is no longer active")
+
+        def settle(self, owner, child, run):
+            raise AssertionError("An unregistered child cannot be settled")
+
+    module = types.ModuleType("local_shell_mcp.webui.child_thread_activity")
+    module.ActiveChildThreads = Reject
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    async def model(profile, history, **kwargs):
+        raise AssertionError("Denied registration cannot launch a model")
+        yield "never"  # pragma: no cover
+
+    host, invocation = await start_task(host_environment, model, start=False)
+    with pytest.raises(PermissionError, match="owner"):
+        await host.start(invocation)
+    tasks = host.list()
+    assert len(tasks) == 1 and tasks[0]["status"] == "error"
+    row = host._get(tasks[0]["taskId"])
+    assert row["child_run_id"] is None and row["child_registered"] == 0
+    assert row["error"] == "Child-thread registration rejected"
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_artifact_guard_settles_preexecution_cancel_outside_sqlite_lock(host_environment, monkeypatch):
+    calls = []
+
+    class Marker:
+        def __init__(self, database):
+            self.database = database
+
+        def activate(self, owner, child, run):
+            calls.append(("activate", child, run))
+
+        def settle(self, owner, child, run):
+            calls.append(("settle", child, run))
+            return True
+
+    module = types.ModuleType("local_shell_mcp.webui.child_thread_activity")
+    module.ActiveChildThreads = Marker
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    async def model(profile, history, **kwargs):
+        raise AssertionError("No child model should run after preexecution cancel")
+        yield "never"  # pragma: no cover
+
+    host, invocation = await start_task(host_environment, model, start=False)
+    real_ensure = host._ensure_active
+
+    async def delayed(_task_id):
+        return None
+
+    monkeypatch.setattr(host, "_ensure_active", delayed)
+    handle = json.loads(await host.start(invocation))
+    task_id = handle["background_task_id"]
+    monkeypatch.setattr(host, "_ensure_active", real_ensure)
+    with host.db.connect() as db:
+        db.execute("UPDATE subagent_tasks SET cancel_requested=1 WHERE id=?", (task_id,))
+    await asyncio.wait_for(host._ensure_active(task_id), timeout=5)
+    row = host._get(task_id)
+    assert row["status"] == "cancelled" and row["child_run_id"] is None
+    assert [call[0] for call in calls] == ["activate", "settle"]
+    await shutdown_subagent_tasks()
