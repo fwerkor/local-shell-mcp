@@ -262,3 +262,33 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## Multi-agent StateGraph runtime (2026-11-11, independent Draft PR)
+
+Baseline: LibreChat v0.8.8 at `e8f3be08623663d4ad7f7241e693c94469b63bb0`;
+`@librechat/agents@4.0.1` at `c4ffb9b1b78421bf63eba3e56993017f922387f3`;
+original integrated **JS** `@langchain/langgraph@1.4.8`,
+`@langchain/langgraph-checkpoint@1.1.3`, `@langchain/core@1.2.8`.
+The upstream `bun.lock` newer agents version is **not** the runtime baseline.
+
+| Upstream source and event/state contract | Python WebUI implementation | Evidence / limitation |
+|---|---|---|
+| `src/messages/reducer.ts`, `@langchain/langgraph.messagesStateReducer` | `webui/message_reducers.py`: `messages` merge/replace/RemoveMessage/remove-all, `agentMessages` last-value | `tests/fixtures/librechat/graph_runtime_real_reference.cjs` instantiates actual JS `HumanMessage` / `AIMessage` / `ToolMessage` / `RemoveMessage` from exact locked npm packages (11 real-object vectors); `test_webui_graph_real_differential.py`. Canonical LSM dictionaries at Python boundary, not an independent JS BaseMessage class hierarchy. |
+| `src/graphs/MultiAgentGraph.ts:createWorkflow`, `src/graphs/Graph.ts` | `webui/graph_runtime.py`: Python `StateGraph(MultiAgentState)` with official `Command` / `Send`, direct/default fan-out, conditional source handoff routing, join edges, prompted fan-in, per-node AgentRunner | Original JS real-class `StateGraph` fan-out/barrier, `Command` and `Send` traces matched to real Python LangGraph 1.0.10. Multiple entry/superstep, direct+handoff exclusive dispatch, parallel receivers tested. AgentRunner is still the only model/provider/tool loop. |
+| `graphs/handoff.ts:HandoffRouting/mergeHandoffState` | existing `webui/handoff.py` reducers and pending transfer commands; `graph_runtime.py` owns routing | Existing source-oracle handoff reducers retained; native graph converts to actual Python `Send`, never schedules using the old single-destination fallback. Shared transitions are checkpointed and merged in graph channels. |
+| `packages/api/src/agents/run.ts:buildSubagentConfigs` | `webui/subagents.py` graph-team configurations, `graph_runtime.py` child isolated namespace | Owned member verification, DAG entry/result, foreground child context and filtered final tool result tested. Subgraph child uses the same generation, grants, executor and checkpoint backend. |
+| `agents/checkpoints/saver.ts`, `@langchain/langgraph-checkpoint` | `webui/graph_checkpoint.py:OwnedGraphCheckpointer` wraps existing `SQLiteCheckpointSaver` and SDK's typed `serde`, preserving `Send` and pending writes | Durable graph/parent-child checkpoints in unified `.local-shell-mcp/` SQLite, restart after cancellation and new runner replay, owner rejection, list/async API and pending Send tested. No Worker import or Node/Mongo runtime dependency. |
+| `agents/hitl/resume.ts`, AskUser, Approval | Existing `webui/generation_routes.py`, `generations.py`, `AgentRunner._pause` | Graph-node Ask User and file-write tool approval verified by actual pending action, one-shot claim, HTTP resume and second Runner. Existing machine ACL and scopes still gate actual LSM execution; enabling tool never grants access. |
+| `Run` callbacks and background Subagent hosts | Existing `GenerationStore` event log and graph-node tool events | **Not complete**: durable background child task/thread queue and continuation are not implemented by this PR; current explicit refusal remains. Full structured RunStepState/Graph stream and arbitrary JS BaseMessage/tool-call fidelity remain outstanding and depend on host-message protocol work. |
+
+`pyproject.toml` defines optional `webui-graph` dependency (`langgraph>=1.0.10,<1.1`,
+`langchain-core>=1.2.8,<2`). CI test jobs install this Controller-only extra.
+Production Worker distribution remains independent of LangGraph, Bun, Node and Mongo.
+No changes to underlying LSM MCP registration/execution, machine permission scopes,
+Shell/Job/File implementations, timeout policy, idempotency or audit hooks.
+
+To rerun in a clean isolated worktree: `PYTHONPATH="$PWD/src" .venv/bin/python -m pytest -q tests/test_webui_full_graph_runtime.py tests/test_webui_graph_real_differential.py tests/test_webui_graph_checkpoint_reducer.py`.
+For the real JS oracle provide Node, the exact pinned npm packages and
+`LSM_JS_ORACLE_ROOT` pointing at their installed package root. A committed fixture
+retains the reference output for test environments without Node dependencies.
+CI coverage gates remain unchanged (global ≥95%, per module ≥90%).

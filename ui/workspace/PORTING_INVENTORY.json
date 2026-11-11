@@ -17121,8 +17121,8 @@
       "repository": "agents",
       "path": "src/graphs/Graph.ts",
       "sha256": "6b86604cdc1eb48873217561697f2e31538aea8ade1c8c78f76da6f31c5ceaae",
-      "python_lsm": "webui/agent_runtime.py; agent_runner.py",
-      "status": "部分",
+      "python_lsm": "webui/agent_runner.py; agent_runtime.py; graph_runtime.py; graph_checkpoint.py",
+      "status": "部分（节点执行与图级checkpoint）",
       "reviewed_mapping": true,
       "difference": "标准model/tools节点循环与checkpoint游标已接入；summary节点、完整reducers/actor事件与breaker仍不完整"
     },
@@ -17130,10 +17130,10 @@
       "repository": "agents",
       "path": "src/graphs/MultiAgentGraph.ts",
       "sha256": "f1f76b86d07833f6635d27eb77d599361c1be7487317ee2cdd54ff5c16e09a55",
-      "python_lsm": "webui/handoff.py; agent_runner.py",
-      "status": "部分",
+      "python_lsm": "webui/graph_topology.py; graph_runtime.py; graph_checkpoint.py; agent_runner.py",
+      "status": "部分（真实StateGraph / superstep）",
       "reviewed_mapping": true,
-      "difference": "原生transfer工具与单目标Agent切换已接入；parallel Send、direct-edge fanout/fanin尚未完整集成"
+      "difference": "direct/parallel/Command/Send/Barriers + SQLite resumable runs tested; background child host and full source events pending"
     },
     {
       "repository": "agents",
@@ -17175,8 +17175,8 @@
       "repository": "agents",
       "path": "src/graphs/handoff.ts",
       "sha256": "0c9b395137b86f4fc6e217284445fd821582808b0f42d497017328e75754d173",
-      "python_lsm": "webui/handoff.py; agent_runner.py",
-      "status": "部分",
+      "python_lsm": "webui/handoff.py; graph_runtime.py; agent_runner.py",
+      "status": "部分（Send/Command并行实际执行）",
       "reviewed_mapping": true,
       "difference": "路由预算/transition幂等/状态已源码差分验证并接入单目标切换；全图并行调度仍待完成"
     },
@@ -18471,8 +18471,8 @@
       "repository": "agents",
       "path": "src/tools/SubagentTool.ts",
       "sha256": "b8bb7584c42a92af212b479e753e0f5aeae5c5e9961eb218bf1145a8bf1b5621",
-      "python_lsm": "webui/subagents.py; agent_runner.py",
-      "status": "部分",
+      "python_lsm": "webui/subagents.py; graph_runtime.py; agent_runner.py",
+      "status": "部分（团队前台图）",
       "reviewed_mapping": true,
       "difference": "原生subagent schema、可选配置、隔离上下文和共享原生工具执行已接入；graph团队、后台/线程宿主与完整子运行事件仍缺失"
     },

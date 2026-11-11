@@ -108,9 +108,9 @@
       "path": "packages/api/src/agents/run.ts",
       "sha256": "5e29fb16cad50fe6a770f9ab4fa45af9b492342d8c11d866eaf3c1f4bce6192f",
       "symbols": "createRun / buildSubagentConfigs / buildAgentInput",
-      "python_lsm": "webui/delegation.py; generation_routes.py",
-      "status": "未实现",
-      "difference": "delegate_agent/handoff_agent与原版graph/Command/子图不等价"
+      "python_lsm": "webui/subagents.py:build_subagent_configs; graph_runtime.py; agent_runner.py; generation_routes.py",
+      "status": "部分（团队图配置路径）",
+      "difference": "从源buildSubagentConfigs解析graph team进StateGraph，复用LSM工具/审批链；prebuiltGraphInputs/原全部createRun callbacks与背景child store尚不等价。"
     },
     {
       "repository": "LibreChat",
@@ -270,36 +270,36 @@
       "path": "src/graphs/Graph.ts",
       "sha256": "6b86604cdc1eb48873217561697f2e31538aea8ade1c8c78f76da6f31c5ceaae",
       "symbols": "agent graph / tools / checkpoint",
-      "python_lsm": "webui/agent_runtime.py; agent_runner.py",
-      "status": "部分",
-      "difference": "标准model/tools节点循环与checkpoint游标已接入；summary节点、完整reducers/actor事件与breaker仍不完整"
+      "python_lsm": "webui/agent_runtime.py; agent_runner.py; graph_runtime.py; graph_checkpoint.py",
+      "status": "部分（多节点执行验证）",
+      "difference": "AgentRunner工具循环沿用LSM权限/审计/超时与审批，StateGraph处理节点与superstep、SQLite保存图级及节点级checkpoint。原RunStepState/完整LangChain BaseMessage协议与结构化工具回调仍未完全等价。"
     },
     {
       "repository": "agents",
       "path": "src/graphs/MultiAgentGraph.ts",
       "sha256": "f1f76b86d07833f6635d27eb77d599361c1be7487317ee2cdd54ff5c16e09a55",
       "symbols": "multi-agent routing / commands",
-      "python_lsm": "webui/handoff.py; agent_runner.py",
-      "status": "部分",
-      "difference": "原生transfer工具与单目标Agent切换已接入；parallel Send、direct-edge fanout/fanin尚未完整集成"
+      "python_lsm": "webui/graph_topology.py; graph_runtime.py; graph_checkpoint.py; agent_runner.py; handoff.py",
+      "status": "部分（真实StateGraph运行时）",
+      "difference": "官方Python LangGraph 1.0.10执行多入口、直接/并行、Command/Send及join/barrier；源JS 1.4.8真实消息类/并行轨迹差分一致。后台子线程及全部回调/运行指标尚待移植。"
     },
     {
       "repository": "agents",
       "path": "src/graphs/handoff.ts",
       "sha256": "0c9b395137b86f4fc6e217284445fd821582808b0f42d497017328e75754d173",
       "symbols": "HandoffRouting / mergeHandoffState",
-      "python_lsm": "webui/handoff.py; agent_runner.py",
-      "status": "部分",
-      "difference": "路由预算/transition幂等/状态已源码差分验证并接入单目标切换；全图并行调度仍待完成"
+      "python_lsm": "webui/handoff.py; graph_runtime.py; agent_runner.py",
+      "status": "部分（并行Send已验证）",
+      "difference": "Command.PARENT/Send与并行路由/单目标/独占直接边在原Python LangGraph运行，HandoffRouting/merge reducer源差分已覆盖。后台/线程生命周期仍未完成。"
     },
     {
       "repository": "agents",
       "path": "src/tools/SubagentTool.ts",
       "sha256": "b8bb7584c42a92af212b479e753e0f5aeae5c5e9961eb218bf1145a8bf1b5621",
       "symbols": "buildSubagentToolParams / createSubagentToolDefinition",
-      "python_lsm": "webui/subagents.py; agent_runner.py",
-      "status": "部分",
-      "difference": "原生subagent schema、可选配置、隔离上下文和共享原生工具执行已接入；graph团队、后台/线程宿主与完整子运行事件仍缺失"
+      "python_lsm": "webui/subagents.py; graph_runtime.py; agent_runner.py",
+      "status": "部分（前台/graph团队）",
+      "difference": "前台单代理与team DAG图进入统一StateGraph；entry/result与隔离namespace支持，结果仅返回父节点。后台任务/线程续接需host durable task store，目前显式拒绝。"
     },
     {
       "repository": "agents",
@@ -381,6 +381,15 @@
       "python_lsm": "webui/generations.py:GenerationStore.history",
       "status": "部分",
       "difference": "已保存结构化text优先于旧text快照，Artifact编辑进入下一轮模型；完整tool/rich/steer重建未完成。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/messages/reducer.ts",
+      "sha256": "e76285f2176912d0608ac6a442711e4c8eac0a1571754e5217f9ade7c4f876f8",
+      "symbols": "messagesStateReducer / createRemoveAllMessage",
+      "python_lsm": "webui/message_reducers.py; tests/fixtures/librechat/graph_runtime_real_reference.cjs",
+      "status": "完成（所覆盖消息ID/删除归约契约）",
+      "difference": "原@langchain/core真实HumanMessage、AIMessage、ToolMessage、RemoveMessage 11条测试含replace/delete/remove-all/auto-ID；BaseMessage实例序列化与所有非文本消息类型不在此DTO等价边界内。"
     }
   ],
   "runtime_dependency_lock": {
@@ -407,5 +416,17 @@
       "@langchain/langgraph-checkpoint": "1.1.3"
     },
     "alternative_bun_lock": "The upstream bun.lock resolves agents 3.6.0/core 1.2.4; it was not consumed by the integrated Docker runtime and is not the port baseline."
+  },
+  "python_graph_runtime": {
+    "dependency": "local-shell-mcp[webui-graph]",
+    "langgraph_tested": "1.0.10",
+    "langchain_core_tested": "1.7.7",
+    "dependency_scope": "optional WebUI Controller; never a Worker dependency",
+    "js_differential_versions": {
+      "@langchain/langgraph": "1.4.8",
+      "@langchain/langgraph-checkpoint": "1.1.3",
+      "@langchain/core": "1.2.8"
+    },
+    "reference_fixture": "tests/fixtures/librechat/graph_runtime_real_vectors.json"
   }
 }
