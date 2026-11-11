@@ -355,3 +355,49 @@ async def test_repeated_compact_skip_records_failure_not_new_boundary(ctx):
     with db.connect() as connection:
         assert connection.execute('SELECT count(*) FROM messages WHERE conversation_id=?',
                                   (previous.conversation_id,)).fetchone()[0] == len(before) + 2
+
+
+def test_completed_summary_survives_process_crash_before_answer(ctx):
+    """Upstream retains a finished checkpoint even when the answer fails later."""
+    database, store, _, _ = ctx
+    prev = _conversation(store, count=4, size=7)
+    run, _ = store.begin('a', {
+        'conversationId': prev.conversation_id,
+        'parentMessageId': prev.response_message_id,
+        'text': 'Continue after this summary',
+    })
+    store.stage_summary('a', run.run_id, 'Four earlier turns completed.', 11, boundary=4)
+    # A fresh Controller reopens the same SQLite database and seals orphaned runs.
+    restarted = GenerationStore(SQLiteDatabase(database.root))
+    assert restarted.recover_orphans() == 1
+    assert restarted.latest('a', prev.conversation_id).status == 'interrupted'
+    assert restarted.recover_orphans() == 0
+    history = restarted.history('a', prev.conversation_id)
+    assert history[0]['role'] == 'system'
+    assert 'Four earlier turns completed.' in history[0]['content']
+    assert not any('User question 0' in str(message.get('content')) for message in history)
+    # A new turn must retain the finished checkpoint and not resurrect old context.
+    followup, _ = restarted.begin('a', {
+        'conversationId': prev.conversation_id,
+        'parentMessageId': run.response_message_id,
+        'text': 'Can you resume?',
+    })
+    restored = restarted.history('a', prev.conversation_id, message_id=followup.user_message_id)
+    assert restored[0]['role'] == 'system'
+    assert restored[-1]['content'] == 'Can you resume?'
+
+
+def test_failed_summary_followed_by_orphan_recovery_preserves_full_history(ctx):
+    database, store, _, _ = ctx
+    prev = _conversation(store, count=3, size=2)
+    run, _ = store.begin('a', {
+        'conversationId': prev.conversation_id,
+        'parentMessageId': prev.response_message_id,
+        'text': 'Continue without checkpoint',
+    })
+    restarted = GenerationStore(SQLiteDatabase(database.root))
+    assert restarted.recover_orphans() == 1
+    history = restarted.history('a', prev.conversation_id)
+    assert any('User question 0' in str(item.get('content')) for item in history)
+    assert not any(item.get('role') == 'system' and '<summary>' in item.get('content', '')
+                   for item in history)
