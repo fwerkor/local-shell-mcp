@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .approval_runtime import ApprovalBatch, prepare_approval_batch
+from .artifact_prompts import artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
@@ -106,6 +107,7 @@ class GenerationStore:
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
+            "artifactsMode": artifact_mode(payload, agent),
         }
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")

@@ -23,6 +23,7 @@ from .approval_runtime import (
     execute_approval_batch,
     truncate_approval_result,
 )
+from .artifact_prompts import agent_instructions
 from .ask_user_tools import ASK_USER_TOOLS, build_ask_user_payload
 from .checkpoints import SQLiteCheckpointSaver
 from .handoff import (
@@ -296,7 +297,7 @@ class AgentRunner:
         received = receive_handoff(update.get("messages") or [], destination)
         history = received["filteredMessages"] if received else update.get("messages") or []
         history = [message for message in history if message.get("role") != "system"]
-        instructions = target.get("instructions") or ""
+        instructions = agent_instructions(target, selected_provider({}, target))
         if received and received.get("instructions"):
             instructions += "\n\n" + received["instructions"]
         if instructions:
