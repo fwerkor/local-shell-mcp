@@ -175,8 +175,8 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.controller_routes import controller_routes
             from .webui.conversation_routes import conversation_routes
             from .webui.generation_routes import generation_routes
-            from .webui.misc_routes import misc_routes
             from .webui.memory_routes import memory_routes
+            from .webui.misc_routes import misc_routes
             from .webui.routes import webui_routes
 
             routes[2:2] = webui_routes()
