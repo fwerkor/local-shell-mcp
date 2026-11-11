@@ -26,7 +26,7 @@ def parse_spec(raw: str) -> dict:
             import yaml  # optional; deferred for worker bootstrap
 
             spec = yaml.safe_load(raw)
-    except (ValueError, ImportError, TypeError) as exc:
+    except Exception as exc:
         raise ValueError("Error parsing OpenAPI spec.") from exc
     if not isinstance(spec, dict):
         raise ValueError("Error parsing OpenAPI spec.")

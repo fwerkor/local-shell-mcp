@@ -138,8 +138,12 @@ class ActionRepository:
                     return metadata, self._credentials(row), {**operation, "server": spec["servers"][0]["url"], "action_id": row["id"]}
             return None
 
-    def tool_schemas(self, owner: str, agent: dict) -> list[dict]:
+    def tool_schemas(self, owner: str, agent: dict, *, selected_tools=None) -> list[dict]:
         selected = set(agent.get("tools") or [])
+        active = (
+            {normalize_action_tool_name(name) for name in selected_tools}
+            if selected_tools is not None else None
+        )
         refs = set(agent.get("actions") or [])
         with self.database.connect() as db:
             rows = db.execute("SELECT * FROM action_records WHERE owner=? AND agent_id=?",
@@ -152,7 +156,8 @@ class ActionRepository:
                 continue
             for op in operations(parse_spec(metadata["raw_spec"])).values():
                 name = tool_name(op["name"], domain)
-                if name in selected and op["method"] in {"get", "post", "put", "patch", "delete"}:
+                if (name in selected and (active is None or normalize_action_tool_name(name) in active)
+                        and op["method"] in {"get", "post", "put", "patch", "delete"}):
                     func = {"name": normalize_action_tool_name(name),
                             "description": op["description"], "parameters": op["parameters"]}
                     # LibreChat's toObjectTool only adds strict for x-strict.
@@ -238,7 +243,7 @@ class ActionRepository:
                 former.update(name + DELIMITER + legacy_domain(old_domain) for name in operations(parse_spec(old_meta["raw_spec"])))
             new_names = [tool_name(name, new_meta["domain"]) for name in incoming_names]
             config_tools = [name for name in config.get("tools", []) if name not in former
-                            and name not in new_names and action_id not in name]
+                            and name not in new_names and name != "legacy-" + action_id]
             config_tools.extend(new_names)
             updated = self.agents._update_locked(db, owner, agent_id, {"actions": actions, "tools": config_tools})
             now = _now()

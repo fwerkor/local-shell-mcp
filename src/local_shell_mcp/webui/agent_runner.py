@@ -93,7 +93,9 @@ class AgentRunner:
         tools += subagent_tools(configs)
         if agent is not None:
             from .actions import ActionRepository
-            tools += ActionRepository(self.database).tool_schemas(self.owner, agent)
+            tools += ActionRepository(self.database).tool_schemas(
+                self.owner, agent, selected_tools=selected
+            )
         if self.root_agent:
             tools += handoff_tools(self.owner, self.root_agent, self.repository, source_agent_id=identity)
         override = (agent or {}).get("recursion_limit")
