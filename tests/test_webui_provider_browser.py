@@ -33,9 +33,10 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
     async def fake_model(request):
         body = await request.json()
         requests.append(body)
-        expected_key = "secondary-private-token" if body["model"] == "independent-model" else "private-test-token"
+        expected_key = ({"independent-model": "secondary-private-token",
+                         "recovered-model": "recovered-test-token"}.get(body["model"], "private-test-token"))
         assert request.headers.get("authorization") == "Bearer " + expected_key
-        if reject_provider:
+        if reject_provider and body["model"] != "recovered-model":
             return JSONResponse({"error": {"message": "Invalid API key"}}, status_code=401)
         return StreamingResponse(iter(['data: {"choices":[{"delta":{"content":"Model channel works."}}]}\n\n', 'data: [DONE]\n\n']), media_type="text/event-stream")
     with socket.socket() as probe:
@@ -93,6 +94,19 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.reload()
                     await page.get_by_test_id("screenshot-target").get_by_text("Model generation failed (HTTPStatusError)", exact=False).wait_for(timeout=15000)
                 assert requests and requests[-1]["model"] == "second-model"
+                if reject_provider:
+                    # Correcting an invalid credential must recover without a
+                    # server restart and without rewriting old conversations.
+                    await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                    await page.get_by_label("Model API key").fill("recovered-test-token")
+                    await page.get_by_label("Model identifiers").fill("recovered-model")
+                    await page.get_by_role("button", name="Save model channel").click()
+                    await page.get_by_role("link", name="Start a new chat and select a model").click()
+                    await page.get_by_test_id("model-selector-button").get_by_text("recovered-model", exact=True).wait_for(timeout=15000)
+                    await page.get_by_test_id("text-input").fill("Credential fixed.")
+                    await page.locator('button[type="submit"]').first.click()
+                    await page.get_by_test_id("screenshot-target").get_by_text("Model channel works.", exact=True).wait_for(timeout=15000)
+                    assert requests[-1]["model"] == "recovered-model"
                 if not reject_provider:
                     # Two OpenAI-compatible profiles with independent credentials
                     # must remain distinct through the actual original React
