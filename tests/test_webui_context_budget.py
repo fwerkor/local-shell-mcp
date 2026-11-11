@@ -296,3 +296,62 @@ def test_manual_invalid_and_failed_compaction_preserves_history(ctx):
     assert content[-1]['initiatedBy'] == 'user'
     assert content[-1]['type'] == 'error'
     assert any('User question 0' in m['content'] for m in store.history('a', prev.conversation_id))
+
+
+def test_multiple_projects_keep_independent_history_and_compaction(ctx):
+    db, store, _, _ = ctx
+    with db.connect() as connection:
+        for project_id in ('project-a', 'project-b'):
+            connection.execute(
+                'INSERT INTO projects(id, owner, name, description) VALUES(?, ?, ?, ?)',
+                (project_id, 'a', project_id, ''),
+            )
+    jobs = {}
+    for project in ('project-a', 'project-b'):
+        first, created = store.begin('a', {'text': 'First question for ' + project,
+                                            'projectId': project})
+        assert created
+        store.finish('a', first.run_id, status='complete', text='Original answer for ' + project)
+        jobs[project] = first
+    a = jobs['project-a']
+    b = jobs['project-b']
+    before_b = store.history('a', b.conversation_id)
+    next_a, created = store.begin('a', {'conversationId': a.conversation_id,
+                                         'parentMessageId': a.response_message_id,
+                                         'text': 'Summarize project A only.'})
+    assert created
+    store.stage_summary('a', next_a.run_id, 'Project A checkpoint.', 6)
+    store.finish('a', next_a.run_id, status='complete', text='Done A.')
+    assert store.history('a', b.conversation_id) == before_b
+    assert len(store.history('a', a.conversation_id)) == 2
+    assert 'Project A checkpoint' in store.history('a', a.conversation_id)[0]['content']
+    with pytest.raises(KeyError):
+        store.history('b', a.conversation_id)
+
+
+@pytest.mark.asyncio
+async def test_repeated_compact_skip_records_failure_not_new_boundary(ctx):
+    db, store, _, profile = ctx
+    previous = _conversation(store, count=2, size=3)
+    before = store.history('a', previous.conversation_id)
+    first, _ = store.begin('a', {'compact': True,
+                                  'conversationId': previous.conversation_id,
+                                  'parentMessageId': previous.response_message_id})
+    store.stage_summary('a', first.run_id, 'Initial completed checkpoint.', 8, manual=True)
+    store.finish('a', first.run_id, status='complete', text='')
+    repeated, _ = store.begin('a', {'compact': True,
+                                     'conversationId': previous.conversation_id,
+                                     'parentMessageId': first.response_message_id})
+    runner = AgentRunner('a', repeated, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=_empty_text,
+                         on_text=_emit_noop, profile=profile)
+    with pytest.raises(ValueError, match='Nothing to compact'):
+        await runner.run(store.history('a', previous.conversation_id, message_id=repeated.user_message_id))
+    assert store.finish('a', repeated.run_id, status='error', error='Nothing to compact')
+    history = store.history('a', previous.conversation_id)
+    assert history[0]['role'] == 'system'
+    assert 'Initial completed checkpoint' in history[0]['content']
+    assert len(before) == 4
+    with db.connect() as connection:
+        assert connection.execute('SELECT count(*) FROM messages WHERE conversation_id=?',
+                                  (previous.conversation_id,)).fetchone()[0] == len(before) + 2
