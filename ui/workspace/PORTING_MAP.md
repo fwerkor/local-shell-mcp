@@ -292,3 +292,35 @@ For the real JS oracle provide Node, the exact pinned npm packages and
 `LSM_JS_ORACLE_ROOT` pointing at their installed package root. A committed fixture
 retains the reference output for test environments without Node dependencies.
 CI coverage gates remain unchanged (global ≥95%, per module ≥90%).
+
+### Graph checkpoint and HTTP recovery contract
+
+`MultiAgentState` uses the original source channel names: `messages` (ID-aware
+LangGraph message reducer), `agentMessages` (last-value replacement),
+`handoffState` (source merge reducer), `subagentResult` (designated team sink)
+and `manualSummary` (optional summary). A node emits existing generation events
+`on_run_step` / `on_message_delta` / `on_run_step_completed`; tools retain the
+source event IDs and full owner ACL. The graph adds no separate provider loop
+or task dispatcher.
+
+Checkpoint identity: `(owner, conversation_id, run_id + ':graph:' + namespace)`
+for graph supersteps, `(owner, conversation_id, run_id, checkpoint_ns=namespace)`
+for per-node model/tool states. The single unified SQLite database stores
+`pendingWrites` and serialized SDK `Send` instances; runtime extras are
+Controller-only, not Worker dependencies. A resumed `ainvoke(None)` reads the
+latest graph checkpoint and executes only unfinished nodes. On a cooperative
+Controller shutdown (not explicit Abort), running generations retain their
+checkpoint and status. A client can `POST /api/agents/chat/resume` with
+`conversationId` (and optionally `generationCreatedAt`) to use the **existing**
+`_start_task` generation scheduler; no duplicate initial `on_run_step` or SSE
+deltas are emitted. Previously sent text is reconstructed from the owner-scoped
+`generation_events`. This recovery path rechecks machine ACL and grant scopes;
+a missing checkpoint or an expired/mismatched generation identity is rejected.
+
+The no-action recovery path assumes the project's single active Controller
+process; **no cross-process SQLite execution lease** is introduced. An HA
+multi-Controller deployment would need a shared generation-lease protocol.
+Restart after a previously consumed Ask User response before the continuation
+has created a checkpoint also needs a durable input replay record. Detached
+background child threads are still explicitly unavailable until the shared
+host task/thread store and message-protocol PRs land.

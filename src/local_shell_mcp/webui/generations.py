@@ -363,6 +363,28 @@ class GenerationStore:
             ).fetchall()
             return [(int(row[0]), json.loads(row[1])) for row in rows]
 
+    def accumulated_text(self, owner: str, run_id: str) -> str:
+        """Reassemble already-streamed deltas for a restarted owner-bound run.
+
+        A resumed StateGraph must not lose previous assistant text, and must not
+        reemit old SSE chunks. This uses the existing generation event contract.
+        """
+        with self.database.connect() as db:
+            rows = db.execute(
+                "SELECT ge.data FROM generation_events ge JOIN runs r ON r.id=ge.run_id "
+                "JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE c.owner=? AND ge.run_id=? ORDER BY ge.seq", (owner, run_id),
+            ).fetchall()
+        chunks = []
+        for row in rows:
+            event = json.loads(row["data"])
+            if event.get("event") == "on_message_delta":
+                content = event.get("data", {}).get("delta", {}).get("content", {})
+                value = content.get("text") if isinstance(content, dict) else None
+                if isinstance(value, str):
+                    chunks.append(value)
+        return "".join(chunks)
+
     def history(self, owner: str, conversation_id: str, max_messages: int = 50,
                 *, message_id: str | None = None) -> list[dict]:
         with self.database.connect() as db:

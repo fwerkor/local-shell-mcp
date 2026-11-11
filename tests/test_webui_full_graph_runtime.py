@@ -388,3 +388,107 @@ def test_graph_team_rejects_orphan_member_before_runtime(context):
     with pytest.raises(ValueError, match="only root"):
         repo.update("local", lead["id"], {"subagents": {
             "enabled": True, "allowSelf": False, "agent_ids": [], "graphs": [definition]}})
+
+@pytest.mark.asyncio
+async def test_cooperative_controller_shutdown_and_http_resume_real_graph(context, monkeypatch):
+    import httpx
+    from starlette.applications import Starlette
+
+    from local_shell_mcp.webui import generation_routes
+
+    repo, store, database = context
+    root, child = create(repo, "root"), create(repo, "child")
+    root = repo.update("local", root["id"], {"edges": [
+        {"from": root["id"], "to": child["id"], "edgeType": "direct"}]})
+    calls = []
+    waiting, release = asyncio.Event(), asyncio.Event()
+
+    async def model(profile, history, **kwargs):
+        calls.append(profile.model)
+        if profile.model == "child" and not release.is_set():
+            waiting.set()
+            await release.wait()
+        yield profile.model + " output"
+
+    monkeypatch.setattr(generation_routes, "stream_model", model)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", model)
+    monkeypatch.setattr(generation_routes, "provider_config", lambda *args: ProviderConfig(
+        "openai", "root", "https://source-test.invalid", ""))
+    generation, _ = store.begin("local", {"text": "task"}, root)
+    profile = ProviderConfig("openai", "root", "https://source-test.invalid", "")
+    await generation_routes._start_task("local", generation, profile, root)
+    await asyncio.wait_for(waiting.wait(), 10)
+    assert store.accumulated_text("local", generation.run_id) == "root output"
+    await generation_routes.shutdown_generations()
+    assert store.get("local", generation.run_id).status == "running"
+    assert not generation_routes._TASKS
+    assert store.accumulated_text("another", generation.run_id) == ""
+    release.set()
+    app = Starlette(routes=generation_routes.generation_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        before = await client.post("/api/agents/chat/resume", json={
+            "conversationId": generation.conversation_id,
+            "generationCreatedAt": generation.generation_created_at + 1})
+        assert before.status_code == 409
+        result = await client.post("/api/agents/chat/resume", json={
+            "conversationId": generation.conversation_id,
+            "generationCreatedAt": generation.generation_created_at})
+        assert result.status_code == 200, result.text
+        task = generation_routes._TASKS.get(generation.run_id)
+        assert task is not None
+        await asyncio.wait_for(task, 12)
+    assert calls == ["root", "child", "child"]
+    assert store.get("local", generation.run_id).status == "complete"
+    assert store.accumulated_text("local", generation.run_id) == "root outputchild output"
+    with database.connect() as conn:
+        row = conn.execute("SELECT text FROM messages WHERE id=?", (
+            generation.response_message_id,)).fetchone()
+    assert row["text"] == "root outputchild output"
+
+@pytest.mark.asyncio
+async def test_graph_http_recovery_rejects_missing_checkpoint(context, monkeypatch):
+    import httpx
+    from starlette.applications import Starlette
+
+    from local_shell_mcp.webui import generation_routes
+
+    repo, store, _ = context
+    root = create(repo, "root")
+    generation, _ = store.begin("local", {"text": "unstarted"}, root)
+    app = Starlette(routes=generation_routes.generation_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        result = await client.post("/api/agents/chat/resume", json={
+            "conversationId": generation.conversation_id})
+    assert result.status_code == 409
+    assert generation.run_id not in generation_routes._TASKS
+    assert store.get("local", generation.run_id).status == "running"
+
+
+@pytest.mark.asyncio
+async def test_graph_http_recovery_rechecks_machine_scopes(context, monkeypatch):
+    import httpx
+    from starlette.applications import Starlette
+
+    from local_shell_mcp.webui import generation_routes
+    from local_shell_mcp.webui.routes import _repo
+
+    repo, store, database = context
+    root, child = create(repo, "root"), create(repo, "child")
+    root = repo.update("local", root["id"], {"edges": [
+        {"from": root["id"], "to": child["id"], "edgeType": "direct"}]})
+    generation, _ = store.begin("local", {"text": "limited"}, root)
+    from local_shell_mcp.webui.graph_checkpoint import OwnedGraphCheckpointer
+
+    saver = OwnedGraphCheckpointer(database, "local")
+    checkpoint = saver.storage.config(generation.conversation_id, generation.run_id + ":graph:",
+                                      event_actor=True)
+    saver.put(checkpoint, {"id": "available", "channel_values": {"messages": []}},
+              {"source": "input"}, {})
+    _repo().save_setting("local", "agent.machine_policy.global", {"local": "read"})
+    monkeypatch.setattr(generation_routes, "_request_grant", lambda request: (set(), None))
+    app = Starlette(routes=generation_routes.generation_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        result = await client.post("/api/agents/chat/resume", json={
+            "conversationId": generation.conversation_id})
+    assert result.status_code == 403
+    assert generation.run_id not in generation_routes._TASKS
