@@ -27,9 +27,9 @@
       "path": "api/server/controllers/agents/request.js",
       "sha256": "3ca1d4f69dc76b00410fb60f84a70f26514c935b3f705292d595091c41c2ab93",
       "symbols": "generation ingress / disconnect",
-      "python_lsm": "webui/generation_routes.py:start_generation",
+      "python_lsm": "webui/generations.py; generation_routes.py",
       "status": "部分",
-      "difference": "缺失完整入口预检及断线处置语义"
+      "difference": "manual compact 现有generation入口复用原会话leaf，不产生伪用户，拒绝new/edit/regenerate/continue；原版全部流事件/首次guard尚未完成。"
     },
     {
       "repository": "LibreChat",
@@ -162,18 +162,18 @@
       "path": "packages/api/src/agents/compaction.ts",
       "sha256": "a8ba0ef364731835c437f1b9feb6e4eeb3f92390f7d3d67fede8bf65255b5b50",
       "symbols": "summary checkpoint / manual outcome",
-      "python_lsm": "webui/generations.py:history",
-      "status": "未实现",
-      "difference": "50消息截断无summary，不能标记compact完成"
+      "python_lsm": "webui/compaction.py; generations.py",
+      "status": "部分",
+      "difference": "2079组原版固定差分全部通过；有效summary checkpoint、失败摘要忽略、手动compact标记/历史恢复；完整语义索引与event actor projection尚未实现。"
     },
     {
       "repository": "LibreChat",
       "path": "packages/api/src/agents/memory.ts",
       "sha256": "f493a11e02b5bc2ec16abe0426614afcd8dfffa288f619c50e22987cfe0e71fc",
       "symbols": "registerMemoryTools / tool usage guard",
-      "python_lsm": "webui/misc_routes.py",
-      "status": "未实现",
-      "difference": "memory权限返回关闭；无对应持久化与工具执行"
+      "python_lsm": "webui/memory.py; agent_runner.py",
+      "status": "部分",
+      "difference": "显式memory marker+capability双开关、单用户/agent分区、二工具与guard注入及真实工具调用可用；原filter/role gate按LSM单用户替代，缓存及流式artifact尚未完全等价。"
     },
     {
       "repository": "LibreChat",
@@ -381,6 +381,96 @@
       "python_lsm": "webui/generations.py:GenerationStore.history",
       "status": "部分",
       "difference": "已保存结构化text优先于旧text快照，Artifact编辑进入下一轮模型；完整tool/rich/steer重建未完成。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/routes/memories.js",
+      "sha256": "0fe243fa8bac29f0cbaf665536da92e1008a5e10e7dde31c07e40a4adffe9135",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/memory_routes.py",
+      "status": "部分",
+      "difference": "GET/POST/PATCH/DELETE、opt-out、隔离和负向测试通过；原RBAC映射为已认证LSM owner；filters投影尚未移植。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/memory/handlers.ts",
+      "sha256": "3b21cc7fc7277946f9b664feae4bb5e6f8cc91dd25b5f9b6d507f75262dfd51e",
+      "symbols": "Memory REST/SQLite implementation",
+      "python_lsm": "webui/memory_routes.py; memory.py",
+      "status": "部分",
+      "difference": "不可猜测opaque id，按id/键修改删除、冲突、额度限制和失败回滚验证；原版content-filter/management handler的完整error body待补。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-schemas/src/methods/memory.ts",
+      "sha256": "f4984bced122c4a2d78398a70f0e945a8bb65053cf04bef3c13b53d3cc68206f",
+      "symbols": "Memory REST/SQLite implementation",
+      "python_lsm": "webui/memory.py; sqlite_store.py",
+      "status": "部分",
+      "difference": "SQLite唯一约束+BEGIN IMMEDIATE原子upsert、rename、create冲突、delete/format/count；时间升序、重启恢复、并发额度测试；原Mongoose无关。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-schemas/src/schema/memory.ts",
+      "sha256": "ed8b6e3e0655193686f440d468ae5d42a35cec9811fcb876a3e56f9a1751bc08",
+      "symbols": "Memory REST/SQLite implementation",
+      "python_lsm": "webui/memory.py; sqlite_store.py",
+      "status": "部分",
+      "difference": "SQLite单表owner+agent_id+key唯一约束，空agent_id映射原null/undefined分区；未迁移Mongo中已有的个人记忆内容。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/utils/tokenizer.ts",
+      "sha256": "54b7be49219301368a80cac2f2ef9991152a7fb5c4bfbdb4c158c3aab43597b5",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/tokenizer.py; webui/encodings/o200k_base.tiktoken.gz",
+      "status": "部分",
+      "difference": "o200k_base编码文件官方SHA256固定，离线分发、lazy import；BPE分段按原4096 UTF-16单位、256连续类别阈值及代理对保护；158组跨语言Node o200k_base差分全部通过；极端U+0085/U+FEFF混合输入仍有1–3 token差异，待原ai-tokenizer完整协议校验。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/summarization/shared.ts",
+      "sha256": "567a7a5d497acda8390b2f48f03869039434bfc13ac0ae3ca6648abfbd011d1c",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/compaction.py; agent_runner.py",
+      "status": "完成（纯函数）",
+      "difference": "总结提示词构造、carrier、参数分离：2079固定向量覆盖与原版source AST参考；实际图摘要见node.ts记录。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/summarization/index.ts",
+      "sha256": "547f5fe25792f1ca0322d6aee534f5b0fc45cbf812f19e80e3f27fda013617d4",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/context_budget.py",
+      "status": "部分",
+      "difference": "token_ratio/remaining_tokens/messages_to_refine触发条件已移植并有阈值单测；日志warn去重未移植。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/summarization/node.ts",
+      "sha256": "306915291a6b64bff49764abbff3c13b1039e784895f8984bca3fd6f30528b7e",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/agent_runner.py; generations.py",
+      "status": "部分",
+      "difference": "失败保持历史、有效摘要才换上下文、阶段化持久检查点、模型SSE实测；完整模型参数/provenance/semanticIndex/event actor提示词流与递归回退未移植。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/messages/recency.ts",
+      "sha256": "9aea2598bb090e13db73f2c146d785c0c471b770a990f905d801e87a9cdef953",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/context_budget.py",
+      "status": "部分",
+      "difference": "最近N轮保留及token cap、open tool-call保护；完整provider-native pairing与intra-turn fallback应由消息协议任务继续移植。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/messages/prune.ts",
+      "sha256": "88bb120616bad3e1573c42c5e2878e04f55d1b2628d6a76c756f235f481ced09",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/context_budget.py; agent_runner.py",
+      "status": "部分",
+      "difference": "默认reserveRatio=0.05用于预算；内容屏蔽、tool result压缩与provider校准未完整移植。"
     }
   ],
   "runtime_dependency_lock": {

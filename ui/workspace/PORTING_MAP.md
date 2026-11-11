@@ -49,8 +49,8 @@ Subagents 使用 `agent.subagents.enabled/allowSelf/agent_ids` 配置和动态�
 | `LibreChat:packages/api/src/agents/hitl/answers.ts` — `retained answers / branch ordering` | `webui/generations.py:history` | 部分 | 已改活动分支；尚无跨compact保留用户回答/来源信任标记 |
 | `LibreChat:packages/api/src/agents/hitl/policy.ts` — `approval rules / deny-ask-allow / policy hashing` | `webui/nested_mcp.py` | 未实现 | 当前对所有nested MCP强制approval，不是原版policy机制 |
 | `LibreChat:packages/api/src/agents/checkpointer.ts` — `durable checkpointer` | `webui/checkpoints.py; agent_runner.py` | 部分 | 统一SQLite tuple/pending-write存储、owner/generation隔离、proposal/结果/完成状态恢复已接入；完整LangChain类序列化与graph actor链未实现 |
-| `LibreChat:packages/api/src/agents/compaction.ts` — `summary checkpoint / manual outcome` | `webui/generations.py:history` | 未实现 | 50消息截断无summary，不能标记compact完成 |
-| `LibreChat:packages/api/src/agents/memory.ts` — `registerMemoryTools / tool usage guard` | `webui/misc_routes.py` | 未实现 | memory权限返回关闭；无对应持久化与工具执行 |
+| `LibreChat:packages/api/src/agents/compaction.ts` — `summary checkpoint / manual outcome` | `webui/compaction.py; generations.py; agent_runner.py` | 部分 | 2079组原函数固定向量全通过；已去除50消息截断，实现完整当前分支历史+有效summary边界、手动compact、失败保原消息；事件actor和语义索引待完整移植 |
+| `LibreChat:packages/api/src/agents/memory.ts` — `registerMemoryTools / tool usage guard` | `webui/memory.py; memory_routes.py; agent_runner.py; sqlite_store.py` | 部分 | 已实现显式capability/Agent marker、写删可选工具、命中规则和prompt guard、SQLite分区/事务/配额、REST，真实工具流和重启验证；缺少原RBAC/filters完全等价 |
 | `LibreChat:packages/api/src/agents/attachments.ts` — `attachment limits / model-bound files` | `webui/attachments.py` | 部分 | LSM真实路径上传已实现；原版资源分类和模型输入链未完成 |
 | `LibreChat:packages/api/src/agents/tools.ts` — `runtime tools / registry adaptation` | `webui/lsm_tool_registry.py` | 部分 | 复用LSM注册表；尚未按原版Agent选择与系统注入拆开 |
 | `LibreChat:packages/data-schemas/src/schema/agent.ts` — `Agent schema / settings / graph / subagents` | `webui/agents.py; agent_validation.py` | 部分 | 原版HTTP validation.ts、参数sanitizer与owner引用约束已移植；完整资源能力/模型catalog/skill加载策略仍不完整 |
@@ -262,3 +262,13 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## Memory / 上下文预算 / 语义压缩移植（本PR）
+
+- 固定源：LibreChat `e8f3be08623663d4ad7f7241e693c94469b63bb0`，npm agents `4.0.1` / `c4ffb9b1b78421bf63eba3e56993017f922387f3`，见 `UPSTREAM_LOCK.json` 中各源文件SHA256。
+- 功能映射：memory routes/model/handlers → `memory_routes.py`、`memory.py`、`sqlite_store.py`；SDK compaction纯函数 → `compaction.py`；trigger/recency/budget → `context_budget.py`；model stream与checkpoint切换 → `agent_runner.py`、`generations.py`。SQLite `webui_memories` 使用 owner/agent/key 事务唯一约束，数据位于现有 `.local-shell-mcp/lsm.sqlite3`。
+- 原启用前提：有memory配置、Agent endpoint `memory` capability 和 Agent.tools `memory`，用户未opt-out；UI查询单独遵循原memory权限集合。机器授权与工具启用完全分开。原管理员配置存储在同一用户 `endpoints.memory`/`webui.memory.config` 键；默认不自动开启。
+- token：单独的可选 WebUI 依赖 `tiktoken`，`o200k_base.tiktoken.gz` 随Wheel发行（gzip压缩后1.69 MB，内存解压，SHA256校验原始内容）；SHA256 `446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d`，首次使用绝不下载。主Worker不依赖它。
+- compaction：前置模型调用生成摘要，只有完整非空结果才存入当前run的 `summaryCheckpoint` 并在结束事务中提交为有效message part。旧消息永不删除。读取完整活动分支，遇最后有效summary载体停止回溯；失败/取消/崩溃或无效summary不替换历史。图检查点继续使用原有 `SQLiteCheckpointSaver`。
+- 已验证：纯函数2079组源向量、memory SQLite CRUD+并发/配额/隔离、51轮长会话/tool结果配对/思考内容、失败与取消、完整HTTP/SSE summarizer和原版React浏览器下一轮及刷新后恢复。
+- 未完全等价：source RBAC/filters接入、SDK模型token校准和按provider native消息格式计算、跨tool pair的intra-turn fallback、动态semantic index/完整事件actor、自定义摘要策略的Graph reducer；这些仍标记“部分”，不可用这批纯函数向量充当整套图运行时已完成的证据。
