@@ -14,7 +14,11 @@ from starlette.exceptions import HTTPException
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui import attachments
-from local_shell_mcp.webui.file_deletion import delete_response, partition_resource_files
+from local_shell_mcp.webui.file_deletion import (
+    delete_response,
+    partition_resource_files,
+    plan_resource_deletion,
+)
 
 
 @pytest.fixture
@@ -265,3 +269,56 @@ def test_context_rejects_other_owner_reference_and_unprocessed_resources(uploads
     assert attachments.agent_context_messages(uploads, "alice", config) == []
     config["tool_resources"]["context"]["file_ids"] = ["foreign", "foreign"]
     assert attachments.agent_context_messages(uploads, "bob", config) == []
+
+
+
+def test_librechat_full_resource_deletion_source_differential():
+    """Compare original compiled Node deleteAgentResourceFiles and Python plan."""
+    node = shutil.which("node") or "/root/.cache/lsm-attachments-node/bin/node"
+    if not Path(node).is_file():
+        pytest.skip("Node used only for offline source differential testing")
+    fixture = Path(__file__).parent / "fixtures/librechat/file_deletion_reference.cjs"
+    samples = []
+    names = ["a", "b", "c"]
+    for mask in range(72):
+        sample = {
+            "requested": ["a", "a", "b", "c", "other"],
+            "attached": ["a", "b", "c"],
+            "files": [{"file_id": name, "owner": "alice" if mask & (1 << idx) else "bob",
+                       "file": {"id": name}} for idx, name in enumerate(names)],
+            "shared": [name for idx, name in enumerate(names) if mask & (1 << (idx + 3))],
+        }
+        samples.append(sample)
+    script = """
+const fs=require('fs');const ref=require(process.argv[1]);
+const samples=JSON.parse(fs.readFileSync(0,'utf8'));
+(async()=>{
+ const outputs=[];
+ for(const sample of samples) {
+  const destroyed=[],unlinked=[];
+  const result=await ref.deleteAgentResourceFiles({
+    agentId:'first',agentObjectId:'first',toolResource:'context',
+    requestedFileIds:sample.requested,attachedFileIds:sample.attached,
+    files:sample.files,userId:'alice'
+  },{
+    getSharedResourceFileIds:async()=>sample.shared,
+    deleteFiles:async files=>{destroyed.push(...files);return {deletedFileIds:files.map(f=>f.id),failedFileIds:[]}},
+    removeAgentResourceFiles:async ({files})=>{unlinked.push(...files)}
+  });
+  outputs.push({destroyed,unlinked,result});
+ }
+ process.stdout.write(JSON.stringify(outputs));
+})();
+"""
+    out = subprocess.run([node, "-e", script, str(fixture)], input=json.dumps(samples),
+                         text=True, capture_output=True, timeout=30, check=True)
+    reference = json.loads(out.stdout)
+    for sample, output in zip(samples, reference, strict=True):
+        actual_destroy, actual_unlink = plan_resource_deletion(
+            sample["requested"], sample["attached"], sample["files"],
+            "context", "alice", sample["shared"],
+        )
+        assert actual_destroy == output["destroyed"]
+        assert actual_unlink == output["unlinked"]
+        assert output["result"]["destroyedFileIds"] == [file["id"] for file in actual_destroy]
+        assert output["result"]["unlinkedFileIds"] == [file["file_id"] for file in actual_unlink]
