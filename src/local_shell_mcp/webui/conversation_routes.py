@@ -34,6 +34,10 @@ async def update_conversation(request: Request):
     repo = _repo()
     changes = {key: val for key, val in values.items() if key != "conversationId"}
     updated = repo.update_conversation(owner, conversation_id, changes)
+    if updated is not None and "projectId" in changes:
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
     if updated is None:
         _not_found()
     return JSONResponse(updated)
@@ -73,6 +77,10 @@ async def delete_all(request: Request):
     owner = _owner(request)
     with _repo().database.connect() as db:
         removed = db.execute("DELETE FROM conversations WHERE owner=?", (owner,)).rowcount
+    if removed:
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
     return JSONResponse({"success": True, "deletedCount": removed})
 
 
