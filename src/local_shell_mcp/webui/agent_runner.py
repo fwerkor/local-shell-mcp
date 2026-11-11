@@ -32,7 +32,6 @@ from .handoff import (
     handoff_edge_for_call,
     handoff_tools,
     is_transfer_tool,
-    receive_handoff,
 )
 from .providers import ModelToolCall, provider_config, selected_provider
 from .subagents import build_subagent_configs, invoke_subagent, subagent_tools
@@ -44,11 +43,17 @@ class AgentRunner:
                  parameters=None, ask_user_enabled=False, mcp_enabled=False,
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
-                 approved_batch=None):
+                 approved_batch=None, graph_node=False, graph_definition=None,
+                 graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
         self.root_agent, self.initial_profile = agent, profile
+        self.graph_definition = graph_definition if graph_definition is not None else agent
+        self.graph_node = graph_node
+        self.graph_entry_id = graph_entry_id or (self.graph_definition or {}).get("id") or "default"
+        self.graph_parallel = graph_parallel
+        self.graph_max_handoffs = graph_max_handoffs
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
@@ -61,7 +66,7 @@ class AgentRunner:
         self.active_config = self.config
         self.cache = {}
         self.configs = {}
-        self.route = HandoffRouting((agent or {}).get("id") or "default")
+        self.route = HandoffRouting(self.graph_entry_id, self.graph_max_handoffs, self.graph_parallel)
 
     def _check_grant(self):
         if self.grant_expires is not None and self.grant_expires <= time.time():
@@ -73,7 +78,7 @@ class AgentRunner:
         from .nested_mcp import nested_tools
 
         self._check_grant()
-        admit_agent_graph(self.owner, self.root_agent, self.repository)
+        admit_agent_graph(self.owner, self.graph_definition, self.repository)
         selected = set(selected_tools if selected_tools is not None else (agent or {}).get("tools") or [])
         unrestricted = agent is None and selected_tools is None
         native = available_tools(self.owner, self.generation.conversation_id,
@@ -91,8 +96,8 @@ class AgentRunner:
         )
         self.configs[identity] = configs
         tools += subagent_tools(configs)
-        if self.root_agent:
-            tools += handoff_tools(self.owner, self.root_agent, self.repository, source_agent_id=identity)
+        if self.graph_definition:
+            tools += handoff_tools(self.owner, self.graph_definition, self.repository, source_agent_id=identity)
         override = (agent or {}).get("recursion_limit")
         limit = override if type(override) in (int, float) and override > 0 else 50
         return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
@@ -106,7 +111,8 @@ class AgentRunner:
                                    "arguments": call.arguments, "provider_data": call.provider_data}
                                   for call in state.pending_calls],
                 "tool_step_started": state.tool_step_started, "completed": state.completed,
-                "partial_text": self.partial_text, "handoffState": self.route.snapshot()}
+                "partial_text": self.partial_text, "handoffState": self.route.snapshot(),
+                "graph_commands": state.graph_commands}
 
     async def _save(self, state, calls):
         if calls and not state.tool_step_started:
@@ -151,7 +157,7 @@ class AgentRunner:
             self.saver.put_writes(self.active_config, [("messages", {
                 "role": "tool", "tool_call_id": call.call_id, "content": output,
             })], task_id=call.call_id)
-        if self.namespace:
+        if self.namespace and not self.graph_node:
             return
         step = self._tool_step(call)
         preview = output if isinstance(output, str) else "Agent control transferred"
@@ -183,7 +189,7 @@ class AgentRunner:
             )
         if is_transfer_tool(call.name):
             current = state.context.agent or {}
-            graph = self.repository.get(self.owner, self.root_agent["id"])
+            graph = self.repository.get(self.owner, self.graph_definition["id"])
             if graph is None:
                 raise RuntimeSafetyError("Agent graph is no longer available")
             edge = handoff_edge_for_call(self.owner, graph, self.repository, call.name,
@@ -238,13 +244,11 @@ class AgentRunner:
 
         if len({call.call_id for call in calls}) != len(calls) or any(not call.call_id for call in calls):
             raise ValueError("Tool call IDs must be non-empty and unique")
-        if sum(is_transfer_tool(call.name) for call in calls) > 1:
-            raise RuntimeSafetyError("Parallel handoff recipients require the source StateGraph executor")
         unresolved = [call for index, call in enumerate(calls) if replay_key(call, index) not in self.cache]
         enabled = {tool["function"]["name"] for tool in state.context.tools}
         if any(call.name not in enabled for call in unresolved):
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
-        if not self.namespace:
+        if not self.namespace or self.graph_node:
             for call in unresolved:
                 self._tool_step(call)
         asking = [call for call in unresolved if call.name == "ask_user_question"]
@@ -280,30 +284,20 @@ class AgentRunner:
             return ToolBatchOutput(messages)
         combined = combine_handoff_commands(commands)
         self.route.finalize(combined, {"messages": state.messages, "handoffState": self.route.snapshot()}, self.active_config)
-        recipients = []
-        for command in combined:
-            goto = command["goto"]
-            if isinstance(goto, str):
-                recipients.append((goto, command.get("update") or {}))
-            else:
-                recipients.extend((send["node"], send["args"]) for send in goto)
-        if len(recipients) != 1:
-            raise ValueError("Parallel handoff recipients require the graph fan-out executor")
-        destination, update = recipients[0]
-        target = self.repository.get(self.owner, destination)
-        if target is None:
-            raise RuntimeSafetyError("Handoff destination is no longer available")
-        received = receive_handoff(update.get("messages") or [], destination)
-        history = received["filteredMessages"] if received else update.get("messages") or []
-        history = [message for message in history if message.get("role") != "system"]
-        instructions = target.get("instructions") or ""
-        if received and received.get("instructions"):
-            instructions += "\n\n" + received["instructions"]
-        if instructions:
-            history.insert(0, {"role": "system", "content": instructions})
-        return ToolBatchOutput(messages, next_context=self._context(target), replace_messages=history)
+        # StateGraph is the sole owner of transfer scheduling. In particular,
+        # never revive the former single-recipient context-switch fallback.
+        if not self.graph_node:
+            raise RuntimeSafetyError("Handoff commands require an active StateGraph node")
+        return ToolBatchOutput(messages, graph_commands=combined)
 
     async def run(self, history, *, recursion_limit=None):
+        from .graph_topology import admit_agent_graph
+
+        topology = admit_agent_graph(self.owner, self.graph_definition, self.repository)
+        if topology is not None and not self.graph_node:
+            from .graph_runtime import run_multi_agent_graph
+
+            return await run_multi_agent_graph(self, history, topology, recursion_limit=recursion_limit)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
         state = AgentLoopState(context, history)
@@ -317,7 +311,8 @@ class AgentRunner:
                                                 selected_tools=self.selected_tools), snapshot["messages"],
                                    snapshot["step"], snapshot["model_turn"],
                                    [ModelToolCall(**call) for call in snapshot.get("pending_calls", [])],
-                                   snapshot.get("tool_step_started", False), snapshot.get("completed", False))
+                                   snapshot.get("tool_step_started", False), snapshot.get("completed", False),
+                                   snapshot.get("graph_commands", []))
             self.partial_text = snapshot.get("partial_text", self.partial_text)
             self.route.restore(snapshot.get("handoffState"))
             completed = [value for _, channel, value in restored["pendingWrites"] if channel == "messages"]
@@ -356,6 +351,7 @@ class AgentRunner:
 
         result = await run_agent_loop(state, stream_tools=self.stream_tools, stream_text=self.stream_text,
                                       dispatch=self._dispatch, on_text=emit, save_state=self._save)
+        self.graph_commands = state.graph_commands
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
                                                review["actionId"], result, self.partial_text)

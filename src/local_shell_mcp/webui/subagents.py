@@ -90,9 +90,6 @@ def build_subagent_configs(owner: str, parent: dict | None, database: Any, *,
         return []
     if depth > MAX_SUBAGENT_DEPTH:
         raise ValueError(f"Subagent graph exceeds the maximum depth of {MAX_SUBAGENT_DEPTH} at agent {parent.get('id')}.")
-    # Do not accidentally advertise a team as a single-agent approximation.
-    if settings.get("graphs"):
-        raise ValueError("Configured graph subagents require the multi-agent graph executor.")
     count = _count if _count is not None else [0]
     repository = AgentRepository(database)
     configs = []
@@ -144,6 +141,34 @@ def build_subagent_configs(owner: str, parent: dict | None, database: Any, *,
         if child is None:
             raise PermissionError("Subagent is not owned by the current principal")
         append(child, identity)
+    # LibreChat packages/api/src/agents/run.ts buildSubagentConfigs: graph entries
+    # are isolated StateGraphs with an explicitly designated result member.
+    for definition in settings.get("graphs") or []:
+        members = []
+        for identity in definition["agent_ids"]:
+            member = repository.get(owner, identity)
+            if member is None:
+                raise PermissionError("Graph subagent member is not owned by the current principal")
+            members.append(member)
+        if not members:
+            continue
+        count[0] += 1
+        if count[0] > MAX_SUBAGENT_RUN_CONFIGS:
+            raise ValueError(f"Subagent run configuration exceeds the maximum of {MAX_SUBAGENT_RUN_CONFIGS} expanded entries.")
+        entry = next((member for member in members if member["id"] == definition["entry_agent_id"]), None)
+        if entry is None:
+            raise ValueError("Graph subagent entry is not a configured member")
+        team = copy.deepcopy(entry)
+        team["edges"] = [copy.deepcopy(edge) for edge in definition["edges"]]
+        team["entryAgentId"] = definition["entry_agent_id"]
+        team["resultAgentId"] = definition["result_agent_id"]
+        for edge in team["edges"]:
+            if edge.get("excludeResults") is False and not edge.get("prompt"):
+                edge.pop("excludeResults")
+        configs.append(SubagentConfig(
+            definition["type"], definition["name"], definition["description"], team,
+            min(resolve_subagent_max_turns(member, endpoint_config) for member in members), owner,
+        ))
     return configs
 
 

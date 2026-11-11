@@ -1,7 +1,7 @@
-"""SDK MultiAgentGraph construction, without pretending to execute a StateGraph.
+"""SDK MultiAgentGraph source construction, validating graph owner and edges.
 
-Ported from agents c4ffb9b1 src/graphs/MultiAgentGraph.ts. Ordered node/edge
-analysis is separate from the future message-ID reducers and superstep runner.
+Mirrors agents 4.0.1 MultiAgentGraph constructor; execution uses official Python
+LangGraph StateGraph via graph_runtime, not an independently named scheduler.
 """
 from __future__ import annotations
 
@@ -188,7 +188,7 @@ class GraphTopology:
 
 
 def admit_agent_graph(owner: str, agent: dict | None, repository: Any) -> GraphTopology | None:
-    """Do not run a partial graph while silently discarding configured branches."""
+    """Validate all owned members before allowing a StateGraph execution."""
     if not agent or not agent.get("edges"):
         return None
     identities = [agent["id"]]
@@ -200,9 +200,8 @@ def admit_agent_graph(owner: str, agent: dict | None, repository: Any) -> GraphT
     for ident in identities:
         if repository.get(owner, ident) is None:
             raise PermissionError("Agent graph member is not owned by the current principal")
-    topology = GraphTopology(identities, agent["edges"])
-    if topology.direct_edges:
-        raise ValueError("Configured direct edges require the source StateGraph executor; refusing a partial graph")
-    if topology.starting_nodes != [agent["id"]]:
-        raise ValueError("Configured graph entry nodes require the source StateGraph executor; refusing a partial graph")
+    topology = GraphTopology(identities, agent["edges"],
+                             entry_agent_id=agent.get("entryAgentId"),
+                             result_agent_id=agent.get("resultAgentId"),
+                             max_handoffs=agent.get("maxHandoffs"))
     return topology

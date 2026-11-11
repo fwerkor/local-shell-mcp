@@ -43,7 +43,7 @@ try{return run(c);}catch(error){return {error:error.message};}})));"""
     assert expected == VECTORS["expected"]
 
 
-def test_graph_admission_preserves_single_handoff_and_rejects_partial_execution():
+def test_graph_admission_preserves_all_direct_and_handoff_edges():
     repository = SimpleNamespace(get=lambda owner, ident: {"id": ident} if owner == "alice" and ident in "abcd" else None)
     assert admit_agent_graph("alice", None, repository) is None
     assert admit_agent_graph("alice", {"id": "a", "edges": []}, repository) is None
@@ -55,8 +55,8 @@ def test_graph_admission_preserves_single_handoff_and_rejects_partial_execution(
     with pytest.raises(PermissionError, match="not owned"):
         admit_agent_graph("bob", {"id": "a", "edges": [{"from": "a", "to": "b"}]}, repository)
     for edge in ({"from": "a", "to": "b", "edgeType": "direct"}, {"from": "a", "to": ["b", "c"]}):
-        with pytest.raises(ValueError, match="direct edges require"):
-            admit_agent_graph("alice", {"id": "a", "edges": [edge]}, repository)
-    with pytest.raises(ValueError, match="entry nodes require"):
-        admit_agent_graph("alice", {"id": "a", "edges": [
-            {"from": "a", "to": "b"}, {"from": "c", "to": "d"}]}, repository)
+        topology = admit_agent_graph("alice", {"id": "a", "edges": [edge]}, repository)
+        assert topology.direct_edges == [edge]
+    topology = admit_agent_graph("alice", {"id": "a", "edges": [
+        {"from": "a", "to": "b"}, {"from": "c", "to": "d"}]}, repository)
+    assert topology.starting_nodes == ["a", "c"]

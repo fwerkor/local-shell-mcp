@@ -41,6 +41,7 @@ class AgentLoopState:
     pending_calls: list[ModelToolCall] = field(default_factory=list)
     tool_step_started: bool = False
     completed: bool = False
+    graph_commands: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -48,6 +49,7 @@ class ToolBatchOutput:
     messages: list[dict]
     next_context: AgentContext | None = None
     replace_messages: list[dict] | None = None
+    graph_commands: list[dict] = field(default_factory=list)
 
 
 async def run_agent_loop(
@@ -79,7 +81,8 @@ async def run_agent_loop(
                 state.context = output.next_context
             state.pending_calls = []
             state.tool_step_started = False
-            state.completed = output.next_context is None and context.tool_end
+            state.graph_commands = output.graph_commands
+            state.completed = bool(output.graph_commands) or (output.next_context is None and context.tool_end)
             if save_state is not None:
                 await save_state(state, [])
             if state.completed:
