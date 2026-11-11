@@ -444,6 +444,24 @@
       "python_lsm": "ui/workspace/client/src/utils/artifacts.ts",
       "status": "原版保留；部分实测",
       "difference": "HTML/React/Mermaid/SVG/Markdown真实浏览器运行；Office转换后预览尚未端到端验证"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/routes/files/files.js",
+      "sha256": "39e115dd8e954ddfbae24fe92a78cbd50cd258f34b7cfdeb954998514214e17b",
+      "symbols": "GET /download/:userId/:file_id / getDownloadFileMetadata allowlist",
+      "python_lsm": "webui/attachments.py:download_react_file",
+      "status": "完成（本地文件下载路径；共享callback仍部分）",
+      "difference": "源格式兼容的用户路径/文件ID双参数下载、受信任owner校验、白名单X-File-Metadata及原件二进制已实测；原版其它存储策略/异步Office转换不在此次实现范围。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/data-service.ts",
+      "sha256": "0e43b4d25765bc3d0122f59e73884f53d184977136beda2e0ea37b65a89f059c",
+      "symbols": "getFileDownload(userId, file_id): blob URL + metadata cache",
+      "python_lsm": "webui/attachments.py; original retained React useArtifactDownload",
+      "status": "完成（本地文件原件路径实测）",
+      "difference": "Chromium从原有tool attachment卡片读取真实SQLite DOCX原件，Blob下载完全保真；模型产生真实Office预览的转换和工具附件事件仍由共享协议PR负责。"
     }
   ],
   "runtime_dependency_lock": {
