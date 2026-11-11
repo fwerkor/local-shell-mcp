@@ -58,6 +58,7 @@ async def run_agent_loop(
     dispatch: Callable[[list[ModelToolCall], AgentLoopState], Awaitable[ToolBatchOutput]],
     on_text: Callable[[str], Awaitable[None]],
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
+    before_model: Callable[[AgentLoopState], Awaitable[None]] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -87,6 +88,8 @@ async def run_agent_loop(
             continue
         if state.step >= state.context.recursion_limit:
             raise ValueError("Recursion limit reached without hitting a stop condition")
+        if before_model is not None:
+            await before_model(state)
         context = state.context
         state.step += 1
         state.model_turn += 1

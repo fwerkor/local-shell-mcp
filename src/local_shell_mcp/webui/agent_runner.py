@@ -34,6 +34,16 @@ from .handoff import (
     is_transfer_tool,
     receive_handoff,
 )
+from .memory import (
+    MEMORY_TOOL_USAGE_GUARD,
+    MemoryRepository,
+    agent_partition,
+    execute_memory_tool,
+    format_memory_context,
+    memory_config,
+    memory_enabled,
+    tool_definitions,
+)
 from .providers import ModelToolCall, provider_config, selected_provider
 from .subagents import build_subagent_configs, invoke_subagent, subagent_tools
 
@@ -62,10 +72,28 @@ class AgentRunner:
         self.cache = {}
         self.configs = {}
         self.route = HandoffRouting((agent or {}).get("id") or "default")
+        self.memory_artifacts: dict[str, dict] = {}
+        self._last_compaction_attempt_size = -1
+        self._summary_failures = 0
 
     def _check_grant(self):
         if self.grant_expires is not None and self.grant_expires <= time.time():
             raise RuntimeSafetyError("Authentication grant expired")
+
+    def _memory_context(self, agent: dict | None) -> str:
+        from .storage import WorkspaceRepository
+
+        settings = WorkspaceRepository(self.database)
+        if not memory_enabled(settings, self.owner, tools=True):
+            return ''
+        if not (agent or {}).get('tools') or 'memory' not in agent['tools']:
+            return ''
+        has_tools = (agent or {}).get('tools') and 'memory' in agent['tools'] and memory_enabled(settings, self.owner, tools=True)
+        formatted = MemoryRepository(self.database).formatted(self.owner, agent_partition(agent))
+        if formatted.get('readFailed'):
+            return ''
+        context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
+        return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
@@ -83,6 +111,11 @@ class AgentRunner:
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
                       if unrestricted or tool["function"]["name"] in selected]
+        from .storage import WorkspaceRepository
+        settings = WorkspaceRepository(self.database)
+        if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
+            config = memory_config(settings, self.owner) or {}
+            tools += tool_definitions(config.get('validKeys'))
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
@@ -162,6 +195,7 @@ class AgentRunner:
                 "type": "tool_call", "tool_call": {
                     "id": call.call_id, "name": call.name, "args": call.arguments,
                     "type": "tool_call", "output": preview, "progress": 1,
+                    **({'artifact': self.memory_artifacts[call.call_id]} if call.call_id in self.memory_artifacts else {}),
                 },
             }},
         })
@@ -173,6 +207,17 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name in {'set_memory', 'delete_memory'}:
+            from .storage import WorkspaceRepository
+            settings = WorkspaceRepository(self.database)
+            if not memory_enabled(settings, self.owner, tools=True):
+                raise RuntimeSafetyError('Memory tools are disabled')
+            result, artifact = execute_memory_tool(MemoryRepository(self.database), self.owner,
+                state.context.agent or {}, call.name, call.arguments,
+                memory_config(settings, self.owner) or {})
+            if artifact is not None:
+                self.memory_artifacts[call.call_id] = artifact
+            return result
         if call.name == "subagent":
             return await invoke_subagent(
                 call, self.configs[(state.context.agent or {}).get("id") or "default"],
@@ -299,13 +344,154 @@ class AgentRunner:
         instructions = target.get("instructions") or ""
         if received and received.get("instructions"):
             instructions += "\n\n" + received["instructions"]
+        memory_text = self._memory_context(target)
+        if memory_text:
+            instructions += ('\n\n' if instructions else '') + memory_text
         if instructions:
             history.insert(0, {"role": "system", "content": instructions})
         return ToolBatchOutput(messages, next_context=self._context(target), replace_messages=history)
 
+    async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
+                                 prompt=None, update_prompt=None, head_count=0):
+        """Request the original checkpoint prompt from the selected model.
+
+        A failed/partial summary is never written, and never makes the old
+        context unreachable. The live model receives the same intact history.
+        """
+        from .compaction import (
+            DEFAULT_SUMMARIZATION_PROMPT,
+            DEFAULT_UPDATE_SUMMARIZATION_PROMPT,
+            build_summarization_instruction,
+            build_summary_carrier_text,
+        )
+        from .tokenizer import count_tokens
+
+        prior = ''
+        for item in reversed(messages):
+            text = item.get('content')
+            if item.get('role') == 'system' and isinstance(text, str) and text.startswith('<summary>\n'):
+                prior = text[len('<summary>\n'):].split('\n</summary>', 1)[0]
+                break
+        effective = build_summarization_instruction(
+            prompt or DEFAULT_SUMMARIZATION_PROMPT,
+            update_prompt or DEFAULT_UPDATE_SUMMARIZATION_PROMPT,
+            prior or None,
+        )
+        instruction = {'role': 'user', 'content': effective}
+        summary_messages = [*messages, instruction]
+        chunks = []
+        limit = max(128, min(int(max_tokens), 16384))
+        async for value in self.stream_text(self.initial_profile or
+                self._context(self.root_agent).profile, summary_messages, max_tokens=limit):
+            if isinstance(value, str):
+                chunks.append(value)
+            else:
+                raise ValueError('Summary provider returned a tool call instead of text')
+        summary = ''.join(chunks).strip()
+        if not summary:
+            raise ValueError('Summarization produced empty output')
+        count = count_tokens(build_summary_carrier_text(summary), exact=False)
+        self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
+                                 boundary=head_count, manual=manual)
+        if not self.namespace:
+            import secrets
+            identity = 'summary_' + secrets.token_hex(8)
+            self.store.append(self.owner, self.generation.run_id, {
+                'event': 'on_run_step_completed', 'data': {'result': {
+                    'id': identity, 'type': 'summary', 'summary': {
+                        'type': 'summary', 'content': [{'type': 'text', 'text': summary}],
+                        'boundary': {'messageIndex': head_count}, 'tokenCount': count,
+                        **({'initiatedBy': 'user'} if manual else {}),
+                    }},},
+            })
+        return summary
+
+    async def _before_model(self, state):
+        """SDK-style recency + trigger, using the shared SQLite checkpoint."""
+        if self.namespace:
+            return
+        from .compaction import build_summary_carrier_text
+        from .context_budget import (
+            calculate_budget,
+            should_trigger_summarization,
+            split_recent_turns,
+        )
+        from .storage import WorkspaceRepository
+        settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+        agent_settings = settings.get('agents') or {}
+        params = state.context.parameters or {}
+        max_raw = params.get('max_context_tokens') or params.get('maxContextTokens') or agent_settings.get('maxContextTokens')
+        if not isinstance(max_raw, (int, float)) or isinstance(max_raw, bool) or not 0 < max_raw <= 2000000:
+            return
+        config = settings.get('summarization') or {}
+        if isinstance(config, dict) and config.get('enabled') is False:
+            return
+        if not isinstance(config, dict):
+            config = {}
+        budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
+                                  reserve_ratio=config.get('reserveRatio', 0.05))
+        if budget.remaining_context_tokens > 0:
+            return
+        if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
+            return
+        system = [message for message in state.messages if message.get('role') == 'system']
+        messages = [message for message in state.messages if message.get('role') != 'system']
+        retain = config.get('retainRecent') or {}
+        head, tail = split_recent_turns(messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'))
+        if not should_trigger_summarization(
+            messages_to_refine_count=len(head), trigger=config.get('trigger'),
+            max_context_tokens=budget.max_context_tokens,
+            pre_prune_context_tokens=budget.max_context_tokens - budget.remaining_context_tokens,
+            remaining_context_tokens=budget.remaining_context_tokens,
+        ):
+            return
+        self._last_compaction_attempt_size = len(state.messages)
+        if budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
+            return
+        try:
+            options = config.get('parameters') or {}
+            summary = await self._summarize_history(
+                [*system, *head], head_count=len(head),
+                max_tokens=options.get('maxSummaryTokens', 2048),
+                prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'))
+            # Keep stable instructions and current summary, then the exact
+            # retained recent turns. Original messages stay in SQLite.
+            plain_system = [message for message in system if not (
+                isinstance(message.get('content'), str)
+                and message['content'].startswith('<summary>\n'))]
+            state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
+            self._summary_failures = 0
+            await self._save(state, [])
+        except Exception:
+            self._summary_failures += 1
+            # The source leaves the state intact on summary failure; never
+            # substitute an empty checkpoint or truncate a tool result.
+            return
+
+    async def _manual_compact(self, history):
+        from .storage import WorkspaceRepository
+        settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+        config = settings.get('summarization') or {}
+        if isinstance(config, dict) and config.get('enabled') is False:
+            raise ValueError('Compaction is disabled for this deployment')
+        config = config if isinstance(config, dict) else {}
+        non_system = [message for message in history if message.get('role') != 'system']
+        if not non_system:
+            raise ValueError('Nothing to compact')
+        await self._summarize_history(history, manual=True, head_count=len(non_system),
+            max_tokens=(config.get('parameters') or {}).get('maxSummaryTokens', 2048),
+            prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'))
+        return history
+
     async def run(self, history, *, recursion_limit=None):
+        if not self.namespace and self.store.manual_compaction(self.owner, self.generation.run_id):
+            return await self._manual_compact(history)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
+        if not self.namespace:
+            memory_text = self._memory_context(self.root_agent)
+            if memory_text:
+                history = [{'role': 'system', 'content': memory_text}, *history]
         state = AgentLoopState(context, history)
         if restored:
             self.active_config = restored["config"]
@@ -355,7 +541,8 @@ class AgentRunner:
             await self.on_text(text)
 
         result = await run_agent_loop(state, stream_tools=self.stream_tools, stream_text=self.stream_text,
-                                      dispatch=self._dispatch, on_text=emit, save_state=self._save)
+                                      dispatch=self._dispatch, on_text=emit, save_state=self._save,
+                                      before_model=self._before_model)
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
                                                review["actionId"], result, self.partial_text)
