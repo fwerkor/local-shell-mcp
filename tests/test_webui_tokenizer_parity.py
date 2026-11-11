@@ -6,7 +6,7 @@ import pytest
 
 from local_shell_mcp.webui.tokenizer import count_tokens
 
-VECTORS = json.loads((Path(__file__).parent / 'fixtures/librechat/tokenizer_vectors.json').read_text())['vectors']
+VECTORS = json.loads((Path(__file__).parent / 'fixtures/librechat/tokenizer_vectors.json').read_text(encoding='utf-8'))['vectors']
 
 
 @pytest.mark.parametrize('index', range(len(VECTORS)))

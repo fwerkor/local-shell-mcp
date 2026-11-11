@@ -47,7 +47,7 @@ def _apply(case):
 
 @pytest.mark.parametrize('index', range(2079))
 def test_upstream_fixed_oracle(index):
-    cases = json.loads((FIX / 'compaction_cases.json').read_text())
-    reference = json.loads((FIX / 'compaction_vectors.json').read_text())
+    cases = json.loads((FIX / 'compaction_cases.json').read_text(encoding='utf-8'))
+    reference = json.loads((FIX / 'compaction_vectors.json').read_text(encoding='utf-8'))
     actual = _apply(cases[index])
     assert actual == reference[index], f'case {index}: {cases[index]}'
