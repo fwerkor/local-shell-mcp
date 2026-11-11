@@ -257,3 +257,41 @@ async def test_uncertain_intent_never_guesses_an_id_or_starts_a_job(bound):
     assert rows()[0]["native_id"] is None
     assert rows()[0]["last_error"] == "native ID not yet confirmed"
     assert rows()[0]["state"] == "cancel_pending"
+
+@pytest.mark.asyncio
+async def test_revocation_racing_with_native_start_recovers_unreturned_worker_id(bound, monkeypatch):
+    """A creation RPC may have executed when its caller is cancelled."""
+    import asyncio
+
+    repo, (cid, other), _ = bound
+    created = asyncio.Event()
+    native = {}
+    cancelled = []
+
+    async def worker(_settings, machine, tool, arguments, **_kwargs):
+        if tool == "job_start":
+            native[(machine, arguments["idempotency_key"])] = "worker-confirmed-native-id"
+            created.set()
+            await asyncio.sleep(0.15)
+            raise ConnectionError("Worker response lost after native commit")
+        if tool == "job_lookup_idempotency":
+            return tools._ok({"job_id": native.get((machine, arguments["idempotency_key"]))})
+        if tool == "job_stop":
+            cancelled.append((machine, arguments["job_id"]))
+            return tools._ok({"job": {"job_id": arguments["job_id"], "status": "stopped"}, "killed": True})
+        raise AssertionError(tool)
+
+    monkeypatch.setattr(tools, "_remote_call", worker)
+    started = asyncio.create_task(call(cid, "delayed-worker", "job_start",
+                                       {"machine": "worker1", "command": "sleep 20"}))
+    await asyncio.wait_for(created.wait(), timeout=5)
+    assert rows()[0]["state"] == "reserved"
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid,
+                      {"local": "write", "worker1": "none", "worker2": "write"})
+    assert durable.mark_revoked("local") == 1
+    with pytest.raises(PermissionError):
+        await asyncio.wait_for(started, timeout=5)
+    assert await durable.sweep() == 1
+    assert rows()[0]["state"] == "stopped"
+    assert cancelled == [("worker1", "worker-confirmed-native-id")]
+    assert (repo.conversation("local", other)) is not None
