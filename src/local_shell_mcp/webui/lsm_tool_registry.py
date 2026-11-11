@@ -298,10 +298,8 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     except PermissionError:
         audit("webui_agent_lsm_tool_revoked", owner=owner, conversation_id=conversation_id,
               tool=tool.name, machines=_targets(tool, arguments), ok=False)
-        if intent is not None:
-            # A native protected start may have settled during cancellation.
-            # The persisted intent, not a guessed ID, drives compensation.
-            await durable_tasks.sweep()
+        # Durable reconcilers run independently. Do not stall the provider
+        # response on an offline Worker's cancellation timeout.
         raise
 
 

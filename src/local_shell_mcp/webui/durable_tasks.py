@@ -23,9 +23,6 @@ _STARTS = frozenset({"job_start", "shell_start", "job_retry", "remote_transfer"}
 _TRACKED = _STARTS | {"run_shell", "run_python"}
 _CONTROL = {"job_stop": ("job", "job_id"), "job_retry": ("job", "job_id"),
             "shell_stop": ("shell", "session_id"), "shell_send": ("shell", "session_id")}
-_READ = {"job_get": ("job", "job_id"), "job_tail": ("job", "job_id"),
-         "shell_read": ("shell", "session_id")}
-_ACTIVE = ("reserved", "active", "cancel_pending", "unknown")
 _POLL = 2.0
 
 
@@ -341,45 +338,53 @@ async def _stop(row: Any) -> bool:
     return False
 
 
+async def _reconcile_one(row: dict) -> int:
+    if row["state"] != "cancel_pending" and not _revoked(row):
+        return 0
+    try:
+        native_id = row["native_id"] or await _lookup(row)
+        if native_id:
+            with _database().connect() as db:
+                try:
+                    db.execute("UPDATE agent_durable_tasks SET native_id=?,state='cancel_pending',updated_at=? "
+                               "WHERE id=? AND state IN ('reserved','active','cancel_pending','unknown')",
+                               (native_id, _stamp(), row["id"]))
+                except Exception:
+                    log.warning("Native ID ownership conflict for durable Agent task %s", row["id"])
+                    return 0
+            row["native_id"] = native_id
+            if await _stop(row):
+                with _database().connect() as db:
+                    db.execute("UPDATE agent_durable_tasks SET state='stopped',updated_at=? WHERE id=? "
+                               "AND state='cancel_pending'", (_stamp(), row["id"]))
+                audit("agent_durable_cancel", owner=row["owner"], conversation_id=row["conversation_id"],
+                      tool=row["tool"], machine=row["machine"], native_id=native_id, ok=True)
+                return 1
+        # No identity means no safe cancellation target; retain intent for reconciliation.
+        error = "native ID not yet confirmed" if not native_id else "native cancellation not confirmed"
+    except Exception as exc:
+        error = type(exc).__name__
+    with _database().connect() as db:
+        db.execute("UPDATE agent_durable_tasks SET state='cancel_pending',last_error=?,"
+                   "next_attempt_at=?,updated_at=? WHERE id=? AND state!='stopped'",
+                   (error, _stamp() + 5_000_000, _stamp(), row["id"]))
+    return 0
+
+
 async def sweep() -> int:
-    """Idempotent reconnect/restart compensation for revoked native tasks."""
+    """Bounded-concurrency native cancellation across all pending machines."""
     with _database().connect() as db:
         rows = [dict(row) for row in db.execute(
             "SELECT * FROM agent_durable_tasks WHERE state IN ('reserved','active','cancel_pending','unknown') "
-            "AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY created_at LIMIT 200", (_stamp(),))]
-    processed = 0
-    for row in rows:
-        if row["state"] != "cancel_pending" and not _revoked(row):
-            continue
-        try:
-            native_id = row["native_id"] or await _lookup(row)
-            if native_id:
-                with _database().connect() as db:
-                    try:
-                        db.execute("UPDATE agent_durable_tasks SET native_id=?,state='cancel_pending',updated_at=? "
-                                   "WHERE id=? AND state IN ('reserved','active','cancel_pending','unknown')",
-                                   (native_id, _stamp(), row["id"]))
-                    except Exception:
-                        log.warning("Native ID ownership conflict for durable Agent task %s", row["id"])
-                        continue
-                row["native_id"] = native_id
-                if await _stop(row):
-                    with _database().connect() as db:
-                        db.execute("UPDATE agent_durable_tasks SET state='stopped',updated_at=? WHERE id=? "
-                                   "AND state='cancel_pending'", (_stamp(), row["id"]))
-                    audit("agent_durable_cancel", owner=row["owner"], conversation_id=row["conversation_id"],
-                          tool=row["tool"], machine=row["machine"], native_id=native_id, ok=True)
-                    processed += 1
-                    continue
-            # No identity means no safe cancellation target; retain intent for reconciliation.
-            error = "native ID not yet confirmed" if not native_id else "native cancellation not confirmed"
-        except Exception as exc:
-            error = type(exc).__name__
-        with _database().connect() as db:
-            db.execute("UPDATE agent_durable_tasks SET state='cancel_pending',last_error=?,"
-                       "next_attempt_at=?,updated_at=? WHERE id=? AND state!='stopped'",
-                       (error, _stamp() + 5_000_000, _stamp(), row["id"]))
-    return processed
+            "AND (next_attempt_at IS NULL OR next_attempt_at<=?) "
+            "ORDER BY CASE WHEN state='cancel_pending' THEN 0 ELSE 1 END, created_at", (_stamp(),))]
+    semaphore = asyncio.Semaphore(8)
+
+    async def limited(row: dict) -> int:
+        async with semaphore:
+            return await _reconcile_one(row)
+
+    return sum(await asyncio.gather(*(limited(row) for row in rows)))
 
 
 async def serve() -> None:

@@ -3856,8 +3856,9 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
             )
         try:
             if persist_on_timeout:
+                kwargs = {"idempotency_key": idempotency_key} if idempotency_key else {}
                 return _ok(await run_job_with_timeout(command, cwd, timeout_s, max_output_bytes,
-                                                      idempotency_key=idempotency_key))
+                                                      **kwargs))
             return _ok(
                 (await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump()
             )
@@ -3887,7 +3888,9 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
                 execution_timeout_s=public_run_shell_timeout(timeout_s) + (30 if persist_on_timeout else 0),
             )
         if persist_on_timeout:
-            return await _tool_call(_run_python, code, cwd, timeout_s, True, idempotency_key)
+            if idempotency_key:
+                return await _tool_call(_run_python, code, cwd, timeout_s, True, idempotency_key)
+            return await _tool_call(_run_python, code, cwd, timeout_s, True)
         return await _tool_call(_run_python, code, cwd, timeout_s)
 
 

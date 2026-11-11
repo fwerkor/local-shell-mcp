@@ -355,7 +355,7 @@ async def abort_generation(request: Request):
         raise HTTPException(409, detail="Generation identity mismatch")
     if generation.status not in {"running", "requires_action"}:
         raise HTTPException(409, detail="Generation is not active")
-    from .durable_tasks import cancel_run, sweep
+    from .durable_tasks import cancel_run
 
     cancel_run(owner, generation.run_id)
     task = _TASKS.get(generation.run_id)
@@ -363,7 +363,6 @@ async def abort_generation(request: Request):
         task.cancel()
     else:
         store.finish(owner, generation.run_id, status="aborted")
-    await sweep()
     return JSONResponse({"success": True, "generationProtocolVersion": protocol},
                         headers=_generator_headers(protocol))
 

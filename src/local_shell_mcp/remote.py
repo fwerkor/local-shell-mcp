@@ -2821,7 +2821,8 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "run_shell_persist_tool":
         return await run_job_with_timeout(
             args["command"], args.get("cwd", "."), args.get("timeout_s"),
-            args.get("max_output_bytes"), idempotency_key=args.get("idempotency_key"),
+            args.get("max_output_bytes"),
+            **({"idempotency_key": args["idempotency_key"]} if args.get("idempotency_key") else {}),
         )
     if tool == "run_shell_tool":
         if args.get("persist_on_timeout"):
@@ -2836,8 +2837,10 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         ).model_dump()
 
     if tool == "run_python_persist_tool":
-        return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60), True,
-                                 args.get("idempotency_key"))
+        arguments = (args["code"], args.get("cwd", "."), args.get("timeout_s", 60), True)
+        if args.get("idempotency_key"):
+            return await _run_python(*arguments, args["idempotency_key"])
+        return await _run_python(*arguments)
     if tool == "run_python_tool":
         if args.get("persist_on_timeout"):
             raise ValueError("persistent Python calls require run_python_persist_tool")
