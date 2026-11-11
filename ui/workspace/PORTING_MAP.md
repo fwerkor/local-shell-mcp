@@ -262,3 +262,57 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## Attachment lifecycle, reference ownership and resource processing (Python/SQLite)
+
+Reference revisions: LibreChat `e8f3be08623663d4ad7f7241e693c94469b63bb0`
+(`api/server/routes/files/files.js`, `api/server/services/Files/process.js`,
+`packages/api/src/files/deletion.ts`, `api/app/clients/prompts/formatMessages.js`),
+and `@librechat/agents@4.0.1` (`c4ffb9b1b78421bf63eba3e56993017f922387f3`).
+
+| Original behavior / API | Python port | Status and intentional differences |
+| --- | --- | --- |
+| `POST /api/files`, `POST /api/files/images`, native Controller upload | `webui/attachments.py:upload_react_file`, `publish_attachment`, `upload_attachment` | Owner-scoped Controller-local storage; `O_EXCL`, inode/size/SHA fingerprint, file and directory sync, SQLite upload intent; no external staging bridge |
+| `GET /api/files`, `GET /api/files/agent/:agent_id`, download | `webui/attachments.py:list_react_files`, `agent_files`, `download_react_file` | Authenticated owner-scoped DTOs; download bytes remain private; paths provided to the *model* only through authorized context/history |
+| `DELETE /api/files`, `buildDeleteFilesResponse`, `partitionAgentResourceFiles` | `webui/attachments.py:delete_react_files`, `webui/file_deletion.py` | Response and partition order ported; source fixture executes Node for differential parity; no Mongo transaction or Node runtime |
+| `deleteAgentResourceFiles`, last-owner reference, global owner deletion | `AttachmentDeletionStore._prepare`, `_finish`, `_remove_references` | **Stronger local guarantee**: `BEGIN IMMEDIATE` covers the final reference check, unlink, filesystem isolation, metadata and all-Agent reference cleanup; other Agent writers share SQLite writer serialization |
+| Native file and resource binding | `AgentRepository.add_resource_file(...,db=db)` | Binding and physical metadata publish atomically in one SQLite transaction |
+| `processAgentFileUpload` context extraction | `extract_context_text`, `agent_context_messages` | UTF-8 text, optional PDF text and DOCX extraction, 128 KiB budget; extracted text is injected as untrusted user-level source material, not privileged instructions |
+| `processAgentFileUpload` OCR, configured RAG, `file_search`, `execute_code`, `image_edit` | N/A | **Not ported**. Explicit 501 for unsupported permanent resource uploads. Native file tools remain LSM's existing authorized tool registry; raw upload is **not** represented as OCR, vector embedding or code environment provisioning |
+| Provider-native image/audio/video handling | Existing provider and generation components | Not complete: byte upload and Controller path are available, but provider media transformations, speech-to-text and image embeddings are not claimed |
+
+**Deletion and crash ordering:** persist `attachment_deletions` (`prepared`) → re-read
+current metadata and Agent references under SQLite `BEGIN IMMEDIATE` → rename blob
+to a same-directory quarantine and `fsync` its directory → delete metadata,
+clean Agent references and mark intent `committed` in the *same* SQLite commit →
+delete quarantine and release intent. A process-wide RLock is insufficient: the
+implementation uses the existing cross-process `.local-shell-mcp/locks` flock /
+Windows file lock plus SQLite's single writer transaction. Interrupted precommit
+operations restore bytes using atomic hardlink-with-EXCL (no overwrite of an
+external reconstruction). Postcommit quarantine is removed. Collision or
+missing evidence retains intent and bytes for inspection. Competing writes may
+bind another Agent *between* prepared and final checks; the final check detects
+that and commits only a detach. This is verified with real spawned processes.
+
+**Upload ordering:** persist `attachment_uploads` intent → exclusive creation,
+record inode and fsync parent → stream, flush and fsync bytes → persist hash and
+size → extract optional text → commit attachment row, resource association and
+intent removal atomically. Lost commit acknowledgement is handled by SQLite
+readback: published bytes must not be deleted. Recovery waits one hour to avoid
+collecting a concurrently active upload, and cleans only provably uncommitted
+files that still match inode, size and SHA-256. Unknown identity, external
+replacement or inaccessible DB retains the intent and file. State and content
+stay under the same `.local-shell-mcp/` root. Existing records are not migrated
+by destructive deletion.
+
+**Validation:** Python route/upload/delete, restart, fault injection (including
+uncertain postcommit acknowledgement and external inode reconstruction),
+cross-process competing reference writers/deleters, and Node fixture differential.
+The original React UI components and preexisting LSM file execution tools are
+unchanged; no duplicate file execution implementation is introduced.
+
+**Remaining parity blockers:** full configured OCR (incl. scanned PDFs), RAG
+extraction/chunking/vector storage and cleanup, execute_code/image_edit
+deployment and secondary-storage deletion, provider-native image/audio payload
+conversion, all project-specific retention semantics and true remote-machine
+resource provisioning. These are not silently downgraded to raw upload.
