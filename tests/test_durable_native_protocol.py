@@ -19,6 +19,17 @@ def native_state(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
+def test_concurrent_python_script_replay_is_atomic(native_state):
+    from concurrent.futures import ThreadPoolExecutor
+
+    content = "print('ready')\n" * 2000
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        paths = list(pool.map(lambda _: jobs.write_durable_python_script(content, "parallel-key"), range(24)))
+    assert len(set(paths)) == 1
+    assert paths[0].read_text() == content
+    assert not list(paths[0].parent.glob(".staging-*.py"))
+
+
 def test_python_scripts_use_deterministic_immutable_native_paths(native_state):
     first = jobs.write_durable_python_script("print('ok')", "durable-key")
     assert first.exists()

@@ -87,16 +87,24 @@ def write_durable_python_script(code: str, idempotency_key: str | None = None) -
     """Store code beside tracked jobs for later job_retry calls."""
     if idempotency_key is None:
         script = _job_runtime_dir() / "scripts" / f"script-{uuid.uuid4().hex}.py"
-    else:
-        import hashlib
+        _private_write_text(script, code)
+        return script
 
-        digest = hashlib.sha256(idempotency_key.encode()).hexdigest()
-        script = _job_runtime_dir() / "scripts" / f"agent-script-{digest}.py"
-        if script.exists():
+    digest = hashlib.sha256(idempotency_key.encode()).hexdigest()
+    directory = _job_runtime_dir() / "scripts"
+    script = directory / f"agent-script-{digest}.py"
+    # Publish fully-written scripts atomically. Replaying the same key in two
+    # concurrent Agent invocations must not truncate a script being executed.
+    staging = directory / f".staging-{uuid.uuid4().hex}.py"
+    _private_write_text(staging, code)
+    try:
+        try:
+            os.link(staging, script)
+        except FileExistsError as exc:
             if script.read_text(encoding="utf-8") != code:
-                raise ValueError("idempotency_key was already used for different Python code")
-            return script
-    _private_write_text(script, code)
+                raise ValueError("idempotency_key was already used for different Python code") from exc
+    finally:
+        staging.unlink(missing_ok=True)
     return script
 
 
