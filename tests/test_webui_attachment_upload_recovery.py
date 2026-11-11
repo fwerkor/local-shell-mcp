@@ -87,8 +87,8 @@ def _make_pending(database, ident="file-stale", payload=b"orphan", *, signature=
         db.execute("INSERT INTO attachment_uploads(file_id,owner,path,st_dev,st_ino,content_sha256,content_size,created_at) "
                    "VALUES(?,?,?,?,?,?,?,0)", (
                        ident, "alice", str(path),
-                       stat.st_dev if signature else None,
-                       stat.st_ino if signature else None,
+                       str(stat.st_dev) if signature else None,
+                       str(stat.st_ino) if signature else None,
                        hashlib.sha256(payload).hexdigest() if signature else None,
                        stat.st_size if signature else None,
                    ))
@@ -322,3 +322,18 @@ const samples=JSON.parse(fs.readFileSync(0,'utf8'));
         assert actual_unlink == output["unlinked"]
         assert output["result"]["destroyedFileIds"] == [file["id"] for file in actual_destroy]
         assert output["result"]["unlinkedFileIds"] == [file["file_id"] for file in actual_unlink]
+
+
+def test_windows_unsigned_ntfs_file_identity_is_exact_sqlite_text(uploads):
+    """Windows NTFS st_ino may exceed SQLite's signed 64-bit INTEGER limit."""
+    path = _make_pending(uploads, "file-ntfs")
+    huge = str((1 << 64) - 1)
+    with uploads.connect() as db:
+        db.execute("UPDATE attachment_uploads SET st_ino=?,st_dev=? WHERE file_id=?",
+                   (huge, huge, "file-ntfs"))
+        row = db.execute("SELECT st_ino,st_dev,typeof(st_ino),typeof(st_dev) "
+                         "FROM attachment_uploads WHERE file_id=?", ("file-ntfs",)).fetchone()
+        assert tuple(row) == (huge, huge, "text", "text")
+    # A fabricated Windows identity must never authorize cleanup of another inode.
+    assert attachments.recover_attachment_uploads(uploads)["retainedFileIds"] == ["file-ntfs"]
+    assert path.exists()

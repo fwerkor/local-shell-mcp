@@ -157,8 +157,8 @@ CREATE TABLE IF NOT EXISTS attachment_uploads (
     file_id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
     path TEXT NOT NULL,
-    st_dev INTEGER,
-    st_ino INTEGER,
+    st_dev TEXT,
+    st_ino TEXT,
     content_sha256 TEXT,
     content_size INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())

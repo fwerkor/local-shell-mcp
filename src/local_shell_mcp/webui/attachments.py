@@ -174,7 +174,10 @@ async def publish_attachment(owner, name, content_type, chunks, state_dir, *, ex
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
         descriptor = os.open(target, flags, 0o600)
         stats = os.fstat(descriptor)
-        file_signature = stats.st_dev, stats.st_ino
+        # NTFS File IDs can be unsigned 64-bit (or larger). SQLite INTEGER
+        # accepts only signed 64-bit; storing canonical decimal TEXT also
+        # protects against precision loss from INTEGER affinity.
+        file_signature = str(stats.st_dev), str(stats.st_ino)
         with _repo().database.connect() as db:
             db.execute("UPDATE attachment_uploads SET st_dev=?,st_ino=? WHERE file_id=? AND owner=?",
                        (*file_signature, file_id, owner))
@@ -239,7 +242,7 @@ async def publish_attachment(owner, name, content_type, chunks, state_dir, *, ex
                     try:
                         stats = target.lstat()
                         same_file = file_signature is not None and (
-                            stats.st_dev, stats.st_ino) == file_signature and not target.is_symlink()
+                            str(stats.st_dev), str(stats.st_ino)) == file_signature and not target.is_symlink()
                     except FileNotFoundError:
                         pass
                     if same_file:
@@ -422,13 +425,15 @@ def recover_attachment_uploads(database, *, grace_seconds=3600):
                 stats = path.stat()
                 if (row["st_dev"] is None or row["content_sha256"] is None or
                     row["content_size"] != stats.st_size or
-                    (stats.st_dev, stats.st_ino) != (row["st_dev"], row["st_ino"])):
+                    (str(stats.st_dev), str(stats.st_ino)) !=
+                    (str(row["st_dev"]), str(row["st_ino"]))):
                     raise OSError("Upload file fingerprint changed or unknown")
                 with path.open("rb") as handle:
                     digest = hashlib.file_digest(handle, "sha256").hexdigest()
                     current = os.fstat(handle.fileno())
                 if digest != row["content_sha256"] or (
-                    current.st_dev, current.st_ino) != (row["st_dev"], row["st_ino"]):
+                    str(current.st_dev), str(current.st_ino)) != (
+                    str(row["st_dev"]), str(row["st_ino"])):
                     raise OSError("Upload content changed during recovery")
                 path.unlink()
                 AttachmentDeletionStore._sync_directory(path.parent)
