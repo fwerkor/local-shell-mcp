@@ -296,10 +296,10 @@
       "repository": "agents",
       "path": "src/tools/SubagentTool.ts",
       "sha256": "b8bb7584c42a92af212b479e753e0f5aeae5c5e9961eb218bf1145a8bf1b5621",
-      "symbols": "buildSubagentToolParams / createSubagentToolDefinition",
-      "python_lsm": "webui/subagents.py; graph_runtime.py; agent_runner.py",
-      "status": "部分（前台/graph团队）",
-      "difference": "前台单代理与team DAG图进入统一StateGraph；entry/result与隔离namespace支持，结果仅返回父节点。后台任务/线程续接需host durable task store，目前显式拒绝。"
+      "symbols": "SubagentToolSchema / run_in_background / subagent_thread_id",
+      "python_lsm": "webui/subagents.py; webui/subagent_task_host.py",
+      "status": "部分",
+      "difference": "Source-gated original schema remains unmodified; host enables real backend, SQLite threads can continue across runs. No alternate tool names."
     },
     {
       "repository": "agents",
@@ -390,6 +390,51 @@
       "python_lsm": "webui/message_reducers.py; tests/fixtures/librechat/graph_runtime_real_reference.cjs",
       "status": "完成（所覆盖消息ID/删除归约契约）",
       "difference": "原@langchain/core真实HumanMessage、AIMessage、ToolMessage、RemoveMessage 11条测试含replace/delete/remove-all/auto-ID；BaseMessage实例序列化与所有非文本消息类型不在此DTO等价边界内。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/types/subagentTasks.ts",
+      "sha256": "3f4fdd4f7b533ada087f171ade46993e35a2c724ec0c124dbbe4a17f6a478aac",
+      "symbols": "SubagentTaskStore / TaskSnapshot / Runtime / claim/control",
+      "python_lsm": "webui/subagent_task_host.py",
+      "status": "部分",
+      "difference": "SQLite owner/root-conversation-scoped task/thread/control store, immutable parent run+agent+tool idempotency, one-shot claim, status, lease and persisted control receipts; SDK has additional transport/wakeup semantics."
+    },
+    {
+      "repository": "agents",
+      "path": "src/tools/subagent/SubagentExecutor.ts",
+      "sha256": "6a0c6214468bcd541e379fa9ac13ffd98fbc71d654a745ce6757f94661afddf5",
+      "symbols": "executeInBackground / executeDetached / child graph factory",
+      "python_lsm": "webui/subagent_task_host.py; webui/subagents.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "Detached child uses same AgentRunner, provider and existing LSM tool executor, host-owned independent generation. Process shutdown/restart, bounded depth and scoped continuation tested; full JS hook/session event delivery is pending."
+    },
+    {
+      "repository": "agents",
+      "path": "src/tools/subagent/InMemorySubagentTaskStore.ts",
+      "sha256": "0f9c3fc943473164a175c5078d23c3dcf7bba676c2f3da179d6d5d9618208664",
+      "symbols": "start / get / list / claim / control / drain / runtime cancellation",
+      "python_lsm": "webui/subagent_task_host.py; tests/fixtures/librechat/subagent_task_real_reference.cjs",
+      "status": "部分",
+      "difference": "Real npm @librechat/agents@4.0.1 store+real LangChain messages differential: duplicate/conflict, queue/withdraw/steer, boundary drain, claim and result. SQLite adds crash leases, startup recovery and run/thread ACL."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/subagentThreads.ts",
+      "sha256": "1b03d7d61ae5696a6a50b2fd27175f8534f432924b133d1708b6078fb2548754",
+      "symbols": "SubagentThreadTaskStore / scope / original parent lineage / continuation",
+      "python_lsm": "webui/subagent_task_host.py; webui/generations.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "SQLite thread transcript (owned by same parent conversation + subagent type), new child generation per lease, nested parent lineage. Cross-replica lease CAS and pending controls; full app-level notifications/wakeup receipts not implemented."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/background.ts",
+      "sha256": "ed8f894225a10c39e3dfb63c31798a6a1deb91c020d5a342f16b69cebc0a7436",
+      "symbols": "registerBackgroundTaskTool / runCheckBackgroundTask / controls",
+      "python_lsm": "webui/subagent_task_host.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "check_background_task name+argument schema, poll/list/cancel/queue/steer/interrupt/cancel_message, durable control invocation fencing and one-time claim; native ordinary tool backgrounding and automatic completion wakeup pending separate integration."
     }
   ],
   "runtime_dependency_lock": {
@@ -425,10 +470,13 @@
     "js_differential_versions": {
       "@langchain/langgraph": "1.4.8",
       "@langchain/langgraph-checkpoint": "1.1.3",
-      "@langchain/core": "1.2.8"
+      "@langchain/core": "1.2.8",
+      "@librechat/agents": "4.0.1"
     },
     "reference_fixture": "tests/fixtures/librechat/graph_runtime_real_vectors.json",
     "http_recovery": "generation_routes.resume_generation + generations.accumulated_text; cooperative shutdown retains running generation; explicit abort remains terminal",
-    "known_gaps": "Detached background child tasks, full JS BaseMessage and callbacks, shared HA process lease"
+    "known_gaps": "Full JS BaseMessage/RunStepState callbacks and host automatic background completion wakeups, cross-controller transport control receipts, asynchronous Approval/Ask User replays, arbitrary JS Hook sessions, ordinary-tool backgrounding.",
+    "reference_fixture_background": "tests/fixtures/librechat/subagent_task_real_reference.cjs",
+    "background_host": "webui/subagent_task_host.py; Owner/child generation + lease CAS, scoped thread continuation and source schema; startup recover_subagent_tasks"
   }
 }

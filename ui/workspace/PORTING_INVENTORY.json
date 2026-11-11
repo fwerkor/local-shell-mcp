@@ -6,7 +6,7 @@
     "LibreChat": 1892,
     "agents": 258
   },
-  "reviewed_mapping_count": 41,
+  "reviewed_mapping_count": 47,
   "modules": [
     {
       "repository": "LibreChat",
@@ -7770,10 +7770,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/background.ts",
       "sha256": "ed8f894225a10c39e3dfb63c31798a6a1deb91c020d5a342f16b69cebc0a7436",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_task_host.py; webui/agent_runner.py",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "check_background_task name+argument schema, poll/list/cancel/queue/steer/interrupt/cancel_message, durable control invocation fencing and one-time claim; native ordinary tool backgrounding and automatic completion wakeup pending separate integration."
     },
     {
       "repository": "LibreChat",
@@ -8796,10 +8796,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/run.ts",
       "sha256": "5e29fb16cad50fe6a770f9ab4fa45af9b492342d8c11d866eaf3c1f4bce6192f",
-      "python_lsm": "webui/delegation.py; generation_routes.py",
-      "status": "未实现",
+      "python_lsm": "webui/subagents.py:build_subagent_configs; graph_runtime.py; agent_runner.py; generation_routes.py",
+      "status": "部分（团队图配置路径）",
       "reviewed_mapping": true,
-      "difference": "delegate_agent/handoff_agent与原版graph/Command/子图不等价"
+      "difference": "从源buildSubagentConfigs解析graph team进StateGraph，复用LSM工具/审批链；prebuiltGraphInputs/原全部createRun callbacks与背景child store尚不等价。"
     },
     {
       "repository": "LibreChat",
@@ -8994,10 +8994,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/subagentThreads.ts",
       "sha256": "1b03d7d61ae5696a6a50b2fd27175f8534f432924b133d1708b6078fb2548754",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_task_host.py; webui/generations.py; webui/agent_runner.py",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "SQLite thread transcript (owned by same parent conversation + subagent type), new child generation per lease, nested parent lineage. Cross-replica lease CAS and pending controls; full app-level notifications/wakeup receipts not implemented."
     },
     {
       "repository": "LibreChat",
@@ -17121,19 +17121,19 @@
       "repository": "agents",
       "path": "src/graphs/Graph.ts",
       "sha256": "6b86604cdc1eb48873217561697f2e31538aea8ade1c8c78f76da6f31c5ceaae",
-      "python_lsm": "webui/agent_runner.py; agent_runtime.py; graph_runtime.py; graph_checkpoint.py",
-      "status": "部分（节点执行与图级checkpoint）",
+      "python_lsm": "webui/agent_runtime.py; agent_runner.py; graph_runtime.py; graph_checkpoint.py",
+      "status": "部分（多节点执行验证）",
       "reviewed_mapping": true,
-      "difference": "标准model/tools节点循环与checkpoint游标已接入；summary节点、完整reducers/actor事件与breaker仍不完整"
+      "difference": "AgentRunner工具循环沿用LSM权限/审计/超时与审批，StateGraph处理节点与superstep、SQLite保存图级及节点级checkpoint。原RunStepState/完整LangChain BaseMessage协议与结构化工具回调仍未完全等价。"
     },
     {
       "repository": "agents",
       "path": "src/graphs/MultiAgentGraph.ts",
       "sha256": "f1f76b86d07833f6635d27eb77d599361c1be7487317ee2cdd54ff5c16e09a55",
-      "python_lsm": "webui/graph_topology.py; graph_runtime.py; graph_checkpoint.py; agent_runner.py",
-      "status": "部分（真实StateGraph / superstep）",
+      "python_lsm": "webui/graph_topology.py; graph_runtime.py; graph_checkpoint.py; agent_runner.py; handoff.py",
+      "status": "部分（真实StateGraph运行时）",
       "reviewed_mapping": true,
-      "difference": "direct/parallel/Command/Send/Barriers + SQLite resumable runs tested; background child host and full source events pending"
+      "difference": "官方Python LangGraph 1.0.10执行多入口、直接/并行、Command/Send及join/barrier；源JS 1.4.8真实消息类/并行轨迹差分一致。后台子线程及全部回调/运行指标尚待移植。"
     },
     {
       "repository": "agents",
@@ -17176,9 +17176,9 @@
       "path": "src/graphs/handoff.ts",
       "sha256": "0c9b395137b86f4fc6e217284445fd821582808b0f42d497017328e75754d173",
       "python_lsm": "webui/handoff.py; graph_runtime.py; agent_runner.py",
-      "status": "部分（Send/Command并行实际执行）",
+      "status": "部分（并行Send已验证）",
       "reviewed_mapping": true,
-      "difference": "路由预算/transition幂等/状态已源码差分验证并接入单目标切换；全图并行调度仍待完成"
+      "difference": "Command.PARENT/Send与并行路由/单目标/独占直接边在原Python LangGraph运行，HandoffRouting/merge reducer源差分已覆盖。后台/线程生命周期仍未完成。"
     },
     {
       "repository": "agents",
@@ -18084,10 +18084,10 @@
       "repository": "agents",
       "path": "src/messages/reducer.ts",
       "sha256": "e76285f2176912d0608ac6a442711e4c8eac0a1571754e5217f9ade7c4f876f8",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/message_reducers.py; tests/fixtures/librechat/graph_runtime_real_reference.cjs",
+      "status": "完成（所覆盖消息ID/删除归约契约）",
+      "reviewed_mapping": true,
+      "difference": "原@langchain/core真实HumanMessage、AIMessage、ToolMessage、RemoveMessage 11条测试含replace/delete/remove-all/auto-ID；BaseMessage实例序列化与所有非文本消息类型不在此DTO等价边界内。"
     },
     {
       "repository": "agents",
@@ -18471,10 +18471,10 @@
       "repository": "agents",
       "path": "src/tools/SubagentTool.ts",
       "sha256": "b8bb7584c42a92af212b479e753e0f5aeae5c5e9961eb218bf1145a8bf1b5621",
-      "python_lsm": "webui/subagents.py; graph_runtime.py; agent_runner.py",
-      "status": "部分（团队前台图）",
+      "python_lsm": "webui/subagents.py; webui/subagent_task_host.py",
+      "status": "部分",
       "reviewed_mapping": true,
-      "difference": "原生subagent schema、可选配置、隔离上下文和共享原生工具执行已接入；graph团队、后台/线程宿主与完整子运行事件仍缺失"
+      "difference": "Source-gated original schema remains unmodified; host enables real backend, SQLite threads can continue across runs. No alternate tool names."
     },
     {
       "repository": "agents",
@@ -18948,10 +18948,10 @@
       "repository": "agents",
       "path": "src/tools/subagent/InMemorySubagentTaskStore.ts",
       "sha256": "0f9c3fc943473164a175c5078d23c3dcf7bba676c2f3da179d6d5d9618208664",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_task_host.py; tests/fixtures/librechat/subagent_task_real_reference.cjs",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Real npm @librechat/agents@4.0.1 store+real LangChain messages differential: duplicate/conflict, queue/withdraw/steer, boundary drain, claim and result. SQLite adds crash leases, startup recovery and run/thread ACL."
     },
     {
       "repository": "agents",
@@ -18966,10 +18966,10 @@
       "repository": "agents",
       "path": "src/tools/subagent/SubagentExecutor.ts",
       "sha256": "6a0c6214468bcd541e379fa9ac13ffd98fbc71d654a745ce6757f94661afddf5",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_task_host.py; webui/subagents.py; webui/agent_runner.py",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Detached child uses same AgentRunner, provider and existing LSM tool executor, host-owned independent generation. Process shutdown/restart, bounded depth and scoped continuation tested; full JS hook/session event delivery is pending."
     },
     {
       "repository": "agents",
@@ -19155,10 +19155,10 @@
       "repository": "agents",
       "path": "src/types/subagentTasks.ts",
       "sha256": "3f4fdd4f7b533ada087f171ade46993e35a2c724ec0c124dbbe4a17f6a478aac",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_task_host.py",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "SQLite owner/root-conversation-scoped task/thread/control store, immutable parent run+agent+tool idempotency, one-shot claim, status, lease and persisted control receipts; SDK has additional transport/wakeup semantics."
     },
     {
       "repository": "agents",

@@ -327,3 +327,29 @@ Restart after a previously consumed Ask User response before the continuation
 has created a checkpoint also needs a durable input replay record. Detached
 background child threads are still explicitly unavailable until the shared
 host task/thread store and message-protocol PRs land.
+
+### 2026-11-12 — 后台 Subagent / 子线程宿主与重启恢复（PR #354 续）
+
+固定参考仍是 LibreChat `e8f3be08` 与原集成 npm `@librechat/agents@4.0.1`
+(`c4ffb9b1`)，**没有**使用上游 bun.lock 的不同 agents 版本。
+关键对应关系：
+
+| 固定原版调用链 | Python/SQLite 一对一执行位置 | 证据与保留限制 |
+|---|---|---|
+| `Graph.ts:subagentTool → SubagentExecutor.executeInBackground` | `subagents.invoke_subagent → SQLiteSubagentTaskHost.start → _ensure_active → AgentRunner.run` | 根父调用 ID、Agent ID、run ID 与可信 conversation 作用域在首次 SQLite `BEGIN IMMEDIATE` 中写入，然后才允许启动后台模型/工具；重试参数不一致拒绝。独立 child Generation 与既有 AgentRunner/StateGraph 共用执行器，**没有实现新的 Graph 或 LSM 工具调度器**。 |
+| `types/subagentTasks.ts` + `InMemorySubagentTaskStore.ts` | `webui/subagent_task_host.py` 与共享 `sqlite_store.py` 中的 task/thread/control/invocation 表 | 完整任务状态、capacity、过期清理、一次性 result claim，`steer/queue/interrupt/cancel_message` 受限 message length、control count 与 SQLite 回执；收敛在工具、preempt、turn 边界，checkpoint 写成功后 ack。真实 npm 4.0.1 类和 `HumanMessage`/`AIMessage` 的差分见 `subagent_task_real_reference.cjs`。 |
+| `subagentThreads.ts:SubagentThreadTaskStore` | `SQLiteSubagentTaskHost.start` 的 owned-thread 查询与 `initial_messages` | 线程属于 `(owner, parent_conversation_id, subagent_type)`，完成后持久化 history，后续 `subagent_thread_id` 创建新的 child generation；父子任务使用相同根 conversation 授权，嵌套 parentRunId 还须由可信 active task lineage 证实。 |
+| `background.ts:registerBackgroundTaskTool / runCheckBackgroundTask` | `agent_runner._context/_invoke` → `check_background_task_tools / host.check` | 与原版相同的 `check_background_task` 工具名、枚举、参数长度限制，模型不能通过 task id 查看/取消他人 scope；按 `run+agent+tool_call_id` 做不可变 control invocation fence，失败的模糊重放不伪装成已接受。 |
+| 原宿主对任务生命周期的拥有权 | `main.py:lifespan → active_child_generations/recover_subagent_tasks` | Controller 启动时保留可恢复 child generation 的 running 状态；SQLite 租约过期后自动认领，不必等待用户再轮询。每次执行有独立 lease token；持有者续租，失去授权/租约后下一个模型/工具检查拒绝，取消报告与真正任务终态区分。 |
+
+**边界说明：** 后台子任务的模型、工具调用和 checkpoint 持续复用原有
+`AgentRunner`、`OwnedGraphCheckpointer`、`GenerationStore`、`lsm_tool_registry`，
+没有修改 Job/Shell/File 执行实现或机器 `none/read/write` 权限模型。
+权限、已启用工具、有效 grant、scope 和 owner 在线上运行前及各工具调用前重新检查。
+单 Controller 中断与重新启动、嵌套 root→middle→leaf、续线程、取消/远端租约、
+控制回执、线程跨作用域阻断均有实测；原版 JS TaskStore 的真实对象对照纳入源码 CI。
+
+尚需另行完成：原版 background completion wakeup/attachment/普通工具后台化，
+跨 Controller 的外部 event/control routing、所有 Hook 回调和富媒体 RunStepState，
+以及全量自动问答/审批事件的 host actor 恢复。上述不应以当前子任务成功测试冒充
+整个 LibreChat 运行时等价。保持全局 ≥95% 和单模块 ≥90% 的覆盖门槛不变。
