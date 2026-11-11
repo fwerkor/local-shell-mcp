@@ -34,6 +34,7 @@ from .routes import _body, _owner
 log = logging.getLogger(__name__)
 _TASKS: dict[str, asyncio.Task] = {}
 _TASK_GUARD = asyncio.Lock()
+_SHUTTING_DOWN = False
 
 
 def _database():
@@ -151,7 +152,11 @@ async def _run_model(
         })
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text)
     except asyncio.CancelledError:
-        repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
+        # Graceful Controller shutdown must not consume an already-accepted
+        # human action: the next process will re-park its durable resumeClaim
+        # and require fresh authentication before replaying native tools.
+        if not (_SHUTTING_DOWN and repo.resume_claim(owner, generation.run_id)):
+            repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
         raise
     except Exception as exc:
         # Do not put provider tokens, request metadata or secrets in response.
@@ -259,9 +264,18 @@ async def start_generation(request: Request):
                         headers=_generator_headers(protocol))
 
 
-async def _events(owner: str, generation: Generation, after: int = 0) -> AsyncIterator[bytes]:
+async def _events(owner: str, generation: Generation, after: int = 0,
+                  *, resume: bool = False) -> AsyncIterator[bytes]:
     store = _generation_store()
     last = max(0, after)
+    if resume:
+        snapshot, watermark = store.resume_snapshot(owner, generation.run_id)
+        if watermark > last:
+            last = watermark
+        yield ("data: " + json.dumps({
+            "sync": True, "resumeState": snapshot, "pendingEvents": [],
+            "generationProtocolVersion": generation.protocol_version,
+        }, ensure_ascii=False, separators=(",", ":")) + "\n\n").encode()
     last_heartbeat = time.monotonic()
     while True:
         results = store.events(owner, generation.run_id, last)
@@ -297,7 +311,9 @@ async def stream_generation(request: Request):
         after = max(0, int(cursor)) if cursor else 0
     except ValueError as exc:
         raise HTTPException(400, detail="Invalid SSE replay cursor") from exc
-    return StreamingResponse(_events(owner, generation, after), media_type="text/event-stream",
+    return StreamingResponse(_events(owner, generation, after,
+                                     resume=request.query_params.get("resume") == "true"),
+                             media_type="text/event-stream",
                              headers=_generator_headers(request_protocol(request, stored_version=generation.protocol_version)))
 
 
@@ -309,11 +325,15 @@ async def generation_status(request: Request):
         return JSONResponse({"active": False, "generationProtocolVersion": protocol},
                             headers=_generator_headers(protocol))
     active = generation.status in {"running", "requires_action"}
-    pending = _generation_store().pending_action(owner, generation.run_id)
+    store = _generation_store()
+    pending = store.client_pending_action(store.pending_action(owner, generation.run_id))
+    resume_state, _ = store.resume_snapshot(owner, generation.run_id)
     return JSONResponse({
         "active": active,
         "status": generation.status,
         **({"pendingAction": pending} if pending is not None else {}),
+        "resumeState": resume_state,
+        "aggregatedContent": resume_state["aggregatedContent"],
         "streamId": generation.conversation_id,
         "createdAt": generation.generation_created_at,
         "elapsedMs": max(0, int(time.time() * 1000) - generation.generation_created_at),
@@ -382,7 +402,7 @@ async def resume_generation(request: Request):
 
     if not isinstance(action_id, str) or not action_id:
         raise HTTPException(400, detail="Invalid human action id")
-    if generation.status != "requires_action":
+    if generation.status not in {"requires_action", "running"}:
         raise HTTPException(409, detail="No pending human action")
     expected = payload.get("generationCreatedAt")
     if expected is not None and str(generation.generation_created_at) != str(expected):
@@ -397,9 +417,16 @@ async def resume_generation(request: Request):
         for machine, level in machine_policy.items():
             if level in {"read", "write"}:
                 require_machine_scope(scopes, machine, level, expires=expiry)
+        claim = store.resume_claim(owner, generation.run_id)
         pending = store.pending_action(owner, generation.run_id)
+        if claim is not None and claim.get("actionId") == action_id:
+            pending = claim.get("pendingAction")
         if pending is None or pending.get("actionId") != action_id:
             raise HTTPException(409, detail="Stale or mismatched human action")
+        if claim is None and store.action_expired(pending):
+            store.finish(owner, generation.run_id, status="interrupted",
+                         error="Human action expired", expired_action_id=action_id)
+            raise HTTPException(409, detail="No live pending action to resume")
         # Read and validate the provider before mutating SQLite. Failed config
         # cannot consume a one-shot answer and strand the pending generation.
         with _database().connect() as db:
@@ -407,6 +434,13 @@ async def resume_generation(request: Request):
         state = json.loads(row["state"])
         profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
         agent = AgentRepository(_database()).get(owner, row["agent_id"]) if row["agent_id"] else None
+        if row["agent_id"] and agent is None:
+            raise HTTPException(403, detail="The originating Agent is no longer accessible")
+        if payload.get("agent_id") not in (None, row["agent_id"]):
+            raise HTTPException(409, detail="Agent identity mismatch")
+        if (payload.get("model") is not None and state.get("model") and
+            payload["model"] != state["model"]):
+            raise HTTPException(409, detail="Model identity mismatch")
         paused_task = _TASKS.get(generation.run_id)
         if paused_task and not paused_task.done():
             await asyncio.wait_for(asyncio.shield(paused_task), timeout=5)
@@ -419,18 +453,38 @@ async def resume_generation(request: Request):
             decisions = payload.get("decisions")
             if not isinstance(decisions, list):
                 raise HTTPException(400, detail="Tool approval decisions are required")
-            if any(isinstance(decision, dict) and decision.get("decision") in {"approve", "edit"}
-                   for decision in decisions):
-                _check_mcp_access(owner, cid, scopes, execution=True) if any(
-                    item.get("name") == "mcp_tool_call" for item in pending["payload"].get("action_requests", [])
-                ) else None
-            resumed, history, previous_text, approved_batch = store.claim_approval(
-                owner, generation.run_id, action_id, decisions,
-            )
+            if (
+                any(isinstance(decision, dict) and decision.get("decision") in {"approve", "edit"}
+                    for decision in decisions)
+                and any(item.get("name") == "mcp_tool_call" for item in
+                        pending["payload"].get("action_requests", []))
+            ):
+                _check_mcp_access(owner, cid, scopes, execution=True)
+            submission = {"decisions": decisions}
+            if claim is not None:
+                resumed, history, previous_text, approved_batch, resume_namespace = (
+                    store.restart_claimed_resume(owner, generation.run_id, action_id, submission))
+            else:
+                try:
+                    resumed, history, previous_text, approved_batch = store.claim_approval(
+                        owner, generation.run_id, action_id, decisions,
+                    )
+                except KeyError:
+                    resumed, history, previous_text, approved_batch, resume_namespace = (
+                        store.restart_claimed_resume(owner, generation.run_id, action_id, submission))
         else:
-            resumed, history, previous_text = store.answer_question(
-                owner, generation.run_id, action_id, payload,
-            )
+            submission = {key: payload[key] for key in ("answer", "answers") if key in payload}
+            if claim is not None:
+                resumed, history, previous_text, approved_batch, resume_namespace = (
+                    store.restart_claimed_resume(owner, generation.run_id, action_id, submission))
+            else:
+                try:
+                    resumed, history, previous_text = store.answer_question(
+                        owner, generation.run_id, action_id, submission,
+                    )
+                except KeyError:
+                    resumed, history, previous_text, approved_batch, resume_namespace = (
+                        store.restart_claimed_resume(owner, generation.run_id, action_id, submission))
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
     except (ValueError, KeyError) as exc:
@@ -445,18 +499,23 @@ async def resume_generation(request: Request):
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
                       granted_scopes=frozenset(scopes), grant_expires=expiry)
-    return JSONResponse(_generation_body(resumed, status="resumed", resumed=True, protocol_version=protocol),
+    return JSONResponse(_generation_body(resumed, status="resuming", resumed=True, protocol_version=protocol),
                         headers=_generator_headers(protocol))
 
 
 async def shutdown_generations() -> None:
-    async with _TASK_GUARD:
-        tasks = list(_TASKS.values())
-        for task in tasks:
-            task.cancel()
-    if tasks:
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
+    global _SHUTTING_DOWN
+    _SHUTTING_DOWN = True
+    try:
+        async with _TASK_GUARD:
+            tasks = list(_TASKS.values())
+            for task in tasks:
+                task.cancel()
+        if tasks:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
+    finally:
+        _SHUTTING_DOWN = False
 
 
 def generation_routes() -> list[Route]:
