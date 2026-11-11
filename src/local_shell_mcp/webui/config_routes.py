@@ -30,7 +30,7 @@ def _endpoint_models() -> dict[str, list[str]]:
     return available
 
 
-def _endpoint_info() -> dict:
+def _endpoint_info(*, memory_available: bool = False) -> dict:
     configs = _endpoint_models()
     # The Agent backend is available even when the operator has not configured
     # a provider; model generation returns a scoped, actionable config error.
@@ -43,6 +43,7 @@ def _endpoint_info() -> dict:
             "allowedProviders": sorted(configs),
             "maxSubagents": 0,
             "availableTools": [],
+            "capabilities": ["memory"] if memory_available else [],
         },
     }
     for index, name in enumerate(configs, start=1):
@@ -100,6 +101,8 @@ async def startup_config(request: Request):
         _owner(request)
     except HTTPException:
         return JSONResponse(settings)
+    from .memory import memory_enabled
+    has_memory = memory_enabled(_repo(), _owner(request))
     settings.update({
         "interface": {
             "modelSelect": True,
@@ -113,7 +116,7 @@ async def startup_config(request: Request):
             "webSearch": False,
             "fileSearch": False,
             "contextUsage": False,
-            "memories": False,
+            "memories": has_memory,
             "marketplace": {"use": False},
             "peoplePicker": {"users": False, "groups": False, "roles": False},
             "remoteAgents": {"use": False},
@@ -125,8 +128,10 @@ async def startup_config(request: Request):
 
 
 async def endpoint_configs(request: Request):
-    _owner(request)
-    return JSONResponse(_endpoint_info())
+    from .memory import memory_enabled
+
+    owner = _owner(request)
+    return JSONResponse(_endpoint_info(memory_available=memory_enabled(_repo(), owner, tools=True)))
 
 
 async def models(request: Request):

@@ -40,6 +40,7 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.44.0"]
+webui = ["tiktoken>=0.9,<1"]
 dev = [
   "coverage[toml]>=7.8.0",
   "pytest>=8.2.0",

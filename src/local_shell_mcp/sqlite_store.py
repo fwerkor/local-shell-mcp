@@ -113,6 +113,17 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_web_sessions_expiry ON web_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_web_tickets_expiry ON web_login_tickets(expires_at);
+CREATE TABLE IF NOT EXISTS webui_memories (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    agent_id TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    token_count INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,agent_id,key)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_memories_owner ON webui_memories(owner,updated_at DESC);
 CREATE TABLE IF NOT EXISTS settings (
     owner TEXT NOT NULL,
     key TEXT NOT NULL,
