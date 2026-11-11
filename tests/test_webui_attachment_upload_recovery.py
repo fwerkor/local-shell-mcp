@@ -337,3 +337,92 @@ def test_windows_unsigned_ntfs_file_identity_is_exact_sqlite_text(uploads):
     # A fabricated Windows identity must never authorize cleanup of another inode.
     assert attachments.recover_attachment_uploads(uploads)["retainedFileIds"] == ["file-ntfs"]
     assert path.exists()
+
+
+@pytest.mark.asyncio
+async def test_non_destructive_upload_intent_upgrade_from_integer_inode_schema(tmp_path, monkeypatch):
+    """Older draft installations had INTEGER affinity (unsafe for NTFS IDs)."""
+    from local_shell_mcp.sqlite_store import DB_NAME
+
+    root = tmp_path / ".local-shell-mcp"
+    root.mkdir()
+    path = root / DB_NAME
+    import sqlite3
+
+    with sqlite3.connect(path) as sql:
+        sql.execute(
+            "CREATE TABLE attachment_uploads("
+            "file_id TEXT PRIMARY KEY,owner TEXT NOT NULL,path TEXT NOT NULL,"
+            "st_dev INTEGER,st_ino INTEGER,content_sha256 TEXT,content_size INTEGER,"
+            "created_at INTEGER NOT NULL DEFAULT(unixepoch()))",
+        )
+        sql.execute(
+            "INSERT INTO attachment_uploads(file_id,owner,path,st_dev,st_ino) VALUES(?,?,?,?,?)",
+            ("legacy", "alice", str(root / "legacy.txt"), 3, 7),
+        )
+    db = SQLiteDatabase(root)
+    monkeypatch.setattr(attachments, "_repo", lambda: SimpleNamespace(database=db))
+    with db.connect() as sql:
+        assert "file_identity" in {
+            row["name"] for row in sql.execute("PRAGMA table_info(attachment_uploads)")
+        }
+        assert tuple(sql.execute(
+            "SELECT st_dev,st_ino FROM attachment_uploads WHERE file_id='legacy'",
+        ).fetchone()) == (3, 7)
+    record = await attachments.publish_attachment(
+        "alice", "modern.txt", "text/plain", _chunks(b"Windows-safe bytes"),
+        root, file_id="modern",
+    )
+    with db.connect() as sql:
+        assert sql.execute("SELECT count(*) FROM attachment_uploads").fetchone()[0] == 1
+        assert sql.execute("SELECT count(*) FROM attachments WHERE id='modern'").fetchone()[0] == 1
+    assert Path(record["path"]).read_bytes() == b"Windows-safe bytes"
+
+
+def test_real_optional_docx_extraction(tmp_path):
+    docx = pytest.importorskip("docx")
+    document = docx.Document()
+    document.add_paragraph("Source-based document content")
+    path = tmp_path / "source.docx"
+    document.save(path)
+    result = attachments.extract_context_text(
+        path, "source.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    assert result["processed"] is True
+    assert result["extraction"] == "docx"
+    assert "Source-based document content" in result["extracted_text"]
+
+
+def test_real_optional_pdf_extraction(tmp_path):
+    pytest.importorskip("pypdf")
+    # A minimal valid single-page PDF with an actual extractable text operator.
+    stream = b"BT /F1 12 Tf 72 720 Td (Source PDF text is extractable) Tj ET"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n"
+        + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    data = bytearray(b"%PDF-1.4\n")
+    positions = [0]
+    for index, content in enumerate(objects, 1):
+        positions.append(len(data))
+        data.extend(f"{index} 0 obj\n".encode() + content + b"\nendobj\n")
+    marker = len(data)
+    data.extend(f"xref\n0 {len(positions)}\n".encode())
+    data.extend(b"0000000000 65535 f \n")
+    for offset in positions[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer\n<< /Size {len(positions)} /Root 1 0 R >>\n"
+        f"startxref\n{marker}\n%%EOF".encode(),
+    )
+    path = tmp_path / "source.pdf"
+    path.write_bytes(data)
+    result = attachments.extract_context_text(path, "source.pdf", "application/pdf")
+    assert result["processed"] is True
+    assert result["extraction"] == "pypdf"
+    assert "Source PDF text is extractable" in result["extracted_text"]

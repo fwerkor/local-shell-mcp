@@ -14,7 +14,7 @@ from local_shell_mcp.sqlite_store import shared_database
 
 
 @pytest.mark.asyncio
-async def test_original_react_browser_upload_then_delete_via_same_origin_fetch(tmp_path, monkeypatch):
+async def test_original_react_browser_upload_then_click_remove_file(tmp_path, monkeypatch):
     playwright = pytest.importorskip("playwright.async_api")
     import uvicorn
 
@@ -64,19 +64,15 @@ async def test_original_react_browser_upload_then_delete_via_same_origin_fetch(t
                 row = db.execute("SELECT path FROM attachments WHERE id=?", (ident,)).fetchone()
                 assert row and Path(row["path"]).read_bytes() == b"actual Chromium upload"
             await page.get_by_text("browser-delete.txt", exact=True).first.wait_for(timeout=10000)
-            # Execute the original DELETE endpoint *inside* Chromium. Fetch
-            # supplies the real Origin and cookies, exercising CSRF and session
-            # transport rather than bypassing the browser HTTP stack.
-            outcome = await page.evaluate("""async (id) => {
-              const response=await fetch('/api/files', {
-                method:'DELETE', credentials:'same-origin',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({files:[{file_id:id,filepath:'/api/files/download/'+id}]})
-              });
-              return {status:response.status, body: await response.json()};
-            }""", ident)
-            assert outcome["status"] == 200, outcome
-            assert outcome["body"]["deletedFileIds"] == [ident]
+            # Click the retained React FileRow/RemoveFile control, not a
+            # synthetic fetch. This exercises its debounce and mutation hook.
+            async with page.expect_response(lambda response: response.request.method == "DELETE"
+                                            and response.url.endswith("/api/files"), timeout=20000) as event:
+                await page.get_by_role("button", name="Remove file").first.click()
+            deleted = await event.value
+            assert deleted.status == 200, await deleted.text()
+            outcome = await deleted.json()
+            assert outcome["deletedFileIds"] == [ident]
             with shared_database(get_settings().state_dir.resolve()).connect() as db:
                 assert db.execute("SELECT 1 FROM attachments WHERE id=?", (ident,)).fetchone() is None
             assert not Path(row["path"]).exists()
