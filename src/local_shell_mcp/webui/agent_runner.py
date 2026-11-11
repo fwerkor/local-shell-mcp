@@ -19,6 +19,7 @@ from .agent_runtime import (
 from .agents import AgentRepository
 from .approval_runtime import (
     approval_policy_decision,
+    ask_user_approval_policy,
     build_approval_payload,
     execute_approval_batch,
     truncate_approval_result,
@@ -221,12 +222,14 @@ class AgentRunner:
     async def _pause(self, payload, state, *, approval=False):
         import uuid
 
+        created_at = int(time.time() * 1000)
         pending = {"actionId": "action_" + uuid.uuid4().hex,
                    "streamId": self.generation.conversation_id,
                    "conversationId": self.generation.conversation_id,
                    "runId": self.generation.run_id,
                    "responseMessageId": self.generation.response_message_id,
-                   "createdAt": int(time.time() * 1000), "namespace": self.namespace, "payload": payload}
+                   "createdAt": created_at, "expiresAt": created_at + 24 * 60 * 60 * 1000,
+                   "namespace": self.namespace, "payload": payload}
         self.saver.put_writes(self.active_config, [("__interrupt__", pending)], task_id="human")
         pause = self.store.pause_for_approval if approval else self.store.pause_for_question
         if not pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text):
@@ -247,16 +250,13 @@ class AgentRunner:
         if not self.namespace:
             for call in unresolved:
                 self._tool_step(call)
-        asking = [call for call in unresolved if call.name == "ask_user_question"]
-        if asking:
-            if len(calls) != 1:
-                raise ValueError("Ask User cannot run in parallel with another tool")
-            await self._pause(build_ask_user_payload(asking[0].arguments, asking[0].call_id), state)
         endpoints = _repo().setting(self.owner, "endpoints", {}) or {}
         policy = (endpoints.get("agents") or {}).get("toolApproval")
         ask = []
+        questions = []
         for call in unresolved:
-            decision = approval_policy_decision(policy, call.name)
+            selected_policy = ask_user_approval_policy(policy) if call.name == "ask_user_question" else policy
+            decision = approval_policy_decision(selected_policy, call.name)
             if decision and decision["decision"] == "deny":
                 output = "Blocked: " + decision.get("reason", "Rejected by policy")
                 record = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)}, "output": output}
@@ -264,8 +264,14 @@ class AgentRunner:
                 self.cache[replay_key(call, calls.index(call))] = record
             elif decision and decision["decision"] == "ask":
                 ask.append(call)
+            elif call.name == "ask_user_question":
+                questions.append(call)
         if ask:
             await self._pause(build_approval_payload(ask), state, approval=True)
+        if questions:
+            if len(calls) != 1:
+                raise ValueError("Ask User cannot run in parallel with another tool")
+            await self._pause(build_ask_user_payload(questions[0].arguments, questions[0].call_id), state)
         outputs = await execute_tool_batch(
             calls, lambda call: self._invoke(call, state), settled=self.cache,
             interrupting_names=frozenset({"subagent"}),
@@ -345,7 +351,12 @@ class AgentRunner:
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
                 cached = self.cache.get(replay_key(original, state.pending_calls.index(original)))
-                return cached["output"] if cached else await self._invoke(call, state)
+                if cached:
+                    return cached["output"]
+                if call.name == "ask_user_question":
+                    await self._pause(build_ask_user_payload(call.arguments, call.call_id), state)
+                    raise AssertionError("Suspended question should not return")
+                return await self._invoke(call, state)
 
             await execute_approval_batch(self.approved_batch, dispatch=reviewed_dispatch,
                                          on_completed=completed)
