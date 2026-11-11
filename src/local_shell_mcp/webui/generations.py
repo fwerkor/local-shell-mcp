@@ -76,7 +76,8 @@ class GenerationStore:
             return self._run(row) if row else None
 
     def begin(self, owner: str, payload: dict, agent: dict | None = None, *,
-              protocol_version: int = 2) -> tuple[Generation, bool]:
+              protocol_version: int = 2,
+              trusted_new_conversation_id: str | None = None) -> tuple[Generation, bool]:
         client_request_id = payload.get("clientRequestId")
         if client_request_id is not None and (not isinstance(client_request_id, str) or
                                                not 1 <= len(client_request_id) <= 160):
@@ -88,7 +89,19 @@ class GenerationStore:
         project_id = payload.get("projectId", payload.get("chatProjectId")) if new_conversation else None
         if project_id is not None and (not isinstance(project_id, str) or not project_id):
             raise ValueError("Invalid project id")
-        conversation_id = str(uuid.uuid4()) if new_conversation else raw_conversation_id
+        # Internal-only allocation for a host-reserved subagent child. No HTTP
+        # field can select this value; the host registered its trusted lineage
+        # before this conversation becomes externally observable.
+        if trusted_new_conversation_id is not None:
+            if not new_conversation or not isinstance(trusted_new_conversation_id, str):
+                raise ValueError("A reserved child conversation must be a new conversation")
+            try:
+                if str(uuid.UUID(trusted_new_conversation_id)) != trusted_new_conversation_id:
+                    raise ValueError("Invalid reserved child conversation identity")
+            except ValueError as exc:
+                raise ValueError("Invalid reserved child conversation identity") from exc
+        conversation_id = (trusted_new_conversation_id or str(uuid.uuid4())) \
+            if new_conversation else raw_conversation_id
         prompt = payload.get("text")
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
             raise ValueError("A non-empty text message is required (max 128 KiB)")

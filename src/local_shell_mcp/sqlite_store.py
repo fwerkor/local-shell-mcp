@@ -174,6 +174,8 @@ CREATE TABLE IF NOT EXISTS subagent_tasks (
     granted_scopes TEXT NOT NULL,
     grant_expires INTEGER,
     child_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    child_conversation_id TEXT,
+    child_registered INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL CHECK(status IN ('running','completed','error','cancelled')),
     result TEXT,
     error TEXT,

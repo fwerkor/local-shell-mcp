@@ -17,6 +17,7 @@ import json
 import logging
 import secrets
 import time
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -105,6 +106,30 @@ class SQLiteSubagentTaskHost:
                  *, stream_tools: Callable, stream_text: Callable):
         self.db, self.owner, self.conversation_id = database, owner, conversation_id
         self.stream_tools, self.stream_text = stream_tools, stream_text
+
+    def _child_activity(self) -> Any | None:
+        """Integration seam for the independent Artifacts PR #352 child guard.
+
+        That PR owns `active_subagent_threads` and its authenticated mutation
+        API. Import only when installed; do not create a competing marker table
+        or rewrite its source-pinned guard.
+        """
+        try:
+            from .child_thread_activity import ActiveChildThreads
+        except ModuleNotFoundError as exc:
+            if exc.name != "local_shell_mcp.webui.child_thread_activity":
+                raise
+            return None
+        return ActiveChildThreads(self.db)
+
+    def _settle_child_registration(self, task_id: str) -> None:
+        activity = self._child_activity()
+        if activity is None:
+            return
+        with self.db.connect() as db:
+            row = self._row(db, task_id)
+        if row and row["status"] != "running" and row["child_conversation_id"]:
+            activity.settle(self.owner, row["child_conversation_id"], row["parent_run_id"])
 
     def _row(self, db: Any, task_id: str) -> Any:
         return db.execute(
@@ -209,6 +234,7 @@ class SQLiteSubagentTaskHost:
                                       "The requested subagent thread is unavailable in this parent scope. Start a new subagent thread or choose one created by this parent for the same subagent type."})
                     prior_messages = json.loads(thread["messages"])
                 task_id = "subtask_" + secrets.token_hex(16)
+                reserved_child_id = str(uuid.uuid4())
                 thread_id = thread_id or "subthread_" + secrets.token_hex(16)
                 if not prior_messages:
                     db.execute("INSERT OR IGNORE INTO subagent_threads "
@@ -219,8 +245,8 @@ class SQLiteSubagentTaskHost:
                 db.execute("INSERT INTO subagent_tasks "
                            "(id,owner,parent_conversation_id,parent_run_id,parent_agent_id,parent_tool_call_id,"
                            "subagent_type,thread_id,idempotency_key,fingerprint,agent_config,execution_options,input,initial_messages,"
-                           "granted_scopes,grant_expires,status,created_at,updated_at) "
-                           "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                           "granted_scopes,grant_expires,child_conversation_id,status,created_at,updated_at) "
+                           "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                            (task_id, self.owner, self.conversation_id, invocation.parent_run_id,
                             parent_agent, invocation.parent_tool_call_id, invocation.subagent_type,
                             thread_id, key, fingerprint, _json(invocation.agent),
@@ -230,9 +256,29 @@ class SQLiteSubagentTaskHost:
                                    "child_types": [config.type for config in invocation.child_configs],
                                    "mcp_enabled": mcp_enabled}), task_text,
                             _json(history), _json(sorted(invocation.scopes)), invocation.grant_expires,
-                            "running", now, now))
+                            reserved_child_id, "running", now, now))
                 task = _snapshot(self._row(db, task_id))
                 is_new = True
+        if is_new:
+            activity = self._child_activity()
+            if activity is not None:
+                # Register the identity before the GeneratorStore creates the
+                # child conversation or exposes its message to artifact routes.
+                # The task is already owned by the parent invocation in SQLite.
+                try:
+                    activity.activate(self.owner, reserved_child_id, invocation.parent_run_id)
+                except BaseException:
+                    with self.db.connect() as db:
+                        db.execute("UPDATE subagent_tasks SET status='error',error=?,updated_at=? "
+                                   "WHERE id=? AND status='running'",
+                                   ("Child-thread registration rejected", _now(), task["taskId"]))
+                    raise
+            # The durable admission bit prevents an idempotent second caller
+            # from launching the same child between task insert and the Artifacts
+            # guard's committed registration. Never infer it from a guessed ID.
+            with self.db.connect() as db:
+                db.execute("UPDATE subagent_tasks SET child_registered=1 WHERE id=? "
+                           "AND status='running'", (task["taskId"],))
         await self._ensure_active(task["taskId"])
         return _json({"background_task_id": task["taskId"],
                       "subagent_thread_id": task["threadId"], "tool": "subagent",
@@ -244,25 +290,47 @@ class SQLiteSubagentTaskHost:
         if current is not None and not current.done():
             return
         now = _now()
+        terminal = False
+        claimed = 0
+        lease = ""
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._row(db, task_id)
             if row is None or row["status"] != "running":
                 return
+            if not row["child_registered"]:
+                # Recovery from a crash after PR #352's registration commit but
+                # before our admission bit. The exact authenticated marker is
+                # durable and may now outlive the parent run.
+                if self._child_activity() is None:
+                    return
+                registered = db.execute(
+                    "SELECT 1 FROM active_subagent_threads WHERE owner=? AND thread_id=? "
+                    "AND parent_run_id=?", (self.owner, row["child_conversation_id"],
+                                              row["parent_run_id"]),
+                ).fetchone()
+                if registered is None:
+                    return
+                db.execute("UPDATE subagent_tasks SET child_registered=1 WHERE id=?",
+                           (task_id,))
             if row["cancel_requested"] and (row["lease_owner"] is None or row["lease_until"] is None
                                               or row["lease_until"] <= now):
                 db.execute("UPDATE subagent_tasks SET status='cancelled', error=?, updated_at=? "
                            "WHERE id=?", ("Detached subagent task cancelled by its parent.", now, task_id))
-                return
-            if row["grant_expires"] is not None and row["grant_expires"] <= time.time():
+                terminal = True
+            elif row["grant_expires"] is not None and row["grant_expires"] <= time.time():
                 db.execute("UPDATE subagent_tasks SET status='error', error=?,updated_at=? WHERE id=?",
                            ("Authentication grant expired", now, task_id))
-                return
-            lease = _PROCESS_ID + ":" + secrets.token_hex(12)
-            claimed = db.execute("UPDATE subagent_tasks SET lease_owner=?,lease_until=? "
-                                 "WHERE id=? AND status='running' AND "
-                                 "(lease_until IS NULL OR lease_until<=?)",
-                                 (lease, now + _LEASE_SECONDS * 1000, task_id, now)).rowcount
+                terminal = True
+            else:
+                lease = _PROCESS_ID + ":" + secrets.token_hex(12)
+                claimed = db.execute("UPDATE subagent_tasks SET lease_owner=?,lease_until=? "
+                                     "WHERE id=? AND status='running' AND "
+                                     "(lease_until IS NULL OR lease_until<=?)",
+                                     (lease, now + _LEASE_SECONDS * 1000, task_id, now)).rowcount
+        if terminal:
+            self._settle_child_registration(task_id)
+            return
         if claimed:
             _ACTIVE_LEASES[task_id] = lease
             runner = asyncio.create_task(self._execute(task_id, lease), name="webui-subagent-" + task_id)
@@ -281,6 +349,7 @@ class SQLiteSubagentTaskHost:
         # original cancellation request from durable state, not a guessed ID.
         if not finished.cancelled():
             return
+        terminated = False
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._row(db, task_id)
@@ -290,9 +359,12 @@ class SQLiteSubagentTaskHost:
                 db.execute("UPDATE subagent_tasks SET status='cancelled', error=?, updated_at=?, "
                            "lease_owner=NULL,lease_until=NULL WHERE id=?",
                            ("Detached subagent task cancelled by its parent.", _now(), task_id))
+                terminated = True
             else:
                 db.execute("UPDATE subagent_tasks SET lease_owner=NULL,lease_until=NULL "
                            "WHERE id=?", (task_id,))
+        if terminated:
+            self._settle_child_registration(task_id)
 
     async def _execute(self, task_id: str, token: str) -> None:
         from .agent_runner import AgentRunner
@@ -316,6 +388,7 @@ class SQLiteSubagentTaskHost:
             child_generation, _ = store.begin(
                 self.owner, {"text": row["input"], "clientRequestId": "subagent:" + task_id,
                              "endpoint": "agents"}, agent,
+                trusted_new_conversation_id=row["child_conversation_id"],
             )
             with self.db.connect() as db:
                 db.execute("UPDATE conversations SET archived=1,metadata=? WHERE id=?",
@@ -426,6 +499,7 @@ class SQLiteSubagentTaskHost:
                 heartbeat.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat
+            self._settle_child_registration(task_id)
 
     def assert_execution_lease(self, task_id: str) -> None:
         """Fence model/tool actions against a replaced or revoked child owner."""
