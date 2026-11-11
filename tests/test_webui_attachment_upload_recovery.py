@@ -206,3 +206,62 @@ process.stdout.write(JSON.stringify(samples.map(x=>ref.partitionAgentResourceFil
         "message": "Some files could not be deleted",
         "deletedFileIds": ["ok"], "failedFileIds": ["bad"],
     }
+
+
+@pytest.mark.asyncio
+async def test_controller_file_paths_remain_local_in_project_and_followup_conversation(uploads):
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
+    uploaded = await attachments.publish_attachment(
+        "alice", "project.txt", "text/plain", _chunks(b"project-notes"),
+        uploads.root, file_id="file-project",
+    )
+    project = WorkspaceRepository(uploads).create_project("alice", "Private project")
+    store = GenerationStore(uploads)
+    generation, fresh = store.begin("alice", {
+        "text": "Summarize project evidence.",
+        "projectId": project["id"],
+        "files": [{"file_id": uploaded["file_id"], "filepath": "/forged-remote/path",
+                   "machine": "remote-worker"}],
+    })
+    assert fresh
+    with uploads.connect() as db:
+        row = db.execute("SELECT project_id FROM conversations WHERE id=?",
+                         (generation.conversation_id,)).fetchone()
+    assert row["project_id"] == project["id"]
+    history = store.history("alice", generation.conversation_id)
+    item = history[-1]["content"]
+    assert "Controller attachments" in item
+    import json
+
+    descriptor = json.loads(item.split("Controller attachments (use authorized LSM file tools):\n")[1])[0]
+    assert descriptor["machine"] == "local"
+    assert descriptor["path"] == uploaded["path"]
+    assert Path(descriptor["path"]).read_bytes() == b"project-notes"
+    assert "remote-worker" not in item and "/forged-remote/path" not in item
+
+    store.finish("alice", generation.run_id, status="complete", text="Acknowledged.")
+    followup, _ = store.begin("alice", {
+        "text": "Continue this conversation.",
+        "conversationId": generation.conversation_id,
+        "parentMessageId": generation.response_message_id,
+    })
+    texts = [item["content"] for item in store.history(
+        "alice", followup.conversation_id, message_id=followup.user_message_id)]
+    assert any("Controller attachments" in text for text in texts)
+    with pytest.raises(KeyError):
+        store.begin("bob", {"text": "Try stealing a file", "files": [
+            {"file_id": uploaded["file_id"]}]})
+
+
+def test_context_rejects_other_owner_reference_and_unprocessed_resources(uploads):
+    from local_shell_mcp.webui.agents import AgentRepository
+
+    identity = AgentRepository(uploads).create(
+        "alice", {"name": "Attached", "model": None, "provider": "openAI"},
+    )
+    config = {**identity, "tool_resources": {"context": {"file_ids": ["foreign"]}}}
+    assert attachments.agent_context_messages(uploads, "alice", config) == []
+    config["tool_resources"]["context"]["file_ids"] = ["foreign", "foreign"]
+    assert attachments.agent_context_messages(uploads, "bob", config) == []
