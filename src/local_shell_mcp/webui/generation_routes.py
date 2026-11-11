@@ -138,8 +138,9 @@ async def _run_model(
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
                              approved_batch=approved_batch)
+        history_start = len(history)
         try:
-            await runner.run(history)
+            finished_messages = await runner.run(history)
         except AgentSuspended:
             return
         repo.append(owner, generation.run_id, {
@@ -149,7 +150,10 @@ async def _run_model(
                 "created_at": now_ms, "closed_at": int(time.time() * 1000),
             },
         })
-        repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text)
+        from .message_dto import model_steps
+
+        repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
+                    model_steps=model_steps(finished_messages, history_start))
     except asyncio.CancelledError:
         repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
         raise
