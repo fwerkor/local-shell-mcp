@@ -274,10 +274,6 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     )):
         intent = durable_tasks.reserve(owner, conversation_id, run_id, call.call_id,
                                       tool.name, arguments, granted_scopes, grant_expires)
-        # Untrusted caller-supplied keys must not adopt tasks started through
-        # an unrelated public MCP client, even when native dedup returns them.
-        if arguments.get("idempotency_key") is not None:
-            await durable_tasks.reject_foreign_native_key(intent)
         check_authorization()
     invocation = dict(arguments)
     if intent is not None and intent.key is not None:

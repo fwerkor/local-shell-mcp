@@ -58,7 +58,7 @@ def test_reject_invalid_creation_and_replayed_identity(policy):
         with pytest.raises(ValueError, match="Not a durable"):
             intent(cid, name=name, args=args)
     for key in ["", " abc ", "x" * 257, 7]:
-        with pytest.raises(ValueError, match="Invalid idempotency"):
+        with pytest.raises(PermissionError, match="caller-supplied idempotency"):
             intent(cid, name="job_start", args={"command": "true", "idempotency_key": key})
     with pytest.raises(PermissionError, match="Conversation ownership"):
         durable.reserve("owner", "missing", "run", "a", "job_start", {"command": "true"}, SCOPES, None)
@@ -157,6 +157,35 @@ async def test_lookup_error_and_stop_statuses(policy, monkeypatch):
     assert not await durable._stop(row)
     row["native_id"] = None
     assert await durable._stop(row) is False
+
+
+@pytest.mark.asyncio
+async def test_stop_requires_actual_native_terminal_status(policy, monkeypatch):
+    from local_shell_mcp import tools
+
+    _, cid = policy
+    job = intent(cid, call="job-status", args={"command": "true", "machine": "worker"})
+    durable.bind(job, {"job_id": "native-job"})
+    shell = intent(cid, call="shell-status", name="shell_start", args={"machine": "worker"})
+    durable.bind(shell, {"session_id": "native-shell"})
+    job_row, shell_row = all_rows()
+    reply = {"ok": True, "data": {"job": {"status": "stopping"}, "killed": False}}
+
+    async def remote(_settings, _machine, _tool, _args, **_kwargs):
+        return reply
+
+    monkeypatch.setattr(tools, "_remote_call", remote)
+    assert not await durable._stop(job_row)
+    reply = {"ok": True, "data": {"job": {"status": "stopped"}, "killed": False}}
+    assert await durable._stop(job_row)
+    reply = {"ok": True, "data": {"killed": False}}
+    assert not await durable._stop(shell_row)
+    reply = {"ok": True, "data": {"killed": True}}
+    assert await durable._stop(shell_row)
+    reply = {"ok": False, "data": {"killed": True}}
+    assert not await durable._stop(shell_row)
+    reply = {"ok": True, "data": {"job": {"status": "running"}}}
+    assert not await durable._stop(job_row)
 
 
 @pytest.mark.asyncio

@@ -80,11 +80,13 @@ def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
     if name not in _TRACKED or (name in {"run_shell", "run_python"} and not arguments.get("persist_on_timeout")):
         raise ValueError("Not a durable creation")
     machine = "local" if name == "remote_transfer" else arguments.get("machine") or "local"
-    supplied = arguments.get("idempotency_key")
-    if supplied is not None and (not isinstance(supplied, str) or not supplied.strip() or
-                                 supplied != supplied.strip() or len(supplied) > 256):
-        raise ValueError("Invalid idempotency key")
-    key = supplied if supplied is not None else "agent-" + secrets.token_hex(24)
+    # A user-provided native key could already belong to a public MCP client
+    # (or be claimed concurrently after a read-only lookup). Never adopt it.
+    # Native MCP clients continue to support explicit idempotency keys; Agent
+    # creation uses only a high-entropy key allocated by this Controller.
+    if arguments.get("idempotency_key") is not None:
+        raise PermissionError("Agent durable creation does not accept caller-supplied idempotency keys")
+    key = "agent-" + secrets.token_hex(24)
     key_hash = hashlib.sha256(key.encode()).hexdigest()
     # Separate native mutation namespaces: job start and job retry differ.
     identity = hashlib.sha256(json.dumps([owner, conversation_id, run_id, call_id, name],
@@ -95,7 +97,7 @@ def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
         db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT * FROM agent_durable_tasks WHERE id=?", (identity,)).fetchone()
         if row:
-            if row["fingerprint"] != fingerprint or row["key_hash"] != key_hash and supplied is not None:
+            if row["fingerprint"] != fingerprint:
                 raise PermissionError("A replayed tool call cannot change a durable task request")
             if row["state"] not in ("reserved", "active"):
                 raise PermissionError("Durable task request was cancelled or cannot be replayed")
@@ -109,8 +111,7 @@ def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
                 raise PermissionError("Generation can no longer start tasks")
             if db.execute("SELECT 1 FROM agent_run_cancellations WHERE run_id=?", (run_id,)).fetchone():
                 raise PermissionError("Generation was cancelled")
-        # Explicit keys are never rewritten. A native key is unique across
-        # conversations for the given operation/machine, preventing adoption.
+        # Native key ownership is exclusive for each operation and machine.
         try:
             db.execute(
                 "INSERT INTO agent_durable_tasks(id,owner,conversation_id,run_id,call_id,tool,kind,machine,"
@@ -228,20 +229,6 @@ def is_run_cancelled(run_id: str) -> bool:
         return db.execute("SELECT 1 FROM agent_run_cancellations WHERE run_id=?", (run_id,)).fetchone() is not None
 
 
-async def reject_foreign_native_key(intent: Intent) -> None:
-    """A caller-supplied key cannot claim an existing unowned native task."""
-    with _database().connect() as db:
-        row = db.execute("SELECT * FROM agent_durable_tasks WHERE id=?", (intent.id,)).fetchone()
-        if row is None:
-            raise PermissionError("Durable task intent disappeared")
-        snapshot = dict(row)
-    existing = await _lookup(snapshot)
-    if existing and existing != snapshot["native_id"]:
-        with _database().connect() as db:
-            db.execute("UPDATE agent_durable_tasks SET state='foreign',updated_at=? WHERE id=?",
-                       (_stamp(), intent.id))
-        raise PermissionError("Native idempotency key already references an unowned task")
-
 
 def cancel_run(owner: str, run_id: str) -> None:
     """Persist explicit abort before cancelling provider/tool coroutine."""
@@ -332,13 +319,15 @@ async def _stop(row: Any) -> bool:
         command = "shell_kill" if row["kind"] == "shell" else "job_stop"
         field = "session_id" if row["kind"] == "shell" else "job_id"
         result = await tools._remote_call(get_settings(), row["machine"], command, {field: native_id}, timeout_s=30)
-    if getattr(result, "isError", False):
+    if (getattr(result, "isError", False) or getattr(result, "ok", True) is False
+            or (isinstance(result, dict) and result.get("ok") is False)):
         return False
-    if hasattr(result, "ok"):
-        return bool(result.ok)
-    if isinstance(result, dict):
-        return result.get("ok") is not False
-    return False
+    data = _payload(result)
+    if row["kind"] == "shell":
+        # An RPC delivered successfully is not proof that tmux/ConPTY killed
+        # the session; the native tool reports the actual outcome separately.
+        return data.get("killed") is True
+    return data.get("status") in {"stopped", "succeeded", "failed", "lost"}
 
 
 async def _reconcile_one(row: dict) -> int:

@@ -132,11 +132,11 @@ async def test_foreign_native_idempotency_key_cannot_be_claimed(bound):
     _, (cid, _), _ = bound
     native = await jobs.start_job(command("import time; time.sleep(8)"), idempotency_key="external-key")
     try:
-        with pytest.raises(PermissionError, match="unowned task"):
+        with pytest.raises(PermissionError, match="caller-supplied idempotency"):
             await call(cid, "collision", "job_start",
                        {"command": command("import time; time.sleep(8)"),
                         "idempotency_key": "external-key"})
-        assert rows()[0]["state"] == "foreign"
+        assert rows() == []
         assert (await jobs.get_job(native["job_id"]))["job"]["job_id"] == native["job_id"]
     finally:
         await jobs.stop_job(native["job_id"])
@@ -148,7 +148,7 @@ def test_machine_grants_and_run_abort_are_durable(bound):
                             {"command": "echo a", "machine": "worker1"}, SCOPES, None)
     assert first.key
     assert rows()[0]["machine"] == "worker1"
-    with pytest.raises(PermissionError, match="already owned"):
+    with pytest.raises(PermissionError, match="caller-supplied idempotency"):
         durable.reserve("local", cid, "run-0", "b", "job_start",
                         {"command": "echo b", "machine": "worker1", "idempotency_key": first.key},
                         SCOPES, None)
