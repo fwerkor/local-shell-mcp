@@ -139,7 +139,10 @@ async def tool_auth(request: Request):
 
 
 def agent_routes() -> list[Route]:
+    from .action_routes import action_routes
+
     return [
+        *action_routes(),
         Route("/api/agents/tools", tool_catalog, methods=["GET"]),
         Route("/api/agents/tools/{tool_id}/auth", tool_auth, methods=["GET"]),
         Route("/api/agents", list_or_create, methods=["GET", "POST"]),

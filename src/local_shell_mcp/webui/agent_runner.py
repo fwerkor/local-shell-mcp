@@ -91,6 +91,9 @@ class AgentRunner:
         )
         self.configs[identity] = configs
         tools += subagent_tools(configs)
+        if agent is not None:
+            from .actions import ActionRepository
+            tools += ActionRepository(self.database).tool_schemas(self.owner, agent)
         if self.root_agent:
             tools += handoff_tools(self.owner, self.root_agent, self.repository, source_agent_id=identity)
         override = (agent or {}).get("recursion_limit")
@@ -191,6 +194,13 @@ class AgentRunner:
             return build_handoff_command(edge, current["id"], current.get("name") or current["id"],
                                          call.name, call.arguments, call.call_id, state.messages)
         try:
+            from .action_spec import is_action_tool
+            if is_action_tool(call.name):
+                from .action_runtime import invoke_action
+                current_id = (state.context.agent or {}).get("id")
+                if not current_id:
+                    raise RuntimeSafetyError("Action execution requires a saved Agent")
+                return await invoke_action(self.owner, current_id, call.name, call.arguments, self.database)
             if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
                 return await discover(self.owner, self.generation.conversation_id, set(self.scopes), call)
             if call.name == "mcp_tool_call":
