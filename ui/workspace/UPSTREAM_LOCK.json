@@ -377,10 +377,28 @@
       "repository": "LibreChat",
       "path": "api/app/clients/prompts/formatMessages.js",
       "sha256": "88f8a1b77d6171c9e180c942d6f59775c7e2c6103b3c4d75cb8b74622eff02ad",
-      "symbols": "formatMessage / formatAgentMessages text-field precedence",
-      "python_lsm": "webui/generations.py:GenerationStore.history",
-      "status": "部分",
-      "difference": "已保存结构化text优先于旧text快照，Artifact编辑进入下一轮模型；完整tool/rich/steer重建未完成。"
+      "symbols": "formatMessage / formatAgentMessages / thoughtSignatures / steer",
+      "python_lsm": "webui/message_dto.py:format_agent_messages; webui/generations.py:history",
+      "status": "核心消息转换已验收",
+      "difference": "原版源码+真实LangChain core 1.2.8转换器5组固定差分向量全等；新跑次按顺序把tool/rich/steer模型步骤写入SQLite，不再从UI截断输出重建。旧历史已丢失的原始结果无法恢复。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/mcp/parsers.ts",
+      "sha256": "85170923b508332f4f9a647eeafbb7ac6d79d6d3fbb606d6f4d1838d7623d584",
+      "symbols": "formatToolContent / MCP content resources image blobs",
+      "python_lsm": "webui/mcp_content.py; webui/mcp_projection.py",
+      "status": "核心MCP parser已差分验收",
+      "difference": "13组原版真实TypeScript转译parser差分全等；完整CallToolResult以raw_result保留；原版JS UI解析预览之外的特殊artifact支持待专门UI扩展。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/messages/core.ts",
+      "sha256": "ce974262671afa4067b10e60c1c85e1ee6e1e1706835d6f4fdf4f4fce00aaf85",
+      "symbols": "projectArtifactPayload / projectAnthropicArtifactContent / tool histories",
+      "python_lsm": "webui/mcp_projection.py; webui/agent_runner.py",
+      "status": "部分：消息和富媒体tool投影",
+      "difference": "原始400000字符模型输入限制保留，checkpoint/SQLite不截断；多轮媒体回放测试通过。未覆盖所有Responses API server-tool/reasoning特殊字段。"
     }
   ],
   "runtime_dependency_lock": {
@@ -406,6 +424,22 @@
       "@langchain/langgraph": "1.4.8",
       "@langchain/langgraph-checkpoint": "1.1.3"
     },
-    "alternative_bun_lock": "The upstream bun.lock resolves agents 3.6.0/core 1.2.4; it was not consumed by the integrated Docker runtime and is not the port baseline."
+    "alternative_bun_lock": "The upstream bun.lock resolves agents 3.6.0/core 1.2.4; it was not consumed by the integrated Docker runtime and is not the port baseline.",
+    "provider_message_conversion": {
+      "pinned_source": "@librechat/agents@4.0.1 / LibreChat e8f3be08",
+      "locked_modules": {
+        "@langchain/core": "1.2.8",
+        "@langchain/anthropic": "1.5.2",
+        "@langchain/google-genai": "2.2.0"
+      },
+      "oracle_tool_only": {
+        "typescript": "5.9.3"
+      },
+      "fixtures": [
+        "tests/fixtures/librechat/message_history_vectors.json",
+        "tests/fixtures/librechat/mcp_content_vectors.json"
+      ],
+      "node_runtime_required": false
+    }
   }
 }
