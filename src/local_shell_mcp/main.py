@@ -141,6 +141,9 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.generation_routes import _generation_store
 
             _generation_store().recover_orphans()
+            from .webui.attachments import recover_attachment_deletions
+
+            recover_attachment_deletions()
         async with inner_app.router.lifespan_context(inner_app):
             try:
                 yield

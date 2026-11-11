@@ -152,6 +152,25 @@ CREATE TABLE IF NOT EXISTS attachments (
     metadata TEXT NOT NULL DEFAULT '{}',
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+
+CREATE TABLE IF NOT EXISTS attachment_uploads (
+    file_id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    path TEXT NOT NULL,
+    st_dev INTEGER,
+    st_ino INTEGER,
+    content_sha256 TEXT,
+    content_size INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS attachment_deletions (
+    file_id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    original_path TEXT NOT NULL,
+    quarantine_path TEXT NOT NULL,
+    phase TEXT NOT NULL CHECK(phase IN ('prepared','committed')),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
 """
 
 _FTS_SCHEMA = """
