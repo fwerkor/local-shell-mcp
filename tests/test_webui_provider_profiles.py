@@ -229,6 +229,11 @@ async def test_named_channel_protocols_validation_and_delete_protection(setup_pr
         agent = repo.create("owner", {"name": "Persistent Agent", "description": "", "provider": "Gemini Gateway", "model": "gemini-test"})
         assert (await client.delete("/api/lsm/providers?name=Gemini%20Gateway")).status_code == 409
         assert repo.get("owner", agent["id"])["provider"] == "Gemini Gateway"
+        # Version rollback must never restore a dangling provider after a
+        # newer Agent revision has switched to a different named channel.
+        repo.update("owner", agent["id"], {"provider": "openai", "model": "safe-model"})
+        assert repo.get("owner", agent["id"])["provider"] == "openai"
+        assert (await client.delete("/api/lsm/providers?name=Gemini%20Gateway")).status_code == 409
         assert provider_config("Gemini Gateway").token == "private-named-token"
         assert (await client.delete("/api/lsm/providers?name=google")).status_code == 400
         assert (await client.delete("/api/lsm/providers?name=not%20existing")).status_code == 200

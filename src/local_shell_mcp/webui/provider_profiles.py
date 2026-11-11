@@ -152,7 +152,9 @@ async def provider_profiles(request):
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM agents WHERE json_extract(config,'$.provider')=? LIMIT 1", (name,)).fetchone() or db.execute(
                 "SELECT 1 FROM runs WHERE json_extract(state,'$.provider')=? LIMIT 1", (name,)
-            ).fetchone() or db.execute("SELECT 1 FROM conversations WHERE endpoint=? LIMIT 1", (name,)).fetchone():
+            ).fetchone() or db.execute("SELECT 1 FROM conversations WHERE endpoint=? LIMIT 1", (name,)).fetchone() or db.execute(
+                "SELECT 1 FROM agent_versions WHERE json_extract(snapshot,'$.provider')=? LIMIT 1", (name,)
+            ).fetchone():
                 raise HTTPException(409, detail="Channel is referenced by saved conversations or Agents")
             db.execute("DELETE FROM settings WHERE owner=? AND key=?", (_OWNER, _CHANNEL_PREFIX + name))
     elif request.method == "PUT":
