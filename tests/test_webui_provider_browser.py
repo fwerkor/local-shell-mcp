@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import socket
 
 import pytest
@@ -79,6 +80,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 assert response.status == 200, await response.text()
                 assert "private-test-token" not in await response.text()
                 await page.get_by_role("link", name="Start a new chat and select a model").click()
+                await page.get_by_test_id("model-selector-button").click()
+                await page.locator("#model-search").fill("first-model")
+                await page.get_by_text("first-model", exact=True).first.click()
                 await page.get_by_test_id("model-selector-button").get_by_text("first-model", exact=True).wait_for(timeout=15000)
                 await page.get_by_test_id("model-selector-button").click()
                 await page.locator("#model-search").fill("second-model")
@@ -136,22 +140,63 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.locator('button[type="submit"]').first.click()
                     await page.get_by_test_id("screenshot-target").get_by_text("Model channel works.", exact=True).wait_for(timeout=15000)
                     assert requests[-1]["model"] == "independent-model"
-                    # Agent authoring through the same browser login, save/reload
-                    # and version evolution without exposing provider secrets.
-                    agent = await page.request.post(f"http://127.0.0.1:{port}/api/agents", data={
-                        "name": "Secondary Agent", "description": "Browser-created Agent",
-                        "provider": "Secondary Research", "model": "independent-model",
-                        "instructions": "Be concise.", "tools": ["ask_user_question"],
-                        "model_parameters": {"maxTokens": 128, "topP": 0.75},
-                    })
-                    assert agent.status == 201, await agent.text()
-                    agent_value = await agent.json()
+                    # Verify the actual retained React Agent Builder is visible,
+                    # independent of machine authorization and selected provider.
+                    await page.get_by_test_id("nav-panel-agents").click(timeout=15000)
+                    builder = page.locator('form[aria-label="Agent configuration form"]')
+                    await builder.wait_for(timeout=15000)
+                    await builder.locator("#name").fill("Builder Research")
+                    await builder.locator("#description").fill("Created using React Agent Builder")
+                    await builder.locator("#provider").click()
+                    await builder.locator("#provider").click()
+                    await page.get_by_text("Secondary Research", exact=True).last.click()
+                    await builder.locator("#model").get_by_text("independent-model", exact=True).wait_for()
+                    await builder.get_by_role("button", name="Back to Builder").click()
+                    await builder.locator("#instructions").fill("You are the configured Research Agent.")
+                    await builder.get_by_text("Add", exact=True).first.click(timeout=8000)
+                    marketplace = page.get_by_role("dialog").last
+                    await marketplace.get_by_role("button", name=re.compile(r"^Ask User\b")).first.click()
+                    await page.keyboard.press("Escape")
+                    await marketplace.wait_for(state="hidden")
+                    # The retained Builder must submit the real Agent payload,
+                    # including selected native tool and named provider.
+                    async with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/api/agents")) as created:
+                        await builder.get_by_role("button", name="Create", exact=True).click()
+                    agent_response = await created.value
+                    assert agent_response.status == 201, await agent_response.text()
+                    agent_value = await agent_response.json()
+                    assert agent_value["name"] == "Builder Research"
+                    assert agent_value["provider"] == "Secondary Research"
+                    assert agent_value["model"] == "independent-model"
+                    assert agent_value["instructions"] == "You are the configured Research Agent."
+                    assert "ask_user_question" in agent_value["tools"]
                     assert "secondary-private-token" not in str(agent_value)
                     agent_id = agent_value["id"]
+                    # Editing through the same retained React form must preserve
+                    # the chosen provider/tool and issue a real versioned PATCH.
+                    save_button = builder.get_by_role("button", name="Save", exact=True)
+                    await save_button.wait_for(timeout=15000)
+                    await builder.locator("#description").fill("Saved again in React Agent Builder")
+                    async with page.expect_response(lambda response: response.request.method == "PATCH" and response.url.endswith(f"/api/agents/{agent_id}")) as saved_again:
+                        await save_button.click()
+                    patched = await saved_again.value
+                    assert patched.status == 200, await patched.text()
+                    assert (await patched.json())["description"] == "Saved again in React Agent Builder"
+                    assert "ask_user_question" in (await patched.json())["tools"]
+                    # Update through API as a second persistence path while the
+                    # Builder's own creation/edit and refresh are verified above.
+                    updated = await page.request.patch(f"http://127.0.0.1:{port}/api/agents/{agent_id}", data={
+                        "model_parameters": {"maxTokens": 128, "topP": 0.75}
+                    })
+                    assert updated.status == 200, await updated.text()
                     await page.reload()
                     saved_agent = await page.request.get(f"http://127.0.0.1:{port}/api/agents/{agent_id}")
                     assert (await saved_agent.json())["model_parameters"] == {"maxTokens": 128, "topP": 0.75}
-                    assert (await saved_agent.json())["tools"] == ["ask_user_question"]
+                    assert "ask_user_question" in (await saved_agent.json())["tools"]
+                    assert (await saved_agent.json())["description"] == "Saved again in React Agent Builder"
+                    versions = await page.request.get(f"http://127.0.0.1:{port}/api/agents/{agent_id}/versions")
+                    assert versions.status == 200
+                    assert len(await versions.json()) >= 2
                     profiles = await page.request.get(f"http://127.0.0.1:{port}/api/lsm/providers")
                     payload = await profiles.json()
                     assert {p.get("name") for p in payload["providers"]} >= {"Secondary Research"}
