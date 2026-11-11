@@ -39,6 +39,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+webui-graph = ["langgraph>=1.0.10,<1.1", "langchain-core>=1.2.8,<2"]
 browser = ["playwright>=1.44.0"]
 dev = [
   "coverage[toml]>=7.8.0",

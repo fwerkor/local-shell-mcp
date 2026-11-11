@@ -1,0 +1,406 @@
+{
+  "provenance": {
+    "sdk_commit": "c4ffb9b1b78421bf63eba3e56993017f922387f3",
+    "langgraph": "1.4.8",
+    "core": "1.2.8",
+    "checkpoint": "1.1.3",
+    "actual_message_classes": true
+  },
+  "cases": [
+    {
+      "left": [
+        {
+          "role": "user",
+          "id": "known_u",
+          "content": "u"
+        }
+      ],
+      "right": [
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "a"
+        }
+      ]
+    },
+    {
+      "left": [
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "old"
+        },
+        {
+          "role": "tool",
+          "id": "known_tool",
+          "content": "tool",
+          "tool_call_id": "t"
+        }
+      ],
+      "right": [
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "new"
+        }
+      ]
+    },
+    {
+      "left": [
+        {
+          "role": "user",
+          "id": "known_u",
+          "content": "u"
+        },
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "a"
+        }
+      ],
+      "right": [
+        {
+          "role": "remove",
+          "id": "known_u"
+        }
+      ]
+    },
+    {
+      "left": [
+        {
+          "role": "user",
+          "id": "known_u",
+          "content": "u"
+        },
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "a"
+        }
+      ],
+      "right": [
+        {
+          "role": "remove",
+          "id": "known_a"
+        },
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "again"
+        }
+      ]
+    },
+    {
+      "left": [
+        {
+          "role": "user",
+          "id": "known_u",
+          "content": "u"
+        }
+      ],
+      "right": [
+        {
+          "role": "remove",
+          "id": "known_missing"
+        }
+      ]
+    },
+    {
+      "left": [
+        {
+          "role": "user",
+          "id": "known_u",
+          "content": "u"
+        }
+      ],
+      "right": [
+        {
+          "role": "remove",
+          "id": "__remove_all__"
+        },
+        {
+          "role": "assistant",
+          "id": "known_new",
+          "content": "new"
+        }
+      ]
+    },
+    {
+      "left": [
+        {
+          "role": "user",
+          "id": "known_u",
+          "content": "u"
+        }
+      ],
+      "right": [
+        {
+          "role": "remove",
+          "id": "__remove_all__"
+        },
+        {
+          "role": "assistant",
+          "id": "known_new",
+          "content": "new"
+        },
+        {
+          "role": "remove",
+          "id": "known_new"
+        }
+      ]
+    },
+    {
+      "left": [],
+      "right": [
+        {
+          "role": "assistant",
+          "content": "auto"
+        }
+      ]
+    },
+    {
+      "left": [
+        {
+          "role": "user",
+          "content": "auto"
+        }
+      ],
+      "right": [
+        {
+          "role": "assistant",
+          "content": "auto2"
+        }
+      ]
+    },
+    {
+      "left": [],
+      "right": [
+        {
+          "role": "tool",
+          "id": "known_t",
+          "content": "result",
+          "tool_call_id": "tc"
+        }
+      ]
+    },
+    {
+      "left": [],
+      "right": [
+        {
+          "role": "remove",
+          "id": "known_missing"
+        }
+      ]
+    }
+  ],
+  "expected": [
+    {
+      "messages": [
+        {
+          "role": "user",
+          "id": "known_u",
+          "content": "u"
+        },
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "a"
+        }
+      ]
+    },
+    {
+      "messages": [
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "new"
+        },
+        {
+          "role": "tool",
+          "id": "known_tool",
+          "content": "tool",
+          "tool_call_id": "t"
+        }
+      ]
+    },
+    {
+      "messages": [
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "a"
+        }
+      ]
+    },
+    {
+      "messages": [
+        {
+          "role": "user",
+          "id": "known_u",
+          "content": "u"
+        },
+        {
+          "role": "assistant",
+          "id": "known_a",
+          "content": "again"
+        }
+      ]
+    },
+    {
+      "error": "Attempting to delete a message with an ID that doesn't exist ('known_missing')"
+    },
+    {
+      "messages": [
+        {
+          "role": "assistant",
+          "id": "known_new",
+          "content": "new"
+        }
+      ]
+    },
+    {
+      "messages": [
+        {
+          "role": "assistant",
+          "id": "known_new",
+          "content": "new"
+        },
+        {
+          "role": "remove",
+          "id": "known_new",
+          "content": []
+        }
+      ]
+    },
+    {
+      "messages": [
+        {
+          "role": "assistant",
+          "id": "auto:0",
+          "content": "auto"
+        }
+      ]
+    },
+    {
+      "messages": [
+        {
+          "role": "user",
+          "id": "auto:0",
+          "content": "auto"
+        },
+        {
+          "role": "assistant",
+          "id": "auto:1",
+          "content": "auto2"
+        }
+      ]
+    },
+    {
+      "messages": [
+        {
+          "role": "tool",
+          "id": "known_t",
+          "content": "result",
+          "tool_call_id": "tc"
+        }
+      ]
+    },
+    {
+      "error": "Attempting to delete a message with an ID that doesn't exist ('known_missing')"
+    }
+  ],
+  "traces": {
+    "fanout": {
+      "messages": [
+        {
+          "role": "user",
+          "id": "known_user",
+          "content": "hello"
+        },
+        {
+          "role": "assistant",
+          "id": "known_root",
+          "content": "root"
+        },
+        {
+          "role": "assistant",
+          "id": "known_left",
+          "content": "left"
+        },
+        {
+          "role": "assistant",
+          "id": "known_right",
+          "content": "right"
+        },
+        {
+          "role": "assistant",
+          "id": "known_join",
+          "content": "join"
+        }
+      ],
+      "trace": [
+        "root:known_user",
+        "left:known_user,known_root",
+        "right:known_user,known_root",
+        "join:known_user,known_root,known_left,known_right"
+      ]
+    },
+    "command": {
+      "messages": [
+        {
+          "role": "user",
+          "id": "known_user",
+          "content": "hello"
+        },
+        {
+          "role": "assistant",
+          "id": "known_start",
+          "content": "start"
+        },
+        {
+          "role": "assistant",
+          "id": "known_left",
+          "content": "left"
+        },
+        {
+          "role": "assistant",
+          "id": "known_right",
+          "content": "right"
+        }
+      ],
+      "trace": [
+        "start",
+        "left",
+        "right"
+      ]
+    },
+    "sends": {
+      "messages": [
+        {
+          "role": "user",
+          "id": "known_user",
+          "content": "hello"
+        },
+        {
+          "role": "assistant",
+          "id": "known_start",
+          "content": "start"
+        },
+        {
+          "role": "assistant",
+          "id": "known_reply_a",
+          "content": "reply_a"
+        },
+        {
+          "role": "assistant",
+          "id": "known_reply_b",
+          "content": "reply_b"
+        }
+      ],
+      "trace": [
+        "a",
+        "b"
+      ]
+    }
+  }
+}
