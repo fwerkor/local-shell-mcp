@@ -87,22 +87,15 @@ async def _data_frames(response) -> AsyncIterator[str]:
 
 
 def _messages_for_google(messages: list[dict]) -> tuple[list[dict], str]:
-    items: list[dict] = []
-    systems: list[str] = []
-    for item in messages:
-        content = str(item.get("content") or "")
-        role = item.get("role")
-        if role == "system":
-            systems.append(content)
-        elif role in {"user", "assistant"}:
-            items.append({"role": "model" if role == "assistant" else "user", "parts": [{"text": content}]})
-    return items, "\n".join(systems)
+    from .provider_tool_protocols import native_messages
+
+    return native_messages(messages, "google")
 
 
 def _messages_for_anthropic(messages: list[dict]) -> tuple[list[dict], str]:
-    systems = [str(item.get("content") or "") for item in messages if item.get("role") == "system"]
-    items = [item for item in messages if item.get("role") in {"user", "assistant"}]
-    return items, "\n".join(systems)
+    from .provider_tool_protocols import native_messages
+
+    return native_messages(messages, "anthropic")
 
 
 async def stream_model(
@@ -115,6 +108,8 @@ async def stream_model(
     """Stream user-visible answer text without buffering the provider response."""
     import httpx
 
+    from .mcp_projection import openai_wire_messages, project_artifact_messages
+
     headers = {"accept": "text/event-stream", "content-type": "application/json"}
     body: dict = {"model": config.model, "stream": True}
     if config.provider == "openai":
@@ -122,7 +117,7 @@ async def stream_model(
             headers["Authorization"] = f"Bearer {config.token}"
         # Local OpenAI-compatible servers may run without an API key. An
         # empty `Bearer ` value is illegal HTTP and breaks streaming.
-        body["messages"] = messages
+        body["messages"] = openai_wire_messages(project_artifact_messages(messages, config.provider))
         body["max_completion_tokens"] = max_tokens
         if temperature is not None:
             body["temperature"] = temperature
@@ -183,6 +178,15 @@ async def stream_model(
 
 
 @dataclass(frozen=True)
+class ModelThought:
+    """Provider reasoning event stored in canonical history, never UI answer text."""
+    kind: str
+    text: str = ""
+    signature: str = ""
+    data: str = ""
+
+
+@dataclass(frozen=True)
 class ModelToolCall:
     """A complete model-requested function call, never partial SSE input."""
 
@@ -221,13 +225,16 @@ async def stream_model_with_tools(
 
     import httpx
 
+    from .mcp_projection import openai_wire_messages, project_artifact_messages
+
+    messages = openai_wire_messages(project_artifact_messages(messages, config.provider))
     headers = {"accept": "text/event-stream", "content-type": "application/json"}
     if config.token:
         headers["Authorization"] = f"Bearer {config.token}"
     body: dict = {
         "model": config.model, "stream": True, "messages": messages,
         "max_completion_tokens": max_tokens, "tools": tools,
-        "tool_choice": "auto", "parallel_tool_calls": False,
+        "tool_choice": "auto", "parallel_tool_calls": True,
     }
     if temperature is not None:
         body["temperature"] = temperature
@@ -258,7 +265,7 @@ async def stream_model_with_tools(
                             yield part["text"]
                 for fragment in delta.get("tool_calls") or []:
                     index = fragment.get("index")
-                    if type(index) is not int or not 0 <= index < 4:
+                    if type(index) is not int or index < 0:
                         raise ValueError("Invalid model tool call index")
                     tool = pending.setdefault(index, {"id": "", "name": "", "arguments": ""})
                     if fragment.get("id"):
@@ -266,8 +273,6 @@ async def stream_model_with_tools(
                     function = fragment.get("function") or {}
                     tool["name"] += str(function.get("name") or "")
                     tool["arguments"] += str(function.get("arguments") or "")
-                    if len(tool["id"]) > 128 or len(tool["name"]) > 128 or len(tool["arguments"]) > 8192:
-                        raise ValueError("Model tool call exceeds allowed size")
     for index in sorted(pending):
         tool = pending[index]
         if not tool["id"] or not tool["name"]:
