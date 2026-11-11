@@ -21,7 +21,6 @@ from .approval_runtime import (
     approval_policy_decision,
     build_approval_payload,
     execute_approval_batch,
-    truncate_approval_result,
 )
 from .ask_user_tools import ASK_USER_TOOLS, build_ask_user_payload
 from .checkpoints import SQLiteCheckpointSaver
@@ -273,8 +272,9 @@ class AgentRunner:
             check_breaker=self._check_grant, on_completed=self._completed,
         )
         commands = [output for output in outputs if isinstance(output, dict) and output.get("graph")]
-        messages = [{"role": "tool", "tool_call_id": call.call_id,
-                     "content": truncate_approval_result(output, 400_000)}
+        from .mcp_projection import mcp_tool_history_message
+
+        messages = [mcp_tool_history_message(call, output, state.context.profile.provider)
                     for call, output in zip(calls, outputs, strict=True) if isinstance(output, str)]
         if not commands:
             return ToolBatchOutput(messages)

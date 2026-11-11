@@ -200,11 +200,18 @@ async def test_nested_mcp_rejects_cross_owner_wrong_tools_and_malformed_approval
         with pytest.raises(ValueError, match="does not match"):
             await nested_mcp.approved_call("alice", cid, {"shell:read", "shell:execute"},
                                            ModelToolCall("x", "mcp_tool_inspect", {"name": "test:call"}))
-        for args in ({"name": "unqualified"}, {"name": "test:call", "arguments": []},
-                     {"name": "test:call", "arguments": {"data": "x" * 9000}}):
-            with pytest.raises(ValueError, match="Invalid|too large"):
+        for args in ({"name": "unqualified"}, {"name": "test:call", "arguments": []}):
+            with pytest.raises(ValueError, match="Invalid"):
                 await nested_mcp.approved_call("alice", cid, {"shell:read", "shell:execute"},
                                                ModelToolCall("x", "mcp_tool_call", args))
+        invoked = []
+        async def native(*args, **kwargs):
+            invoked.append((args, kwargs))
+            return "accepted"
+        monkeypatch.setattr(nested_mcp, "_invoke_registered", native)
+        assert await nested_mcp.approved_call("alice", cid, {"shell:read", "shell:execute"},
+            ModelToolCall("x", "mcp_tool_call", {"name": "test:call", "arguments": {"data": "x" * 9000}})) == "accepted"
+        assert len(invoked[0][0][3]["arguments"]["data"]) == 9000
     finally:
         _registry_for_state.cache_clear()
         get_settings.cache_clear()
