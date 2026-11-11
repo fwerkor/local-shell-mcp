@@ -256,11 +256,15 @@ class SQLiteDatabase:
 _KEY_LOCKS: dict[tuple[str, str], threading.RLock] = {}
 _KEY_LOCKS_GUARD = threading.Lock()
 _LOCK_DEPTH = threading.local()
+_SHARED_DATABASE_INIT_LOCK = threading.Lock()
 
 
 @lru_cache(maxsize=16)
 def shared_database(state_dir: Path) -> SQLiteDatabase:
-    return SQLiteDatabase(state_dir)
+    # functools.lru_cache allows concurrent cache misses to invoke the wrapped
+    # function more than once. Serialise schema/WAL setup on cold startup.
+    with _SHARED_DATABASE_INIT_LOCK:
+        return SQLiteDatabase(state_dir)
 
 
 class SQLiteStateStore:
