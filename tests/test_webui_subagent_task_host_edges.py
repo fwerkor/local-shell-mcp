@@ -542,3 +542,116 @@ async def test_owner_lease_stolen_after_model_cannot_finish_generation(host_envi
     assert row["child_run_id"] is not None
     assert host_environment[2].get("local", row["child_run_id"]).status == "running"
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_parent_cancel_wins_against_late_model_completion(host_environment, monkeypatch):
+    """A completed model token must not overwrite a committed parent cancel."""
+    async def model(profile, history, **kwargs):
+        yield "late result should not be delivered"
+
+    host, invocation = await start_task(host_environment, model, start=False)
+    original = host._settle_child_registration
+
+    def cancel_before_commit(task_id, **kwargs):
+        if kwargs.get("before_terminal") and kwargs.get("lease_token"):
+            with host.db.connect() as db:
+                db.execute("UPDATE subagent_tasks SET cancel_requested=1 WHERE id=?", (task_id,))
+        return original(task_id, **kwargs)
+
+    monkeypatch.setattr(host, "_settle_child_registration", cancel_before_commit)
+    handle = json.loads(await host.start(invocation))
+    row = await settle(host, handle["background_task_id"])
+    assert row["status"] == "cancelled" and row["result"] is None
+    assert host_environment[2].get("local", row["child_run_id"]).status == "aborted"
+    assert json.loads(await host.check({"background_task_id": row["id"]}))["status"] == "cancelled"
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_arriving_after_guard_preflight_is_not_published_early(host_environment, monkeypatch):
+    async def model(profile, history, **kwargs):
+        raise AssertionError("A pre-cancelled task must not launch a child")
+        yield "never"  # pragma: no cover
+
+    host, invocation = await start_task(host_environment, model, start=False)
+    ensure = host._ensure_active
+
+    async def no_dispatch(_task_id):
+        return None
+
+    monkeypatch.setattr(host, "_ensure_active", no_dispatch)
+    handle = json.loads(await host.start(invocation))
+    task_id = handle["background_task_id"]
+    monkeypatch.setattr(host, "_ensure_active", ensure)
+    original = host._get
+    flipped = False
+
+    def flip_after_snapshot(task):
+        nonlocal flipped
+        snapshot = original(task)
+        if not flipped:
+            flipped = True
+            with host.db.connect() as db:
+                db.execute("UPDATE subagent_tasks SET cancel_requested=1 WHERE id=?", (task,))
+        return snapshot
+
+    monkeypatch.setattr(host, "_get", flip_after_snapshot)
+    await host._ensure_active(task_id)
+    monkeypatch.setattr(host, "_get", original)
+    assert host._get(task_id)["status"] == "running"
+    await host._ensure_active(task_id)
+    assert host._get(task_id)["status"] == "cancelled"
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_expiring_grant_after_guard_preflight_stays_pending_until_settled(host_environment, monkeypatch):
+    async def model(profile, history, **kwargs):
+        raise AssertionError("An expired grant cannot start the model")
+        yield "never"  # pragma: no cover
+
+    host, invocation = await start_task(host_environment, model, start=False)
+    ensure = host._ensure_active
+
+    async def no_dispatch(_task_id):
+        return None
+
+    monkeypatch.setattr(host, "_ensure_active", no_dispatch)
+    handle = json.loads(await host.start(invocation))
+    task_id = handle["background_task_id"]
+    monkeypatch.setattr(host, "_ensure_active", ensure)
+    with host.db.connect() as db:
+        db.execute("UPDATE subagent_tasks SET grant_expires=? WHERE id=?",
+                   (time.time() + 600, task_id))
+    original = host._get
+    flipped = False
+
+    def expire_after_snapshot(task):
+        nonlocal flipped
+        snapshot = original(task)
+        if not flipped:
+            flipped = True
+            with host.db.connect() as db:
+                db.execute("UPDATE subagent_tasks SET grant_expires=? WHERE id=?",
+                           (time.time() - 1, task))
+        return snapshot
+
+    monkeypatch.setattr(host, "_get", expire_after_snapshot)
+    await host._ensure_active(task_id)
+    monkeypatch.setattr(host, "_get", original)
+    assert host._get(task_id)["status"] == "running"
+    await host._ensure_active(task_id)
+    assert host._get(task_id)["status"] == "error"
+    await shutdown_subagent_tasks()
+
+
+def test_bounded_background_result_preserves_both_ends():
+    from local_shell_mcp.webui.subagent_task_host import _limited
+
+    text = "first " + "x" * 101_000 + " last"
+    output = _limited(text, 100_000)
+    assert len(output) == 100_000
+    assert output.startswith("first ") and output.endswith(" last")
+    assert "[truncated]" in output
+    assert _limited("short", 100_000) == "short"
