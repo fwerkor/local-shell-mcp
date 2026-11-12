@@ -408,3 +408,12 @@ SQLite 租约 watcher：不抢占有效租约、不重写任务身份，重复�
 回归测试模拟远端第一次续租后才停止续约，验证不提前接管、最终正确恢复结果。
 这属于子任务租约恢复，不等于原版所有 Agent Trigger 的自动 completion
 wakeup/外部队列/跨 Controller 事件协议已经移植；后者仍单列为未完成。
+
+### 2026-11-12 — Windows CI 调度时间容限
+
+当前 CI Windows x86_64 Python 3.12 曾在高负载下因两个测试中固定的
+2 秒/4 秒短等待而偶发失败：`test_job_mutation_recovery` 在拦截
+`start_shell` 前尚未得到调度，`test_webui_subagent_task_host_edges` 的
+异步 Child Generation 尚未完成。测试等待窗口改为有上界的 15 秒和
+20 秒，继续验证真实启动/终态、所有权及 `exit_code`，失败时显示受限状态。
+没有放宽任何生产操作 timeout 或权限检查。
