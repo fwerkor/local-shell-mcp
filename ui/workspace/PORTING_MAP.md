@@ -375,3 +375,20 @@ host task/thread store and message-protocol PRs land.
 幂等重放、缺失可信 marker 的 fail-closed、恢复重建以及非法外部 conversation ID。
 待 PR #352 合入，需要用其真实 `ActiveChildThreads` 与 Artifact 编辑路由联合测试，
 才可以把本项由“部分/依赖 PR #352”提升为完整等价；此前不声称写保护端到端验收。
+
+### 2026-11-12 — child terminal publication / stale lease CI hardening
+
+PR #354 的多平台 CI（`334e111d`）暴露一个真实可观察的竞态：`_execute`
+先提交 `subagent_tasks.status='completed'`，随后才在 `finally` 调用
+PR #352 的 `ActiveChildThreads.settle`。另一个 Controller 或测试观察者可能
+见到已完成的 task，却仍看到 child 活跃。这一顺序已更正：成功、失败、取消和
+过期的每个终态发布路径，在释放任务终态之前先通过 PR #352 原始 API 持久化
+保护标记；不在持有同一 SQLite 写锁时重入该 API。若两个提交之间崩溃，task
+仍为 running，而 child 标记已只读，重试可以安全再调用幂等 `settle`。
+
+修复同时涵盖失去执行租约后旧 Controller 继续 `GenerationStore.finish` 的风险：
+子 generation 只允许在同一租约成功提交任务终态后才完成；父调用请求取消期间
+不应把晚到的模型结果改写为成功。新测试覆盖原子可观察顺序、迟到租约接管、
+取消与正常结束。此外，跨平台 Job 测试夹具 `_wait_job` 原先把过渡态
+`retrying` 当成终态，导致 macOS 的 `exit_code=None` 偶发失败；现只在
+取得实际退出码后返回，生产 Job/Shell 实现保持不变。
