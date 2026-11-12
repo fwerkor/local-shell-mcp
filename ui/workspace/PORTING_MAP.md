@@ -392,3 +392,19 @@ PR #352 的 `ActiveChildThreads.settle`。另一个 Controller 或测试观察�
 取消与正常结束。此外，跨平台 Job 测试夹具 `_wait_job` 原先把过渡态
 `retrying` 当成终态，导致 macOS 的 `exit_code=None` 偶发失败；现只在
 取得实际退出码后返回，生产 Job/Shell 实现保持不变。
+
+### 2026-11-12 — 长租约远程重连的持续恢复
+
+对照原版 `packages/api/src/agents/subagentThreads.ts` 租约续期以及
+`triggers/README.md` 的 idle recovery 语义，Controller 启动时的一次性
+`lease_until` 计时器不足以恢复续过租的子任务：其他正常 Controller 在第一次
+租约到期前续期会阻止认领，后续掉线则使任务永久遗留 `running`。
+
+`recover_subagent_tasks` 现在针对尚由远端持有的任务维护有界、可取消的
+SQLite 租约 watcher：不抢占有效租约、不重写任务身份，重复启动不会增加同一任务
+的 watcher，远端续租后继续读取真实 `lease_until`，真正超时才调用现有
+`_ensure_active` 按 CAS 认领，并在本机恢复 `AgentRunner` 后退出 watcher。
+`shutdown_subagent_tasks` 会取消和收拢 watcher，避免泄漏异步任务。
+回归测试模拟远端第一次续租后才停止续约，验证不提前接管、最终正确恢复结果。
+这属于子任务租约恢复，不等于原版所有 Agent Trigger 的自动 completion
+wakeup/外部队列/跨 Controller 事件协议已经移植；后者仍单列为未完成。
