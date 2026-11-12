@@ -34,7 +34,11 @@ async def _wait_job(job_id: str, timeout: float = 15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = await tail_job(job_id)
-        if result["job"]["status"] not in {"starting", "running"}:
+        # A retry is a persisted intermediate operation, not a terminal job.
+        # Especially on macOS, tail_job may observe `retrying` before its
+        # process is reattached, while the exit_code is still None.
+        if result["job"]["status"] not in {"starting", "running", "retrying", "stopping"} \
+                and result["job"]["exit_code"] is not None:
             return result
         await asyncio.sleep(0.1)
     pytest.fail(f"job {job_id} did not complete")
@@ -497,3 +501,20 @@ async def test_persistent_output_limits_raw_bytes_before_decoding(
     assert result["truncated"] is expected_truncation
     assert len(result["stdout"].encode("utf-8")) <= limit
     assert result["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_wait_job_does_not_treat_retrying_as_a_terminal_exit(monkeypatch):
+    seen = iter([{"status": "retrying", "exit_code": None},
+                 {"status": "running", "exit_code": None},
+                 {"status": "succeeded", "exit_code": 0}])
+    calls = []
+
+    async def fake_tail(_job_id):
+        state = next(seen)
+        calls.append(state["status"])
+        return {"job": state, "output": ""}
+
+    monkeypatch.setattr("test_timeout_auto_persist.tail_job", fake_tail)
+    assert (await _wait_job("repeat", timeout=2))["job"]["exit_code"] == 0
+    assert calls == ["retrying", "running", "succeeded"]

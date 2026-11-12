@@ -505,3 +505,40 @@ async def test_child_subagent_budget_never_resets_after_nested_delegation(host_e
     assert not any(tool["function"]["name"] == "check_background_task" for tool in context.tools)
     assert runner.configs[child["id"]] == []
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_owner_lease_stolen_after_model_cannot_finish_generation(host_environment, monkeypatch):
+    """A stale Controller must not publish completion after the last model step."""
+    from local_shell_mcp.webui import subagent_task_host as module
+
+    async def model(profile, history, **kwargs):
+        yield "old process result must be ignored"
+
+    host, invocation = await start_task(host_environment, model, start=False)
+    unmodified = host._settle_child_registration
+    stolen = asyncio.Event()
+
+    def steal_at_finish(task_id, **kwargs):
+        if kwargs.get("before_terminal") and kwargs.get("lease_token"):
+            with host.db.connect() as db:
+                db.execute("UPDATE subagent_tasks SET lease_owner=?,lease_until=? "
+                           "WHERE id=? AND status='running'",
+                           ("new-controller-token", module._now() + 30_000, task_id))
+            stolen.set()
+        return unmodified(task_id, **kwargs)
+
+    monkeypatch.setattr(host, "_settle_child_registration", steal_at_finish)
+    handle = json.loads(await host.start(invocation))
+    task_id = handle["background_task_id"]
+    await asyncio.wait_for(stolen.wait(), 5)
+    for _ in range(100):
+        if task_id not in module._TASKS:
+            break
+        await asyncio.sleep(.01)
+    row = host._get(task_id)
+    assert row["status"] == "running" and row["lease_owner"] == "new-controller-token"
+    assert row["result"] is None
+    assert row["child_run_id"] is not None
+    assert host_environment[2].get("local", row["child_run_id"]).status == "running"
+    await shutdown_subagent_tasks()

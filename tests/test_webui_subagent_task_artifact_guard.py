@@ -102,6 +102,12 @@ async def test_graph_host_artifact_guard_reserves_child_before_creation_and_sett
 
         def settle(self, owner, child, parent):
             with self.db.connect() as db:
+                # Terminal status must not be observable until the immutable
+                # child protection marker has been durably settled.
+                task = db.execute("SELECT status FROM subagent_tasks WHERE "
+                                  "child_conversation_id=? AND owner=? AND parent_run_id=?",
+                                  (child, owner, parent)).fetchone()
+                assert task is not None and task["status"] == "running"
                 db.execute("BEGIN IMMEDIATE")
                 changed = db.execute("UPDATE active_subagent_threads SET active=0 "
                                      "WHERE owner=? AND thread_id=? AND parent_run_id=? AND active=1",
