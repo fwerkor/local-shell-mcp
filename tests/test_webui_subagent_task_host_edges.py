@@ -655,3 +655,42 @@ def test_bounded_background_result_preserves_both_ends():
     assert output.startswith("first ") and output.endswith(" last")
     assert "[truncated]" in output
     assert _limited("short", 100_000) == "short"
+
+
+@pytest.mark.asyncio
+async def test_remote_owner_renews_before_expiry_then_later_disappears(host_environment, monkeypatch):
+    """Startup recovery must revisit renewed leases, not abandon them once."""
+    from local_shell_mcp.webui import subagent_task_host as module
+
+    async def model(profile, history, **kwargs):
+        yield "recovered after second remote expiry"
+
+    host, invocation = await start_task(host_environment, model, start=False)
+    original = host._ensure_active
+
+    async def no_dispatch(_task_id):
+        return None
+
+    monkeypatch.setattr(host, "_ensure_active", no_dispatch)
+    handle = json.loads(await host.start(invocation))
+    task_id = handle["background_task_id"]
+    monkeypatch.setattr(host, "_ensure_active", original)
+    now = module._now()
+    with host.db.connect() as db:
+        db.execute("UPDATE subagent_tasks SET lease_owner=?,lease_until=? WHERE id=?",
+                   ("remote-controller", now + 110, task_id))
+    accepted = await module.recover_subagent_tasks(host.db, stream_tools=model, stream_text=model)
+    assert accepted == 1
+    assert await module.recover_subagent_tasks(host.db, stream_tools=model, stream_text=model) == 1
+    assert len(module._RECOVERY_WATCHERS) == 1
+    await asyncio.sleep(.05)
+    with host.db.connect() as db:
+        db.execute("UPDATE subagent_tasks SET lease_until=? WHERE id=?",
+                   (module._now() + 320, task_id))
+    await asyncio.sleep(.18)
+    assert host._get(task_id)["child_run_id"] is None
+    assert host._get(task_id)["lease_owner"] == "remote-controller"
+    settled = await settle(host, task_id, timeout=3)
+    assert settled["status"] == "completed"
+    assert json.loads(await host.check({"background_task_id": task_id}))["result"] == "recovered after second remote expiry"
+    await shutdown_subagent_tasks()
