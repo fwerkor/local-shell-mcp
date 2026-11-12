@@ -41,6 +41,7 @@ _TIMEOUT_SECONDS = 30 * 60
 _TASKS: dict[str, asyncio.Task] = {}
 _ACTIVE_LEASES: dict[str, str] = {}
 _RECOVERY_TASKS: set[asyncio.Task] = set()
+_RECOVERY_WATCHERS: dict[str, asyncio.Task] = {}
 _PROCESS_ID = secrets.token_hex(16)
 
 
@@ -807,16 +808,47 @@ async def recover_subagent_tasks(database: Any, *, stream_tools: Callable, strea
         host = SQLiteSubagentTaskHost(database, row["owner"], row["parent_conversation_id"],
                                       stream_tools=stream_tools, stream_text=stream_text)
         task_id = row["id"]
-        lease_until = row["lease_until"] or 0
-        if lease_until <= _now():
-            await host._ensure_active(task_id)
-            count += 1
-        else:
-            async def later(owner=host, key=task_id, expires=lease_until):
-                await asyncio.sleep(max(0, (expires - _now()) / 1000) + .05)
-                await owner._ensure_active(key)
-            future = asyncio.create_task(later(), name="webui-subagent-recover-" + task_id)
-            _RECOVERY_TASKS.add(future)
-            future.add_done_callback(_RECOVERY_TASKS.discard)
-            count += 1
+        await host._ensure_active(task_id)
+        count += 1
+        local = _TASKS.get(task_id)
+        if local is not None and not local.done():
+            continue
+        prior = _RECOVERY_WATCHERS.get(task_id)
+        if prior is not None and not prior.done():
+            continue
+
+        async def watch(owner=host, key=task_id):
+            # A live remote owner may renew its lease just before our first
+            # expiration check. A one-shot timer would then abandon the task
+            # forever if the remote Controller later disappears. Keep a bounded
+            # retry against the authoritative SQLite row, not a guessed job ID.
+            while True:
+                with owner.db.connect() as db:
+                    current = owner._row(db, key)
+                if current is None or current["status"] != "running":
+                    return
+                active = _TASKS.get(key)
+                if active is not None and not active.done():
+                    return
+                expires = current["lease_until"] or 0
+                # Do not spin on an expired but temporarily unclaimable task
+                # (e.g. the artifact guard is not yet installed). Retry with
+                # a bounded delay and keep the durable row as source of truth.
+                await asyncio.sleep(min(5.0, max(.5, (expires - _now()) / 1000 + .05)))
+                try:
+                    await owner._ensure_active(key)
+                except Exception:
+                    log.exception("Detached subagent %s recovery admission failed; retrying", key)
+                    await asyncio.sleep(5)
+
+        future = asyncio.create_task(watch(), name="webui-subagent-recover-" + task_id)
+        _RECOVERY_TASKS.add(future)
+        _RECOVERY_WATCHERS[task_id] = future
+
+        def done(finished, key=task_id):
+            _RECOVERY_TASKS.discard(finished)
+            if _RECOVERY_WATCHERS.get(key) is finished:
+                _RECOVERY_WATCHERS.pop(key, None)
+
+        future.add_done_callback(done)
     return count
