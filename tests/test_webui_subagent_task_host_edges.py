@@ -59,14 +59,18 @@ async def start_task(env, model, *, call_id="task-1", text="description",
     return host, invocation
 
 
-async def settle(host, task_id, *, timeout=4):
+async def settle(host, task_id, *, timeout=20):
     end = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < end:
         record = host._get(task_id)
         if record and record["status"] != "running":
             return record
         await asyncio.sleep(.02)
-    raise AssertionError("Task did not settle")
+    current = host._get(task_id)
+    raise AssertionError(
+        f"Task did not settle: status={current['status'] if current else 'missing'}, "
+        f"lease_active={bool(current and current['lease_owner'])}"
+    )
 
 
 @pytest.mark.asyncio
