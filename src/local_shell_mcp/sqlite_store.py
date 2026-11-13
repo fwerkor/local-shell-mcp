@@ -223,6 +223,26 @@ CREATE TABLE IF NOT EXISTS subagent_task_invocations (
     updated_at INTEGER NOT NULL,
     PRIMARY KEY(owner,parent_conversation_id,parent_run_id,parent_agent_id,tool_call_id)
 );
+-- Original agent completion event, prepared in the same transaction as the
+-- child task BEFORE its model starts. Source: subagentCompletionWakeup.ts.
+CREATE TABLE IF NOT EXISTS subagent_wakeups (
+    task_id TEXT PRIMARY KEY REFERENCES subagent_tasks(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    parent_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_agent_id TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+       CHECK(status IN ('pending','dispatched','done','retired','dead')),
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    lease_owner TEXT,
+    lease_until INTEGER,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_wakeups_pending ON
+    subagent_wakeups(status,created_at);
 CREATE TABLE IF NOT EXISTS attachments (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,

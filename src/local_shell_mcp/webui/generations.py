@@ -8,6 +8,7 @@ owned by the Controller's event loop, not by the browser connection.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import secrets
@@ -77,7 +78,8 @@ class GenerationStore:
 
     def begin(self, owner: str, payload: dict, agent: dict | None = None, *,
               protocol_version: int = 2,
-              trusted_new_conversation_id: str | None = None) -> tuple[Generation, bool]:
+              trusted_new_conversation_id: str | None = None,
+              _connection: Any | None = None) -> tuple[Generation, bool]:
         client_request_id = payload.get("clientRequestId")
         if client_request_id is not None and (not isinstance(client_request_id, str) or
                                                not 1 <= len(client_request_id) <= 160):
@@ -120,8 +122,13 @@ class GenerationStore:
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
         }
-        with self.database.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        # Internal trigger delivery supplies its already-locked SQLite
+        # transaction. The generation and a one-shot child result claim must
+        # commit or roll back together; ordinary HTTP admission is unchanged.
+        with (contextlib.nullcontext(_connection) if _connection is not None
+              else self.database.connect()) as db:
+            if _connection is None:
+                db.execute("BEGIN IMMEDIATE")
             if client_request_id:
                 prior = db.execute(
                     "SELECT r.* FROM generation_requests gr JOIN runs r ON r.id=gr.run_id "
