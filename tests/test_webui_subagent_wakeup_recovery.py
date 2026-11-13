@@ -228,3 +228,75 @@ async def test_delegation_respects_source_optout_and_rejects_untrusted_parent_bi
     await shutdown_subagent_tasks()
 
 
+
+
+@pytest.mark.asyncio
+async def test_manual_result_claim_and_automatic_delivery_race_has_one_winner(environment):
+    db, repo, store, child, parent, parent_run = environment
+    host, task_id, _ = await make_task(environment)
+    await completed(host, task_id)
+    store.finish("local", parent_run.run_id, status="complete", text="Parent finished")
+    await wait_admission()
+    delivered = []
+
+    async def dispatch(owner, generation, profile, agent, **kwargs):
+        delivered.append(generation.run_id)
+
+    scan, receipt = await asyncio.gather(
+        process_wakeups(db, dispatch=dispatch),
+        host.check({"background_task_id": task_id}),
+    )
+    claim = json.loads(receipt)
+    assert scan in {0, 1}
+    if scan == 1:
+        assert claim["status"] == "delivery_scheduled" and "result" not in claim
+    else:
+        assert claim["result"] == "child result"
+    with db.connect() as conn:
+        wakeup = conn.execute("SELECT status FROM subagent_wakeups WHERE task_id=?",
+                              (task_id,)).fetchone()[0]
+        rows = conn.execute("SELECT result_claimed,result_claim_key FROM subagent_tasks WHERE id=?",
+                            (task_id,)).fetchone()
+        assert rows["result_claimed"] == 1
+        assert wakeup == ("dispatched" if scan else "retired")
+        assert (rows["result_claim_key"] == "wakeup:" + task_id) == bool(scan)
+        assert conn.execute("SELECT count(*) FROM runs WHERE conversation_id=?",
+                            (parent_run.conversation_id,)).fetchone()[0] == 1 + scan
+    assert len(delivered) == scan
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_sibling_child_completions_serialize_on_newest_parent_assistant(environment):
+    db, repo, store, child, parent, parent_run = environment
+    host, first_id, _ = await make_task(environment, call_id="sibling-1")
+    host, second_id, _ = await make_task(environment, call_id="sibling-2")
+    await completed(host, first_id)
+    await completed(host, second_id)
+    store.finish("local", parent_run.run_id, status="complete", text="Parent finished")
+    await wait_admission()
+    seen = []
+
+    async def dispatch(owner, generation, profile, agent, **kwargs):
+        seen.append(generation)
+
+    assert await process_wakeups(db, dispatch=dispatch) == 1
+    assert len(seen) == 1  # sibling cannot overtake in-flight continuation
+    with db.connect() as conn:
+        initially_running = conn.execute("SELECT task_id FROM subagent_wakeups WHERE "
+                                         "status='dispatched'").fetchone()[0]
+    store.finish("local", seen[0].run_id, status="complete", text="First delivered")
+    assert await process_wakeups(db, dispatch=dispatch) == 1
+    with db.connect() as conn:
+        latest_input = conn.execute("SELECT parent_id FROM messages WHERE id=?",
+                                    (seen[1].user_message_id,)).fetchone()
+        assert latest_input["parent_id"] == seen[0].response_message_id
+        assert conn.execute("SELECT count(*) FROM subagent_wakeups WHERE "
+                            "status IN ('done','dispatched')").fetchone()[0] == 2
+    assert {first_id, second_id} >= {initially_running}
+    store.finish("local", seen[1].run_id, status="complete", text="Second delivered")
+    assert await process_wakeups(db, dispatch=dispatch) == 0
+    with db.connect() as conn:
+        assert conn.execute("SELECT count(*) FROM subagent_wakeups WHERE "
+                            "status='done'").fetchone()[0] == 2
+    await shutdown_subagent_tasks()

@@ -99,3 +99,37 @@ async def test_source_wakeup_uses_latest_persisted_assistant_descendant(environm
     await shutdown_subagent_tasks()
 
 
+
+
+@pytest.mark.parametrize("mutation", [
+    "deleted_child", "changed_owner_lineage", "malformed_lineage", "pending_child_finish",
+])
+@pytest.mark.asyncio
+async def test_missing_or_incomplete_child_transcript_cannot_trigger_parent(environment, mutation):
+    db, repo, store, child, parent, parent_run = environment
+    host, task_id, _ = await make_task(environment)
+    child_record = await completed(host, task_id)
+    store.finish("local", parent_run.run_id, status="complete", text="Parent complete")
+    with db.connect() as conn:
+        if mutation == "deleted_child":
+            conn.execute("DELETE FROM conversations WHERE id=?",
+                         (child_record["child_conversation_id"],))
+        elif mutation == "changed_owner_lineage":
+            conn.execute("UPDATE conversations SET metadata=? WHERE id=?",
+                         ('{"subagentTask":"untrusted","parentConversationId":"foreign"}',
+                          child_record["child_conversation_id"]))
+        elif mutation == "malformed_lineage":
+            conn.execute("UPDATE conversations SET metadata=? WHERE id=?",
+                         ('not-json', child_record["child_conversation_id"]))
+        else:
+            conn.execute("UPDATE runs SET status='running' WHERE id=?",
+                         (child_record["child_run_id"],))
+    await wait_admission()
+    assert await process_wakeups(db, dispatch=lambda *args, **kwargs: None) == 0
+    with db.connect() as conn:
+        state = conn.execute("SELECT status FROM subagent_wakeups WHERE task_id=?",
+                             (task_id,)).fetchone()[0]
+        assert state == ("pending" if mutation == "pending_child_finish" else "retired")
+        assert conn.execute("SELECT result_claimed FROM subagent_tasks WHERE id=?",
+                            (task_id,)).fetchone()[0] == 0
+    await shutdown_subagent_tasks()
