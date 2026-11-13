@@ -51,6 +51,20 @@ def register_wakeup(db: Any, *, task_id: str, owner: str, conversation_id: str,
     parent = db.execute("SELECT state FROM runs WHERE id=? AND conversation_id=?",
                         (parent_run_id, conversation_id)).fetchone()
     if parent is None:
+        # A nested Subagent executes under its own child conversation while
+        # retaining the root conversation's tool authority. A completion event
+        # for that hidden child cannot be routed to the root conversation's
+        # assistant branch. Keep its ordinary durable poll/claim path rather
+        # than failing the child or inventing a false root Agent continuation.
+        nested = db.execute(
+            "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+            "JOIN subagent_tasks t ON t.child_run_id=r.id "
+            "WHERE r.id=? AND c.owner=? AND t.owner=? "
+            "AND t.parent_conversation_id=? AND t.status='running' LIMIT 1",
+            (parent_run_id, owner, owner, conversation_id),
+        ).fetchone()
+        if nested is not None:
+            return
         raise PermissionError("A completion wakeup requires a trusted parent run")
     response_id = json.loads(parent["state"]).get("responseMessageId")
     if not isinstance(response_id, str) or not response_id:

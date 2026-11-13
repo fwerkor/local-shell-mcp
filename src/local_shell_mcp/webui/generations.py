@@ -84,6 +84,14 @@ class GenerationStore:
         if client_request_id is not None and (not isinstance(client_request_id, str) or
                                                not 1 <= len(client_request_id) <= 160):
             raise ValueError("Invalid client request id")
+        # These idempotency namespaces are host-generated only. A browser can
+        # see a task handle and must not be able to preoccupy its continuation
+        # key with an unrelated generation before the child settles.
+        if isinstance(client_request_id, str):
+            if client_request_id.startswith("subagent-wakeup:") and _connection is None:
+                raise ValueError("Internal completion idempotency key cannot be submitted")
+            if client_request_id.startswith("subagent:") and trusted_new_conversation_id is None:
+                raise ValueError("Internal child idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")
         new_conversation = raw_conversation_id in (None, "", "new", "new_conversation")
         if raw_conversation_id is not None and not isinstance(raw_conversation_id, str):
