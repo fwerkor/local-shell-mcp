@@ -462,6 +462,24 @@
       "python_lsm": "webui/attachments.py; original retained React useArtifactDownload",
       "status": "完成（本地文件原件路径实测）",
       "difference": "Chromium从原有tool attachment卡片读取真实SQLite DOCX原件，Blob下载完全保真；模型产生真实Office预览的转换和工具附件事件仍由共享协议PR负责。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/files/documents/html.ts",
+      "sha256": "c0abfcc6f04a2bb2ff310489c9ffd82d2b217bb1768e75979453fbb8cb78c19f",
+      "symbols": "officeHtmlBucket/bufferToOfficeHtml; escape + DOCX, XLS/XLSX/ODS/CSV/PPTX static fallback",
+      "python_lsm": "webui/office_preview.py",
+      "status": "部分：静态语义HTML已完成；CDN/LibreOffice高保真未移植",
+      "difference": "使用Python标准库安全静态渲染及轻量xlrd支持BIFF.xls；真实上游6个二进制样例、XSS/ZIP上限与真实浏览器回归；不使用原版动态CDN高保真渲染。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/files/documents/zipSafety.ts",
+      "sha256": "c137820f3b7c0d3dcb041addd8c217e2b0d430b78bc31f887e02d065ea38ec13",
+      "symbols": "assertSafeZipSize 25MiB entry/100MiB total; XML DTD denial",
+      "python_lsm": "webui/office_preview.py",
+      "status": "完成：Python ZIP actual-inflate size preflight",
+      "difference": "使用Python标准库安全静态渲染及轻量xlrd支持BIFF.xls；真实上游6个二进制样例、XSS/ZIP上限与真实浏览器回归；不使用原版动态CDN高保真渲染。"
     }
   ],
   "runtime_dependency_lock": {
@@ -488,5 +506,13 @@
       "@langchain/langgraph-checkpoint": "1.1.3"
     },
     "alternative_bun_lock": "The upstream bun.lock resolves agents 3.6.0/core 1.2.4; it was not consumed by the integrated Docker runtime and is not the port baseline."
+  },
+  "artifacts_office_fixture_lock": {
+    "sample.docx": "23c30abe8d50720ab7acd0aad6f69427c8b101bdab39f515dd6e69d1d336de63",
+    "sample.xlsx": "394c6bd079c0d68d4e4edb4dd630a0418b0ed856d3ee2ab0e9ffcfcf5d20f2b9",
+    "sample.xls": "3f0282b67989043e5186c52e1784341ebac9649ebec416f54b57f9efcb691d2f",
+    "sample.ods": "d81a5886c068be340eb888d99854027b0b861498f874ea8328913e421aa6007e",
+    "sample.pptx": "b3c0d9957f92f98da34b9abeeadf58f6a972b07d312faa02b272bae919d535c0",
+    "empty.docx": "9106332c57592e86f80688601055761f32d2ca7da659964198f572dc48de9198"
   }
 }
