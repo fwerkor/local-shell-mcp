@@ -67,6 +67,11 @@ async def test_nested_background_child_run_uses_root_scope_and_depth(tmp_path, m
         await asyncio.sleep(.03)
     tasks = host.list()
     assert len(tasks) == 2, (tasks, trace)
+    # The hidden middle-child conversation has no root assistant branch to
+    # target. Its nested result is still durable and manually claimable, not
+    # misrouted through a fabricated parent wakeup event.
+    with database.connect() as db:
+        assert db.execute("SELECT count(*) FROM subagent_wakeups").fetchone()[0] == 1
     assert {task["subagentType"] for task in tasks} == {middle["id"], leaf["id"]}
     middle_task = host._get(handle["background_task_id"])
     leaf_task = next(host._get(task["taskId"]) for task in tasks if task["subagentType"] == leaf["id"])
