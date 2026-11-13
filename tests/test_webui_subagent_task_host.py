@@ -210,7 +210,7 @@ async def test_background_task_idempotency_argument_conflict_and_cross_scope_thr
     first = json.loads(await invoke_subagent(ModelToolCall("id", "subagent", base), config, **kw))
     again = json.loads(await invoke_subagent(ModelToolCall("id", "subagent", base), config, **kw))
     assert first["background_task_id"] == again["background_task_id"]
-    assert "Reused" in again["message"]
+    assert f'Task handle: background_task_id "{first["background_task_id"]}"' in again["message"]
     conflict = json.loads(await invoke_subagent(ModelToolCall("id", "subagent", {
         **base, "description": "changed"}), config, **kw))
     assert conflict["status"] == "rejected"
