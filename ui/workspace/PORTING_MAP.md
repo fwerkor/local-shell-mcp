@@ -287,7 +287,7 @@ Evidence commands (independent worktree):
 
 ```sh
 PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_prompts.py tests/test_webui_artifact_routes.py tests/test_webui_artifacts_source.py
-PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_browser.py tests/test_webui_artifact_preview_browser.py tests/test_webui_artifact_file_download_browser.py tests/test_webui_attachments.py
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_browser.py tests/test_webui_artifact_preview_browser.py tests/test_webui_artifact_file_download_browser.py tests/test_webui_attachments.py tests/test_webui_office_preview.py tests/test_webui_office_runtime.py
 # Source-differential oracle only; Node and npm dedent are BUILD/TEST dependencies,
 # not needed by the Python+SQLite controller:
 node scripts/check-librechat-artifact-prompt-diff.cjs /path/to/pinned-LibreChat /path/to/dedent-1.7.0
@@ -304,5 +304,6 @@ cases and 95.33% global branch coverage; the added download route is being
 re-checked in CI (do not infer a new full-suite pass from the earlier run). No remaining behavior is
 represented as fully source-equivalent merely because an identically named
 frontend feature appears. The new Office preview's separate source-differential
-fixtures and security tests are in `tests/test_webui_office_preview.py`, with an
-actual native-file-write-to-React replay in `test_webui_artifact_file_download_browser.py`.
+format fixtures and security tests are in `tests/test_webui_office_preview.py`,
+native runtime/owner/idempotency tests in `tests/test_webui_office_runtime.py`, and
+native-file-write-to-React replay in `test_webui_artifact_file_download_browser.py`.

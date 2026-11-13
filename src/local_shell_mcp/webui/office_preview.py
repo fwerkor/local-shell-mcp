@@ -482,7 +482,8 @@ async def publish_native_file_write(owner: str, generation, tool_call, output: s
     if tool_call.name != 'file_write' or not isinstance(tool_call.arguments, dict):
         return None
     args = tool_call.arguments
-    if args.get('machine') not in {None, '', 'local'}:
+    machine = args.get('machine')
+    if machine is not None and (not isinstance(machine, str) or machine not in {'', 'local'}):
         return None
     try:
         response = json.loads(output)
@@ -504,7 +505,7 @@ async def publish_native_file_write(owner: str, generation, tool_call, output: s
     try:
         if args.get('encoding') == 'base64':
             original = base64.b64decode(content, validate=True)
-        elif args.get('encoding') in {None, 'utf-8'}:
+        elif args.get('encoding') is None or args.get('encoding') == 'utf-8':
             original = content.encode('utf-8')
         else:
             return None
