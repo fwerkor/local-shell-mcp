@@ -6,7 +6,7 @@
     "LibreChat": 1892,
     "agents": 258
   },
-  "reviewed_mapping_count": 48,
+  "reviewed_mapping_count": 51,
   "modules": [
     {
       "repository": "LibreChat",
@@ -2163,10 +2163,10 @@
       "repository": "LibreChat",
       "path": "api/server/services/Endpoints/agents/subagentThreadStore.js",
       "sha256": "aada9ea0c8d50588aaf4dd6b26a3025bd5511004cdca73a27eea98ac2ab69a6f",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_task_host.py:start/recover_subagent_tasks; webui/subagent_wakeup.py",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "task intent 与 wakeup envelope 同一 SQLite commit；父子任务完成后恢复轮询扫描持久队列；Controller 生命周期负责队列 worker 的启停；无需 Node/Mongo/Redis。"
     },
     {
       "repository": "LibreChat",
@@ -7770,10 +7770,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/background.ts",
       "sha256": "ed8f894225a10c39e3dfb63c31798a6a1deb91c020d5a342f16b69cebc0a7436",
-      "python_lsm": "webui/subagent_task_host.py; webui/agent_runner.py",
+      "python_lsm": "webui/subagent_task_host.py; webui/subagent_wakeup.py; webui/agent_runner.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "check_background_task name+argument schema, poll/list/cancel/queue/steer/interrupt/cancel_message, durable control invocation fencing and one-time claim; native ordinary tool backgrounding and automatic completion wakeup pending separate integration."
+      "difference": "Source check_background_task name/args, poll/list/control, manual vs auto wakeup atomic claim; ordinary-tool backgrounding and rich artifact delivery remain unported."
     },
     {
       "repository": "LibreChat",
@@ -8940,19 +8940,19 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/subagentCompletionWakeup.ts",
       "sha256": "41f03d180f370fad2acaf0da1aa1a26e54cf51eecb2cca504f766d75bbe87684",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_wakeup.py:register_wakeup/_latest_branch/_input/process_wakeups",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Python SQLite 事务内预登记可信内部 continue envelope，检验 owner/parent Agent/原 responseMessageId；查找最新 assistant descendant；结果与新 generation 原子二选一；多 Controller CAS 回放；复用 GenerationStore/AgentRunner。尚缺 JS Trigger 全套死信、租约失败重排和输入事件丰富元数据。"
     },
     {
       "repository": "LibreChat",
       "path": "packages/api/src/agents/subagentDelivery.ts",
       "sha256": "1cd02cb4434266915177f99b81b2194c5d328a8de9fe45b46d09b7d9bb247346",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_wakeup.py:SOURCE_WAKEUP_GUIDANCE; webui/subagent_task_host.py:start",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "宿主模型工具参数维持 agents@4.0.1 原版差分；host PostToolUse running handle 文案匹配源码。管理员 opt-out 通过已有 SQLite settings(backgroundTasks.completionWakeups)。"
     },
     {
       "repository": "LibreChat",
@@ -8994,10 +8994,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/subagentThreads.ts",
       "sha256": "1b03d7d61ae5696a6a50b2fd27175f8534f432924b133d1708b6078fb2548754",
-      "python_lsm": "webui/subagent_task_host.py; webui/generations.py; webui/agent_runner.py",
+      "python_lsm": "webui/subagent_task_host.py; webui/subagent_wakeup.py; webui/generations.py; webui/agent_runner.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "SQLite thread transcript (owned by same parent conversation + subagent type), new child generation per lease, nested parent lineage. Cross-replica lease CAS and pending controls; full app-level notifications/wakeup receipts not implemented."
+      "difference": "Owned child thread, SQLite lease/CAS, source completion wakeup pre-admission; root branch readiness and bounded result claim are present. Full JS transport callbacks/HA actor are still partial."
     },
     {
       "repository": "LibreChat",

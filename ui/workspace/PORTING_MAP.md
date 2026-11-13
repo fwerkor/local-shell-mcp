@@ -417,3 +417,43 @@ wakeup/外部队列/跨 Controller 事件协议已经移植；后者仍单列为
 异步 Child Generation 尚未完成。测试等待窗口改为有上界的 15 秒和
 20 秒，继续验证真实启动/终态、所有权及 `exit_code`，失败时显示受限状态。
 没有放宽任何生产操作 timeout 或权限检查。
+
+### 2026-11-13 — 持久 Subagent Completion Wakeup（原版 source 部分移植）
+
+源码锁定：`packages/api/src/agents/subagentDelivery.ts`、
+`subagentCompletionWakeup.ts`、`subagentThreads.ts`、
+`api/server/services/Endpoints/agents/subagentThreadStore.js` 和
+`packages/api/src/agents/triggers/README.md`。SHA-256 和逐符号对应见
+`UPSTREAM_LOCK.json`、`PORTING_INVENTORY.json`；`@librechat/agents@4.0.1`
+的工具 Schema 保持原版 JS 真实类差分不变。
+
+`webui/subagent_wakeup.py` 使用统一 SQLite 中的 `subagent_wakeups` 作为
+可信内部 `AgentContinueTriggerEnvelope` 队列，**在子 task intent 的同一个
+BEGIN IMMEDIATE 事务中预登记**，且只有原 owner + parent Agent + run +
+responseMessageId 绑定允许派发。源码默认启用，管理员可用
+`settings.backgroundTasks.completionWakeups=false` 关闭。宿主工具返回
+源码 `SUBAGENT_WAKEUP_GUIDANCE`，禁止无意义地反复 poll。
+
+子结果落地后仅在父 generation 完成时启动续接：先验证可信父 Agent 和
+原 reply，选当前 branch 中最新 assistant descendant（含兄弟 completion
+链），保留有上界的宿主 orchestration snapshot；调用现有
+`GenerationStore.begin`（受约束的 internal `_connection`）与子任务
+`result_claimed=1` **同一 SQLite 原子提交**。并发手动 poll 在该事务前
+领取时会撤销 wakeup；自动续接抢先时 poll 显示 `delivery_scheduled`。
+授权过期、父 generation 失败、Agent 删除或分支不匹配均安全拒绝，
+不执行模型。已经被派发的 generation 由原 `generation_routes._start_task`
+执行：保留原 MCP/Ask User 设置和不可提升的旧授权，复用 Provider、
+AgentRunner/StateGraph、generation SSE 和持久事件，不新建模型调度器。
+
+任务 crash 后以稳定 task ID 和原有 generation run ID 重接，不重复创建
+模型会话；`recover_orphans` 跳过尚有有效 wakeup 归属的根 generation，
+lease 延续/抢占由 SQLite 控制；失效后释放自动 claim 供人工领取。
+后续仍需补齐全局原版 Agent Trigger 的外部事件、死信重排、重试退避、
+富媒体 artifact delivery 和所有 Controller 之间对根生成 actor 的 HA
+强拥有权与恢复语义，不能把本次局部可信内部触发说成整个 JS Trigger
+子系统的 100% 等价移植。
+
+测试拆为 `test_webui_subagent_wakeup.py`、`_guard.py`、`_recovery.py`，
+共 32 个真实 SQLite E2E/异常/并发/恢复测试，包括一例真实 Parent AgentRunner
+调用 + SSE on_run_step 与最终 responseMessage 持久化；共享 fixture 在
+`tests/wakeup_helpers.py`，原版 source-locked UI CI 增加了全部三个文件。

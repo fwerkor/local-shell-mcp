@@ -208,6 +208,8 @@ jobs:
             tests/test_webui_subagent_task_host.py tests/test_webui_subagent_task_host_edges.py \
             tests/test_webui_subagent_task_nested.py tests/test_webui_subagent_task_approval.py \
             tests/test_webui_subagent_task_artifact_guard.py \
+            tests/test_webui_subagent_wakeup.py tests/test_webui_subagent_wakeup_guard.py \
+            tests/test_webui_subagent_wakeup_recovery.py \
             tests/test_webui_direct_login.py tests/test_webui_provider_browser.py \
             tests/test_webui_artifacts_source.py tests/test_webui_artifact_routes.py \
             tests/test_webui_artifact_browser.py

@@ -423,18 +423,18 @@
       "path": "packages/api/src/agents/subagentThreads.ts",
       "sha256": "1b03d7d61ae5696a6a50b2fd27175f8534f432924b133d1708b6078fb2548754",
       "symbols": "SubagentThreadTaskStore / scope / original parent lineage / continuation",
-      "python_lsm": "webui/subagent_task_host.py; webui/generations.py; webui/agent_runner.py",
+      "python_lsm": "webui/subagent_task_host.py; webui/subagent_wakeup.py; webui/generations.py; webui/agent_runner.py",
       "status": "部分",
-      "difference": "SQLite thread transcript (owned by same parent conversation + subagent type), new child generation per lease, nested parent lineage. Cross-replica lease CAS and pending controls; full app-level notifications/wakeup receipts not implemented."
+      "difference": "Owned child thread, SQLite lease/CAS, source completion wakeup pre-admission; root branch readiness and bounded result claim are present. Full JS transport callbacks/HA actor are still partial."
     },
     {
       "repository": "LibreChat",
       "path": "packages/api/src/agents/background.ts",
       "sha256": "ed8f894225a10c39e3dfb63c31798a6a1deb91c020d5a342f16b69cebc0a7436",
       "symbols": "registerBackgroundTaskTool / runCheckBackgroundTask / controls",
-      "python_lsm": "webui/subagent_task_host.py; webui/agent_runner.py",
+      "python_lsm": "webui/subagent_task_host.py; webui/subagent_wakeup.py; webui/agent_runner.py",
       "status": "部分",
-      "difference": "check_background_task name+argument schema, poll/list/cancel/queue/steer/interrupt/cancel_message, durable control invocation fencing and one-time claim; native ordinary tool backgrounding and automatic completion wakeup pending separate integration."
+      "difference": "Source check_background_task name/args, poll/list/control, manual vs auto wakeup atomic claim; ordinary-tool backgrounding and rich artifact delivery remain unported."
     },
     {
       "repository": "LibreChat",
@@ -444,6 +444,42 @@
       "python_lsm": "webui/subagent_task_host.py:SQLiteSubagentTaskHost.start/_execute/_settle_child_registration; webui/generations.py:GenerationStore.begin(trusted_new_conversation_id); requires PR #352 webui/child_thread_activity.py",
       "status": "部分（依赖 Draft PR #352 的 source-pinned Artifacts guard）",
       "difference": "Graph host reserves UUID and parent-run ownership in existing SQLite task record before creating child; optional PR352 ActiveChildThreads.activate/settle interop registers read-only marker and leaves it after settle. Persisted child_registered admission bit fences concurrent idempotent caller; crash only resumes after owner-scoped registered marker. PR352 artifact route owns its separate live-child write guard and table, which are not duplicated here."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/subagentDelivery.ts",
+      "sha256": "1cd02cb4434266915177f99b81b2194c5d328a8de9fe45b46d09b7d9bb247346",
+      "symbols": "SUBAGENT_COMPLETION_DELIVERY, SUBAGENT_WAKEUP_GUIDANCE, createSubagentWakeupHandleHook",
+      "python_lsm": "webui/subagent_wakeup.py:SOURCE_WAKEUP_GUIDANCE; webui/subagent_task_host.py:start",
+      "status": "部分",
+      "difference": "宿主模型工具参数维持 agents@4.0.1 原版差分；host PostToolUse running handle 文案匹配源码。管理员 opt-out 通过已有 SQLite settings(backgroundTasks.completionWakeups)。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/subagentCompletionWakeup.ts",
+      "sha256": "41f03d180f370fad2acaf0da1aa1a26e54cf51eecb2cca504f766d75bbe87684",
+      "symbols": "createSubagentCompletionWakeupHandler, createSubagentCompletionWakeupResolver, latestAssistantDescendant, renderWakeupInput",
+      "python_lsm": "webui/subagent_wakeup.py:register_wakeup/_latest_branch/_input/process_wakeups",
+      "status": "部分",
+      "difference": "Python SQLite 事务内预登记可信内部 continue envelope，检验 owner/parent Agent/原 responseMessageId；查找最新 assistant descendant；结果与新 generation 原子二选一；多 Controller CAS 回放；复用 GenerationStore/AgentRunner。尚缺 JS Trigger 全套死信、租约失败重排和输入事件丰富元数据。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/services/Endpoints/agents/subagentThreadStore.js",
+      "sha256": "aada9ea0c8d50588aaf4dd6b26a3025bd5511004cdca73a27eea98ac2ab69a6f",
+      "symbols": "createSubagentCompletionWakeupHandler; onTaskPrepared; onTaskSettled; expediteCompletionWakeups",
+      "python_lsm": "webui/subagent_task_host.py:start/recover_subagent_tasks; webui/subagent_wakeup.py",
+      "status": "部分",
+      "difference": "task intent 与 wakeup envelope 同一 SQLite commit；父子任务完成后恢复轮询扫描持久队列；Controller 生命周期负责队列 worker 的启停；无需 Node/Mongo/Redis。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/README.md",
+      "sha256": "89830f383e456940e46d36c7a1b384320dcf6725f3bf03a4a52b671bdc268f76",
+      "symbols": "enqueueAgentTrigger; trusted continue branch; durable delivery lease",
+      "python_lsm": "webui/subagent_wakeup.py:process_wakeups/start_wakeup_worker",
+      "status": "部分",
+      "difference": "单一 SQLite 持久内部触发队列，结果 claim 与 GenerationStore.begin 原子同事务，lease owner CAS and crash recovery；尚缺全体外部 Agent triggers、dead letters 管理和跨 Controller 主 generation actor 完整接管。"
     }
   ],
   "runtime_dependency_lock": {
@@ -484,9 +520,10 @@
     },
     "reference_fixture": "tests/fixtures/librechat/graph_runtime_real_vectors.json",
     "http_recovery": "generation_routes.resume_generation + generations.accumulated_text; cooperative shutdown retains running generation; explicit abort remains terminal",
-    "known_gaps": "Full JS BaseMessage/RunStepState callbacks and host automatic background completion wakeups, cross-controller transport control receipts, asynchronous Approval/Ask User replays, arbitrary JS Hook sessions, ordinary-tool backgrounding.",
+    "known_gaps": "Full JS BaseMessage/RunStepState and hook callbacks; source Agent Trigger global queue dead-letter/retry/admin path and complete cross-controller root generation ownership; ordinary tool backgrounding; rich artifact delivery; independent Approval/AskUser integration PRs.",
     "reference_fixture_background": "tests/fixtures/librechat/subagent_task_real_reference.cjs",
     "background_host": "webui/subagent_task_host.py; Owner/child generation + lease CAS, scoped thread continuation and source schema; startup recover_subagent_tasks",
-    "artifacts_integration": "Child conversation identity pre-reserved/registered with optional PR352 ActiveChildThreads.activate before GenerationStore.begin and settled after terminal; no duplicate guard table or artifact route. PR #352 must be integrated before claiming child edit protection."
+    "artifacts_integration": "Child conversation identity pre-reserved/registered with optional PR352 ActiveChildThreads.activate before GenerationStore.begin and settled after terminal; no duplicate guard table or artifact route. PR #352 must be integrated before claiming child edit protection.",
+    "subagent_completion_wakeup": "Original source pre-enqueue+256ms backoff, parent response branch resolution, shared SQLite manual vs automatic atomic one-shot result claim, root AgentRunner continue, source UX handle, restart wakeup leases. Tests: real SQLite and actual parent AgentRunner SSE. Full JS global trigger retry/dead-letter protocol and HA root actor remain partial."
   }
 }
