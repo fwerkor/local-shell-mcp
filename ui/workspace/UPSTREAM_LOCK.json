@@ -489,6 +489,24 @@
       "python_lsm": "webui/context_budget.py; agent_runner.py",
       "status": "部分",
       "difference": "已接入Graph on_context_usage结构、模型调用前的消息/指令/摘要/tool schema预算快照；未覆盖Graph原provider tokenizer校准与分层fading"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/memory/protection.ts",
+      "sha256": "655e8d51a8449e1c3d68124e447f3b2c7b88cfe2dd0da2316a4ccb79ad68bcfb",
+      "symbols": "projectStoredMemories",
+      "python_lsm": "webui/memory_protection.py; memory_routes.py; memory.py",
+      "status": "部分",
+      "difference": "Memory source字段审查、旧记录只读投影和敏感字段置空已接入；自定义pattern由限时Python regex执行，完整RE2JS程序大小/全局跨source过滤仍有差异"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/protection/detectors/pattern.ts",
+      "sha256": "990a1ddd9a676f4b9e0747f0ba16f983b0dc17022bbe854dcb002d413fde2743",
+      "symbols": "STARTER_PATTERNS / custom patterns",
+      "python_lsm": "webui/memory_protection.py",
+      "status": "部分",
+      "difference": "starter三规则和custom regex严格时限已适配；完整RE2JS/patternAction审计链尚未等价"
     }
   ],
   "runtime_dependency_lock": {
