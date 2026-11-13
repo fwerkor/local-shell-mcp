@@ -96,6 +96,7 @@ async def _run_model(
     params = parameters or {}
     step_id = "step_" + generation.run_id
     now_ms = int(time.time() * 1000)
+    memory_task: asyncio.Task | None = None
     try:
         from .agent_runner import AgentRunner
         from .agent_runtime import AgentSuspended
@@ -139,9 +140,18 @@ async def _run_model(
                              resume_namespace=resume_namespace, partial_text=partial_text,
                              approved_batch=approved_batch)
         try:
+            if resume_history is None and not repo.manual_compaction(owner, generation.run_id):
+                from .memory_agent import run_automatic_memory
+
+                memory_task = asyncio.create_task(run_automatic_memory(
+                    owner, generation, _database(), history, root_agent=parent_agent,
+                    stream_tools=stream_model_with_tools),
+                    name='webui-memory-' + generation.run_id)
             await runner.run(history)
         except AgentSuspended:
             return
+        if memory_task is not None:
+            await memory_task
         repo.append(owner, generation.run_id, {
             "event": "on_run_step_closed", "data": {
                 "id": step_id, "index": 0, "type": "message_creation",
@@ -159,6 +169,10 @@ async def _run_model(
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
                     error=f"Model generation failed ({type(exc).__name__})")
     finally:
+        if memory_task is not None and not memory_task.done():
+            memory_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await memory_task
         async with _TASK_GUARD:
             _TASKS.pop(generation.run_id, None)
 
