@@ -1,6 +1,8 @@
 """Opt-in automatic MemoryRun: source gate, BPE window, tool-end and SSE artifact."""
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
@@ -299,3 +301,32 @@ def test_memory_window_structured_contents_and_no_user_boundary():
     shorter = memory_agent._memory_window(data[:3], window_size=5, max_tokens=128)
     assert 'part A' in shorter and 'part B' in shorter
     assert '42' not in shorter
+
+
+@pytest.mark.asyncio
+async def test_memory_write_denied_after_auth_grant_expires(memory_run):
+    db, store, settings, job, _ = memory_run
+    enable(settings)
+
+    async def provider(*args, **kwargs):
+        yield ModelToolCall('expired', 'set_memory', {'key': 'style', 'value': 'No.'})
+
+    assert await memory_agent.run_automatic_memory('alice', job, db,
+        store.history('alice', job.conversation_id), root_agent=None, stream_tools=provider,
+        grant_expires=int(time.time()) - 1) == 0
+    assert not MemoryRepository(db).list('alice')
+
+    class ExpiringIterator:
+        async def __aiter__(self):
+            from unittest.mock import patch
+            with patch.object(memory_agent.time, 'time', return_value=time.time() + 100):
+                yield ModelToolCall('expired-midrun', 'set_memory', {'key': 'style', 'value': 'No.'})
+
+    async def late(*args, **kwargs):
+        async for entry in ExpiringIterator():
+            yield entry
+
+    assert await memory_agent.run_automatic_memory('alice', job, db,
+        store.history('alice', job.conversation_id), root_agent=None, stream_tools=late,
+        grant_expires=int(time.time()) + 10) == 0
+    assert not MemoryRepository(db).list('alice')

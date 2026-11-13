@@ -6,6 +6,7 @@ than creating an independent runtime, database, or long-lived background owner.
 from __future__ import annotations
 
 import logging
+import time
 
 from .agents import AgentRepository
 from .memory import (
@@ -102,14 +103,15 @@ def _memory_window(history: list[dict], *, window_size: int, max_tokens: int) ->
 
 
 async def run_automatic_memory(owner: str, generation, database, history: list[dict],
-                               *, root_agent: dict | None, stream_tools) -> int:
+                               *, root_agent: dict | None, stream_tools,
+                               grant_expires: int | None = None) -> int:
     """Run the configured summarize-only memory graph with tool-end semantics.
 
     Errors are isolated from the visible answer, as in upstream processMemory;
     every successful memory mutation remains a serialized SQLite transaction.
     """
     settings = WorkspaceRepository(database)
-    if not memory_enabled(settings, owner):
+    if (grant_expires is not None and grant_expires <= time.time()) or not memory_enabled(settings, owner):
         return 0
     config = memory_config(settings, owner) or {}
     agent = _automatic_agent(config, owner, database)
@@ -164,7 +166,8 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
             from .generations import GenerationStore
 
             latest = GenerationStore(database).get(owner, generation.run_id)
-            if latest is None or latest.status != 'running' or not memory_enabled(settings, owner):
+            if (latest is None or latest.status != 'running' or not memory_enabled(settings, owner)
+                    or (grant_expires is not None and grant_expires <= time.time())):
                 break
             # Re-evaluate the live deployment filter before every mutation.
             latest_filters = configured_filters(settings, owner)

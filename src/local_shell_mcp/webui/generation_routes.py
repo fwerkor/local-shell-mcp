@@ -145,7 +145,8 @@ async def _run_model(
 
                 memory_task = asyncio.create_task(run_automatic_memory(
                     owner, generation, _database(), history, root_agent=parent_agent,
-                    stream_tools=stream_model_with_tools),
+                    stream_tools=stream_model_with_tools,
+                    grant_expires=grant_expires),
                     name='webui-memory-' + generation.run_id)
             await runner.run(history)
         except AgentSuspended:
