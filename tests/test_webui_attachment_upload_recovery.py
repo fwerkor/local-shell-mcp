@@ -426,3 +426,116 @@ def test_real_optional_pdf_extraction(tmp_path):
     assert result["processed"] is True
     assert result["extraction"] == "pypdf"
     assert "Source PDF text is extractable" in result["extracted_text"]
+
+
+@pytest.mark.parametrize("kind,expected", [
+    ("pages", 413),
+    ("text_limit", 413),
+    ("parser_failure", 422),
+    ("no_text", 422),
+])
+def test_pdf_context_defensively_bounds_page_count_bytes_and_errors(tmp_path, monkeypatch, kind, expected):
+    """Use a minimal reader double to cover failure boundaries independently of optional pypdf."""
+    import sys
+
+    path = tmp_path / "data.pdf"
+    path.write_bytes(b"%PDF")
+
+    class Page:
+        def extract_text(self):
+            if kind == "parser_failure":
+                raise RuntimeError("broken page")
+            if kind == "text_limit":
+                return "a" * (128 * 1024 + 1)
+            if kind == "no_text":
+                return None
+            return "sample"
+
+    def reader(_path):
+        return SimpleNamespace(pages=[Page()] * (65 if kind == "pages" else 1))
+
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=reader))
+    with pytest.raises(HTTPException) as error:
+        attachments.extract_context_text(path, "data.pdf", "application/pdf")
+    assert error.value.status_code == expected
+
+
+@pytest.mark.parametrize("kind,expected", [
+    ("text_limit", 413),
+    ("parser_failure", 422),
+    ("no_text", 422),
+])
+def test_docx_context_defensively_bounds_bytes_and_errors(tmp_path, monkeypatch, kind, expected):
+    import sys
+
+    path = tmp_path / "data.docx"
+    path.write_bytes(b"invalid document")
+
+    def document(_path):
+        if kind == "parser_failure":
+            raise RuntimeError("broken document")
+        value = "a" * (128 * 1024 + 1) if kind == "text_limit" else ""
+        return SimpleNamespace(paragraphs=[SimpleNamespace(text=value)])
+
+    monkeypatch.setitem(sys.modules, "docx", SimpleNamespace(Document=document))
+    with pytest.raises(HTTPException) as error:
+        attachments.extract_context_text(path, "data.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    assert error.value.status_code == expected
+
+
+def test_context_enforces_binary_rejection_and_raw_text_size_before_read(tmp_path):
+    path = tmp_path / "payload.txt"
+    path.write_bytes(b"x" * (1024 * 1024 + 1))
+    with pytest.raises(HTTPException) as error:
+        attachments.extract_context_text(path, path.name, "text/plain")
+    assert error.value.status_code == 413
+    path = tmp_path / "payload.png"
+    path.write_bytes(b"image")
+    with pytest.raises(HTTPException) as error:
+        attachments.extract_context_text(path, path.name, "image/png")
+    assert error.value.status_code == 501
+
+
+def test_agent_context_excludes_missing_unsafe_unprocessed_and_other_owner_resources(uploads, tmp_path):
+    """Only processed, on-disk, owner-scoped documents are supplied as context."""
+    existing = attachments._safe_attachment_path("alice", "one.txt", uploads.root)
+    existing.write_bytes(b"source")
+    missing = attachments._safe_attachment_path("alice", "two.txt", uploads.root)
+    link = attachments._safe_attachment_path("alice", "three.txt", uploads.root)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("unsafe")
+    try:
+        link.symlink_to(outside)
+        symlink_supported = True
+    except (OSError, NotImplementedError):  # Windows without symlink privilege
+        symlink_supported = False
+    entries = [
+            ("good", existing, {"extracted_text": "reference"}, "alice"),
+            ("missing", missing, {"extracted_text": "absent"}, "alice"),
+            ("raw", existing, {}, "alice"),
+            ("foreign", existing, {"extracted_text": "secret"}, "bob"),
+    ]
+    if symlink_supported:
+        entries.append(("symlink", link, {"extracted_text": "unsafe"}, "alice"))
+    with uploads.connect() as db:
+        for ident, path, metadata, owner in entries:
+            db.execute("INSERT INTO attachments(id,owner,name,path,content_type,metadata) "
+                       "VALUES(?,?,?,?,?,?)", (ident, owner, ident + ".txt", str(path),
+                                              "text/plain", json.dumps(metadata)))
+    agent = {"tool_resources": {"context": {"file_ids": [
+        "good", "missing", "symlink", "raw", "foreign", "unknown", "good",
+    ]}}}
+    context = attachments.agent_context_messages(uploads, "alice", agent)
+    assert len(context) == 1
+    assert context[0]["role"] == "user"
+    assert context[0]["content"].count("\nreference") == 1
+    assert "unsafe" not in context[0]["content"]
+    assert "secret" not in context[0]["content"]
+    assert attachments.agent_context_messages(uploads, "alice", {"tool_resources": {"context": {"file_ids": None}}}) == []
+
+
+def test_upload_recovery_retains_same_inode_with_changed_content(uploads):
+    path = _make_pending(uploads)
+    path.write_bytes(b"mutate")  # Same inode and size; digest differs.
+    assert attachments.recover_attachment_uploads(uploads)["retainedFileIds"] == ["file-stale"]
+    assert path.read_bytes() == b"mutate"
