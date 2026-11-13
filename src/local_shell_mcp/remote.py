@@ -2010,6 +2010,7 @@ WORKER_SHELL_TOOLS = frozenset(
         "shell_resize",
         "shell_kill",
         "shell_list",
+        "shell_lookup_idempotency",
     }
 )
 WORKER_JOB_TOOLS = frozenset(
@@ -2020,6 +2021,7 @@ WORKER_JOB_TOOLS = frozenset(
         "job_tail",
         "job_stop",
         "job_retry",
+        "job_lookup_idempotency",
     }
 )
 WORKER_FILE_TOOLS = frozenset(
@@ -2820,6 +2822,7 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await run_job_with_timeout(
             args["command"], args.get("cwd", "."), args.get("timeout_s"),
             args.get("max_output_bytes"),
+            **({"idempotency_key": args["idempotency_key"]} if args.get("idempotency_key") else {}),
         )
     if tool == "run_shell_tool":
         if args.get("persist_on_timeout"):
@@ -2834,7 +2837,10 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         ).model_dump()
 
     if tool == "run_python_persist_tool":
-        return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60), True)
+        arguments = (args["code"], args.get("cwd", "."), args.get("timeout_s", 60), True)
+        if args.get("idempotency_key"):
+            return await _run_python(*arguments, args["idempotency_key"])
+        return await _run_python(*arguments)
     if tool == "run_python_tool":
         if args.get("persist_on_timeout"):
             raise ValueError("persistent Python calls require run_python_persist_tool")
@@ -2875,6 +2881,9 @@ async def _execute_shell_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
     if tool == "shell_list":
         return await list_shells()
+    if tool == "shell_lookup_idempotency":
+        from .shell_ops import lookup_shell_idempotency
+        return lookup_shell_idempotency(args["idempotency_key"], args.get("operation", "start"))
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
@@ -2903,6 +2912,9 @@ async def _execute_job_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
     if tool == "job_retry":
         return await retry_job(args["job_id"], args.get("idempotency_key"))
+    if tool == "job_lookup_idempotency":
+        from .jobs import lookup_job_idempotency
+        return lookup_job_idempotency(args["idempotency_key"], args.get("action", "start"))
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 

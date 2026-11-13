@@ -129,6 +129,10 @@ async def conversation_permissions(request: Request):
             _checked(request, machines)
             repo.save_setting(owner, machine_key, machines)
         repo.save_setting(owner, key, flags)
+        if "machines" in payload:
+            from .durable_tasks import mark_revoked
+
+            mark_revoked(owner)
     else:
         flags = repo.setting(owner, key, defaults)
         if not isinstance(flags, dict):
