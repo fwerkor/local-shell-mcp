@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -135,7 +136,7 @@ class ActionRepository:
                 spec = parse_spec(metadata["raw_spec"])
                 operation = operations(spec).get(op_id)
                 if operation:
-                    return metadata, self._credentials(row), {**operation, "server": spec["servers"][0]["url"], "action_id": row["id"]}
+                    return metadata, self._credentials(row), {**operation, "server": spec["servers"][0]["url"], "action_id": row["id"], "action_version": row["version"]}
             return None
 
     def tool_schemas(self, owner: str, agent: dict, *, selected_tools=None) -> list[dict]:
@@ -174,7 +175,7 @@ class ActionRepository:
         if not isinstance(incoming, dict):
             raise ValueError("Action metadata required")
         action_id = body.get("action_id") or secrets.token_urlsafe(12)
-        if not isinstance(action_id, str) or not action_id or len(action_id) > 128:
+        if not isinstance(action_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", action_id):
             raise ValueError("Invalid Action ID")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -255,6 +256,7 @@ class ActionRepository:
                         (int(previous["version"]) + 1 if previous else 1), now, now))
             if target_changed:
                 db.execute("DELETE FROM action_oauth_tokens WHERE action_id=?", (action_id,))
+                db.execute("DELETE FROM action_oauth_flows WHERE action_id=?", (action_id,))
             saved = db.execute("SELECT * FROM action_records WHERE id=?", (action_id,)).fetchone()
             return updated, self._public(saved)
 

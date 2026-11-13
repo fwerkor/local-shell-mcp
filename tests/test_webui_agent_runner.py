@@ -433,3 +433,122 @@ async def test_agent_action_from_saved_browser_schema_through_real_http_and_mode
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+@pytest.mark.asyncio
+async def test_oauth_action_prompt_callback_resumes_same_agent_tool_call(runtime, monkeypatch):
+    """Original React ToolCall auth payload -> bind -> callback -> model tool continuation."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlsplit
+
+    from local_shell_mcp.webui import action_oauth, action_routes
+    from local_shell_mcp.webui.action_spec import normalize_action_tool_name, tool_name
+    from local_shell_mcp.webui.actions import ActionRepository
+    from local_shell_mcp.webui.agent_routes import agent_routes
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = json.dumps({"authorized": self.headers.get("Authorization") == "Bearer FROM-IDP"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("LSM_ACTION_ALLOWED_ADDRESSES", f"127.0.0.1:{server.server_port}")
+        monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://chat.example.org")
+        get_settings.cache_clear()
+        _, database, store, profile = runtime
+        url = f"http://127.0.0.1:{server.server_port}"
+        agent = AgentRepository(database).create("local", {
+            "provider": "openAI", "model": "test", "name": "OAuth Agent",
+        })
+        spec = {"openapi": "3.0.0", "servers": [{"url": url}], "paths": {
+            "/read": {"get": {"operationId": "readData", "responses": {"200": {"description": "OK"}}}},
+        }}
+        agent, action = ActionRepository(database).save("local", agent["id"], {
+            "metadata": {"domain": url, "raw_spec": json.dumps(spec), "auth": {
+                "type": "oauth", "authorization_url": "https://id.example.org/authorize",
+                "client_url": "https://id.example.org/token", "scope": "read",
+                "token_exchange_method": "default_post"},
+                "oauth_client_id": "PUBLIC-ID", "oauth_client_secret": "PRIVATE-IDP-SECRET"},
+            "functions": [{"type": "function", "function": {"name": "readData"}}],
+        })
+        tool = normalize_action_tool_name(tool_name("readData", url))
+        generation, _ = store.begin("local", {"text": "use the OAuth action"}, agent)
+        results = []
+
+        async def model(_profile, history, *, tools, **kwargs):
+            assert tool in {item["function"]["name"] for item in tools}
+            assert "PRIVATE-IDP-SECRET" not in json.dumps(tools)
+            if history[-1].get("role") == "tool":
+                assert json.loads(history[-1]["content"])["authorized"] is True
+                results.append(history[-1]["content"])
+                yield "Done."
+            else:
+                yield ModelToolCall("action-call-1", tool, {})
+
+        async def emit(value):
+            results.append(value)
+
+        async def token_exchange(url, payload, creds, method):
+            assert payload["code"] == "idp-code"
+            assert creds["oauth_client_secret"] == "PRIVATE-IDP-SECRET"
+            return {"access_token": "FROM-IDP", "refresh_token": "KEEP-PRIVATE", "expires_in": 1000}
+
+        monkeypatch.setattr(action_oauth, "_exchange", token_exchange)
+        monkeypatch.setattr(action_routes, "_repository", lambda: ActionRepository(database))
+        runner = AgentRunner("local", generation, database, store, scopes=set(), grant_expires=None,
+                             stream_tools=model, stream_text=model, on_text=emit, profile=profile, agent=agent)
+        execution = asyncio.create_task(runner.run(store.history("local", generation.conversation_id)))
+        try:
+            prompt = None
+            for _ in range(80):
+                await asyncio.sleep(.05)
+                for _, item in store.events("local", generation.run_id):
+                    if item.get("event") == "on_run_step_delta" and item.get("data", {}).get("delta", {}).get("auth"):
+                        prompt = item
+                        break
+                if prompt:
+                    break
+            assert prompt is not None, "Agent never emitted original React auth prompt"
+            auth_url = prompt["data"]["delta"]["auth"]
+            oauth_params = parse_qs(urlsplit(auth_url).query)
+            assert prompt["data"]["delta"]["tool_calls"][0]["id"] == "action-call-1"
+            assert oauth_params["redirect_uri"] == [
+                f"https://chat.example.org/api/actions/{action['action_id']}/oauth/callback"]
+            app = Starlette(routes=agent_routes())
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="https://chat.example.org") as client:
+                path = f"/api/actions/{action['action_id']}/oauth"
+                bound = await client.post(path + "/bind")
+                assert bound.status_code == 200, bound.text
+                callback = await client.get(path + "/callback", params={
+                    "state": oauth_params["state"][0], "code": "idp-code"})
+                assert callback.status_code == 302
+                assert callback.headers["location"].startswith("/oauth/success")
+            history = await asyncio.wait_for(execution, timeout=8)
+            assert history[-1]["content"] == "Done."
+            assert json.loads(results[0])["authorized"] is True
+            event_text = json.dumps(store.events("local", generation.run_id))
+            for secret in ("PRIVATE-IDP-SECRET", "FROM-IDP", "KEEP-PRIVATE"):
+                assert secret not in event_text
+                assert secret not in json.dumps(history)
+            assert any(item.get("event") == "on_run_step_completed" for _, item in store.events("local", generation.run_id))
+        finally:
+            if not execution.done():
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+    finally:
+        server.shutdown()
+        thread.join(timeout=1)
+        server.server_close()
+        get_settings.cache_clear()

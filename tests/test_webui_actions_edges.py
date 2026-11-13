@@ -283,8 +283,10 @@ def test_auth_headers_and_model_safety():
     assert _authorization({"auth": {"type": "service_http", "authorization_type": "custom",
                                    "custom_auth_header": "X-Key"}}, key) == {"X-Key": "stored-cred"}
     for kind in ("oauth", "invalid", "service_http"):
-        with pytest.raises((ValueError, RuntimeError)):
+        with pytest.raises((ValueError, PermissionError)):
             _authorization({"auth": {"type": kind}}, {})
+    assert _authorization({"auth": {"type": "oauth"}}, {"oauth_access_token": "opaque"}) == {
+        "Authorization": "Bearer opaque"}
 
 
 @pytest.mark.parametrize(("value", "schema", "valid"), [
@@ -394,7 +396,7 @@ def test_encryption_isolated_by_file_permission(tmp_path):
         assert isinstance(repo._cipher(), Fernet)
 
 
-def test_oauth_storage_explicit_interactive_blocker(tmp_path):
+def test_oauth_storage_credentials_require_access_token(tmp_path):
     db = SQLiteDatabase(tmp_path)
     agent = make_agent(db)
     repo = ActionRepository(db)
@@ -411,9 +413,10 @@ def test_oauth_storage_explicit_interactive_blocker(tmp_path):
     assert "CLIENT-SECRET" not in db.path.read_text(errors="ignore")
     record = repo.get_for_tool("alice", agent["id"], tool_name("echo", BASE))
     assert record[1] == {"oauth_client_id": "CLIENT-SECRET-ID", "oauth_client_secret": "CLIENT-SECRET-PASSWORD"}
-    assert _authorization(record[0], record[1]) if False else True
-    with pytest.raises(RuntimeError, match="interactive flow unavailable"):
+    with pytest.raises(PermissionError, match="login required"):
         _authorization(record[0], record[1])
+    assert _authorization(record[0], {**record[1], "oauth_access_token": "access-from-sqlite"}) == {
+        "Authorization": "Bearer access-from-sqlite"}
 
 
 @pytest.mark.asyncio

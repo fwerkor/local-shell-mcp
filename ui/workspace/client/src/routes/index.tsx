@@ -9,6 +9,7 @@ import LoginLayout from './Layouts/Login';
 import ChatRoute from './ChatRoute';
 import LsmControl from '~/components/LSM/Control';
 import Search from './Search';
+import { OAuthError, OAuthSuccess } from '~/components/OAuth';
 import Root from './Root';
 
 const AuthLayout = () => (
@@ -37,6 +38,10 @@ export const router = createBrowserRouter(
       element: <AuthLayout />,
       errorElement: <RouteErrorBoundary />,
       children: [
+        // OAuth callbacks open in a separate tab. These pages must render
+        // without the authenticated chat layout or the login redirect gate.
+        { path: 'oauth/success', element: <OAuthSuccess /> },
+        { path: 'oauth/error', element: <OAuthError /> },
         {
           path: '/',
           element: <LoginLayout />,

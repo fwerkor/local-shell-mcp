@@ -290,12 +290,25 @@ TypeScript 模块，导出解析器、工具定义与域名验证的原版结果
   环境代理；HTTPS保留SNI/校验证书；响应上限256KiB，HTTP超时20秒，
   async CancelledError向上传播。`LSM_ACTION_ALLOWED_DOMAINS`可选限制目标域，
   `LSM_ACTION_ALLOWED_ADDRESSES`仅管理员环境白名单（`host:port`，不可由模型设置）。
-- **认证及不可误判的阻塞**：API Key的basic/bearer/custom和无认证可执行。
-  OAuth客户端凭据已隔离、配置可保存，但**原版OAuth Action交互授权尚未完成**：
-  `/api/actions/:action_id/oauth/bind`、callback的state/CSRF校验、token exchange、
-  refresh、持久化token授权主体关联及 `on_run_step_delta` sign-in、
-  checkpoint中断恢复仍缺失。OAuth实际工具调用按fail-closed返回执行错误；
-  不允许以API Key路径通过冒充OAuth通过。**PR #349 在此完成前不得标记整体Actions全量验收。**
+- **原版Actions OAuth2授权**：`webui/action_oauth.py`、`webui/action_routes.py`、
+  `webui/action_runtime.py`及`agent_runner.py`，对应上游
+  `api/server/routes/actions.js`（`bind`/`callback`）、`ActionService.js`（登录提示、
+  令牌复用和刷新）、`packages/api/src/oauth/tokens.ts`（code exchange/refresh）和
+  React `ToolCall.tsx`。使用外部提供的HTTPS访问地址
+  `LOCAL_SHELL_MCP_PUBLIC_BASE_URL`构建`/api/actions/:action_id/oauth/callback`；
+  无公网域名时允许回环地址的HTTP（仅本地开发）。保留原版React消耗的
+  `on_run_step_delta`工具调用auth URL、过期时间及登录完成清空事件。
+  `/api/actions/:action_id/oauth/bind`要求原LSM已认证身份及同源POST，
+  设置HttpOnly/Secure/SameSite=Lax、按Action区分且与owner绑定的CSRF cookie；
+  callback是唯一豁免Bearer认证的Action路由，严格要求10分钟内一次性state、
+  CSRF cookie、Action归属及版本吻合。state仅以SHA-256散列落盘；
+  access/refresh token与API Key分离，使用Fernet加密存入SQLite，
+  支持到期刷新及同进程同Action并发刷新去重，不会转为匿名执行；
+  真实token交换使用HTTPS+DNS/IP固定、完整证书校验、不跟随跳转、禁用代理和32KiB上限。
+  OAuth等待与Agent工具调用同在运行中，无需另造MCP/LSM工具；取消可中止等待。
+  **边界**：运行中授权等待在Controller进程崩溃/重启后还不能自动继续原执行游标；
+  实际第三方IdP浏览器人工登录尚未以生产凭据验收（测试使用受控模拟IdP）。
+  因此不能将此模块判定为全部原版行为等价。
 - **测试**：`tests/test_webui_actions.py`、`test_webui_actions_edges.py`、
   `test_webui_actions_source_oracle.py`，分别覆盖原React API契约、真实本地
   HTTP服务的成功/错误/取消/超时、多工具、重启和跨owner隔离；
@@ -303,4 +316,8 @@ TypeScript 模块，导出解析器、工具定义与域名验证的原版结果
   10组工具名/10组域校验共31个差分断言。测试依赖Node仅在重新生成oracle时需要，
   生产服务及Worker运行时不引入Node/Mongo。
   工作区运行命令：`PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_actions*.py`。
-  Actions四个新模块单独统计分支覆盖率均≥90%；全仓总覆盖率须由最新CI验收。
+  `tests/test_webui_action_oauth.py`还覆盖CSRF绑定、state一次性消费、过期、
+  Owner隔离、令牌加密及刷新、HTTPS IP pinning/禁止代理/错误体，
+  `test_webui_agent_runner.py`覆盖原始模型调用→OAuth授权提示→HTTP callback→
+  真实本地Action服务→模型恢复的完整链路。新OAuth模块本地分支覆盖率96%+；
+  Actions各模块覆盖率须≥90%，全仓总覆盖率须由最新CI验收。

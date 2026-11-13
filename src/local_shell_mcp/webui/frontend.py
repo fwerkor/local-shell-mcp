@@ -23,6 +23,7 @@ from starlette.routing import Match, Route
 
 _STATIC_PREFIXES = ("monaco/", "assets/", "fonts/", "images/", "locales/", "favicon", "robots.txt", "manifest", "sw.js", "sw-heal.js", "registerSW.js", "workbox-")
 _SPA_PREFIXES = ("c", "login", "register", "search", "agents", "settings", "control", "projects", "chat", "d", "presets", "prompts", "schedules", "memories")
+_ACTION_OAUTH_SPA_PATHS = frozenset({"/oauth/success", "/oauth/error"})
 _CACHE_LOCK = threading.Lock()
 _MAX_FILE_BYTES = 60 * 1024 * 1024
 _MAX_ASSET_BYTES = 256 * 1024 * 1024
@@ -95,7 +96,7 @@ def bundled_frontend() -> Path | None:
 
 def is_spa_path(path: str) -> bool:
     first = path.strip("/").split("/", 1)[0]
-    return not first or first in _SPA_PREFIXES
+    return not first or first in _SPA_PREFIXES or path in _ACTION_OAUTH_SPA_PATHS
 
 
 def is_public_frontend(path: str, method: str) -> bool:
@@ -110,7 +111,8 @@ async def frontend(request: Request) -> Response:
         from ..settings import get_settings
         from .auth import COOKIE, _store
 
-        if get_settings().auth_mode != "none" and not _store().session(request.cookies.get(COOKIE, "")):
+        if (request.url.path not in _ACTION_OAUTH_SPA_PATHS and get_settings().auth_mode != "none"
+                and not _store().session(request.cookies.get(COOKIE, ""))):
             return RedirectResponse("/auth/login", status_code=303)
     try:
         root = bundled_frontend()

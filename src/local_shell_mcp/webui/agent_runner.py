@@ -202,7 +202,40 @@ class AgentRunner:
                 current_id = (state.context.agent or {}).get("id")
                 if not current_id:
                     raise RuntimeSafetyError("Action execution requires a saved Agent")
-                return await invoke_action(self.owner, current_id, call.name, call.arguments, self.database)
+                from .action_oauth import access_token, await_login, begin_flow
+                from .actions import ActionRepository
+
+                action_repo = ActionRepository(self.database)
+                record = action_repo.get_for_tool(self.owner, current_id, call.name)
+                if record is None:
+                    raise RuntimeSafetyError("Action is not bound to this Agent")
+                meta, _, operation = record
+                oauth_token = None
+                if meta.get("auth", {}).get("type") == "oauth":
+                    oauth_token = await access_token(action_repo, self.owner, operation["action_id"])
+                    if not oauth_token:
+                        url, oauth_state = begin_flow(action_repo, self.owner, operation["action_id"],
+                                                     self.generation.run_id, call.call_id)
+                        step = self._tool_step(call)
+                        self.store.append(self.owner, self.generation.run_id, {
+                            "event": "on_run_step_delta", "data": {
+                                "id": step["id"], "delta": {"type": "tool_calls",
+                                    "tool_calls": [{"id": call.call_id, "name": call.name, "args": ""}],
+                                    "auth": url, "expires_at": int(time.time() * 1000) + 120_000},
+                            },
+                        })
+                        oauth_token = await await_login(action_repo, self.owner,
+                                                        operation["action_id"], oauth_state)
+                        self._check_grant()
+                        self.store.append(self.owner, self.generation.run_id, {
+                            "event": "on_run_step_delta", "data": {
+                                "id": step["id"], "delta": {"type": "tool_calls",
+                                    "tool_calls": [{"id": call.call_id, "name": call.name, "args": ""}],
+                                    "auth": None, "expires_at": None},
+                            },
+                        })
+                return await invoke_action(self.owner, current_id, call.name, call.arguments, self.database,
+                                           oauth_token=oauth_token, expected_version=operation["action_version"])
             if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
                 return await discover(self.owner, self.generation.conversation_id, set(self.scopes), call)
             if call.name == "mcp_tool_call":

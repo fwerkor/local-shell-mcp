@@ -108,6 +108,18 @@ CREATE TABLE IF NOT EXISTS action_oauth_tokens (
     expires_at INTEGER,
     PRIMARY KEY (action_id,owner,kind)
 );
+CREATE TABLE IF NOT EXISTS action_oauth_flows (
+    state_hash TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    action_id TEXT NOT NULL REFERENCES action_records(id) ON DELETE CASCADE,
+    action_version INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_action_oauth_flows_expiry ON action_oauth_flows(expires_at);
 CREATE TABLE IF NOT EXISTS agent_versions (
     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     version INTEGER NOT NULL,

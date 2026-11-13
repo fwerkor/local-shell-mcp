@@ -132,9 +132,10 @@ def _authorization(meta: dict, creds: dict) -> dict:
     if kind == "none":
         return {}
     if kind == "oauth":
-        # Interactive OAuth flow and refresh use a separate token lifecycle,
-        # never silently downgrade an OAuth Action to unauthenticated access.
-        raise RuntimeError("OAuth Action authorization required; interactive flow unavailable")
+        access = creds.get("oauth_access_token")
+        if not isinstance(access, str) or not access:
+            raise PermissionError("OAuth Action login required")
+        return {"Authorization": "Bearer " + access}
     if kind != "service_http" or not creds.get("api_key"):
         raise ValueError("Action credentials unavailable")
     key = creds["api_key"]
@@ -208,11 +209,18 @@ async def execute_action(metadata: dict, creds: dict, operation: dict, arguments
         return "API call failed (network error)"
 
 
-async def invoke_action(owner: str, agent_id: str, tool: str, arguments: dict, database) -> str:
+async def invoke_action(owner: str, agent_id: str, tool: str, arguments: dict, database,
+                        *, oauth_token: str | None = None, expected_version: int | None = None) -> str:
     record = ActionRepository(database).get_for_tool(owner, agent_id, tool)
     if record is None:
         raise PermissionError("Action is not bound to this Agent")
     meta, creds, operation = record
+    if expected_version is not None and operation["action_version"] != expected_version:
+        raise PermissionError("OAuth Action updated while authorizing")
+    if meta.get("auth", {}).get("type") == "oauth":
+        if not oauth_token:
+            raise PermissionError("OAuth Action login required")
+        creds = {**creds, "oauth_access_token": oauth_token}
     try:
         return await execute_action(meta, creds, operation, arguments)
     except asyncio.CancelledError:

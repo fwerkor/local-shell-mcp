@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import re
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
@@ -37,6 +38,7 @@ PUBLIC_PATHS = {
 }
 HUMAN_UI_API_PREFIX = "/api/ui/"
 LIVE_UI_API_PREFIX = "/api/live/"
+_ACTION_OAUTH_CALLBACK_PATH = re.compile(r"^/api/actions/[A-Za-z0-9_-]{1,128}/oauth/callback$")
 CONTROLLER_API_PREFIX = "/api/lsm/controller/"
 _REQUEST_BODY_SCOPE_KEY = "local_shell_mcp.request_body"
 _REMOTE_TRANSFER_PREFIX = "/remote/transfer/"
@@ -456,6 +458,10 @@ class AuthMiddleware:
         from .webui.frontend import is_public_frontend
 
         if (_is_public_path(path)
+            # An IdP browser redirect has no bearer header. The Action callback
+            # separately verifies the one-use state and HttpOnly CSRF binding;
+            # POST /oauth/bind remains bearer-authenticated.
+            or (scope.get("method") == "GET" and _ACTION_OAUTH_CALLBACK_PATH.fullmatch(path) is not None)
             or (path in {"/api/config", "/health"} and scope.get("method") in {"GET", "HEAD"})
             or (path in {"/api/auth/lsm", "/api/auth/refresh", "/api/auth/logout"}
                 and scope.get("method") == "POST")
