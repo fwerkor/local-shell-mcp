@@ -188,7 +188,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
             row = db.execute(
                 "SELECT w.*,t.status AS child_status,t.result_claimed,t.result_claim_key,"
                 "t.granted_scopes,t.grant_expires,t.thread_id,t.subagent_type,t.result,t.error,"
-                "t.id,t.child_conversation_id,t.parent_tool_call_id "
+                "t.id,t.child_conversation_id,t.child_run_id,t.parent_tool_call_id "
                 "FROM subagent_wakeups w JOIN subagent_tasks t ON t.id=w.task_id "
                 "WHERE w.task_id=? AND w.owner=t.owner AND w.parent_conversation_id=t.parent_conversation_id "
                 "AND w.parent_run_id=t.parent_run_id AND w.parent_agent_id=t.parent_agent_id",
@@ -208,6 +208,32 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                 if row["result_claimed"]:
                     _retire(db, task_id, "Child result already manually claimed")
                     continue
+                # The original createSubagentCompletionWakeupResolver requires
+                # the actual owned child conversation and terminal assistant
+                # state. Deleting a child transcript must retire delivery, not
+                # let a stale result be replayed into its parent conversation.
+                child = db.execute(
+                    "SELECT c.metadata,r.status FROM conversations c JOIN runs r "
+                    "ON r.conversation_id=c.id WHERE c.id=? AND c.owner=? AND r.id=?",
+                    (row["child_conversation_id"], owner, row["child_run_id"]),
+                ).fetchone()
+                if child is None:
+                    _retire(db, task_id, "The owned child conversation is no longer available")
+                    continue
+                try:
+                    lineage = json.loads(child["metadata"])
+                except (ValueError, TypeError):
+                    _retire(db, task_id, "The child transcript metadata is invalid")
+                    continue
+                if not isinstance(lineage, dict):
+                    _retire(db, task_id, "The child transcript metadata is invalid")
+                    continue
+                if (lineage.get("subagentTask") != task_id or
+                        lineage.get("parentConversationId") != row["parent_conversation_id"]):
+                    _retire(db, task_id, "The child transcript lineage no longer matches its owner")
+                    continue
+                if child["status"] in {"running", "requires_action"}:
+                    continue  # Child terminal messages are not durable yet.
                 if expiry is not None and expiry <= time.time():
                     _retire(db, task_id, "Parent authorization grant expired")
                     continue
