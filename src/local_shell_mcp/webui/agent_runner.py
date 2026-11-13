@@ -207,7 +207,8 @@ class AgentRunner:
             if call.name == "mcp_tool_call":
                 return await approved_call(self.owner, self.generation.conversation_id, set(self.scopes), call)
             return await call_tool(self.owner, self.generation.conversation_id, call,
-                                   granted_scopes=set(self.scopes), grant_expires=self.grant_expires)
+                                   granted_scopes=set(self.scopes), grant_expires=self.grant_expires,
+                                   run_id=self.generation.run_id)
         except PermissionError as error:
             raise RuntimeSafetyError(str(error)) from error
         except Exception as error:

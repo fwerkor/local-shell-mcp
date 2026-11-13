@@ -83,10 +83,28 @@ def _job_runtime_dir() -> Path:
     return path
 
 
-def write_durable_python_script(code: str) -> Path:
+def write_durable_python_script(code: str, idempotency_key: str | None = None) -> Path:
     """Store code beside tracked jobs for later job_retry calls."""
-    script = _job_runtime_dir() / "scripts" / f"script-{uuid.uuid4().hex}.py"
-    _private_write_text(script, code)
+    if idempotency_key is None:
+        script = _job_runtime_dir() / "scripts" / f"script-{uuid.uuid4().hex}.py"
+        _private_write_text(script, code)
+        return script
+
+    digest = hashlib.sha256(idempotency_key.encode()).hexdigest()
+    directory = _job_runtime_dir() / "scripts"
+    script = directory / f"agent-script-{digest}.py"
+    # Publish fully-written scripts atomically. Replaying the same key in two
+    # concurrent Agent invocations must not truncate a script being executed.
+    staging = directory / f".staging-{uuid.uuid4().hex}.py"
+    _private_write_text(staging, code)
+    try:
+        try:
+            os.link(staging, script)
+        except FileExistsError as exc:
+            if script.read_text(encoding="utf-8") != code:
+                raise ValueError("idempotency_key was already used for different Python code") from exc
+    finally:
+        staging.unlink(missing_ok=True)
     return script
 
 
@@ -1332,16 +1350,38 @@ def _launch_managed_job(
     _MANAGED_JOB_TASKS[job_id] = task
 
 
+def lookup_job_idempotency(idempotency_key: str, action: str = "start") -> dict[str, Any]:
+    """Read-only reconciliation by a native dedup record, never by name/ID guess."""
+    if action not in {"start", "retry"}:
+        raise ValueError("Unknown native job idempotency action")
+    key_hash = _idempotency_key_hash(_normalize_idempotency_key(idempotency_key))
+    with _store_transaction() as store:
+        for job in store.get("jobs", []):
+            if any(record.get("action") == action and record.get("key_hash") == key_hash
+                   for record in job.get("idempotency_requests", []) if isinstance(record, dict)):
+                return {"job_id": job["job_id"], "status": job.get("status")}
+    return {"job_id": None, "status": "not_found"}
+
+
 async def start_managed_job(
     kind: str,
     payload: dict[str, Any],
     *,
     name: str | None = None,
     command: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     normalized = kind.strip()
     if normalized not in _MANAGED_JOB_HANDLERS:
         raise ValueError(f"unknown managed job kind: {normalized}")
+    idempotency_key = _normalize_idempotency_key(idempotency_key)
+    fingerprint = _idempotency_fingerprint("start", {"kind": normalized, "payload": payload})
+    if idempotency_key is not None:
+        with _store_transaction() as store:
+            existing = _find_idempotent_job(store, action="start", key=idempotency_key,
+                                            fingerprint=fingerprint)
+            if existing is not None:
+                return _public_job(existing)
     job_id = _new_job_id()
     display_name = name or f"{normalized}-{job_id}"
     if get_settings().stateless_controller:
@@ -1378,7 +1418,15 @@ async def start_managed_job(
     }
     try:
         with _store_transaction() as store:
-            store["jobs"].append(job)
+            existing = _find_idempotent_job(store, action="start", key=idempotency_key,
+                                            fingerprint=fingerprint)
+            if existing is None:
+                _record_idempotency_request(job, action="start", key=idempotency_key,
+                                            fingerprint=fingerprint)
+                store["jobs"].append(job)
+        if existing is not None:
+            _remove_attempt_files(job_id)
+            return _public_job(existing)
         _launch_managed_job(job_id, normalized, payload, log_path)
     except BaseException:
         _remove_attempt_files(job_id)
@@ -1544,6 +1592,7 @@ async def run_job_with_timeout(
     max_output_bytes: int | None = None,
     *,
     script_path: Path | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Wait for a tracked command, leaving the *same* job running on timeout.
 
@@ -1558,6 +1607,7 @@ async def run_job_with_timeout(
         cwd,
         script_path=str(script_path) if script_path is not None else None,
         initial_call_lease_s=300,
+        idempotency_key=idempotency_key,
     )
     job_id = str(job["job_id"])
     status_path = _attempt_paths(job_id, 1)["status"]
