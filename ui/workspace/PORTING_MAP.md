@@ -282,6 +282,8 @@ React schema remains unchanged.
 - 未完全等价：源RBAC（适配为LSM单用户owner）、完整跨source filter审计/RE2JS、SDK provider token校准和按provider native消息格式计算、跨tool pair的intra-turn fallback、动态semantic index/完整事件actor、自定义摘要策略的Graph reducer；这些仍标记“部分”，不可用这批纯函数向量充当整套图运行时已完成的证据。
 - Memory字段过滤：按原版保护来源配置读取 `webui.filters.config` 或 `endpoints.filters`，支持`memories.pii.fields`、starter三规则、custom regex及`audit`不阻止行为；旧记录在GET与模型上下文读取前按最新policy投影，原始SQLite行不篡改且总token按存储值计算；写入新记录或修改在提交前阻止并返回不泄漏原值的`content_filter_block`。为规避Python正则退化，超时及不支持的pattern在memory路径 fail-closed，完整原RE2JS与跨source事件审计尚未移植。
 
+- Memory启动兼容：`regex`与BPE tokenizer同属可选 `.[webui]`，在`memory_protection.py`按需加载。没有安装WebUI extra的纯Controller Wheel仍可正常启动；如启用了Memory PII过滤而regex缺失，策略执行安全拒绝并遮蔽字段，不会以错误忽略过滤。覆盖独立Python子进程模拟`ModuleNotFoundError: regex`，这修复此前GitHub CI wheel和独立包启动失败。
+- Agent `useMemory` read-only上下文与原版保持一致：配置Memory并获用户授权时，主Agent即使不含`memory`工具也能读取withoutKeys；只有确实注册inline memory capability时才得到withKeys和`set_memory/delete_memory` guard。自动MemoryRun的默认指令文本已与原版`getDefaultInstructions`对齐。
 - 可选自动Memory Agent：源配置`memory.agent.enabled=true`且提供同owner的`agent.id`或`provider`+`model`后，使用现有Provider流、BPE裁剪的用户对话窗口、原Memory tool接口和共享SQLite记录执行MemoryRun；每条记忆写入由`MemoryRepository`事务校验，再把工具artifact以原`attachment` SSE形状持久化。默认关闭、用户opt-out后不再执行、手动compact不触发、模型处理失败不影响原会话、外部取消同步撤销同一run内的自动任务。已验证原SSE tool_call碎片经真实loopback HTTP服务复原、落库、重启回放及无效Agent/权限/Policy边界。
 - 自动Memory Agent仍非上游LangGraph内部Run等价：无完整hook/model-bound所有来源检查、token使用量/独立Agent流事件、Graph actor调度；它是源码gate+数据/工具协议的Python接入，完整等价需与并行graph/protocol端口衔接，不能宣称整套Memory已完成。
 
