@@ -13,6 +13,11 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+from .memory_protection import (
+    MemoryContentBlocked,
+    assert_memory_content_allowed,
+    project_stored_memories,
+)
 from .tokenizer import count_tokens
 
 MEMORY_INSTRUCTIONS = ('Persistent memory is available across conversations within the current memory scope. '
@@ -118,13 +123,14 @@ class MemoryRepository:
                 rows = db.execute('SELECT * FROM webui_memories WHERE owner=? AND agent_id=? ORDER BY updated_at,id', (owner, agent_id)).fetchall()
         return [self._from_row(row) for row in rows]
 
-    def formatted(self, owner: str, agent_id: str = '') -> dict:
+    def formatted(self, owner: str, agent_id: str = '', *, filters: dict | None = None) -> dict:
         try:
             memories = sorted(self.list(owner, agent_id), key=lambda entry: entry['updated_at'])
         except sqlite3.Error:
             return {'withKeys': None, 'withoutKeys': None, 'totalTokens': 0,
                     'tokenCountsByKey': {}, 'readFailed': True}
         counts = {entry['key']: entry['tokenCount'] for entry in memories}
+        memories = project_stored_memories(memories, filters)
         with_keys, without_keys = [], []
         for i, entry in enumerate(memories, 1):
             stamp = entry['updated_at'][:10]
@@ -143,9 +149,10 @@ class MemoryRepository:
 
     def write(self, owner: str, key: str, value: str, *, agent_id: str = '',
               char_limit: int = 10000, token_limit: int | None = None, create: bool = False,
-              existing_id: str | None = None) -> dict:
+              existing_id: str | None = None, filters: dict | None = None) -> dict:
         """Serialized limit validation + upsert/rename; rollback on every conflict."""
         self._check(key, value, char_limit=char_limit)
+        assert_memory_content_allowed(key, value, filters)
         token_count = count_tokens(value, exact=False)
         with self.database.connect() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -229,11 +236,14 @@ def execute_memory_tool(repo: MemoryRepository, owner: str, agent: dict, name: s
         if _utf16_length(value) > limit:
             return (f'Value exceeds maximum length of {limit} characters.', None)
         record = repo.write(owner, key, value, agent_id=agent_id,
-                            char_limit=limit, token_limit=config.get('tokenLimit'))
+                            char_limit=limit, token_limit=config.get('tokenLimit'),
+                            filters=config.get('filters'))
         tokens = record['tokenCount']
         return (f'Memory set for key "{key}" ({tokens} tokens)', {'memory': {
             'key': key, 'value': value, 'tokenCount': tokens, 'type': 'update',
             **({'agentId': agent_id} if agent_id else {})}})
+    except MemoryContentBlocked as exc:
+        return (json.dumps(exc.response(model=True), ensure_ascii=False), None)
     except MemoryLimitExceeded as exc:
         if exc.kind == 'already_exceeded':
             return ('Memory storage exceeded. Cannot save new memories.', exc.artifact())

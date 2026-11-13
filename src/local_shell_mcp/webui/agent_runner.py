@@ -44,6 +44,7 @@ from .memory import (
     memory_enabled,
     tool_definitions,
 )
+from .memory_protection import configured_filters
 from .providers import ModelToolCall, provider_config, selected_provider
 from .subagents import build_subagent_configs, invoke_subagent, subagent_tools
 
@@ -89,7 +90,8 @@ class AgentRunner:
         if not (agent or {}).get('tools') or 'memory' not in agent['tools']:
             return ''
         has_tools = (agent or {}).get('tools') and 'memory' in agent['tools'] and memory_enabled(settings, self.owner, tools=True)
-        formatted = MemoryRepository(self.database).formatted(self.owner, agent_partition(agent))
+        formatted = MemoryRepository(self.database).formatted(
+            self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
         if formatted.get('readFailed'):
             return ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
@@ -212,9 +214,10 @@ class AgentRunner:
             settings = WorkspaceRepository(self.database)
             if not memory_enabled(settings, self.owner, tools=True):
                 raise RuntimeSafetyError('Memory tools are disabled')
+            config = {**(memory_config(settings, self.owner) or {}),
+                      'filters': configured_filters(settings, self.owner)}
             result, artifact = execute_memory_tool(MemoryRepository(self.database), self.owner,
-                state.context.agent or {}, call.name, call.arguments,
-                memory_config(settings, self.owner) or {})
+                state.context.agent or {}, call.name, call.arguments, config)
             if artifact is not None:
                 self.memory_artifacts[call.call_id] = artifact
             return result

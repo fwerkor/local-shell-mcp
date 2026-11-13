@@ -11,6 +11,11 @@ from starlette.routing import Route
 
 from .agents import AgentRepository
 from .memory import _VALID_KEY, MemoryRepository, _utf16_length, memory_config
+from .memory_protection import (
+    MemoryContentBlocked,
+    configured_filters,
+    project_stored_memories,
+)
 from .routes import _body, _owner, _repo
 
 
@@ -60,6 +65,8 @@ def _write(repo: MemoryRepository, owner: str, config: dict, key: str, value: st
         raise HTTPException(404, detail='Memory not found.') from exc
     except OverflowError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
+    except MemoryContentBlocked:
+        raise
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
 
@@ -67,7 +74,7 @@ def _write(repo: MemoryRepository, owner: str, config: dict, key: str, value: st
 async def memories(request: Request):
     owner, repo, store, config = _context(request)
     if request.method == 'GET':
-        items = store.list(owner)
+        items = project_stored_memories(store.list(owner), configured_filters(repo, owner))
         for item in items:
             if agent_id := item.get('agentId'):
                 agent = AgentRepository(repo.database).get(owner, agent_id)
@@ -85,8 +92,13 @@ async def memories(request: Request):
         agent_id = ''
     if agent_id and AgentRepository(repo.database).get(owner, agent_id) is None:
         raise HTTPException(404, detail='Agent not found.')
-    record = _write(store, owner, config, key, value.strip(), agent_id=agent_id, create=True)
-    return JSONResponse({'created': True, 'memory': record}, status_code=201)
+    try:
+        record = _write(store, owner, config, key, value.strip(), agent_id=agent_id, create=True,
+                        filters=configured_filters(repo, owner))
+    except MemoryContentBlocked as exc:
+        return JSONResponse(exc.response(), status_code=400)
+    return JSONResponse({'created': True, 'memory': project_stored_memories(
+        [record], configured_filters(repo, owner))[0]}, status_code=201)
 
 
 async def preference(request: Request):
@@ -117,8 +129,13 @@ async def memory_by_id(request: Request):
             raise HTTPException(404, detail='Memory not found.')
         key = record['key']
     key, value = _validate(key, value, config)
-    record = _write(store, owner, config, key, value, agent_id=part, existing_id=identifier)
-    return JSONResponse({'updated': True, 'memory': record})
+    try:
+        record = _write(store, owner, config, key, value, agent_id=part, existing_id=identifier,
+                        filters=configured_filters(repo, owner))
+    except MemoryContentBlocked as exc:
+        return JSONResponse(exc.response(), status_code=400)
+    return JSONResponse({'updated': True, 'memory': project_stored_memories(
+        [record], configured_filters(repo, owner))[0]})
 
 
 async def memory_by_key(request: Request):
@@ -134,8 +151,13 @@ async def memory_by_key(request: Request):
     prior = next((entry for entry in store.list(owner, part) if entry['key'] == key), None)
     if prior is None:
         raise HTTPException(404, detail='Memory not found.')
-    record = _write(store, owner, config, new_key, value, agent_id=part, existing_id=prior['_id'])
-    return JSONResponse({'updated': True, 'memory': record})
+    try:
+        record = _write(store, owner, config, new_key, value, agent_id=part, existing_id=prior['_id'],
+                        filters=configured_filters(repo, owner))
+    except MemoryContentBlocked as exc:
+        return JSONResponse(exc.response(), status_code=400)
+    return JSONResponse({'updated': True, 'memory': project_stored_memories(
+        [record], configured_filters(repo, owner))[0]})
 
 
 def memory_routes() -> list[Route]:
