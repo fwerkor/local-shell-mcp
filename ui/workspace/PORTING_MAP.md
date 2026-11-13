@@ -54,6 +54,8 @@ Subagents 使用 `agent.subagents.enabled/allowSelf/agent_ids` 配置和动态�
 | `LibreChat:packages/api/src/agents/compaction.ts` — `summary checkpoint / manual outcome` | `webui/compaction.py; generations.py; agent_runner.py` | 部分 | 2079组原函数固定向量全通过；已去除50消息截断，实现完整当前分支历史+有效summary边界、手动compact、失败保原消息；事件actor和语义索引待完整移植 |
 | `LibreChat:packages/api/src/memory/protection.ts` — `projectStoredMemories` | `webui/memory_protection.py; memory_routes.py; memory.py` | 部分 | 已支持memory字段选中、starter/custom过滤、历史记录安全投影；regex引擎是带时间上限的Python适配，非完全RE2JS |
 | `LibreChat:packages/api/src/memory/handlers.ts` — `blockFilteredMemoryContent / createMemoryManagementHandlers` | `webui/memory_protection.py; memory_routes.py` | 部分 | POST/PATCH及agent memory写入均在SQLite写前检查；内容过滤返回原版字段结构，旧行GET保留统计字段并屏蔽内容；完整跨source/audit尚未移植 |
+| `LibreChat:packages/api/src/agents/memory.ts` — `createMemoryProcessor / processMemory` | `webui/memory_agent.py; generation_routes.py` | 部分 | 原版Memory Agent显式`agent.enabled`与模型/Agent配置、仅由用户触发写入的prompt约束、BPE历史窗口、toolEnd执行、SQLite写入与源attachment事件已接入；完整Graph步骤、provider初始化/跨source过滤与usage仍未等价 |
+| `LibreChat:api/server/controllers/agents/client.js` — `useMemory / runMemory` | `webui/memory_agent.py; generation_routes.py` | 部分 | 用户真实对话中并行发起自动memory任务，主响应结束前收敛，人工中断会取消；手动compaction不会自动触发MemoryRun；原完整event-actor/side-effect审批尚未移植 |
 | `LibreChat:packages/api/src/agents/memory.ts` — `registerMemoryTools / tool usage guard` | `webui/memory.py; memory_routes.py; agent_runner.py; sqlite_store.py` | 部分 | 已实现显式capability/Agent marker、写删可选工具、命中规则和prompt guard、SQLite分区/事务/配额、REST，真实工具流和重启验证；缺少原RBAC/filters完全等价 |
 | `LibreChat:packages/api/src/agents/attachments.ts` — `attachment limits / model-bound files` | `webui/attachments.py` | 部分 | LSM真实路径上传已实现；原版资源分类和模型输入链未完成 |
 | `LibreChat:packages/api/src/agents/tools.ts` — `runtime tools / registry adaptation` | `webui/lsm_tool_registry.py` | 部分 | 复用LSM注册表；尚未按原版Agent选择与系统注入拆开 |
@@ -279,5 +281,8 @@ React schema remains unchanged.
 - 新增Windows粗粒度事件循环下GUI TTL回归稳定性测试；新增真实SQLite重启后“摘要已完成但answer崩溃”与“摘要失败”两种历史恢复测试，CI旧Linux安装失败是Runner解析Ubuntu包源域名中断，未擅改构建依赖。
 - 未完全等价：源RBAC（适配为LSM单用户owner）、完整跨source filter审计/RE2JS、SDK provider token校准和按provider native消息格式计算、跨tool pair的intra-turn fallback、动态semantic index/完整事件actor、自定义摘要策略的Graph reducer；这些仍标记“部分”，不可用这批纯函数向量充当整套图运行时已完成的证据。
 - Memory字段过滤：按原版保护来源配置读取 `webui.filters.config` 或 `endpoints.filters`，支持`memories.pii.fields`、starter三规则、custom regex及`audit`不阻止行为；旧记录在GET与模型上下文读取前按最新policy投影，原始SQLite行不篡改且总token按存储值计算；写入新记录或修改在提交前阻止并返回不泄漏原值的`content_filter_block`。为规避Python正则退化，超时及不支持的pattern在memory路径 fail-closed，完整原RE2JS与跨source事件审计尚未移植。
+
+- 可选自动Memory Agent：源配置`memory.agent.enabled=true`且提供同owner的`agent.id`或`provider`+`model`后，使用现有Provider流、BPE裁剪的用户对话窗口、原Memory tool接口和共享SQLite记录执行MemoryRun；每条记忆写入由`MemoryRepository`事务校验，再把工具artifact以原`attachment` SSE形状持久化。默认关闭、用户opt-out后不再执行、手动compact不触发、模型处理失败不影响原会话、外部取消同步撤销同一run内的自动任务。已验证原SSE tool_call碎片经真实loopback HTTP服务复原、落库、重启回放及无效Agent/权限/Policy边界。
+- 自动Memory Agent仍非上游LangGraph内部Run等价：无完整hook/model-bound所有来源检查、token使用量/独立Agent流事件、Graph actor调度；它是源码gate+数据/工具协议的Python接入，完整等价需与并行graph/protocol端口衔接，不能宣称整套Memory已完成。
 
 **WebUI发行适配：** PyPI Wheel 保持 `webui` 可选 extra；Docker和单二进制发行始终提供完整WebUI，构建时额外安装 `.[webui]` 并收集 tiktoken。Worker 通过显式源文件白名单打包，不携带 tokenizer 或 WebUI 编码数据。

@@ -54,9 +54,9 @@
       "path": "api/server/controllers/agents/client.js",
       "sha256": "9b2f6accf56544096aa530d5bccff4b1cc5b76651a746da2a8aee94cc20020e1",
       "symbols": "AgentClient / history / run lifecycle",
-      "python_lsm": "webui/generations.py; generation_routes.py",
+      "python_lsm": "webui/generations.py; generation_routes.py; memory_agent.py",
       "status": "部分",
-      "difference": "未移植完整AgentClient和事件actor生命周期"
+      "difference": "Memory useMemory/runMemory显式自动配置/上下文窗口、原SSE工具与artifact已接通；其余完整AgentClient、event-actor生命周期及hook未实现"
     },
     {
       "repository": "LibreChat",
@@ -171,9 +171,9 @@
       "path": "packages/api/src/agents/memory.ts",
       "sha256": "f493a11e02b5bc2ec16abe0426614afcd8dfffa288f619c50e22987cfe0e71fc",
       "symbols": "registerMemoryTools / tool usage guard",
-      "python_lsm": "webui/memory.py; agent_runner.py",
+      "python_lsm": "webui/memory.py; memory_agent.py; memory_routes.py; agent_runner.py",
       "status": "部分",
-      "difference": "显式memory marker+capability双开关、单用户/agent分区、二工具与guard注入及真实工具调用可用；原filter/role gate按LSM单用户替代，缓存及流式artifact尚未完全等价。"
+      "difference": "inline memory工具与可选MemoryRun均有真实Python实现，explicit-only提示、SQLite额度、SSE附件、模型transport与自动配置生效；完整Graph/跨source过滤/usage事件仍缺"
     },
     {
       "repository": "LibreChat",
