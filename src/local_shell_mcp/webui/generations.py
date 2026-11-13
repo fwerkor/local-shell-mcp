@@ -498,7 +498,7 @@ class GenerationStore:
             ).fetchall()
             max_seq = entries[-1]["seq"] if entries else 0
         steps = {}
-        text_parts = []
+        content_parts: list[dict] = []
         for entry in entries:
             item = json.loads(entry["data"])
             event, data = item.get("event"), item.get("data") or {}
@@ -509,13 +509,23 @@ class GenerationStore:
                     key: data[key] for key in ("status", "closed_at") if key in data}}
             elif event == "on_message_delta":
                 content = (data.get("delta") or {}).get("content") or {}
-                if content.get("type") == "text" and isinstance(content.get("text"), str):
-                    text_parts.append(content["text"])
+                if content.get("type") == "text" and isinstance(content.get("text"), str) and content["text"]:
+                    if content_parts and content_parts[-1].get("type") == "text":
+                        content_parts[-1]["text"] += content["text"]
+                    else:
+                        content_parts.append({"type": "text", "text": content["text"],
+                                              "phase": "final_answer"})
+            elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
+                content_parts.append(data["part"])
         pending = state.get("pendingAction")
-        initial = [{"type": "text", "text": "".join(text_parts), "phase": "final_answer"}] if text_parts else []
+        initial = content_parts
+        pending_steers = (state.get("steering") or {}).get("queue", [])
+        from .steering import _public
+
         result = {
             "runSteps": list(steps.values()),
             "aggregatedContent": initial,
+            "pendingSteers": [_public(item) for item in pending_steers],
             "userMessage": {
                 "messageId": generation.user_message_id,
                 "conversationId": generation.conversation_id,
@@ -574,6 +584,16 @@ class GenerationStore:
                                  and part.get("type") == "text" and isinstance(part.get("text"), str)]
                         if texts:
                             content = "".join(texts)
+                        if row["role"] == "assistant":
+                            # Upstream formatAgentMessages replays STEER parts
+                            # as user instructions, not as assistant prose.
+                            from .steering import merged_text
+
+                            for part in reversed(parts):
+                                if (isinstance(part, dict) and part.get("type") == "steer"
+                                    and isinstance(part.get("steer"), str)):
+                                    result.append({"role": "user", "content": merged_text(part),
+                                                   "source": "steer"})
                     files = json.loads(row["metadata"]).get("files", [])
                     if row["role"] == "user" and files:
                         descriptors = []
@@ -614,15 +634,29 @@ class GenerationStore:
             # Preserve source React tool-call parts in history and final SSE,
             # rather than erasing them when the assistant text is committed.
             tool_parts = {}
+            content = []
             for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
                 value = json.loads(event["data"])
-                if value.get("event") == "on_run_step_completed":
-                    result = value.get("data", {}).get("result", {})
+                kind = value.get("event")
+                data = value.get("data") or {}
+                if kind == "on_run_step_completed":
+                    result = data.get("result", {})
                     if isinstance(result.get("tool_call"), dict):
                         tool_parts[result["id"]] = {"type": "tool_call", "tool_call": {
                             **result["tool_call"], "stepId": result["id"],
                         }}
-            content = ([{"type": "text", "text": text, "phase": "final_answer"}] if text else []) + list(tool_parts.values())
+                elif kind == "on_message_delta":
+                    delta = (data.get("delta") or {}).get("content") or {}
+                    if delta.get("type") == "text" and isinstance(delta.get("text"), str) and delta["text"]:
+                        if content and content[-1].get("type") == "text":
+                            content[-1]["text"] += delta["text"]
+                        else:
+                            content.append({"type": "text", "text": delta["text"], "phase": "final_answer"})
+                elif kind == "on_steer_applied" and isinstance(data.get("part"), dict):
+                    content.append(data["part"])
+            if not content and text:
+                content.append({"type": "text", "text": text, "phase": "final_answer"})
+            content += list(tool_parts.values())
             # LibreChat agents/client.js emits ContentTypes.ERROR as a content
             # part. A top-level final.error alone is ignored by finalHandler.
             # Persist the same part so the error survives history reload too.
@@ -647,6 +681,9 @@ class GenerationStore:
                             "unfinished": status != "complete"}), now, now),
                 )
             run_state = json.loads(row["state"])
+            from .steering import SteeringStore
+
+            pending_steers = SteeringStore.settle_leftovers(run_state)
             if status != "interrupted":
                 run_state.pop("resumeClaim", None)
                 run_state.pop("approvedToolBatch", None)
@@ -660,6 +697,7 @@ class GenerationStore:
                 "responseMessage": response_message,
                 **({"aborted": True} if status == "aborted" else {}),
                 **({"error": error or "Generation failed"} if status in {"error", "interrupted"} else {}),
+                **({"pendingSteers": pending_steers} if pending_steers else {}),
             }
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(final)))
             return True

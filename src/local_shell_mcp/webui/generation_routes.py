@@ -359,6 +359,61 @@ async def active_generations(request: Request):
                          "generationProtocolVersion": protocol}, headers=_generator_headers(protocol))
 
 
+async def steer_generation(request: Request):
+    """Original React steering POST contract, no provider-bound side effects on replay."""
+    from .steering import SteeringStore, SteerRejection
+
+    owner = _owner(request)
+    body = await _body(request)
+    protocol = request_protocol(request, body)
+    store = SteeringStore(_database())
+    cid = body.get("conversationId")
+    if isinstance(cid, str):
+        current = _generation_store().latest(owner, cid)
+        if (current is not None and current.agent_id and
+            AgentRepository(_database()).get(owner, current.agent_id) is None):
+            return JSONResponse({"code": "FORBIDDEN", "generationProtocolVersion": protocol},
+                                status_code=403, headers=_generator_headers(protocol))
+        if current is not None:
+            # Model-bound instructions cannot bypass revoked machine scopes
+            # merely because the originating generation still exists.
+            from .machine_permissions import require_machine_scope, resolve_access
+
+            scopes, expiry = _request_grant(request)
+            try:
+                policy = resolve_access(owner, cid)
+                for machine, level in policy.items():
+                    if level in {"read", "write"}:
+                        require_machine_scope(scopes, machine, level, expires=expiry)
+            except (PermissionError, KeyError):
+                return JSONResponse({"code": "FORBIDDEN", "generationProtocolVersion": protocol},
+                                    status_code=403, headers=_generator_headers(protocol))
+    try:
+        result = store.enqueue(owner, body, preempt_capable=True,
+                               strict_delivery=request.url.path.endswith("/deliver"))
+    except SteerRejection as exc:
+        return JSONResponse({**exc.body, "generationProtocolVersion": protocol},
+                            status_code=exc.status, headers=_generator_headers(protocol))
+    return JSONResponse({**result, "generationProtocolVersion": protocol},
+                        status_code=202, headers=_generator_headers(protocol))
+
+
+async def mutate_steer(request: Request):
+    from .steering import SteeringStore, SteerRejection
+
+    owner = _owner(request)
+    body = await _body(request)
+    protocol = request_protocol(request, body)
+    arm = request.url.path.endswith("/arm")
+    try:
+        result = SteeringStore(_database()).mutate(owner, body, arm=arm, preempt_capable=True)
+    except SteerRejection as exc:
+        return JSONResponse({**exc.body, "generationProtocolVersion": protocol},
+                            status_code=exc.status, headers=_generator_headers(protocol))
+    return JSONResponse({**result, "generationProtocolVersion": protocol},
+                        headers=_generator_headers(protocol))
+
+
 async def abort_generation(request: Request):
     owner = _owner(request)
     payload = await _body(request)
@@ -373,12 +428,16 @@ async def abort_generation(request: Request):
     expected = payload.get("generationCreatedAt")
     if expected is not None and str(generation.generation_created_at) != str(expected):
         raise HTTPException(409, detail="Generation identity mismatch")
+    from .steering import SteeringStore
+
+    pending_steers = SteeringStore(_database()).pending(owner, generation.run_id)
     task = _TASKS.get(generation.run_id)
     if task and not task.done():
         task.cancel()
     else:
         store.finish(owner, generation.run_id, status="aborted")
-    return JSONResponse({"success": True, "generationProtocolVersion": protocol},
+    return JSONResponse({"success": True, "generationProtocolVersion": protocol,
+                         **({"pendingSteers": pending_steers} if pending_steers else {})},
                         headers=_generator_headers(protocol))
 
 
@@ -524,6 +583,10 @@ def generation_routes() -> list[Route]:
         Route("/api/agents/chat/status/{conversation_id}", generation_status, methods=["GET"]),
         Route("/api/agents/chat/active", active_generations, methods=["GET"]),
         Route("/api/agents/chat/abort", abort_generation, methods=["POST"]),
+        Route("/api/agents/chat/steer", steer_generation, methods=["POST"]),
+        Route("/api/agents/chat/steer/deliver", steer_generation, methods=["POST"]),
+        Route("/api/agents/chat/steer/cancel", mutate_steer, methods=["POST"]),
+        Route("/api/agents/chat/steer/arm", mutate_steer, methods=["POST"]),
         Route("/api/agents/chat/resume", resume_generation, methods=["POST"]),
         Route("/api/agents/chat", start_generation, methods=["POST"]),
         Route("/api/agents/chat/{endpoint}", start_generation, methods=["POST"]),

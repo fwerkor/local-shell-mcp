@@ -36,6 +36,7 @@ from .handoff import (
     receive_handoff,
 )
 from .providers import ModelToolCall, provider_config, selected_provider
+from .steering import SteeringStore, merged_text
 from .subagents import build_subagent_configs, invoke_subagent, subagent_tools
 
 
@@ -57,6 +58,7 @@ class AgentRunner:
         self.partial_text, self.approved_batch = partial_text, approved_batch
         self.repository = AgentRepository(database)
         self.saver = SQLiteCheckpointSaver(database, owner)
+        self.steers = SteeringStore(database)
         self.config = self.saver.config(generation.conversation_id, generation.run_id,
                                        checkpoint_ns=namespace, event_actor=True)
         self.active_config = self.config
@@ -365,8 +367,31 @@ class AgentRunner:
                 self.partial_text += text
             await self.on_text(text)
 
-        result = await run_agent_loop(state, stream_tools=self.stream_tools, stream_text=self.stream_text,
-                                      dispatch=self._dispatch, on_text=emit, save_state=self._save)
+        async def inject_steers(loop_state, boundary):
+            # Source PostToolBatch, PreemptBoundary and StopFinalize hooks all
+            # inject from the same owner/epoch-fenced durable queue.
+            if self.namespace:
+                return False
+            applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary)
+            for item in applied:
+                content = merged_text(item)
+                if item.get("files"):
+                    # Retain validated upload refs for native tools; the model
+                    # cannot claim multimodal inline encoding from this path.
+                    content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
+                        item["files"], ensure_ascii=False,
+                    )
+                loop_state.messages.append({"role": "user", "content": content, "source": "steer"})
+            return bool(applied)
+
+        async def should_seal_stream():
+            return not self.namespace and self.steers.has_preempt(self.owner, self.generation.run_id)
+
+        result = await run_agent_loop(
+            state, stream_tools=self.stream_tools, stream_text=self.stream_text,
+            dispatch=self._dispatch, on_text=emit, save_state=self._save,
+            on_boundary=inject_steers, on_stream_chunk=should_seal_stream,
+        )
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
                                                review["actionId"], result, self.partial_text)

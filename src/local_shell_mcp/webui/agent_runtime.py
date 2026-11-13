@@ -58,6 +58,8 @@ async def run_agent_loop(
     dispatch: Callable[[list[ModelToolCall], AgentLoopState], Awaitable[ToolBatchOutput]],
     on_text: Callable[[str], Awaitable[None]],
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
+    on_boundary: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
+    on_stream_chunk: Callable[[], Awaitable[bool]] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -77,9 +79,10 @@ async def run_agent_loop(
             state.messages.extend(output.messages)
             if output.next_context is not None:
                 state.context = output.next_context
+            injected = await on_boundary(state, "post_tools") if on_boundary else False
             state.pending_calls = []
             state.tool_step_started = False
-            state.completed = output.next_context is None and context.tool_end
+            state.completed = output.next_context is None and context.tool_end and not injected
             if save_state is not None:
                 await save_state(state, [])
             if state.completed:
@@ -100,12 +103,23 @@ async def run_agent_loop(
         source = stream_tools(context.profile, state.messages, tools=context.tools,
                               max_tokens=max_tokens, temperature=temperature) if context.tools else \
             stream_text(context.profile, state.messages, max_tokens=max_tokens, temperature=temperature)
-        async for item in source:
-            if isinstance(item, ModelToolCall):
-                calls.append(item)
-            elif item:
-                text_parts.append(item)
-                await on_text(item)
+        sealed = False
+        try:
+            async for item in source:
+                if isinstance(item, ModelToolCall):
+                    calls.append(item)
+                elif item:
+                    text_parts.append(item)
+                    await on_text(item)
+                    if on_stream_chunk is not None and await on_stream_chunk():
+                        sealed = True
+                        break
+        finally:
+            # Closing the async iterator releases provider SSE/HTTP resources
+            # after an intentional provider-safe steer preemption.
+            close = getattr(source, "aclose", None)
+            if close is not None:
+                await close()
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if calls:
             import json
@@ -118,7 +132,10 @@ async def run_agent_loop(
         state.messages.append(message)
         state.pending_calls = calls
         state.completed = not calls
+        if (not calls and on_boundary is not None and
+            await on_boundary(state, "stream" if sealed else "terminal")):
+            state.completed = False
         if save_state is not None:
             await save_state(state, calls)
-        if not calls:
+        if state.completed:
             return state.messages
