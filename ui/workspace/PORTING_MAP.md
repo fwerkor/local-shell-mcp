@@ -285,6 +285,7 @@ React schema remains unchanged.
 - Memory启动兼容：`regex`与BPE tokenizer同属可选 `.[webui]`，在`memory_protection.py`按需加载。没有安装WebUI extra的纯Controller Wheel仍可正常启动；如启用了Memory PII过滤而regex缺失，策略执行安全拒绝并遮蔽字段，不会以错误忽略过滤。覆盖独立Python子进程模拟`ModuleNotFoundError: regex`，这修复此前GitHub CI wheel和独立包启动失败。
 - Agent `useMemory` read-only上下文与原版保持一致：配置Memory并获用户授权时，主Agent即使不含`memory`工具也能读取withoutKeys；只有确实注册inline memory capability时才得到withKeys和`set_memory/delete_memory` guard。自动MemoryRun的默认指令文本已与原版`getDefaultInstructions`对齐。
 - 可选自动Memory Agent：源配置`memory.agent.enabled=true`且提供同owner的`agent.id`或`provider`+`model`后，使用现有Provider流、BPE裁剪的用户对话窗口、原Memory tool接口和共享SQLite记录执行MemoryRun；每条记忆写入由`MemoryRepository`事务校验，再把工具artifact以原`attachment` SSE形状持久化。默认关闭、用户opt-out后不再执行、授权过期后禁止写入、手动compact不触发、模型处理失败不影响原会话、外部取消同步撤销同一run内的自动任务。已验证原SSE tool_call碎片经真实loopback HTTP服务复原、落库、重启回放及无效Agent/权限/Policy边界。
+- 失败隔离：自动Memory Agent的配置/初始化/可选Tokenizer缺失等异常只记录为MemoryRun失败，主Agent已成功的回答照常提交；回归测试模拟独立Memory任务启动后抛出异常，验证主对话仍完成。
 - 自动Memory Agent仍非上游LangGraph内部Run等价：无完整hook/model-bound所有来源检查、token使用量/独立Agent流事件、Graph actor调度；它是源码gate+数据/工具协议的Python接入，完整等价需与并行graph/protocol端口衔接，不能宣称整套Memory已完成。
 
 **WebUI发行适配：** PyPI Wheel 保持 `webui` 可选 extra；Docker和单二进制发行始终提供完整WebUI，构建时额外安装 `.[webui]` 并收集 tiktoken。Worker 通过显式源文件白名单打包，不携带 tokenizer 或 WebUI 编码数据。

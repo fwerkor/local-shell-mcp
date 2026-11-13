@@ -330,3 +330,31 @@ async def test_memory_write_denied_after_auth_grant_expires(memory_run):
         store.history('alice', job.conversation_id), root_agent=None, stream_tools=late,
         grant_expires=int(time.time()) + 10) == 0
     assert not MemoryRepository(db).list('alice')
+
+
+@pytest.mark.asyncio
+async def test_automatic_memory_setup_failure_cannot_break_primary_chat(memory_run, monkeypatch):
+    db, store, settings, job, profile = memory_run
+    enable(settings)
+    monkeypatch.setattr(generation_routes, '_database', lambda: db)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    from local_shell_mcp.webui import agent_runner
+
+    class PrimaryAgent:
+        def __init__(self, *args, on_text, **kwargs):
+            self.on_text = on_text
+            self.partial_text = ''
+
+        async def run(self, history):
+            await self.on_text('The primary model succeeded.')
+            self.partial_text = 'The primary model succeeded.'
+            return history
+
+    async def broken_memory(*args, **kwargs):
+        raise ModuleNotFoundError('Optional memory tokenizer is missing')
+
+    monkeypatch.setattr(agent_runner, 'AgentRunner', PrimaryAgent)
+    monkeypatch.setattr(memory_agent, 'run_automatic_memory', broken_memory)
+    await generation_routes._run_model('alice', job, profile)
+    assert store.get('alice', job.run_id).status == 'complete'
+    assert store.history('alice', job.conversation_id)[-1]['content'] == 'The primary model succeeded.'

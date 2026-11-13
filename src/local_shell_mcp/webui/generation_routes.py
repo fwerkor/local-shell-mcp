@@ -152,7 +152,13 @@ async def _run_model(
         except AgentSuspended:
             return
         if memory_task is not None:
-            await memory_task
+            try:
+                await memory_task
+            except Exception as exc:
+                # The original AgentClient.runMemory isolates extraction
+                # failures: a misconfigured opt-in memory model must never
+                # discard the user's successful primary answer.
+                log.warning("Automatic Memory extraction failed (%s)", type(exc).__name__)
         repo.append(owner, generation.run_id, {
             "event": "on_run_step_closed", "data": {
                 "id": step_id, "index": 0, "type": "message_creation",
