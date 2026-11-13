@@ -175,7 +175,11 @@ class SQLiteSubagentTaskHost:
     def _sweep(self, db: Any, now: int) -> None:
         # Source store TTL: retire old terminal task handles but keep the
         # independently owned thread transcript for future continuation.
-        db.execute("DELETE FROM subagent_tasks WHERE status!='running' AND updated_at<?",
+        # Never let an hour-old child receipt cascade-delete a source trigger
+        # still awaiting its parent branch or an active continuation.
+        db.execute("DELETE FROM subagent_tasks WHERE status!='running' AND updated_at<? "
+                   "AND NOT EXISTS(SELECT 1 FROM subagent_wakeups w WHERE w.task_id=subagent_tasks.id "
+                   "AND w.status IN ('pending','dispatched'))",
                    (now - 60 * 60 * 1000,))
 
     def _existing(self, db: Any, key: str, fingerprint: str) -> dict | None:
@@ -275,6 +279,15 @@ class SQLiteSubagentTaskHost:
                                    "mcp_enabled": mcp_enabled}), task_text,
                             _json(history), _json(sorted(invocation.scopes)), invocation.grant_expires,
                             reserved_child_id, "running", now, now))
+                # The original completion trigger is pre-enqueued in the
+                # exact same task-intent transaction, before child execution.
+                from .subagent_wakeup import register_wakeup
+
+                register_wakeup(db, task_id=task_id, owner=self.owner,
+                                conversation_id=self.conversation_id,
+                                parent_run_id=invocation.parent_run_id,
+                                agent_id=parent_agent, thread_id=thread_id,
+                                subagent_type=invocation.subagent_type, created_at=now)
                 task = _snapshot(self._row(db, task_id))
                 is_new = True
         if is_new:
@@ -298,10 +311,22 @@ class SQLiteSubagentTaskHost:
                 db.execute("UPDATE subagent_tasks SET child_registered=1 WHERE id=? "
                            "AND status='running'", (task["taskId"],))
         await self._ensure_active(task["taskId"])
+        with self.db.connect() as db:
+            wakeup = db.execute("SELECT 1 FROM subagent_wakeups WHERE task_id=? "
+                                "AND status IN ('pending','dispatched')", (task["taskId"],)).fetchone()
+        if wakeup and task["status"] == "running":
+            from .subagent_wakeup import SOURCE_WAKEUP_GUIDANCE
+
+            message = (f'Task handle: background_task_id "{task["taskId"]}". '
+                       + SOURCE_WAKEUP_GUIDANCE)
+        else:
+            message = (f'{"Started" if is_new else "Reused"} subagent "{task["subagentType"]}" '
+                       f'background task. Use check_background_task with background_task_id '
+                       f'"{task["taskId"]}" to inspect or collect its result.')
         return _json({"background_task_id": task["taskId"],
                       "subagent_thread_id": task["threadId"], "tool": "subagent",
                       "subagent_type": task["subagentType"], "status": task["status"],
-                      "message": f"{'Started' if is_new else 'Reused'} subagent \"{task['subagentType']}\" background task. Poll the host background-task tool with background_task_id \"{task['taskId']}\" to check progress or collect its result."})
+                      "message": message})
 
     async def _ensure_active(self, task_id: str) -> None:
         current = _TASKS.get(task_id)
@@ -687,7 +712,14 @@ class SQLiteSubagentTaskHost:
                 if task["status"] == "running":
                     return _json(_out(task))
                 if task["resultClaimed"]:
+                    if row["result_claim_key"] == "wakeup:" + task_id:
+                        return _json(_out(task, status="delivery_scheduled"))
                     return _json(_out(task, status="claimed"))
+                # The manual result claim and retirement of an unclaimed
+                # trigger are a single transaction. One path wins, not both.
+                db.execute("UPDATE subagent_wakeups SET status='retired',error=?,updated_at=? "
+                           "WHERE task_id=? AND status='pending'",
+                           ("Manually claimed", _now(), task_id))
                 db.execute("UPDATE subagent_tasks SET result_claimed=1,result_claim_key=?,"
                            "updated_at=? WHERE id=?", (invocation_key, _now(), task_id))
                 task = {**task, "resultAvailable": False, "resultClaimed": True}
@@ -754,6 +786,9 @@ class SQLiteSubagentTaskHost:
 
 async def shutdown_subagent_tasks() -> None:
     """Release Controller-owned execution leases while preserving running tasks."""
+    from .subagent_wakeup import shutdown_wakeup_workers
+
+    await shutdown_wakeup_workers()
     tasks = list(_TASKS.values()) + list(_RECOVERY_TASKS)
     for task in tasks:
         task.cancel()
@@ -790,7 +825,9 @@ def active_child_generations(database: Any) -> set[str]:
     with database.connect() as db:
         rows = db.execute("SELECT child_run_id FROM subagent_tasks "
                           "WHERE status='running' AND child_run_id IS NOT NULL").fetchall()
-    return {row["child_run_id"] for row in rows}
+        wakeup_runs = db.execute("SELECT run_id FROM subagent_wakeups "
+                                 "WHERE status='dispatched' AND run_id IS NOT NULL").fetchall()
+    return {row["child_run_id"] for row in rows} | {row["run_id"] for row in wakeup_runs}
 
 
 async def recover_subagent_tasks(database: Any, *, stream_tools: Callable, stream_text: Callable) -> int:
@@ -803,6 +840,11 @@ async def recover_subagent_tasks(database: Any, *, stream_tools: Callable, strea
     with database.connect() as db:
         rows = db.execute("SELECT owner,parent_conversation_id,id,lease_until FROM subagent_tasks "
                           "WHERE status='running' ORDER BY created_at").fetchall()
+    # The same Controller lifespan owns both the child lease recovery and
+    # its source event continuation queue. No separate model executor.
+    from .subagent_wakeup import start_wakeup_worker
+
+    await start_wakeup_worker(database)
     count = 0
     for row in rows:
         host = SQLiteSubagentTaskHost(database, row["owner"], row["parent_conversation_id"],
