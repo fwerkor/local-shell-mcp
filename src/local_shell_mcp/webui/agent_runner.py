@@ -235,8 +235,10 @@ class AgentRunner:
                 return await discover(self.owner, self.authorization_conversation_id, set(self.scopes), call)
             if call.name == "mcp_tool_call":
                 return await approved_call(self.owner, self.authorization_conversation_id, set(self.scopes), call)
-            return await call_tool(self.owner, self.authorization_conversation_id, call,
-                                   granted_scopes=set(self.scopes), grant_expires=self.grant_expires)
+            return await call_tool(self.owner, self.generation.conversation_id, call,
+                                   granted_scopes=set(self.scopes), grant_expires=self.grant_expires,
+                                   run_id=self.generation.run_id,
+                                   authorization_conversation_id=self.authorization_conversation_id)
         except PermissionError as error:
             raise RuntimeSafetyError(str(error)) from error
         except Exception as error:

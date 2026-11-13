@@ -50,7 +50,6 @@ _EXECUTION_TOOLS = frozenset({
 })
 # Do not bypass distinct OAuth rights that the existing MCP server requires.
 _ADDITIONAL_SCOPES = {
-    "gui_list": "shell:execute", "gui_state": "shell:execute",
     "gui_action": "shell:execute",
     "browser_session": "browser:use", "browser_snapshot": "browser:use",
     "browser_act": "browser:use", "browser_run_script": "browser:use",
@@ -213,12 +212,29 @@ def _validate_arguments(arguments: Any) -> None:
 
 
 async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
-                    granted_scopes: set[str], grant_expires: int | None = None) -> str:
-    """Dispatch through FastMCP's original validated, audited tool function."""
+                    granted_scopes: set[str], grant_expires: int | None = None,
+                    run_id: str | None = None,
+                    authorization_conversation_id: str | None = None) -> str:
+    """Dispatch through FastMCP's original validated, audited tool function.
+
+    Detached child generations own native tasks in their actual child
+    conversation while inheriting the verified original parent conversation's
+    machine policy. Never bind a child's run_id to its parent's conversation:
+    durable_tasks.reserve requires the run to belong to the owned task scope.
+    """
+    from . import durable_tasks
+
     tool = _tool(call.name)
     arguments = call.arguments
     _validate_arguments(arguments)
+    intent = None
+    permission_conversation_id = authorization_conversation_id or conversation_id
+
     def check_authorization():
+        if run_id is not None and durable_tasks.is_run_cancelled(run_id):
+            raise PermissionError("Agent generation has been cancelled")
+        if intent is not None:
+            durable_tasks.check_intent(intent)
         operation = _operation(tool, arguments)
         if tool.name in _AGENT_CONTROL:
             # Session ownership is still checked; this bypasses machine ACLs only.
@@ -236,13 +252,13 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
             destination = arguments.get("destination_machine") or "local"
             if not isinstance(source, str) or not isinstance(destination, str):
                 raise ValueError("Invalid transfer machines")
-            authorize_machine_action(owner, conversation_id, source, "read",
+            authorize_machine_action(owner, permission_conversation_id, source, "read",
                                      scopes=granted_scopes, expires=grant_expires)
-            authorize_machine_action(owner, conversation_id, destination, "write",
+            authorize_machine_action(owner, permission_conversation_id, destination, "write",
                                      scopes=granted_scopes, expires=grant_expires)
         else:
             for machine in _targets(tool, arguments):
-                authorize_machine_action(owner, conversation_id, machine, operation,
+                authorize_machine_action(owner, permission_conversation_id, machine, operation,
                                          scopes=granted_scopes, expires=grant_expires)
         if tool.name == "job_retry" and arguments.get("machine") in {None, "", "local"}:
             # Controller-managed transfer jobs retain remote endpoints in their
@@ -250,28 +266,45 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
             from ..jobs import job_retry_machine_requirements
 
             for machine, required in job_retry_machine_requirements(arguments.get("job_id")):
-                authorize_machine_action(owner, conversation_id, machine, required,
+                authorize_machine_action(owner, permission_conversation_id, machine, required,
                                          scopes=granted_scopes, expires=grant_expires)
         extra_scope = _ADDITIONAL_SCOPES.get(tool.name)
         if extra_scope and extra_scope not in granted_scopes:
             raise PermissionError(f"{extra_scope} permission is required")
+        if run_id is not None:
+            durable_tasks.owned(owner, conversation_id, tool.name, arguments)
 
     check_authorization()
     # MCP uses None/omitted for the local controller. Passing the literal name
     # `local` would instead incorrectly route to a Worker called local.
+    if run_id is not None and (tool.name in durable_tasks._STARTS or (
+        tool.name in {"run_shell", "run_python"} and arguments.get("persist_on_timeout")
+    )):
+        intent = durable_tasks.reserve(owner, conversation_id, run_id, call.call_id,
+                                      tool.name, arguments, granted_scopes, grant_expires,
+                                      authorization_conversation_id=authorization_conversation_id)
+        check_authorization()
     invocation = dict(arguments)
+    if intent is not None and intent.key is not None:
+        invocation["idempotency_key"] = intent.key
     for field in ("machine", "source_machine", "destination_machine"):
         if invocation.get(field) == "local":
             invocation[field] = None
     try:
-        return await _await_authorized(
+        result = await _await_authorized(
             _invoke_registered(owner, conversation_id, tool.name, invocation,
-                               scopes=granted_scopes, machines=_targets(tool, arguments)),
+                               scopes=granted_scopes, machines=_targets(tool, arguments),
+                               intent=intent),
             check_authorization,
         )
+        if run_id is not None and json.loads(result).get("ok", True) is not False:
+            durable_tasks.mark_stopped(owner, conversation_id, tool.name, arguments)
+        return result
     except PermissionError:
         audit("webui_agent_lsm_tool_revoked", owner=owner, conversation_id=conversation_id,
               tool=tool.name, machines=_targets(tool, arguments), ok=False)
+        # Durable reconcilers run independently. Do not stall the provider
+        # response on an offline Worker's cancellation timeout.
         raise
 
 
@@ -326,7 +359,8 @@ def registered_definitions(names: tuple[str, ...]) -> list[dict]:
 
 async def _invoke_registered(owner: str, conversation_id: str, name: str,
                              arguments: dict[str, Any], *, scopes: set[str],
-                             machines: list[str] | None = None) -> str:
+                             machines: list[str] | None = None,
+                             intent=None) -> str:
     """Call only an explicitly vetted tool using MCP's own validated executor."""
     from ..auth import _CURRENT_PRINCIPAL, Principal
 
@@ -339,6 +373,10 @@ async def _invoke_registered(owner: str, conversation_id: str, name: str,
     ))
     try:
         data = await _registry()._tool_manager.call_tool(name, invocation, convert_result=True)
+        if intent is not None:
+            from .durable_tasks import bind
+
+            bind(intent, data)
         result = _encode_result(data)
         succeeded = _result_succeeded(data)
     except Exception as exc:

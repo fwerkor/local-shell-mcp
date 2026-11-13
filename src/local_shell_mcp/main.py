@@ -148,6 +148,11 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
                 generation_store.database,
                 stream_tools=stream_model_with_tools, stream_text=stream_model,
             )
+        recovery_task = None
+        if enabled:
+            from .webui.durable_tasks import serve
+
+            recovery_task = asyncio.create_task(serve(), name="agent-durable-task-recovery")
         async with inner_app.router.lifespan_context(inner_app):
             try:
                 yield
@@ -156,6 +161,9 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
                     from .webui.generation_routes import shutdown_generations
 
                     await shutdown_generations()
+                if recovery_task is not None:
+                    recovery_task.cancel()
+                    await asyncio.gather(recovery_task, return_exceptions=True)
 
     routes = [
         Route("/healthz", lambda request: JSONResponse({"ok": True}), methods=["GET"]),

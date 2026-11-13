@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from local_shell_mcp.sqlite_store import DB_NAME, SQLiteStateStore
+from local_shell_mcp.sqlite_store import DB_NAME, SQLiteStateStore, shared_database
 
 
 def test_transactional_binary_state(tmp_path: Path) -> None:
@@ -44,6 +44,22 @@ def test_idempotent_file_import_keeps_original_files(tmp_path: Path) -> None:
     assert store.migrate_files() == 0
     assert store.read_bytes("remote/workers.json") == b"updated"
     assert legacy.read_bytes() == b'{"workers":1}'
+
+
+def test_parallel_cold_sqlite_startup_serializes_wal_schema(tmp_path: Path) -> None:
+    """Cache misses in separate threads must not race WAL/schema initialization."""
+    import threading
+
+    shared_database.cache_clear()
+    ready = threading.Barrier(8)
+
+    def initialize(_: int) -> Path:
+        ready.wait(timeout=10)
+        return SQLiteStateStore(tmp_path, migrate_files=False).database.path
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        paths = list(executor.map(initialize, range(8)))
+    assert paths == [tmp_path / DB_NAME] * 8
 
 
 def test_concurrent_append_with_lock(tmp_path: Path) -> None:
