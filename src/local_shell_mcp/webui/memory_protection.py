@@ -9,8 +9,6 @@ import re
 from functools import lru_cache
 from typing import Any
 
-import regex
-
 _MEMORY_FIELDS = ('key', 'value', 'summary')
 _MAX_FIELD_LENGTH = 262144
 
@@ -60,7 +58,8 @@ def _fields(policy: dict) -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=256)
-def _compile(expression: str, flags: int = 0) -> regex.Pattern:
+def _compile(expression: str, flags: int = 0) -> Any:
+    import regex  # WebUI optional extra; never block a plain Controller wheel at import time.
     if not isinstance(expression, str) or not 0 < len(expression) <= 512:
         raise ValueError('Invalid memory content pattern')
     # RE2JS does not accept lookarounds, recursive groups, or backreferences.
@@ -69,11 +68,11 @@ def _compile(expression: str, flags: int = 0) -> regex.Pattern:
     return regex.compile(expression, flags | regex.VERSION1)
 
 
-def _rules(policy: dict) -> list[tuple[regex.Pattern, str]]:
+def _rules(policy: dict) -> list[tuple[Any, str]]:
     catalog = {
         'sk_prefix': (r'\b(sk-)[a-zA-Z0-9_-]+', 0, 'sk- prefix token'),
-        'bearer_header': (r'\b(Bearer )[^\s"\']+', regex.I, 'Bearer token'),
-        'api_key_header': (r'\b(api-key:?\s+)[^\s"\']+', regex.I, 'api-key header'),
+        'bearer_header': (r'\b(Bearer )[^\s"\']+', re.I, 'Bearer token'),
+        'api_key_header': (r'\b(api-key:?\s+)[^\s"\']+', re.I, 'api-key header'),
     }
     starters = policy.get('starterPatterns')
     if starters is None:
@@ -114,8 +113,9 @@ def inspect_memory_content(entry: dict, filters: dict | None) -> MemoryContentBl
         return None
     try:
         rules = _rules(policy)
-    except (regex.error, ValueError, TypeError):
-        # Invalid server configuration must not expose already-stored values.
+    except Exception:
+        # Invalid configuration or missing optional regex must fail closed,
+        # never block Controller startup or expose already-stored values.
         return MemoryContentBlocked(fields[0])
     for field in fields:
         content = entry.get(field)

@@ -217,3 +217,32 @@ def test_excessively_long_legacy_values_are_redacted_and_timeout_fails_closed(mo
 
     monkeypatch.setattr(protection, '_rules', lambda _: [(ExpensivePattern(), 'confidential')])
     assert inspect_memory_content({'value': 'safe'}, policy(['value'])).field == 'value'
+
+
+def test_controller_import_and_memory_projection_without_optional_regex(tmp_path):
+    """The plain wheel must boot; a missing policy engine must fail closed."""
+    import os
+    import subprocess
+    import sys
+
+    source = '''
+import builtins
+original_import = builtins.__import__
+def without_regex(name, *args, **kwargs):
+    if name == 'regex' or name.startswith('regex.'):
+        raise ModuleNotFoundError('No module named regex')
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = without_regex
+from local_shell_mcp.webui.memory_routes import memory_routes
+from local_shell_mcp.webui.memory_protection import project_stored_memories
+assert memory_routes()
+source = {'memories': {'pii': {'starterPatterns': ['sk_prefix']}}}
+projected = project_stored_memories([{'key': 'style', 'value': 'safe'}], source)[0]
+assert projected['value'] == ''
+assert projected['contentFilterBlocked'] is True
+'''
+    env = os.environ.copy()
+    env['PYTHONPATH'] = 'src'
+    proc = subprocess.run([sys.executable, '-c', source], text=True, capture_output=True,
+                          cwd=os.getcwd(), env=env, timeout=20, check=False)
+    assert proc.returncode == 0, proc.stderr
