@@ -96,6 +96,7 @@ async def _run_model(
     text_parts: list[str] = [partial_text] if partial_text else []
     params = parameters or {}
     step_id = "step_" + generation.run_id
+    step_index = 0
     now_ms = int(time.time() * 1000)
     try:
         from .agent_runner import AgentRunner
@@ -131,6 +132,37 @@ async def _run_model(
                 },
             })
 
+        async def on_injected():
+            nonlocal step_id, step_index, now_ms
+
+            # Upstream reserves an absolute content slot per message_creation.
+            # Once a STEER part occupies the next slot, subsequent provider
+            # text must use a *new* runStep index or useStepHandler appends it
+            # into the old text block before the visible steer.
+            closed_at = int(time.time() * 1000)
+            repo.append(owner, generation.run_id, {
+                "event": "on_run_step_closed", "data": {
+                    "id": step_id, "index": step_index, "type": "message_creation",
+                    "status": "completed", "runId": generation.response_message_id,
+                    "created_at": now_ms, "closed_at": closed_at,
+                },
+            })
+            snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
+            step_index = len(snapshot["aggregatedContent"])
+            step_id = f"step_{generation.run_id}_after_steer_{step_index}"
+            now_ms = closed_at
+            repo.append(owner, generation.run_id, {
+                "event": "on_run_step", "data": {
+                    "type": "message_creation", "id": step_id,
+                    "runId": generation.response_message_id, "index": step_index,
+                    "created_at": now_ms, "status": "in_progress",
+                    "stepDetails": {"type": "message_creation", "message_creation": {
+                        "message_id": generation.response_message_id,
+                        "content_type": "text", "phase": "final_answer",
+                    }},
+                },
+            })
+
         runner = AgentRunner(owner, generation, _database(), repo,
                              scopes=granted_scopes, grant_expires=grant_expires,
                              stream_tools=stream_model_with_tools, stream_text=stream_model,
@@ -138,14 +170,14 @@ async def _run_model(
                              parameters=params, ask_user_enabled=ask_user_enabled,
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
-                             approved_batch=approved_batch)
+                             approved_batch=approved_batch, on_injected=on_injected)
         try:
             await runner.run(history)
         except AgentSuspended:
             return
         repo.append(owner, generation.run_id, {
             "event": "on_run_step_closed", "data": {
-                "id": step_id, "index": 0, "type": "message_creation",
+                "id": step_id, "index": step_index, "type": "message_creation",
                 "status": "completed", "runId": generation.response_message_id,
                 "created_at": now_ms, "closed_at": int(time.time() * 1000),
             },

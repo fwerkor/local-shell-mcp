@@ -46,7 +46,8 @@ class AgentRunner:
                  parameters=None, ask_user_enabled=False, mcp_enabled=False,
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
-                 approved_batch=None):
+                 approved_batch=None, on_injected=None):
+        self.on_injected = on_injected
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -373,6 +374,8 @@ class AgentRunner:
             if self.namespace:
                 return False
             applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary)
+            if applied and self.on_injected is not None:
+                await self.on_injected()
             for item in applied:
                 content = merged_text(item)
                 if item.get("files"):

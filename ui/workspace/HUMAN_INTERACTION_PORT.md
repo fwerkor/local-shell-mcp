@@ -76,6 +76,9 @@ instruction rather than attributing it to the assistant.
 - Nested single subagent Tool Approval: original agent checkpoints resume the
   same child and root call; tests also re-park a claimed child approval before
   resuming (crash/restart simulation).
+- Original React Chromium: live preemptive Steer enters the provider,
+  renders its inline receipt between old/new text at source runStep indices,
+  and preserves that order after full page reload.
 - Original React Chromium: Ask User and approval panels survive page reload,
   submit the original request, continue the same generation and render saved
   completed history after another reload. No React component rewritten.
@@ -88,8 +91,9 @@ The complete multi-agent StateGraph event actor and parallel interrupt
 fan-in/fan-out, retained Ask User answers through semantic compaction,
 cross-process generation lease ownership/fencing, media-native inline steer
 attachments, and the complete upstream graph hook/event lifecycle remain
-unverified. Source React's steering chip behavior needs a dedicated
-Chromium reload/abort/late-ACK differential suite. Current SQLite preemption
+unverified. Source React's live applied-steer/reload behavior is verified;
+abort/late-ACK/queued-chip and nested parallel graph steering still need
+additional Chromium differential coverage. Current SQLite preemption
 durably emits an applied steer before the next graph checkpoint commits; a
 controller crash in that window cannot guarantee the original actor's
 exactly-once model consumption. Generation recovery currently parks/interrupts
