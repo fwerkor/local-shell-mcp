@@ -379,3 +379,26 @@ def test_completed_tool_does_not_link_file_from_different_owner_during_atomic_ap
             if value.get("event") == "attachment"] == []
     with workspace.connect() as sql:
         assert sql.execute("SELECT count(*) FROM tool_attachment_links").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_unsanitized_html_preview_fails_closed_in_route_and_events(workspace):
+    file(workspace, "generated", status="ready")
+    with workspace.connect() as sql:
+        sql.execute(
+            "UPDATE attachments SET metadata=? WHERE id='generated'",
+            (json.dumps({
+                "text": "<script>window.stolen=true</script>",
+                "textFormat": "html",
+                "status": "ready",
+            }),),
+        )
+    run = run_with_step(workspace)
+    event = link_tool_attachment(workspace, "alice", run.run_id, "call-123", "generated")
+    assert event["status"] == "failed"
+    assert event["previewError"] == "unsupported"
+    assert "text" not in event and "textFormat" not in event
+    with workspace.connect() as sql:
+        from local_shell_mcp.webui.tool_attachments import response_attachments
+        snapshot = response_attachments(sql, "alice", [run.response_message_id])
+    assert snapshot[run.response_message_id][0]["status"] == "failed"

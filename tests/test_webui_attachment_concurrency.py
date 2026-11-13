@@ -101,7 +101,7 @@ def test_parallel_resource_deletes_use_cross_process_lock(tmp_path):
         process.join(timeout=20)
         assert process.exitcode == 0
     results = [queue.get(timeout=3) for _ in procs]
-    assert all(isinstance(result, dict) for result in results)
+    assert all(isinstance(result, dict) for result in results), results
     assert sum(len(result["deletedFileIds"]) for result in results) == 1
     assert not path.exists()
     with database.connect() as db:

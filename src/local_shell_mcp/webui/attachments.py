@@ -279,10 +279,21 @@ async def publish_attachment(owner, name, content_type, chunks, state_dir, *, ex
 
 
 
+def _public_attachment_metadata(metadata):
+    """Never surface unsanitized legacy HTML as a trusted office preview."""
+    public_metadata = {key: value for key, value in metadata.items()
+                       if key != "extracted_text"}
+    if public_metadata.get("textFormat") == "html":
+        public_metadata.pop("text", None)
+        public_metadata.pop("textFormat", None)
+        public_metadata["status"] = "failed"
+        public_metadata["previewError"] = "unsupported"
+    return public_metadata
+
+
 def file_record(row):
     """Original React file DTO; physical paths stay in owner-scoped SQLite."""
-    public_metadata = {key: value for key, value in json.loads(row["metadata"]).items()
-                       if key != "extracted_text"}
+    public_metadata = _public_attachment_metadata(json.loads(row["metadata"]))
     return {**public_metadata, "file_id": row["id"], "filename": row["name"],
             "type": row["content_type"], "filepath": "/api/files/download/" + row["id"],
             "source": "local", "createdAt": row["created_at"],
@@ -487,7 +498,7 @@ async def file_preview(request: Request):
                          (ident, owner)).fetchone()
     if row is None:
         raise HTTPException(404, detail="Attachment not found")
-    metadata = json.loads(row["metadata"])
+    metadata = _public_attachment_metadata(json.loads(row["metadata"]))
     status = metadata.get("status", "ready")
     if status not in {"pending", "ready", "failed"}:
         status = "ready"
