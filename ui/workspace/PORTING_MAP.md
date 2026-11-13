@@ -457,3 +457,24 @@ lease 延续/抢占由 SQLite 控制；失效后释放自动 claim 供人工领�
 共 32 个真实 SQLite E2E/异常/并发/恢复测试，包括一例真实 Parent AgentRunner
 调用 + SSE on_run_step 与最终 responseMessage 持久化；共享 fixture 在
 `tests/wakeup_helpers.py`，原版 source-locked UI CI 增加了全部三个文件。
+
+### 2026-11-13 — 对接已合入 main 的 PR #353 持久原生 Job
+
+PR #353 新增 `agent_durable_tasks` 和按 `(owner,conversation_id,run_id)`
+验证的不可冒用原生 Job/Shell 持久所有权。其 `run_id` 必须属于所记录的
+实际 conversation；原版 Subagent 继承机器权限的 context 却属于父 conversation。
+本合并保留两条**不可混淆的可信维度**：
+`AgentRunner.generation.conversation_id` 负责 native Job 持久拥有权、
+`AgentRunner.authorization_conversation_id` 负责每个机器操作的权限检查。
+`lsm_tool_registry.call_tool` 在内部接收原授权 scope，传给
+`durable_tasks.reserve` 时同时记录独立 `authorization_conversation_id`，
+PR #353 的 `_revoked` 使用该可信 parent scope 检查权限变更，同时先验证
+child conversation 原拥有权及 child run 的显式取消。旧版本只有 PR #353
+表时使用同步 `PRAGMA table_info` + `BEGIN IMMEDIATE` 安全迁移新增字段，
+默认 NULL 维持现有根任务兼容性；不复制/重写任何 Job/Shell/Worker RPC。
+
+`tests/test_webui_graph_durable_bridge.py` 真实 SQLite 验证：child run 可以
+创建受父会话 machine policy 约束的原生 Job intent；子会话单独的 `none`
+权限不被冒用作为授权；父会话撤权触发 `mark_revoked` 的 durable cancel，
+并测试对 PR #353 旧数据库的原地升级。源码锁定的 Graph/Ask User
+测试不因此修改原版 `@librechat/agents@4.0.1` 工具参数 schema。
