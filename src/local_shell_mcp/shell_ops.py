@@ -1046,6 +1046,22 @@ async def _start_shell_unlocked(
     }
 
 
+def lookup_shell_idempotency(idempotency_key: str, operation: str = "start") -> dict:
+    """Inspect the original shell idempotency journal without invoking a shell."""
+    if operation not in {"start", "send", "kill"}:
+        raise ValueError("Unknown native shell mutation")
+    key = str(idempotency_key or "").strip()
+    if not key or len(key) > 256:
+        raise ValueError("Invalid idempotency key")
+    state_key = "shell-idempotency/" + hashlib.sha256(f"{operation}:{key}".encode()).hexdigest() + ".json"
+    raw = get_state_store().read_bytes(state_key)
+    entry = json.loads(raw) if raw else {}
+    if entry.get("state") != "completed":
+        return {"session_id": None, "status": entry.get("state", "not_found")}
+    result = entry.get("result") or {}
+    return {"session_id": result.get("session_id"), "status": "completed"}
+
+
 async def start_shell(
     cwd: str = ".", name: str | None = None, command: str | None = None,
     idempotency_key: str | None = None,

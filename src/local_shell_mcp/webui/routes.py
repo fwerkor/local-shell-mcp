@@ -81,12 +81,20 @@ async def conversations(request: Request):
             raise HTTPException(400, detail="A conversationId is required")
         if not repo.delete_conversation(owner, conversation_id):
             _not_found()
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
         return _result({"conversationIds": [conversation_id]})
     payload = await _body(request)
     conversation_id = payload.get("conversationId")
     try:
         if isinstance(conversation_id, str) and repo.conversation(owner, conversation_id):
-            return _result(repo.update_conversation(owner, conversation_id, payload))
+            updated = repo.update_conversation(owner, conversation_id, payload)
+            if "projectId" in payload:
+                from .durable_tasks import mark_revoked
+
+                mark_revoked(owner)
+            return _result(updated)
         return _result(repo.create_conversation(owner, payload), status=201)
     except sqlite3.IntegrityError as exc:
         raise HTTPException(409, detail="Conversation conflict or invalid project") from exc
@@ -104,9 +112,16 @@ async def conversation(request: Request):
     if request.method == "DELETE":
         if not repo.delete_conversation(owner, conversation_id):
             _not_found()
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
         return _result({"conversationIds": [conversation_id]})
     changes = await _body(request)
     result = repo.update_conversation(owner, conversation_id, changes)
+    if "projectId" in changes:
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
     if result is None:
         _not_found()
     return _result(result)
@@ -188,6 +203,9 @@ async def project(request: Request):
     elif request.method == "DELETE":
         if not repo.delete_project(owner, project_id):
             _not_found()
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
         return _result({"deleted": True})
     else:
         try:
@@ -208,6 +226,10 @@ async def assign_project(request: Request):
     if project_id is not None and repo.project(owner, str(project_id)) is None:
         _not_found()
     result = repo.update_conversation(owner, conversation_id, {"projectId": project_id})
+    if result is not None:
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
     if result is None:
         _not_found()
     return _result(result)
