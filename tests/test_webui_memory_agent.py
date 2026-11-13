@@ -59,7 +59,7 @@ async def test_automatic_memory_tools_commit_with_persistent_attachment(memory_r
 
     async def stream(config, messages, **kw):
         received.append((config, messages, kw))
-        assert 'only for memory requests' in messages[0]['content']
+        assert 'ONLY for memory requests' in messages[0]['content']
         assert '# Current Chat:' in messages[-1]['content']
         assert len(kw['tools']) == 2
         yield ModelToolCall('memory-1', 'set_memory', {'key': 'style', 'value': 'The user prefers concise replies.'})

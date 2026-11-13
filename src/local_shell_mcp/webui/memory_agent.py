@@ -23,12 +23,35 @@ from .tokenizer import count_tokens
 
 _log = logging.getLogger(__name__)
 
-_DEFAULT_MEMORY_INSTRUCTIONS = '''Use the `set_memory` tool to save important information about the user, but ONLY when the user has requested you to remember something.
-The `delete_memory` tool should only be used when the user explicitly asks to forget specific information.
-When updating existing memories use `set_memory` instead of deleting and re-adding.
-NEVER store information merely because it was mentioned in the conversation.
-Memory tools are only for memory requests, not general tool usage.
-If the user has not requested a memory action, end this memory run without tool calls.'''
+def _default_instructions(keys: list[str], token_limit: int | None) -> str:
+    """Port packages/api/src/agents/memory.ts:getDefaultInstructions."""
+    instructions = """Use the `set_memory` tool to save important information about the user, but ONLY when the user has requested you to remember something.
+
+The `delete_memory` tool should only be used in two scenarios:
+  1. When the user explicitly asks to forget or remove specific information
+  2. When updating existing memories, use the `set_memory` tool instead of deleting and re-adding the memory.
+
+1. ONLY use memory tools when the user requests memory actions with phrases like:
+   - "Remember [that] [I]..."
+   - "Don't forget [that] [I]..."
+   - "Please remember..."
+   - "Store this..."
+   - "Forget [that] [I]..."
+   - "Delete the memory about..."
+
+2. NEVER store information just because the user mentioned it in conversation.
+
+3. NEVER use memory tools when the user asks you to use other tools or invoke tools in general.
+
+4. Memory tools are ONLY for memory requests, not for general tool usage.
+
+5. If the user doesn't ask you to remember or forget something, DO NOT use any memory tools.
+"""
+    if keys:
+        instructions += '\nVALID KEYS: ' + ', '.join(keys) + '\n'
+    if token_limit:
+        instructions += f'\nTOKEN LIMIT: Maximum {token_limit} tokens across all memory values.\n'
+    return instructions + "\nWhen in doubt, and the user hasn't asked to remember or forget anything, END THE TURN IMMEDIATELY."
 
 
 def _automatic_agent(config: dict, owner: str, database) -> dict | None:
@@ -126,7 +149,8 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
                   + str(existing['totalTokens']) + ' tokens\nToken limit: '
                   + str(remaining) + ' tokens\nRemaining capacity: '
                   + str(max(0, remaining - existing['totalTokens'])) + ' tokens\n\n' + status)
-    instructions = (agent.get('instructions') or _DEFAULT_MEMORY_INSTRUCTIONS) + '\n\n' + status
+    instructions = (agent.get('instructions') or _default_instructions(
+        allowed_keys, remaining if isinstance(remaining, int) else None)) + '\n\n' + status
     messages = [{'role': 'system', 'content': instructions},
                 {'role': 'user', 'content': window}]
     writes = 0

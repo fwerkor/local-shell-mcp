@@ -43,8 +43,8 @@ def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, mon
     assert runner._memory_context(None) == ''
     repo.save_setting('a', 'endpoints', {'memory': {'tokenLimit': 100},
                                        'agents': {'capabilities': ['memory']}})
-    assert runner._memory_context(None) == ''  # No implicit memory for a non-agent call
-    assert runner._memory_context({'id': 'a', 'tools': []}) == ''
+    assert 'Persistent memory is available' in runner._memory_context(None)
+    assert 'Persistent memory is available' in runner._memory_context({'id': 'a', 'tools': []})
     assert runner._memory_context({'id': 'a', 'tools': ['memory']}) == (
         runner._memory_context({'id': 'other', 'tools': ['memory']}))
     MemoryRepository(db).write('a', 'style', 'Speak concisely.')
@@ -55,7 +55,8 @@ def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, mon
     assert runner._memory_context({'id': 'a', 'tools': ['memory']}) == ''
     repo.save_setting('a', 'user.memories', True)
     repo.save_setting('a', 'endpoints', {'memory': {'tokenLimit': 100}, 'agents': {}})
-    assert runner._memory_context({'id': 'a', 'tools': ['memory']}) == ''
+    assert 'Persistent memory is available' in runner._memory_context({'id': 'a', 'tools': ['memory']})
+    assert 'Only use the `set_memory`' not in runner._memory_context({'id': 'a', 'tools': ['memory']})
 
 
 @pytest.mark.asyncio

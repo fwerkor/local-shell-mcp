@@ -85,11 +85,13 @@ class AgentRunner:
         from .storage import WorkspaceRepository
 
         settings = WorkspaceRepository(self.database)
-        if not memory_enabled(settings, self.owner, tools=True):
+        if not memory_enabled(settings, self.owner):
             return ''
-        if not (agent or {}).get('tools') or 'memory' not in agent['tools']:
-            return ''
-        has_tools = (agent or {}).get('tools') and 'memory' in agent['tools'] and memory_enabled(settings, self.owner, tools=True)
+        # The original primary Agent reads shared personal memories even when
+        # it has no inline memory tool. Only an Agent explicitly registering
+        # the memory capability receives keys and a mutation-tool prompt.
+        has_tools = ('memory' in ((agent or {}).get('tools') or [])
+                     and memory_enabled(settings, self.owner, tools=True))
         formatted = MemoryRepository(self.database).formatted(
             self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
         if formatted.get('readFailed'):
