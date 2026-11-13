@@ -478,3 +478,22 @@ child conversation 原拥有权及 child run 的显式取消。旧版本只有 P
 权限不被冒用作为授权；父会话撤权触发 `mark_revoked` 的 durable cancel，
 并测试对 PR #353 旧数据库的原地升级。源码锁定的 Graph/Ask User
 测试不因此修改原版 `@librechat/agents@4.0.1` 工具参数 schema。
+
+### 2026-11-13 — 嵌套 Background Subagent 可信续接边界与内部幂等键
+
+完整跨平台回归发现在根会话内托管的中间 Subagent，其 `parent_run_id`
+实际属于隐藏 child conversation。它是可信且合法的嵌套 task，却没有根会话
+的 assistant `responseMessageId` 分支可以用于自动续接。
+`register_wakeup` 现在通过 owner、实际 child run 和仍在运行的
+`subagent_tasks.child_run_id` 证实此嵌套关系，并仅关闭缺少准确目标分支的
+**嵌套自动续接**；child 仍正常执行、保存 thread、轮询/控制/领取结果。
+绝不把隐藏 child 的完成通知伪装为根 conversation 的新模型轮次。
+真实 `test_webui_subagent_task_nested.py` 验证根 child 获得一个 wakeup，
+嵌套 child 则不登记错误的第二个 wakeup。
+
+普通 HTTP 请求可见 task ID，但不能占用服务器生成的
+`clientRequestId=subagent:<opaque>` 或
+`clientRequestId=subagent-wakeup:<opaque>`。`GenerationStore.begin`
+将这两种命名空间只开放给可信内部 child conversation 分配或原子 SQLite
+wakeup 连接；浏览器直接提交立即拒绝，防止内部续接幂等性被用户预占。
+`test_webui_generations.py` 覆盖无写入副作用的拒绝路径。
