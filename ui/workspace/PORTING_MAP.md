@@ -497,3 +497,20 @@ child conversation 原拥有权及 child run 的显式取消。旧版本只有 P
 将这两种命名空间只开放给可信内部 child conversation 分配或原子 SQLite
 wakeup 连接；浏览器直接提交立即拒绝，防止内部续接幂等性被用户预占。
 `test_webui_generations.py` 覆盖无写入副作用的拒绝路径。
+
+### 2026-11-13 — 完成续接消息的 child transcript 归属与并发竞争回归
+
+原版 `createSubagentCompletionWakeupResolver` 在尝试将 child 结果注入根父
+conversation 前校验源 child conversation 的存在和归属。Python
+`process_wakeups` 现使用实际 `(child_run_id, child_conversation_id, owner)`
+查询已提交的 child，并验证已存档 metadata 的 `subagentTask` 与
+`parentConversationId`；child 被删除、元数据格式不合法或归属信息不匹配
+时仅撤销自动事件，保留人工可领取的终态，不会把孤儿内容注入父 Agent。
+child run 尚在 `running/requires_action` 时等待持久终态，不用抢先注入消息。
+
+新增真实 SQLite 并发回归：手工 `check_background_task` 与自动
+`process_wakeups` 同时竞争同一终态，原子领取唯一获胜者；两条兄弟 child
+完成时先派发一个续接，第二条排队到第一个 parent assistant message
+写入，再挂接到其最新 descendant 分支。还补齐了删除 child、伪造元数据、
+非法 JSON 和终态持久化前的 fail-closed 行为。固定源码后单独测试
+`subagent_wakeup.py` 分支覆盖率为 **93.9%**（38 测试通过）。
