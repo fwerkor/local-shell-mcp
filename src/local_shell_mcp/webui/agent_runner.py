@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import time
 
 from .agent_execution import execute_tool_batch, replay_key
@@ -45,7 +46,7 @@ from .memory import (
     tool_definitions,
 )
 from .memory_protection import configured_filters
-from .providers import ModelToolCall, provider_config, selected_provider
+from .providers import ModelToolCall, ModelUsage, provider_config, selected_provider
 from .semantic_index import (
     render_compaction_semantic_index,
     snapshot_compaction_semantic_index,
@@ -412,6 +413,10 @@ class AgentRunner:
                 self._context(self.root_agent).profile, summary_messages, max_tokens=limit):
             if isinstance(value, str):
                 chunks.append(value)
+            elif isinstance(value, ModelUsage):
+                # A summarizer's provider metadata must never be inserted into
+                # user-visible checkpoint text or mistaken for a tool call.
+                continue
             else:
                 raise ValueError('Summary provider returned a tool call instead of text')
         summary = ''.join(chunks).strip()
@@ -433,6 +438,30 @@ class AgentRunner:
             })
         return summary
 
+    async def _observe_model_usage(self, usage: ModelUsage, state: AgentLoopState) -> None:
+        """Update cumulative raw/provider ratio only on genuine usage frames."""
+        if self.namespace or usage.provider != state.context.profile.provider:
+            return
+        from .context_budget import calculate_budget
+
+        profile = state.context.profile
+        try:
+            estimate = calculate_budget(state.messages, state.context.tools, 2_000_000,
+                                        reserve_ratio=0)
+            instruction_overhead = estimate.instruction_tokens + estimate.tool_schema_tokens
+            calibration = self.store.token_calibration(self.owner, self.generation.run_id,
+                                                       profile.provider, profile.model)
+            updated = calibration.observe(provider_input_tokens=usage.input_tokens,
+                                          raw_sent_this_turn=estimate.message_tokens,
+                                          instruction_overhead=instruction_overhead)
+            if updated != calibration:
+                self.store.record_token_calibration(self.owner, self.generation.run_id,
+                                                    profile.provider, profile.model, updated)
+        except Exception as exc:
+            # Usage is observational metadata; a failed calibration update
+            # cannot invalidate an otherwise successful model response.
+            logging.getLogger(__name__).warning('Token calibration failed (%s)', type(exc).__name__)
+
     async def _before_model(self, state):
         """SDK-style recency + trigger, using the shared SQLite checkpoint."""
         if self.namespace:
@@ -450,6 +479,9 @@ class AgentRunner:
         max_raw = params.get('max_context_tokens') or params.get('maxContextTokens') or agent_settings.get('maxContextTokens')
         if not isinstance(max_raw, (int, float)) or isinstance(max_raw, bool) or not 0 < max_raw <= 2000000:
             return
+        calibration = self.store.token_calibration(
+            self.owner, self.generation.run_id,
+            state.context.profile.provider, state.context.profile.model)
         try:
             config = settings.get('summarization') or {}
             if isinstance(config, dict) and config.get('enabled') is False:
@@ -457,7 +489,8 @@ class AgentRunner:
             if not isinstance(config, dict):
                 config = {}
             budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
-                                      reserve_ratio=config.get('reserveRatio', 0.05))
+                                      reserve_ratio=config.get('reserveRatio', 0.05),
+                                      calibration_ratio=calibration.ratio)
             if budget.remaining_context_tokens > 0:
                 return
             if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
@@ -508,6 +541,7 @@ class AgentRunner:
                 state.messages, state.context.tools, int(max_raw), reserve_ratio=ratio,
                 run_id=self.generation.run_id,
                 agent_id=(state.context.agent or {}).get('id'),
+                calibration_ratio=calibration.ratio,
             )
             self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
 
@@ -586,7 +620,8 @@ class AgentRunner:
 
         result = await run_agent_loop(state, stream_tools=self.stream_tools, stream_text=self.stream_text,
                                       dispatch=self._dispatch, on_text=emit, save_state=self._save,
-                                      before_model=self._before_model)
+                                      before_model=self._before_model,
+                                      on_model_usage=self._observe_model_usage)
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
                                                review["actionId"], result, self.partial_text)

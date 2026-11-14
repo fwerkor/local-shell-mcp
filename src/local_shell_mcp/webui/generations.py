@@ -382,6 +382,67 @@ class GenerationStore:
             ).fetchall()
             return [(int(row[0]), json.loads(row[1])) for row in rows]
 
+    def token_calibration(self, owner: str, run_id: str, provider: str, model: str):
+        """Read source-style calibration by owner, model and active run.
+
+        A new generation seeds from conversation metadata; a resumed
+        generation always prefers its own run state, preserving the last
+        confirmed token observation after controller restart.
+        """
+        import hashlib
+
+        from .context_calibration import TokenCalibration
+
+        key = hashlib.sha256((provider + '\x00' + model).encode()).hexdigest()
+        with self.database.connect() as db:
+            row = db.execute(
+                'SELECT r.state,c.metadata FROM runs r JOIN conversations c ON c.id=r.conversation_id '
+                'WHERE r.id=? AND c.owner=?', (run_id, owner),
+            ).fetchone()
+        if row is None:
+            raise KeyError('Generation not found or unauthorized')
+        state = json.loads(row['state'])
+        conversation = json.loads(row['metadata'])
+        for source in (state, conversation):
+            entries = source.get('tokenCalibrations') if isinstance(source, dict) else None
+            if isinstance(entries, dict) and key in entries:
+                return TokenCalibration.from_dict(entries[key])
+        return TokenCalibration()
+
+    def record_token_calibration(self, owner: str, run_id: str, provider: str, model: str,
+                                 calibration) -> None:
+        """Atomically persist confirmed provider calibration with the conversation."""
+        import hashlib
+
+        from .context_calibration import TokenCalibration
+
+        if not isinstance(calibration, TokenCalibration):
+            raise TypeError('A token calibration snapshot is required')
+        key = hashlib.sha256((provider + '\x00' + model).encode()).hexdigest()
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute(
+                'SELECT r.state,c.id AS conversation_id,c.metadata FROM runs r '
+                'JOIN conversations c ON c.id=r.conversation_id '
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError('Generation not active or unauthorized')
+            state = json.loads(row['state'])
+            metadata = json.loads(row['metadata'])
+            for record in (state, metadata):
+                entries = record.get('tokenCalibrations')
+                entries = dict(entries) if isinstance(entries, dict) else {}
+                entries[key] = calibration.to_dict()
+                if len(entries) > 32:
+                    for expired in list(entries)[:-32]:
+                        entries.pop(expired, None)
+                record['tokenCalibrations'] = entries
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(state), _now(), run_id))
+            db.execute('UPDATE conversations SET metadata=?,updated_at=? WHERE id=? AND owner=?',
+                       (_json(metadata), _now(), row['conversation_id'], owner))
+
     def record_context_usage(self, owner: str, run_id: str, snapshot: dict) -> int:
         """Commit a visible context snapshot to run state and the SSE replay log.
 

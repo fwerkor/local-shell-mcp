@@ -10,6 +10,7 @@ import json
 import math
 from dataclasses import dataclass
 
+from .context_calibration import clamp_calibration_ratio
 from .tokenizer import count_tokens
 
 DEFAULT_RESERVE_RATIO = 0.05
@@ -46,13 +47,17 @@ def message_token_count(message: dict) -> int:
 
 
 def calculate_budget(messages: list[dict], tools: list[dict], max_context_tokens: int,
-                     *, reserve_ratio: float = DEFAULT_RESERVE_RATIO) -> ContextBudget:
+                     *, reserve_ratio: float = DEFAULT_RESERVE_RATIO,
+                     calibration_ratio: float = 1.0) -> ContextBudget:
     if max_context_tokens <= 0:
         raise ValueError('max_context_tokens must be positive')
     instructions = sum(message_token_count(item) for item in messages if item.get('role') == 'system')
     tools_text = json.dumps(tools, ensure_ascii=False, separators=(',', ':')) if tools else ''
     tool_tokens = count_tokens(tools_text, exact=False) if tools else 0
-    messages_count = sum(message_token_count(item) for item in messages if item.get('role') != 'system')
+    messages_raw = sum(message_token_count(item) for item in messages if item.get('role') != 'system')
+    # prune.ts keeps individual raw BPE counts intact, applying cumulative
+    # provider calibration only to the pre-invoke budget decision.
+    messages_count = math.floor(messages_raw * clamp_calibration_ratio(calibration_ratio) + 0.5)
     reserve = round(max_context_tokens * reserve_ratio) if 0 < reserve_ratio < 1 else 0
     available = max(0, max_context_tokens - reserve - instructions - tool_tokens)
     return ContextBudget(max_context_tokens, instructions, tool_tokens, messages_count,
@@ -61,14 +66,16 @@ def calculate_budget(messages: list[dict], tools: list[dict], max_context_tokens
 
 def context_usage_snapshot(messages: list[dict], tools: list[dict],
                            max_context_tokens: int, *, reserve_ratio: float = DEFAULT_RESERVE_RATIO,
-                           run_id: str | None = None, agent_id: str | None = None) -> dict:
+                           run_id: str | None = None, agent_id: str | None = None,
+                           calibration_ratio: float = 1.0) -> dict:
     """Project the offline BPE budget onto the pinned SDK context-usage shape.
 
-    This is a pre-invoke estimate. Source-specific provider token calibration,
-    prompt cache and native tool-output pricing remain the provider adapter's
-    responsibility; do not label these values as billed usage.
+    This is a pre-invoke estimate calibrated only by provider-confirmed input
+    usage, when available. Prompt cache and billed usage remain provider-native.
     """
-    budget = calculate_budget(messages, tools, max_context_tokens, reserve_ratio=reserve_ratio)
+    ratio = clamp_calibration_ratio(calibration_ratio)
+    budget = calculate_budget(messages, tools, max_context_tokens, reserve_ratio=reserve_ratio,
+                              calibration_ratio=ratio)
     summaries = [message for message in messages if message.get('role') == 'system'
                  and isinstance(message.get('content'), str)
                  and message['content'].startswith('<summary>\n')]
@@ -77,7 +84,8 @@ def context_usage_snapshot(messages: list[dict], tools: list[dict],
     instructions = system_tokens + budget.tool_schema_tokens
     tool_messages = [message for message in messages if message.get('role') == 'tool'
                      or message.get('tool_calls')]
-    tool_message_tokens = sum(map(message_token_count, tool_messages))
+    tool_message_tokens = min(budget.message_tokens,
+                              math.floor(sum(map(message_token_count, tool_messages)) * ratio + 0.5))
     return {
         **({'runId': run_id} if run_id else {}),
         **({'agentId': agent_id} if agent_id else {}),
@@ -94,6 +102,7 @@ def context_usage_snapshot(messages: list[dict], tools: list[dict],
             'availableForMessages': budget.available_for_messages,
             'toolMessageTokens': tool_message_tokens,
         },
+        'calibrationRatio': ratio,
         'contextBudget': max(0, budget.max_context_tokens - budget.reserve_tokens),
         'effectiveInstructionTokens': instructions,
         'prePruneContextTokens': budget.message_tokens,

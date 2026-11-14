@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .providers import ModelToolCall, ProviderConfig
+from .providers import ModelToolCall, ModelUsage, ProviderConfig
 from .semantic_index import SemanticSnapshot
 
 
@@ -61,6 +61,7 @@ async def run_agent_loop(
     on_text: Callable[[str], Awaitable[None]],
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
     before_model: Callable[[AgentLoopState], Awaitable[None]] | None = None,
+    on_model_usage: Callable[[ModelUsage, AgentLoopState], Awaitable[None]] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -108,6 +109,9 @@ async def run_agent_loop(
         async for item in source:
             if isinstance(item, ModelToolCall):
                 calls.append(item)
+            elif isinstance(item, ModelUsage):
+                if on_model_usage is not None:
+                    await on_model_usage(item, state)
             elif item:
                 text_parts.append(item)
                 await on_text(item)
