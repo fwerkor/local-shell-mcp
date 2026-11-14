@@ -343,3 +343,22 @@ async def test_expired_action_oauth_link_reissues_once_across_concurrent_status_
         await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
         assert ctx.store.get("local", ctx.gen.run_id).status == "complete"
         assert len(ctx.seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_user_abort_invalidates_outstanding_oauth_callback(scenario):
+    ctx = scenario
+    state = await _pause(ctx)
+    path = f"/api/actions/{ctx.action['action_id']}/oauth"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ctx.app),
+                                 base_url="https://chat.example.org", follow_redirects=False) as client:
+        assert (await client.post(path + "/bind", headers={"x-owner": "local"})).status_code == 200
+        response = await client.post("/api/agents/chat/abort", json={
+            "conversationId": ctx.gen.conversation_id,
+        }, headers={"x-owner": "local"})
+        assert response.status_code == 200, response.text
+        assert ctx.store.get("local", ctx.gen.run_id).status == "aborted"
+        callback = await client.get(path + "/callback", params={"state": state, "code": "oauth-code"})
+        assert callback.status_code == 302 and "invalid_state" in callback.headers["location"]
+        assert action_oauth._token(ActionRepository(ctx.db), "local", ctx.action["action_id"], "access") is None
+        assert ctx.seen == []

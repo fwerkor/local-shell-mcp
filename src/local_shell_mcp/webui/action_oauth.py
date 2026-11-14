@@ -162,6 +162,16 @@ def claim_callback(repo: ActionRepository, action_id: str, state: str, cookie: s
         row = db.execute("SELECT * FROM action_records WHERE id=? AND owner=?", (action_id, flow["owner"])).fetchone()
         if row is None or row["version"] != flow["action_version"]:
             raise PermissionError("OAuth Action was updated or removed")
+        run = db.execute("SELECT r.status,r.state FROM runs r JOIN conversations c "
+                         "ON c.id=r.conversation_id WHERE r.id=? AND c.owner=?",
+                         (flow["run_id"], flow["owner"])).fetchone()
+        if run is not None:
+            payload = json.loads(run["state"]).get("pendingAction", {}).get("payload", {})
+            if (run["status"] != "requires_action" or payload.get("type") != "action_oauth"
+                    or payload.get("action_id") != action_id
+                    or payload.get("tool_call_id") != flow["call_id"]
+                    or payload.get("action_version") != row["version"]):
+                raise PermissionError("OAuth generation was aborted or superseded")
         db.execute("UPDATE action_oauth_flows SET used_at=? WHERE state_hash=? AND used_at IS NULL",
                    (int(time.time()), key))
     return (flow["owner"], json.loads(row["metadata"]), repo._credentials(row), flow["redirect_uri"],
