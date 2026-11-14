@@ -10,6 +10,7 @@ import copy
 import json
 
 from .fading import is_fading_tier, resolve_fading_caps
+from .truncation_source import truncate_tool_input, truncate_tool_result_content
 
 
 def _clip(value: str, chars: int) -> str:
@@ -49,7 +50,7 @@ def project_faded_provider_messages(messages: list[dict], tier: dict | None,
         if item.get('role') == 'tool' and isinstance(item.get('content'), str):
             consumed = tier['masked'] and _answered_by_later_assistant(messages, i)
             max_chars = caps['consumedChars'] if consumed else caps['resultChars']
-            item['content'] = _clip(item['content'], max_chars)
+            item['content'] = truncate_tool_result_content(item['content'], max_chars)
         elif item.get('role') == 'assistant':
             for call in item.get('tool_calls') or []:
                 if not isinstance(call, dict):
@@ -60,7 +61,7 @@ def project_faded_provider_messages(messages: list[dict], tier: dict | None,
                 arguments = function.get('arguments')
                 if isinstance(arguments, str) and len(arguments) > caps['inputChars']:
                     limit = caps['inputChars']
-                    preview = _clip(arguments, max(0, limit - 90))
+                    preview = truncate_tool_input(arguments, max(0, limit - 90))['_truncated']
                     encoded = json.dumps({'_truncated': preview, '_originalChars': len(arguments)},
                                          ensure_ascii=False, separators=(',', ':'))
                     while len(encoded) > limit and preview:
