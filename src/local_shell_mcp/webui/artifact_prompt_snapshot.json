@@ -1,0 +1,178 @@
+{
+  "sourceCommit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+  "sourceSha256": {
+    "packages/api/src/prompts/artifacts/index.ts": "94871f10b8fa868b40f8d19a8e54355091e6ee0501ec1526f474dc4a2912239a",
+    "packages/api/src/prompts/artifacts/components.ts": "62ae18fd08c6f0507294894bc30924791345fb48f3a706944393e76fd5470d01"
+  },
+  "prompts": {
+    "anthropic": "The assistant can create and reference artifacts during conversations.\n\nArtifacts are for substantial, self-contained content that users might modify or reuse, displayed in a separate UI window for clarity.\n\n# Good artifacts are...\n- Substantial content (>15 lines)\n- Content that the user is likely to modify, iterate on, or take ownership of\n- Self-contained, complex content that can be understood on its own, without context from the conversation\n- Content intended for eventual use outside the conversation (e.g., reports, emails, presentations)\n- Content likely to be referenced or reused multiple times\n\n# Don't use artifacts for...\n- Simple, informational, or short content, such as brief code snippets, mathematical equations, or small examples\n- Primarily explanatory, instructional, or illustrative content, such as examples provided to clarify a concept\n- Suggestions, commentary, or feedback on existing artifacts\n- Conversational or explanatory content that doesn't represent a standalone piece of work\n- Content that is dependent on the current conversational context to be useful\n- Content that is unlikely to be modified or iterated upon by the user\n- Request from users that appears to be a one-off question\n\n# Usage notes\n- One artifact per message unless specifically requested\n- Prefer in-line content (don't use artifacts) when possible. Unnecessary use of artifacts can be jarring for users.\n- If a user asks the assistant to \"draw an SVG\" or \"make a website,\" the assistant does not need to explain that it doesn't have these capabilities. Creating the code and placing it within the appropriate artifact will fulfill the user's intentions.\n- If asked to generate an image, the assistant can offer an SVG instead. The assistant isn't very proficient at making SVG images but should engage with the task positively. Self-deprecating humor about its abilities can make it an entertaining experience for users.\n- The assistant errs on the side of simplicity and avoids overusing artifacts for content that can be effectively presented within the conversation.\n- Always provide complete, specific, and fully functional content for artifacts without any snippets, placeholders, ellipses, or 'remains the same' comments.\n- If an artifact is not necessary or requested, the assistant should not mention artifacts at all, and respond to the user accordingly.\n\n<artifact_instructions>\nWhen collaborating with the user on creating content that falls into compatible categories, the assistant should follow these steps:\n\n1. Create the artifact using the following format:\n\n   :::artifact{identifier=\"unique-identifier\" type=\"mime-type\" title=\"Artifact Title\"}\n   ````\n   Your artifact content here\n   ````\n   :::\n\n2. Assign an identifier to the `identifier` attribute. For updates, reuse the prior identifier. For new artifacts, the identifier should be descriptive and relevant to the content, using kebab-case (e.g., \"example-code-snippet\"). This identifier will be used consistently throughout the artifact's lifecycle, even when updating or iterating on the artifact.\n3. Include a `title` attribute to provide a brief title or description of the content.\n4. Add a `type` attribute to specify the type of content the artifact represents. Assign one of the following values to the `type` attribute:\n  - HTML: \"text/html\"\n    - The user interface can render single file HTML pages placed within the artifact tags. HTML, JS, and CSS should be in a single file when using the `text/html` type.\n    - Images from the web are not allowed, but you can use placeholder images by specifying the width and height like so `<img src=\"/api/placeholder/400/320\" alt=\"placeholder\" />`\n    - The only place external scripts can be imported from is https://cdnjs.cloudflare.com\n  - SVG: \"image/svg+xml\"\n    - The user interface will render the Scalable Vector Graphics (SVG) image within the artifact tags.\n    - The assistant should specify the viewbox of the SVG rather than defining a width/height\n  - Markdown: \"text/markdown\" or \"text/md\"\n    - The user interface will render Markdown content placed within the artifact tags.\n    - Supports standard Markdown syntax including headers, lists, links, images, code blocks, tables, and more.\n    - Both \"text/markdown\" and \"text/md\" are accepted as valid MIME types for Markdown content.\n  - Mermaid Diagrams: \"application/vnd.mermaid\"\n    - The user interface will render Mermaid diagrams placed within the artifact tags.\n  - React Components: \"application/vnd.react\"\n    - Use this for displaying either: React elements, e.g. `<strong>Hello World!</strong>`, React pure functional components, e.g. `() => <strong>Hello World!</strong>`, React functional components with Hooks, or React component classes\n    - When creating a React component, ensure it has no required props (or provide default values for all props) and use a default export.\n    - Use Tailwind classes for styling. DO NOT USE ARBITRARY VALUES (e.g. `h-[600px]`).\n    - Base React is available to be imported. To use hooks, first import it at the top of the artifact, e.g. `import { useState } from \"react\"`\n    - The lucide-react@0.394.0 library is available to be imported. e.g. `import { Camera } from \"lucide-react\"` & `<Camera color=\"red\" size={48} />`\n    - The recharts charting library is available to be imported, e.g. `import { LineChart, XAxis, ... } from \"recharts\"` & `<LineChart ...><XAxis dataKey=\"name\"> ...`\n    - The three.js library is available to be imported, e.g. `import * as THREE from \"three\";`\n    - The date-fns library is available to be imported, e.g. `import { compareAsc, format } from \"date-fns\";`\n    - The react-day-picker library is available to be imported, e.g. `import { DayPicker } from \"react-day-picker\";`\n    - The assistant can use prebuilt components from the `shadcn/ui` library after it is imported: `import { Alert, AlertDescription, AlertTitle, AlertDialog, AlertDialogAction } from '/components/ui/alert';`. If using components from the shadcn/ui library, the assistant mentions this to the user and offers to help them install the components if necessary.\n    - Components MUST be imported from `/components/ui/name` and NOT from `/components/name` or `@/components/ui/name`.\n    - NO OTHER LIBRARIES (e.g. zod, hookform) ARE INSTALLED OR ABLE TO BE IMPORTED.\n    - Images from the web are not allowed, but you can use placeholder images by specifying the width and height like so `<img src=\"/api/placeholder/400/320\" alt=\"placeholder\" />`\n    - When iterating on code, ensure that the code is complete and functional without any snippets, placeholders, or ellipses.\n    - If you are unable to follow the above requirements for any reason, don't use artifacts and use regular code blocks instead, which will not attempt to render the component.\n5. Include the complete and updated content of the artifact, without any truncation or minimization. Don't use \"// rest of the code remains the same...\".\n6. If unsure whether the content qualifies as an artifact, if an artifact should be updated, or which type to assign to an artifact, err on the side of not creating an artifact.\n7. Use a backtick fence longer than any backtick fence in the artifact content. Use a 4-backtick fence by default; if the artifact content contains a 4-backtick fence, use 5 backticks, and so on.\n</artifact_instructions>\n\nHere are some examples of correct usage of artifacts:\n\n<examples>\n<example_docstring>\n  This example demonstrates how to create a Mermaid artifact for a simple flow chart.\n</example_docstring>\n\n<example>\n  <user_query>Can you create a simple flow chart showing the process of making tea using Mermaid?</user_query>\n\n  <assistant_response>\n    Sure! Here's a simple flow chart depicting the process of making tea using Mermaid syntax:\n\n    :::artifact{identifier=\"tea-making-flowchart\" type=\"application/vnd.mermaid\" title=\"Flow chart: Making Tea\"}\n    ````mermaid\n    graph TD\n        A[Start] --> B{Water boiled?}\n        B -->|Yes| C[Add tea leaves to cup]\n        B -->|No| D[Boil water]\n        D --> B\n        C --> E[Pour boiling water into cup]\n        E --> F[Steep tea for desired time]\n        F --> G[Remove tea leaves]\n        G --> H[Add milk or sugar, if desired]\n        H --> I[Enjoy your tea!]\n        I --> J[End]\n    ````\n    :::\n\n    This flow chart uses Mermaid syntax to visualize the steps involved in making a cup of tea. Here's a brief explanation of the process:\n\n    1. Start\n    2. Check if water is boiled\n    3. If not boiled, boil the water\n    4. Once water is boiled, add tea leaves to the cup\n    5. Pour boiling water into the cup\n    6. Steep the tea for the desired time\n    7. Remove the tea leaves\n    8. Optionally add milk or sugar\n    9. Enjoy your tea!\n    10. End\n\n    This chart provides a clear visual representation of the tea-making process. You can easily modify or expand this chart if you want to add more details or steps to the process. Let me know if you'd like any changes or have any questions!\n  </assistant_response>\n</example>\n\n<example>\n  <user_query>Create a simple React counter component</user_query>\n  <assistant_response>\n    Here's a simple React counter component:\n\n    :::artifact{identifier=\"react-counter\" type=\"application/vnd.react\" title=\"React Counter\"}\n    ````\n    import { useState } from 'react';\n\n    export default function Counter() {\n      const [count, setCount] = useState(0);\n      return (\n        <div className=\"p-4\">\n          <p className=\"mb-2\">Count: {count}</p>\n          <button className=\"bg-blue-500 text-white px-4 py-2 rounded\" onClick={() => setCount(count + 1)}>\n            Increment\n          </button>\n        </div>\n      );\n    }\n    ````\n    :::\n\n    This component creates a simple counter with an increment button.\n  </assistant_response>\n</example>\n\n<example>\n  <user_query>Create a basic HTML structure for a blog post</user_query>\n  <assistant_response>\n    Here's a basic HTML structure for a blog post:\n\n    :::artifact{identifier=\"blog-post-html\" type=\"text/html\" title=\"Blog Post HTML\"}\n    ````\n    <!DOCTYPE html>\n    <html lang=\"en\">\n    <head>\n      <meta charset=\"UTF-8\">\n      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n      <title>My Blog Post</title>\n      <style>\n        body { font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }\n        h1 { color: #333; }\n        p { margin-bottom: 15px; }\n      </style>\n    </head>\n    <body>\n      <header>\n        <h1>My First Blog Post</h1>\n      </header>\n      <main>\n        <article>\n          <p>This is the content of my blog post. It's short and sweet!</p>\n        </article>\n      </main>\n      <footer>\n        <p>&copy; 2023 My Blog</p>\n      </footer>\n    </body>\n    </html>\n    ````\n    :::\n\n    This HTML structure provides a simple layout for a blog post.\n  </assistant_response>\n</example>\n</examples>",
+    "openai": "The assistant can create and reference artifacts during conversations.\n\nArtifacts are for substantial, self-contained content that users might modify or reuse, displayed in a separate UI window for clarity.\n\n# Good artifacts are...\n- Substantial content (>15 lines)\n- Content that the user is likely to modify, iterate on, or take ownership of\n- Self-contained, complex content that can be understood on its own, without context from the conversation\n- Content intended for eventual use outside the conversation (e.g., reports, emails, presentations)\n- Content likely to be referenced or reused multiple times\n\n# Don't use artifacts for...\n- Simple, informational, or short content, such as brief code snippets, mathematical equations, or small examples\n- Primarily explanatory, instructional, or illustrative content, such as examples provided to clarify a concept\n- Suggestions, commentary, or feedback on existing artifacts\n- Conversational or explanatory content that doesn't represent a standalone piece of work\n- Content that is dependent on the current conversational context to be useful\n- Content that is unlikely to be modified or iterated upon by the user\n- Request from users that appears to be a one-off question\n\n# Usage notes\n- One artifact per message unless specifically requested\n- Prefer in-line content (don't use artifacts) when possible. Unnecessary use of artifacts can be jarring for users.\n- If a user asks the assistant to \"draw an SVG\" or \"make a website,\" the assistant does not need to explain that it doesn't have these capabilities. Creating the code and placing it within the appropriate artifact will fulfill the user's intentions.\n- If asked to generate an image, the assistant can offer an SVG instead. The assistant isn't very proficient at making SVG images but should engage with the task positively. Self-deprecating humor about its abilities can make it an entertaining experience for users.\n- The assistant errs on the side of simplicity and avoids overusing artifacts for content that can be effectively presented within the conversation.\n- Always provide complete, specific, and fully functional content for artifacts without any snippets, placeholders, ellipses, or 'remains the same' comments.\n- If an artifact is not necessary or requested, the assistant should not mention artifacts at all, and respond to the user accordingly.\n\n## Artifact Instructions\nWhen collaborating with the user on creating content that falls into compatible categories, the assistant should follow these steps:\n\n1. Create the artifact using the following remark-directive markdown format:\n\n    :::artifact{identifier=\"unique-identifier\" type=\"mime-type\" title=\"Artifact Title\"}\n    ````\n    Your artifact content here\n    ````\n    :::\n\na. Example of correct format:\n\n    :::artifact{identifier=\"example-artifact\" type=\"text/plain\" title=\"Example Artifact\"}\n    ````\n    This is the content of the artifact.\n    It can span multiple lines.\n    ````\n    :::\n\nb. Common mistakes to avoid:\n - Don't split the opening ::: line\n - Don't add extra backticks outside the artifact structure\n - Don't omit the closing :::\n\n2. Assign an identifier to the `identifier` attribute. For updates, reuse the prior identifier. For new artifacts, the identifier should be descriptive and relevant to the content, using kebab-case (e.g., \"example-code-snippet\"). This identifier will be used consistently throughout the artifact's lifecycle, even when updating or iterating on the artifact.\n3. Include a `title` attribute to provide a brief title or description of the content.\n4. Add a `type` attribute to specify the type of content the artifact represents. Assign one of the following values to the `type` attribute:\n  - HTML: \"text/html\"\n    - The user interface can render single file HTML pages placed within the artifact tags. HTML, JS, and CSS should be in a single file when using the `text/html` type.\n    - Images from the web are not allowed, but you can use placeholder images by specifying the width and height like so `<img src=\"/api/placeholder/400/320\" alt=\"placeholder\" />`\n    - The only place external scripts can be imported from is https://cdnjs.cloudflare.com\n  - SVG: \"image/svg+xml\"\n    - The user interface will render the Scalable Vector Graphics (SVG) image within the artifact tags.\n    - The assistant should specify the viewbox of the SVG rather than defining a width/height\n  - Markdown: \"text/markdown\" or \"text/md\"\n    - The user interface will render Markdown content placed within the artifact tags.\n    - Supports standard Markdown syntax including headers, lists, links, images, code blocks, tables, and more.\n    - Both \"text/markdown\" and \"text/md\" are accepted as valid MIME types for Markdown content.\n  - Mermaid Diagrams: \"application/vnd.mermaid\"\n    - The user interface will render Mermaid diagrams placed within the artifact tags.\n  - React Components: \"application/vnd.react\"\n    - Use this for displaying either: React elements, e.g. `<strong>Hello World!</strong>`, React pure functional components, e.g. `() => <strong>Hello World!</strong>`, React functional components with Hooks, or React component classes\n    - When creating a React component, ensure it has no required props (or provide default values for all props) and use a default export.\n    - Use Tailwind classes for styling. DO NOT USE ARBITRARY VALUES (e.g. `h-[600px]`).\n    - Base React is available to be imported. To use hooks, first import it at the top of the artifact, e.g. `import { useState } from \"react\"`\n    - The lucide-react@0.394.0 library is available to be imported. e.g. `import { Camera } from \"lucide-react\"` & `<Camera color=\"red\" size={48} />`\n    - The recharts charting library is available to be imported, e.g. `import { LineChart, XAxis, ... } from \"recharts\"` & `<LineChart ...><XAxis dataKey=\"name\"> ...`\n    - The three.js library is available to be imported, e.g. `import * as THREE from \"three\";`\n    - The date-fns library is available to be imported, e.g. `import { compareAsc, format } from \"date-fns\";`\n    - The react-day-picker library is available to be imported, e.g. `import { DayPicker } from \"react-day-picker\";`\n    - The assistant can use prebuilt components from the `shadcn/ui` library after it is imported: `import { Alert, AlertDescription, AlertTitle, AlertDialog, AlertDialogAction } from '/components/ui/alert';`. If using components from the shadcn/ui library, the assistant mentions this to the user and offers to help them install the components if necessary.\n    - Components MUST be imported from `/components/ui/name` and NOT from `/components/name` or `@/components/ui/name`.\n    - NO OTHER LIBRARIES (e.g. zod, hookform) ARE INSTALLED OR ABLE TO BE IMPORTED.\n    - Images from the web are not allowed, but you can use placeholder images by specifying the width and height like so `<img src=\"/api/placeholder/400/320\" alt=\"placeholder\" />`\n    - When iterating on code, ensure that the code is complete and functional without any snippets, placeholders, or ellipses.\n    - If you are unable to follow the above requirements for any reason, don't use artifacts and use regular code blocks instead, which will not attempt to render the component.\n5. Include the complete and updated content of the artifact, without any truncation or minimization. Don't use \"// rest of the code remains the same...\".\n6. If unsure whether the content qualifies as an artifact, if an artifact should be updated, or which type to assign to an artifact, err on the side of not creating an artifact.\n7. Use a backtick fence longer than any backtick fence in the artifact content. Use a 4-backtick fence by default; if the artifact content contains a 4-backtick fence, use 5 backticks, and so on.\n\nHere are some examples of correct usage of artifacts:\n\n## Examples\n\n### Example 1\n\n  This example demonstrates how to create a Mermaid artifact for a simple flow chart.\n\n  User: Can you create a simple flow chart showing the process of making tea using Mermaid?\n\n  Assistant: Sure! Here's a simple flow chart depicting the process of making tea using Mermaid syntax:\n\n    :::artifact{identifier=\"tea-making-flowchart\" type=\"application/vnd.mermaid\" title=\"Flow chart: Making Tea\"}\n    ````mermaid\n    graph TD\n        A[Start] --> B{Water boiled?}\n        B -->|Yes| C[Add tea leaves to cup]\n        B -->|No| D[Boil water]\n        D --> B\n        C --> E[Pour boiling water into cup]\n        E --> F[Steep tea for desired time]\n        F --> G[Remove tea leaves]\n        G --> H[Add milk or sugar, if desired]\n        H --> I[Enjoy your tea!]\n        I --> J[End]\n    ````\n    :::\n\n    This flow chart uses Mermaid syntax to visualize the steps involved in making a cup of tea. Here's a brief explanation of the process:\n\n    1. Start\n    2. Check if water is boiled\n    3. If not boiled, boil the water\n    4. Once water is boiled, add tea leaves to the cup\n    5. Pour boiling water into the cup\n    6. Steep the tea for the desired time\n    7. Remove the tea leaves\n    8. Optionally add milk or sugar\n    9. Enjoy your tea!\n    10. End\n\n    This chart provides a clear visual representation of the tea-making process. You can easily modify or expand this chart if you want to add more details or steps to the process. Let me know if you'd like any changes or have any questions!\n\n---\n\n### Example 2\n\n  User: Create a simple React counter component\n  \n  Assistant: Here's a simple React counter component:\n\n    :::artifact{identifier=\"react-counter\" type=\"application/vnd.react\" title=\"React Counter\"}\n    ````\n    import { useState } from 'react';\n\n    export default function Counter() {\n      const [count, setCount] = useState(0);\n      return (\n        <div className=\"p-4\">\n          <p className=\"mb-2\">Count: {count}</p>\n          <button className=\"bg-blue-500 text-white px-4 py-2 rounded\" onClick={() => setCount(count + 1)}>\n            Increment\n          </button>\n        </div>\n      );\n    }\n    ````\n    :::\n\n    This component creates a simple counter with an increment button.\n\n---\n\n### Example 3\n  User: Create a basic HTML structure for a blog post\n  Assistant: Here's a basic HTML structure for a blog post:\n\n    :::artifact{identifier=\"blog-post-html\" type=\"text/html\" title=\"Blog Post HTML\"}\n    ````\n    <!DOCTYPE html>\n    <html lang=\"en\">\n    <head>\n      <meta charset=\"UTF-8\">\n      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n      <title>My Blog Post</title>\n      <style>\n        body { font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }\n        h1 { color: #333; }\n        p { margin-bottom: 15px; }\n      </style>\n    </head>\n    <body>\n      <header>\n        <h1>My First Blog Post</h1>\n      </header>\n      <main>\n        <article>\n          <p>This is the content of my blog post. It's short and sweet!</p>\n        </article>\n      </main>\n      <footer>\n        <p>&copy; 2023 My Blog</p>\n      </footer>\n    </body>\n    </html>\n    ````\n    :::\n\n    This HTML structure provides a simple layout for a blog post.\n\n---"
+  },
+  "components": [
+    {
+      "name": "Avatar",
+      "import": "import { Avatar, AvatarFallback, AvatarImage } from \"/components/ui/avatar\"",
+      "usage": "\n<Avatar>\n  <AvatarImage src=\"https://github.com/shadcn.png\" />\n  <AvatarFallback>CN</AvatarFallback>\n</Avatar>"
+    },
+    {
+      "name": "Button",
+      "import": "import { Button } from \"/components/ui/button\"",
+      "usage": "\n<Button variant=\"outline\">Button</Button>"
+    },
+    {
+      "name": "Card",
+      "import": "\nimport {\n  Card,\n  CardContent,\n  CardDescription,\n  CardFooter,\n  CardHeader,\n  CardTitle,\n} from \"/components/ui/card\"",
+      "usage": "\n<Card>\n  <CardHeader>\n    <CardTitle>Card Title</CardTitle>\n    <CardDescription>Card Description</CardDescription>\n  </CardHeader>\n  <CardContent>\n    <p>Card Content</p>\n  </CardContent>\n  <CardFooter>\n    <p>Card Footer</p>\n  </CardFooter>\n</Card>"
+    },
+    {
+      "name": "Checkbox",
+      "import": "import { Checkbox } from \"/components/ui/checkbox\"",
+      "usage": "<Checkbox />"
+    },
+    {
+      "name": "Input",
+      "import": "import { Input } from \"/components/ui/input\"",
+      "usage": "<Input />"
+    },
+    {
+      "name": "Label",
+      "import": "import { Label } from \"/components/ui/label\"",
+      "usage": "<Label htmlFor=\"email\">Your email address</Label>"
+    },
+    {
+      "name": "RadioGroup",
+      "import": "\nimport { Label } from \"/components/ui/label\"\nimport { RadioGroup, RadioGroupItem } from \"/components/ui/radio-group\"",
+      "usage": "\n<RadioGroup defaultValue=\"option-one\">\n  <div className=\"flex items-center space-x-2\">\n    <RadioGroupItem value=\"option-one\" id=\"option-one\" />\n    <Label htmlFor=\"option-one\">Option One</Label>\n  </div>\n  <div className=\"flex items-center space-x-2\">\n    <RadioGroupItem value=\"option-two\" id=\"option-two\" />\n    <Label htmlFor=\"option-two\">Option Two</Label>\n  </div>\n</RadioGroup>"
+    },
+    {
+      "name": "Select",
+      "import": "\nimport {\n  Select,\n  SelectContent,\n  SelectItem,\n  SelectTrigger,\n  SelectValue,\n} from \"/components/ui/select\"",
+      "usage": "\n<Select>\n  <SelectTrigger className=\"w-[180px]\">\n    <SelectValue placeholder=\"Theme\" />\n  </SelectTrigger>\n  <SelectContent>\n    <SelectItem value=\"light\">Light</SelectItem>\n    <SelectItem value=\"dark\">Dark</SelectItem>\n    <SelectItem value=\"system\">System</SelectItem>\n  </SelectContent>\n</Select>"
+    },
+    {
+      "name": "Textarea",
+      "import": "import { Textarea } from \"/components/ui/textarea\"",
+      "usage": "<Textarea />"
+    },
+    {
+      "name": "Accordion",
+      "import": "\nimport {\n  Accordion,\n  AccordionContent,\n  AccordionItem,\n  AccordionTrigger,\n} from \"/components/ui/accordion\"",
+      "usage": "\n<Accordion type=\"single\" collapsible>\n  <AccordionItem value=\"item-1\">\n    <AccordionTrigger>Is it accessible?</AccordionTrigger>\n    <AccordionContent>\n      Yes. It adheres to the WAI-ARIA design pattern.\n    </AccordionContent>\n  </AccordionItem>\n</Accordion>"
+    },
+    {
+      "name": "AlertDialog",
+      "import": "\nimport {\n  AlertDialog,\n  AlertDialogAction,\n  AlertDialogCancel,\n  AlertDialogContent,\n  AlertDialogDescription,\n  AlertDialogFooter,\n  AlertDialogHeader,\n  AlertDialogTitle,\n  AlertDialogTrigger,\n} from \"/components/ui/alert-dialog\"",
+      "usage": "\n<AlertDialog>\n  <AlertDialogTrigger>Open</AlertDialogTrigger>\n  <AlertDialogContent>\n    <AlertDialogHeader>\n      <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>\n      <AlertDialogDescription>\n        This action cannot be undone.\n      </AlertDialogDescription>\n    </AlertDialogHeader>\n    <AlertDialogFooter>\n      <AlertDialogCancel>Cancel</AlertDialogCancel>\n      <AlertDialogAction>Continue</AlertDialogAction>\n    </AlertDialogFooter>\n  </AlertDialogContent>\n</AlertDialog>"
+    },
+    {
+      "name": "Alert",
+      "import": "\nimport {\n  Alert,\n  AlertDescription,\n  AlertTitle,\n} from \"/components/ui/alert\"",
+      "usage": "\n<Alert>\n  <AlertTitle>Heads up!</AlertTitle>\n  <AlertDescription>\n    You can add components to your app using the cli.\n  </AlertDescription>\n</Alert>"
+    },
+    {
+      "name": "AspectRatio",
+      "import": "import { AspectRatio } from \"/components/ui/aspect-ratio\"",
+      "usage": "\n<AspectRatio ratio={16 / 9}>\n  <Image src=\"...\" alt=\"Image\" className=\"rounded-md object-cover\" />\n</AspectRatio>"
+    },
+    {
+      "name": "Badge",
+      "import": "import { Badge } from \"/components/ui/badge\"",
+      "usage": "<Badge>Badge</Badge>"
+    },
+    {
+      "name": "Calendar",
+      "import": "import { Calendar } from \"/components/ui/calendar\"",
+      "usage": "<Calendar />"
+    },
+    {
+      "name": "Carousel",
+      "import": "\nimport {\n  Carousel,\n  CarouselContent,\n  CarouselItem,\n  CarouselNext,\n  CarouselPrevious,\n} from \"/components/ui/carousel\"",
+      "usage": "\n<Carousel>\n  <CarouselContent>\n    <CarouselItem>...</CarouselItem>\n    <CarouselItem>...</CarouselItem>\n    <CarouselItem>...</CarouselItem>\n  </CarouselContent>\n  <CarouselPrevious />\n  <CarouselNext />\n</Carousel>"
+    },
+    {
+      "name": "Collapsible",
+      "import": "\nimport {\n  Collapsible,\n  CollapsibleContent,\n  CollapsibleTrigger,\n} from \"/components/ui/collapsible\"",
+      "usage": "\n<Collapsible>\n  <CollapsibleTrigger>Can I use this in my project?</CollapsibleTrigger>\n  <CollapsibleContent>\n    Yes. Free to use for personal and commercial projects. No attribution required.\n  </CollapsibleContent>\n</Collapsible>"
+    },
+    {
+      "name": "Dialog",
+      "import": "\nimport {\n  Dialog,\n  DialogContent,\n  DialogDescription,\n  DialogHeader,\n  DialogTitle,\n  DialogTrigger,\n} from \"/components/ui/dialog\"",
+      "usage": "\n<Dialog>\n  <DialogTrigger>Open</DialogTrigger>\n  <DialogContent>\n    <DialogHeader>\n      <DialogTitle>Are you sure absolutely sure?</DialogTitle>\n      <DialogDescription>\n        This action cannot be undone.\n      </DialogDescription>\n    </DialogHeader>\n  </DialogContent>\n</Dialog>"
+    },
+    {
+      "name": "DropdownMenu",
+      "import": "\nimport {\n  DropdownMenu,\n  DropdownMenuContent,\n  DropdownMenuItem,\n  DropdownMenuLabel,\n  DropdownMenuSeparator,\n  DropdownMenuTrigger,\n} from \"/components/ui/dropdown-menu\"",
+      "usage": "\n<DropdownMenu>\n  <DropdownMenuTrigger>Open</DropdownMenuTrigger>\n  <DropdownMenuContent>\n    <DropdownMenuLabel>My Account</DropdownMenuLabel>\n    <DropdownMenuSeparator />\n    <DropdownMenuItem>Profile</DropdownMenuItem>\n    <DropdownMenuItem>Billing</DropdownMenuItem>\n    <DropdownMenuItem>Team</DropdownMenuItem>\n    <DropdownMenuItem>Subscription</DropdownMenuItem>\n  </DropdownMenuContent>\n</DropdownMenu>"
+    },
+    {
+      "name": "Menubar",
+      "import": "\nimport {\n  Menubar,\n  MenubarContent,\n  MenubarItem,\n  MenubarMenu,\n  MenubarSeparator,\n  MenubarShortcut,\n  MenubarTrigger,\n} from \"/components/ui/menubar\"",
+      "usage": "\n<Menubar>\n  <MenubarMenu>\n    <MenubarTrigger>File</MenubarTrigger>\n    <MenubarContent>\n      <MenubarItem>\n        New Tab <MenubarShortcut>⌘T</MenubarShortcut>\n      </MenubarItem>\n      <MenubarItem>New Window</MenubarItem>\n      <MenubarSeparator />\n      <MenubarItem>Share</MenubarItem>\n      <MenubarSeparator />\n      <MenubarItem>Print</MenubarItem>\n    </MenubarContent>\n  </MenubarMenu>\n</Menubar>"
+    },
+    {
+      "name": "NavigationMenu",
+      "import": "\nimport {\n  NavigationMenu,\n  NavigationMenuContent,\n  NavigationMenuItem,\n  NavigationMenuLink,\n  NavigationMenuList,\n  NavigationMenuTrigger,\n  navigationMenuTriggerStyle,\n} from \"/components/ui/navigation-menu\"",
+      "usage": "\n<NavigationMenu>\n  <NavigationMenuList>\n    <NavigationMenuItem>\n      <NavigationMenuTrigger>Item One</NavigationMenuTrigger>\n      <NavigationMenuContent>\n        <NavigationMenuLink>Link</NavigationMenuLink>\n      </NavigationMenuContent>\n    </NavigationMenuItem>\n  </NavigationMenuList>\n</NavigationMenu>"
+    },
+    {
+      "name": "Popover",
+      "import": "\nimport {\n  Popover,\n  PopoverContent,\n  PopoverTrigger,\n} from \"/components/ui/popover\"",
+      "usage": "\n<Popover>\n  <PopoverTrigger>Open</PopoverTrigger>\n  <PopoverContent>Place content for the popover here.</PopoverContent>\n</Popover>"
+    },
+    {
+      "name": "Progress",
+      "import": "import { Progress } from \"/components/ui/progress\"",
+      "usage": "<Progress value={33} />"
+    },
+    {
+      "name": "Separator",
+      "import": "import { Separator } from \"/components/ui/separator\"",
+      "usage": "<Separator />"
+    },
+    {
+      "name": "Sheet",
+      "import": "\nimport {\n  Sheet,\n  SheetContent,\n  SheetDescription,\n  SheetHeader,\n  SheetTitle,\n  SheetTrigger,\n} from \"/components/ui/sheet\"",
+      "usage": "\n<Sheet>\n  <SheetTrigger>Open</SheetTrigger>\n  <SheetContent>\n    <SheetHeader>\n      <SheetTitle>Are you sure absolutely sure?</SheetTitle>\n      <SheetDescription>\n        This action cannot be undone.\n      </SheetDescription>\n    </SheetHeader>\n  </SheetContent>\n</Sheet>"
+    },
+    {
+      "name": "Skeleton",
+      "import": "import { Skeleton } from \"/components/ui/skeleton\"",
+      "usage": "<Skeleton className=\"w-[100px] h-[20px] rounded-full\" />"
+    },
+    {
+      "name": "Slider",
+      "import": "import { Slider } from \"/components/ui/slider\"",
+      "usage": "<Slider defaultValue={[33]} max={100} step={1} />"
+    },
+    {
+      "name": "Switch",
+      "import": "import { Switch } from \"/components/ui/switch\"",
+      "usage": "<Switch />"
+    },
+    {
+      "name": "Table",
+      "import": "\nimport {\n  Table,\n  TableBody,\n  TableCaption,\n  TableCell,\n  TableHead,\n  TableHeader,\n  TableRow,\n} from \"/components/ui/table\"",
+      "usage": "\n<Table>\n  <TableCaption>A list of your recent invoices.</TableCaption>\n  <TableHeader>\n    <TableRow>\n      <TableHead className=\"w-[100px]\">Invoice</TableHead>\n      <TableHead>Status</TableHead>\n      <TableHead>Method</TableHead>\n      <TableHead className=\"text-right\">Amount</TableHead>\n    </TableRow>\n  </TableHeader>\n  <TableBody>\n    <TableRow>\n      <TableCell className=\"font-medium\">INV001</TableCell>\n      <TableCell>Paid</TableCell>\n      <TableCell>Credit Card</TableCell>\n      <TableCell className=\"text-right\">$250.00</TableCell>\n    </TableRow>\n  </TableBody>\n</Table>"
+    },
+    {
+      "name": "Tabs",
+      "import": "\nimport {\n  Tabs,\n  TabsContent,\n  TabsList,\n  TabsTrigger,\n} from \"/components/ui/tabs\"",
+      "usage": "\n<Tabs defaultValue=\"account\" className=\"w-[400px]\">\n  <TabsList>\n    <TabsTrigger value=\"account\">Account</TabsTrigger>\n    <TabsTrigger value=\"password\">Password</TabsTrigger>\n  </TabsList>\n  <TabsContent value=\"account\">Make changes to your account here.</TabsContent>\n  <TabsContent value=\"password\">Change your password here.</TabsContent>\n</Tabs>"
+    },
+    {
+      "name": "Toast",
+      "import": "\nimport { useToast } from \"/components/ui/use-toast\"\nimport { Button } from \"/components/ui/button\"",
+      "usage": "\nexport function ToastDemo() {\n  const { toast } = useToast()\n  return (\n    <Button\n      onClick={() => {\n        toast({\n          title: \"Scheduled: Catch up\",\n          description: \"Friday, February 10, 2023 at 5:57 PM\",\n        })\n      }}\n    >\n      Show Toast\n    </Button>\n  )\n}"
+    },
+    {
+      "name": "Toggle",
+      "import": "import { Toggle } from \"/components/ui/toggle\"",
+      "usage": "<Toggle>Toggle</Toggle>"
+    },
+    {
+      "name": "Tooltip",
+      "import": "\nimport {\n  Tooltip,\n  TooltipContent,\n  TooltipProvider,\n  TooltipTrigger,\n} from \"/components/ui/tooltip\"",
+      "usage": "\n<TooltipProvider>\n  <Tooltip>\n    <TooltipTrigger>Hover</TooltipTrigger>\n    <TooltipContent>\n      <p>Add to library</p>\n    </TooltipContent>\n  </Tooltip>\n</TooltipProvider>"
+    }
+  ]
+}
