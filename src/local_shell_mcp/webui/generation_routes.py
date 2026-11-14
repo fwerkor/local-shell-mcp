@@ -34,7 +34,9 @@ from .routes import _body, _owner
 log = logging.getLogger(__name__)
 _TASKS: dict[str, asyncio.Task] = {}
 _TASK_GUARD = asyncio.Lock()
-_SHUTTING_DOWN = False
+# Preserve durable running checkpoints only for cooperative Controller shutdown.
+# Explicit abort/disconnect cancellation keeps its existing terminal semantics.
+_SHUTDOWN_TASKS: set[asyncio.Task] = set()
 
 
 def _database():
@@ -134,11 +136,6 @@ async def _run_model(
 
         async def on_injected():
             nonlocal step_id, step_index, now_ms
-
-            # Upstream reserves an absolute content slot per message_creation.
-            # Once a STEER part occupies the next slot, subsequent provider
-            # text must use a *new* runStep index or useStepHandler appends it
-            # into the old text block before the visible steer.
             closed_at = int(time.time() * 1000)
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step_closed", "data": {
@@ -184,10 +181,7 @@ async def _run_model(
         })
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text)
     except asyncio.CancelledError:
-        # Graceful Controller shutdown must not consume an already-accepted
-        # human action: the next process will re-park its durable resumeClaim
-        # and require fresh authentication before replaying native tools.
-        if not (_SHUTTING_DOWN and repo.resume_claim(owner, generation.run_id)):
+        if asyncio.current_task() not in _SHUTDOWN_TASKS:
             repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
         raise
     except Exception as exc:
@@ -196,6 +190,7 @@ async def _run_model(
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
                     error=f"Model generation failed ({type(exc).__name__})")
     finally:
+        _SHUTDOWN_TASKS.discard(asyncio.current_task())
         async with _TASK_GUARD:
             _TASKS.pop(generation.run_id, None)
 
@@ -429,7 +424,6 @@ async def steer_generation(request: Request):
     return JSONResponse({**result, "generationProtocolVersion": protocol},
                         status_code=202, headers=_generator_headers(protocol))
 
-
 async def mutate_steer(request: Request):
     from .steering import SteeringStore, SteerRejection
 
@@ -492,6 +486,52 @@ async def resume_generation(request: Request):
     if action_id is None:
         if generation.status != "running":
             raise HTTPException(409, detail="Generation cannot be resumed")
+        expected = payload.get("generationCreatedAt")
+        if expected is not None and str(generation.generation_created_at) != str(expected):
+            raise HTTPException(409, detail="Generation identity mismatch")
+        current = _TASKS.get(generation.run_id)
+        if current is None or current.done():
+            # A Controller restart loses only the ephemeral task handle. The
+            # real AgentRunner and StateGraph checkpoint stores live in SQLite;
+            # reattach using the SAME generation scheduler and owner grant.
+            from .checkpoints import SQLiteCheckpointSaver
+            from .machine_permissions import require_machine_scope, resolve_access
+            from .routes import _repo
+
+            saver = SQLiteCheckpointSaver(_database(), owner)
+            checkpoint = saver.get_tuple(saver.config(cid, generation.run_id, event_actor=True))
+            graph_checkpoint = saver.get_tuple(saver.config(
+                cid, generation.run_id + ":graph:", event_actor=True))
+            if checkpoint is None and graph_checkpoint is None:
+                raise HTTPException(409, detail="Generation has no recoverable checkpoint")
+            try:
+                scopes, expiry = _request_grant(request)
+                machine_policy = resolve_access(owner, cid)
+                for machine, level in machine_policy.items():
+                    if level in {"read", "write"}:
+                        require_machine_scope(scopes, machine, level, expires=expiry)
+            except PermissionError as exc:
+                raise HTTPException(403, detail=str(exc)) from exc
+            with _database().connect() as db:
+                row = db.execute("SELECT state,agent_id FROM runs WHERE id=?", (generation.run_id,)).fetchone()
+            state = json.loads(row["state"])
+            try:
+                profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
+            except ValueError as exc:
+                raise HTTPException(400, detail=str(exc)) from exc
+            agent = AgentRepository(_database()).get(owner, row["agent_id"]) if row["agent_id"] else None
+            if row["agent_id"] and agent is None:
+                raise HTTPException(404, detail="Agent no longer available")
+            await _start_task(
+                owner, generation, profile, agent,
+                native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
+                write_tools=any(level == "write" for level in machine_policy.values()),
+                ask_user_enabled=bool(state.get("askUserEnabled")),
+                mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+                resume_history=store.history(owner, cid, message_id=generation.user_message_id),
+                partial_text=store.accumulated_text(owner, generation.run_id),
+                granted_scopes=frozenset(scopes), grant_expires=expiry,
+            )
         return JSONResponse(_generation_body(generation, status="resumed", resumed=True, protocol_version=protocol),
                             headers=_generator_headers(protocol))
 
@@ -599,18 +639,17 @@ async def resume_generation(request: Request):
 
 
 async def shutdown_generations() -> None:
-    global _SHUTTING_DOWN
-    _SHUTTING_DOWN = True
-    try:
-        async with _TASK_GUARD:
-            tasks = list(_TASKS.values())
-            for task in tasks:
-                task.cancel()
-        if tasks:
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
-    finally:
-        _SHUTTING_DOWN = False
+    async with _TASK_GUARD:
+        tasks = list(_TASKS.values())
+        for task in tasks:
+            _SHUTDOWN_TASKS.add(task)
+            task.cancel()
+    if tasks:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
+    from .subagent_task_host import shutdown_subagent_tasks
+
+    await shutdown_subagent_tasks()
 
 
 def generation_routes() -> list[Route]:

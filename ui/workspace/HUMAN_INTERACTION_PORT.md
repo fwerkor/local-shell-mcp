@@ -99,3 +99,25 @@ controller crash in that window cannot guarantee the original actor's
 exactly-once model consumption. Generation recovery currently parks/interrupts
 orphans rather than silently resuming their machine grants. These constraints
 are documented rather than advertising full LibreChat runtime parity.
+
+## Cross-PR integration acceptance (Draft Graph #354 + HITL #357)
+
+A separate integration branch merges the exact independent Draft histories (without
+mutating either source branch). It combines the graph scheduler with source HITL
+approval precedence, durable resume-claim replay, original React status/SSE sync,
+and the Steer HTTP FIFO. Foreground graph node model streams now consume Steer;
+detached subagent graph nodes are not allowed to steal the root user queue.
+The stable `on_injected` callback moves the original React message-creation
+index after an applied Steer, including when a graph node is producing text.
+
+Regression: `tests/test_webui_graph_steer_integration.py` exercises real
+Python LangGraph and a preempted foreground graph node; its model observes the
+user's new instruction before the stale old response can finish.
+The combined full-suite run completed **2479 passed, 4 skipped** before the
+additional graph-Steer regression was added (the new test separately passed).
+
+Unverified: deterministic Steer delivery across simultaneous fan-out siblings,
+true cross-process root-generation actor ownership/lease fencing, full original
+rich-media Steer encoding, exact-once provider/tool effects after a crash, and
+full graph actor event-hook parity. The merged implementation must not be
+advertised as exact full upstream parity without those tests and fixes.

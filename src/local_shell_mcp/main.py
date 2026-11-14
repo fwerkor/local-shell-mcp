@@ -139,10 +139,18 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             # A crash can leave an old generation marked as running. Replay
             # final 'interrupted' events before admitting new chat requests.
             from .webui.generation_routes import _generation_store
+            from .webui.providers import stream_model, stream_model_with_tools
+            from .webui.subagent_task_host import active_child_generations, recover_subagent_tasks
 
-            store = _generation_store()
-            store.recover_claimed_resumes()
-            store.recover_orphans()
+            generation_store = _generation_store()
+            # Accepted human submissions survive a cooperative shutdown. Re-park
+            # their exact immutable action before generic orphan recovery.
+            generation_store.recover_claimed_resumes(active_child_generations(generation_store.database))
+            generation_store.recover_orphans(active_child_generations(generation_store.database))
+            await recover_subagent_tasks(
+                generation_store.database,
+                stream_tools=stream_model_with_tools, stream_text=stream_model,
+            )
         recovery_task = None
         if enabled:
             from .webui.durable_tasks import serve

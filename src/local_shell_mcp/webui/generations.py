@@ -8,6 +8,7 @@ owned by the Controller's event loop, not by the browser connection.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import secrets
@@ -77,11 +78,21 @@ class GenerationStore:
             return self._run(row) if row else None
 
     def begin(self, owner: str, payload: dict, agent: dict | None = None, *,
-              protocol_version: int = 2) -> tuple[Generation, bool]:
+              protocol_version: int = 2,
+              trusted_new_conversation_id: str | None = None,
+              _connection: Any | None = None) -> tuple[Generation, bool]:
         client_request_id = payload.get("clientRequestId")
         if client_request_id is not None and (not isinstance(client_request_id, str) or
                                                not 1 <= len(client_request_id) <= 160):
             raise ValueError("Invalid client request id")
+        # These idempotency namespaces are host-generated only. A browser can
+        # see a task handle and must not be able to preoccupy its continuation
+        # key with an unrelated generation before the child settles.
+        if isinstance(client_request_id, str):
+            if client_request_id.startswith("subagent-wakeup:") and _connection is None:
+                raise ValueError("Internal completion idempotency key cannot be submitted")
+            if client_request_id.startswith("subagent:") and trusted_new_conversation_id is None:
+                raise ValueError("Internal child idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")
         new_conversation = raw_conversation_id in (None, "", "new", "new_conversation")
         if raw_conversation_id is not None and not isinstance(raw_conversation_id, str):
@@ -89,7 +100,19 @@ class GenerationStore:
         project_id = payload.get("projectId", payload.get("chatProjectId")) if new_conversation else None
         if project_id is not None and (not isinstance(project_id, str) or not project_id):
             raise ValueError("Invalid project id")
-        conversation_id = str(uuid.uuid4()) if new_conversation else raw_conversation_id
+        # Internal-only allocation for a host-reserved subagent child. No HTTP
+        # field can select this value; the host registered its trusted lineage
+        # before this conversation becomes externally observable.
+        if trusted_new_conversation_id is not None:
+            if not new_conversation or not isinstance(trusted_new_conversation_id, str):
+                raise ValueError("A reserved child conversation must be a new conversation")
+            try:
+                if str(uuid.UUID(trusted_new_conversation_id)) != trusted_new_conversation_id:
+                    raise ValueError("Invalid reserved child conversation identity")
+            except ValueError as exc:
+                raise ValueError("Invalid reserved child conversation identity") from exc
+        conversation_id = (trusted_new_conversation_id or str(uuid.uuid4())) \
+            if new_conversation else raw_conversation_id
         prompt = payload.get("text")
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
             raise ValueError("A non-empty text message is required (max 128 KiB)")
@@ -108,8 +131,13 @@ class GenerationStore:
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
         }
-        with self.database.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        # Internal trigger delivery supplies its already-locked SQLite
+        # transaction. The generation and a one-shot child result claim must
+        # commit or roll back together; ordinary HTTP admission is unchanged.
+        with (contextlib.nullcontext(_connection) if _connection is not None
+              else self.database.connect()) as db:
+            if _connection is None:
+                db.execute("BEGIN IMMEDIATE")
             if client_request_id:
                 prior = db.execute(
                     "SELECT r.* FROM generation_requests gr JOIN runs r ON r.id=gr.run_id "
@@ -549,6 +577,28 @@ class GenerationStore:
                 (owner, run_id, after, min(200, max(1, limit))),
             ).fetchall()
             return [(int(row[0]), json.loads(row[1])) for row in rows]
+
+    def accumulated_text(self, owner: str, run_id: str) -> str:
+        """Reassemble already-streamed deltas for a restarted owner-bound run.
+
+        A resumed StateGraph must not lose previous assistant text, and must not
+        reemit old SSE chunks. This uses the existing generation event contract.
+        """
+        with self.database.connect() as db:
+            rows = db.execute(
+                "SELECT ge.data FROM generation_events ge JOIN runs r ON r.id=ge.run_id "
+                "JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE c.owner=? AND ge.run_id=? ORDER BY ge.seq", (owner, run_id),
+            ).fetchall()
+        chunks = []
+        for row in rows:
+            event = json.loads(row["data"])
+            if event.get("event") == "on_message_delta":
+                content = event.get("data", {}).get("delta", {}).get("content", {})
+                value = content.get("text") if isinstance(content, dict) else None
+                if isinstance(value, str):
+                    chunks.append(value)
+        return "".join(chunks)
 
     def history(self, owner: str, conversation_id: str, max_messages: int = 50,
                 *, message_id: str | None = None) -> list[dict]:

@@ -41,6 +41,7 @@ class AgentLoopState:
     pending_calls: list[ModelToolCall] = field(default_factory=list)
     tool_step_started: bool = False
     completed: bool = False
+    graph_commands: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -48,6 +49,7 @@ class ToolBatchOutput:
     messages: list[dict]
     next_context: AgentContext | None = None
     replace_messages: list[dict] | None = None
+    graph_commands: list[dict] = field(default_factory=list)
 
 
 async def run_agent_loop(
@@ -58,6 +60,8 @@ async def run_agent_loop(
     dispatch: Callable[[list[ModelToolCall], AgentLoopState], Awaitable[ToolBatchOutput]],
     on_text: Callable[[str], Awaitable[None]],
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
+    inject_controls: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
+    should_preempt: Callable[[], bool] | None = None,
     on_boundary: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
     on_stream_chunk: Callable[[], Awaitable[bool]] | None = None,
 ) -> list[dict]:
@@ -82,12 +86,19 @@ async def run_agent_loop(
             injected = await on_boundary(state, "post_tools") if on_boundary else False
             state.pending_calls = []
             state.tool_step_started = False
-            state.completed = output.next_context is None and context.tool_end and not injected
+            state.graph_commands = output.graph_commands
+            state.completed = bool(output.graph_commands) or (
+                output.next_context is None and context.tool_end and not injected
+            )
             if save_state is not None:
                 await save_state(state, [])
             if state.completed:
                 return state.messages
+            if inject_controls is not None:
+                await inject_controls(state, "tool")
             continue
+        if inject_controls is not None:
+            await inject_controls(state, "tool")
         if state.step >= state.context.recursion_limit:
             raise ValueError("Recursion limit reached without hitting a stop condition")
         context = state.context
@@ -103,7 +114,7 @@ async def run_agent_loop(
         source = stream_tools(context.profile, state.messages, tools=context.tools,
                               max_tokens=max_tokens, temperature=temperature) if context.tools else \
             stream_text(context.profile, state.messages, max_tokens=max_tokens, temperature=temperature)
-        sealed = False
+        preempted = False
         try:
             async for item in source:
                 if isinstance(item, ModelToolCall):
@@ -111,27 +122,31 @@ async def run_agent_loop(
                 elif item:
                     text_parts.append(item)
                     await on_text(item)
-                # An interrupted provider can emit only tool_calls, without
-                # ever yielding text. Inspect *every* chunk before dispatching
-                # proposals, including the final tool-call chunk.
-                if on_stream_chunk is not None and await on_stream_chunk():
-                    sealed = True
+                # Model streams may contain only tool calls. Both the durable
+                # user steer and detached-child interrupt can preempt these.
+                if ((should_preempt is not None and should_preempt()) or
+                    (on_stream_chunk is not None and await on_stream_chunk())):
+                    preempted = True
                     break
         finally:
-            # Closing the async iterator releases provider SSE/HTTP resources
-            # after an intentional provider-safe steer preemption.
             close = getattr(source, "aclose", None)
             if close is not None:
                 await close()
-        # A steer may arrive after the provider's last chunk and before
-        # dispatch. Recheck the durable queue at this execution boundary.
-        if not sealed and on_stream_chunk is not None and await on_stream_chunk():
-            sealed = True
-        # A preempted provider turn is incomplete. None of its buffered
-        # tool proposals may dispatch: the injected user steer must be heard
-        # by the model before it can authorize another batch.
-        if sealed:
-            calls.clear()
+        # A steer can arrive between final SSE chunk and tool dispatch.
+        if not preempted and ((should_preempt is not None and should_preempt()) or
+                              (on_stream_chunk is not None and await on_stream_chunk())):
+            preempted = True
+        if preempted:
+            state.messages.append({"role": "assistant", "content": "".join(text_parts) or None})
+            state.pending_calls = []
+            state.completed = False
+            if on_boundary is not None:
+                await on_boundary(state, "stream")
+            if save_state is not None:
+                await save_state(state, [])
+            if inject_controls is not None:
+                await inject_controls(state, "preempt")
+            continue
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if calls:
             import json
@@ -144,10 +159,14 @@ async def run_agent_loop(
         state.messages.append(message)
         state.pending_calls = calls
         state.completed = not calls
-        if (not calls and on_boundary is not None and
-            await on_boundary(state, "stream" if sealed else "terminal")):
+        if not calls and on_boundary is not None and await on_boundary(state, "terminal"):
             state.completed = False
         if save_state is not None:
             await save_state(state, calls)
-        if state.completed:
-            return state.messages
+        if not calls:
+            if inject_controls is not None and await inject_controls(state, "turn"):
+                state.completed = False
+                if save_state is not None:
+                    await save_state(state, [])
+            if state.completed:
+                return state.messages

@@ -142,10 +142,112 @@ CREATE TABLE IF NOT EXISTS generation_events (
 );
 CREATE INDEX IF NOT EXISTS idx_generation_events_run ON generation_events(run_id,seq);
 CREATE INDEX IF NOT EXISTS idx_runs_conversation ON runs(conversation_id,created_at DESC);
+-- Detached subagent tasks are persisted at creation, before any child model/tool
+-- execution. One task lease has one child generation and belongs to one trusted
+-- owner + parent conversation; a thread can have multiple sequential leases.
+CREATE TABLE IF NOT EXISTS subagent_threads (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    parent_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    subagent_type TEXT NOT NULL,
+    messages TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_threads_parent ON
+    subagent_threads(owner,parent_conversation_id,subagent_type);
+CREATE TABLE IF NOT EXISTS subagent_tasks (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    parent_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_agent_id TEXT NOT NULL,
+    parent_tool_call_id TEXT NOT NULL,
+    subagent_type TEXT NOT NULL,
+    thread_id TEXT NOT NULL REFERENCES subagent_threads(id) ON DELETE CASCADE,
+    idempotency_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    agent_config TEXT NOT NULL,
+    execution_options TEXT NOT NULL DEFAULT '{}',
+    input TEXT NOT NULL,
+    initial_messages TEXT NOT NULL,
+    granted_scopes TEXT NOT NULL,
+    grant_expires INTEGER,
+    child_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    child_conversation_id TEXT,
+    child_registered INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL CHECK(status IN ('running','completed','error','cancelled')),
+    result TEXT,
+    error TEXT,
+    result_claimed INTEGER NOT NULL DEFAULT 0,
+    result_claim_key TEXT,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    lease_owner TEXT,
+    lease_until INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,parent_conversation_id,idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_tasks_scope ON
+    subagent_tasks(owner,parent_conversation_id,created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subagent_one_live_thread ON
+    subagent_tasks(thread_id) WHERE status='running';
+CREATE TABLE IF NOT EXISTS subagent_task_controls (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES subagent_tasks(id) ON DELETE CASCADE,
+    invocation_key TEXT,
+    action TEXT NOT NULL CHECK(action IN ('steer','queue','interrupt')),
+    message TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('accepted','applied','rejected','failed')),
+    boundary TEXT,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_controls_task ON
+    subagent_task_controls(task_id,status,created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subagent_control_invocation ON
+    subagent_task_controls(task_id,invocation_key) WHERE invocation_key IS NOT NULL;
+-- This is a durable reservation before poll/claim/control side effects.
+-- A reserved-but-unconfirmed replay is fenced instead of reexecuted blindly.
+CREATE TABLE IF NOT EXISTS subagent_task_invocations (
+    owner TEXT NOT NULL,
+    parent_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_agent_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('reserved','completed')),
+    result TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(owner,parent_conversation_id,parent_run_id,parent_agent_id,tool_call_id)
+);
+-- Original agent completion event, prepared in the same transaction as the
+-- child task BEFORE its model starts. Source: subagentCompletionWakeup.ts.
+CREATE TABLE IF NOT EXISTS subagent_wakeups (
+    task_id TEXT PRIMARY KEY REFERENCES subagent_tasks(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    parent_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_agent_id TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+       CHECK(status IN ('pending','dispatched','done','retired','dead')),
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    lease_owner TEXT,
+    lease_until INTEGER,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_wakeups_pending ON
+    subagent_wakeups(status,created_at);
 CREATE TABLE IF NOT EXISTS agent_durable_tasks (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
     conversation_id TEXT NOT NULL,
+    authorization_conversation_id TEXT,
     run_id TEXT,
     call_id TEXT NOT NULL,
     tool TEXT NOT NULL,
@@ -174,6 +276,7 @@ CREATE TABLE IF NOT EXISTS agent_run_cancellations (
     run_id TEXT PRIMARY KEY,
     created_at INTEGER NOT NULL
 );
+
 CREATE TABLE IF NOT EXISTS attachments (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
@@ -226,6 +329,15 @@ class SQLiteDatabase:
                 self.fts_enabled = False
             else:
                 self.fts_enabled = True
+            # PR #353 created this table before delegated child conversations
+            # needed a separate inherited permission scope. Migrate the real
+            # existing Controller DB in-place; serialize concurrent cold starts.
+            db.execute("BEGIN IMMEDIATE")
+            if "authorization_conversation_id" not in {
+                row["name"] for row in db.execute("PRAGMA table_info(agent_durable_tasks)")
+            }:
+                db.execute("ALTER TABLE agent_durable_tasks "
+                           "ADD COLUMN authorization_conversation_id TEXT")
             db.execute("PRAGMA user_version=1")
 
     @contextlib.contextmanager
