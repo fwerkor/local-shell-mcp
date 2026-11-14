@@ -50,7 +50,9 @@ def public_profiles() -> dict:
     return {"providers": [{"provider": kind, "base_url": urlunsplit((urlsplit(value["base_url"]).scheme,
                                                      urlsplit(value["base_url"]).netloc.rsplit("@", 1)[-1],
                                                      urlsplit(value["base_url"]).path, "", "")),
-                            "models": value["models"], "configured": configured(value)}
+                            "models": value["models"], "configured": configured(value),
+                            "include_usage": value.get("include_usage") is True or (
+                                kind == "openai" and urlsplit(value["base_url"]).hostname == "api.openai.com")}
                            for kind in _DEFAULTS for value in [profile(kind)]]}
 
 
@@ -82,7 +84,11 @@ def _validate(body: dict) -> dict:
     key = body.get("api_key")
     if key is not None and (not isinstance(key, str) or len(key) > 16384 or any(ord(char) < 32 for char in key)):
         raise ValueError("Invalid model API key")
-    return {"provider": kind, "base_url": base, "models": models, "api_key": (key.strip() or None) if key else None}
+    include_usage = body.get('include_usage')
+    if include_usage is not None and type(include_usage) is not bool:
+        raise ValueError('include_usage must be a boolean')
+    return {"provider": kind, "base_url": base, "models": models,
+            "api_key": (key.strip() or None) if key else None, 'include_usage': include_usage}
 
 
 async def provider_profiles(request):
@@ -110,6 +116,8 @@ async def provider_profiles(request):
             previous = json.loads(row[0]) if row else fallback
             if value["api_key"] is None:
                 value["api_key"] = previous.get("api_key", "")
+            if value['include_usage'] is None:
+                value['include_usage'] = previous.get('include_usage', False)
             db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) "
                        "DO UPDATE SET value=excluded.value",
                        (_OWNER, _PREFIX + value["provider"], json.dumps(value)))

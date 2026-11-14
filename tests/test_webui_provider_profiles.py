@@ -139,3 +139,27 @@ def test_environment_provider_inventory_redacts_url_credentials(setup_profiles, 
     value = public_profiles()["providers"][0]
     assert value["base_url"] == "https://models.invalid/v1"
     assert "secret" not in str(value) and "hidden" not in str(value) and "private-key" not in str(value)
+
+
+@pytest.mark.asyncio
+async def test_profile_usage_option_survives_config_updates_and_rejects_invalid_values(setup_profiles):
+    _, app = setup_profiles
+    body = {'provider': 'openai', 'base_url': 'http://127.0.0.1:9000/v1',
+            'models': ['compatible'], 'include_usage': True}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='https://lsm.invalid', headers=_ADMIN) as client:
+        result = await client.put('/api/lsm/providers', json=body)
+        assert result.status_code == 200
+        assert provider_config('openai').include_usage is True
+        assert result.json()['providers'][0]['include_usage'] is True
+        # Updating the key/model must preserve the explicitly enabled usage
+        # option; callers may explicitly disable it again.
+        without_option = {key: value for key, value in body.items() if key != 'include_usage'}
+        assert (await client.put('/api/lsm/providers', json=without_option)).status_code == 200
+        assert provider_config('openai').include_usage is True
+        assert (await client.put('/api/lsm/providers', json={**body, 'include_usage': False})).status_code == 200
+        assert provider_config('openai').include_usage is False
+        for invalid in (1, 'yes', [], {}, 0):
+            failed = await client.put('/api/lsm/providers', json={**body, 'include_usage': invalid})
+            assert failed.status_code == 400
+            assert provider_config('openai').include_usage is False
