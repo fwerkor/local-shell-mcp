@@ -86,22 +86,35 @@ async def _data_frames(response) -> AsyncIterator[str]:
         yield "\n".join(data)
 
 
+def _openai_messages(messages: list[dict]) -> list[dict]:
+    """Provider must not receive source-only steer metadata from checkpoints."""
+    keys = {"role", "content", "tool_calls", "tool_call_id", "name"}
+    return [{k: v for k, v in message.items() if k in keys} for message in messages]
+
+
 def _messages_for_google(messages: list[dict]) -> tuple[list[dict], str]:
+    from .provider_multimodal import native_content_parts
+
     items: list[dict] = []
     systems: list[str] = []
     for item in messages:
-        content = str(item.get("content") or "")
+        content = item.get("content") or ""
         role = item.get("role")
         if role == "system":
-            systems.append(content)
+            systems.append(str(content))
         elif role in {"user", "assistant"}:
-            items.append({"role": "model" if role == "assistant" else "user", "parts": [{"text": content}]})
+            items.append({"role": "model" if role == "assistant" else "user",
+                          "parts": native_content_parts(content, "google")})
     return items, "\n".join(systems)
 
 
 def _messages_for_anthropic(messages: list[dict]) -> tuple[list[dict], str]:
     systems = [str(item.get("content") or "") for item in messages if item.get("role") == "system"]
-    items = [item for item in messages if item.get("role") in {"user", "assistant"}]
+    from .provider_multimodal import native_content_parts
+
+    items = [{"role": item["role"],
+              "content": native_content_parts(item.get("content") or "", "anthropic")}
+             for item in messages if item.get("role") in {"user", "assistant"}]
     return items, "\n".join(systems)
 
 
@@ -122,7 +135,7 @@ async def stream_model(
             headers["Authorization"] = f"Bearer {config.token}"
         # Local OpenAI-compatible servers may run without an API key. An
         # empty `Bearer ` value is illegal HTTP and breaks streaming.
-        body["messages"] = messages
+        body["messages"] = _openai_messages(messages)
         body["max_completion_tokens"] = max_tokens
         if temperature is not None:
             body["temperature"] = temperature
@@ -225,7 +238,7 @@ async def stream_model_with_tools(
     if config.token:
         headers["Authorization"] = f"Bearer {config.token}"
     body: dict = {
-        "model": config.model, "stream": True, "messages": messages,
+        "model": config.model, "stream": True, "messages": _openai_messages(messages),
         "max_completion_tokens": max_tokens, "tools": tools,
         "tool_choice": "auto", "parallel_tool_calls": False,
     }

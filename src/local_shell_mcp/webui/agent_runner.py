@@ -452,12 +452,10 @@ class AgentRunner:
             if applied and self.on_injected is not None:
                 await self.on_injected()
             for item in applied:
-                content = merged_text(item)
-                if item.get("files"):
-                    content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
-                        item["files"], ensure_ascii=False,
-                    )
-                current.messages.append({"role": "user", "content": content, "source": "steer"})
+                # The graph checkpoint contains only durable owned references.
+                # Encode actual media per provider request, never persist base64.
+                current.messages.append({"role": "user", "content": merged_text(item),
+                                         "source": "steer", "files": item.get("files", [])})
             return bool(applied)
 
         async def should_seal_stream():
@@ -468,8 +466,24 @@ class AgentRunner:
                                (self.graph_node and self.namespace.startswith("/graph:")))
             return owns_user_queue and self.steers.has_preempt(self.owner, self.generation.run_id)
 
+        async def stream_tools_with_media(profile, messages, **kwargs):
+            from ..settings import get_settings
+            from .steer_media import stamp_model_messages
+
+            prepared = await stamp_model_messages(self.database, self.owner, messages, get_settings().state_dir)
+            async for event in self.stream_tools(profile, prepared, **kwargs):
+                yield event
+
+        async def stream_text_with_media(profile, messages, **kwargs):
+            from ..settings import get_settings
+            from .steer_media import stamp_model_messages
+
+            prepared = await stamp_model_messages(self.database, self.owner, messages, get_settings().state_dir)
+            async for event in self.stream_text(profile, prepared, **kwargs):
+                yield event
+
         result = await run_agent_loop(
-            state, stream_tools=self.stream_tools, stream_text=self.stream_text,
+            state, stream_tools=stream_tools_with_media, stream_text=stream_text_with_media,
             dispatch=self._dispatch, on_text=emit, save_state=self._save,
             on_boundary=inject_steers, on_stream_chunk=should_seal_stream,
             inject_controls=inject if self.task_control_host else None,

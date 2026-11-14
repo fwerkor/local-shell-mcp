@@ -13,12 +13,15 @@ from .providers import ModelToolCall, ProviderConfig, _data_frames
 
 
 def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], str]:
+    from .provider_multimodal import native_content_parts
+
     result = []
     systems = []
     names = {}
     for message in messages:
         role = message.get("role")
-        text = str(message.get("content") or "")
+        content = message.get("content") or ""
+        text = str(content) if not isinstance(content, list) else ""
         if role == "system":
             systems.append(text)
             continue
@@ -35,8 +38,7 @@ def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], st
             native_role = "user"
         else:
             native_role = "model" if role == "assistant" and provider == "google" else role
-            if text:
-                parts.append({"type": "text", "text": text} if provider == "anthropic" else {"text": text})
+            parts.extend(native_content_parts(content, provider))
             for call in message.get("tool_calls") or []:
                 function = call["function"]
                 names[call["id"]] = function["name"]

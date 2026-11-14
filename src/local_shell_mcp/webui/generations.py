@@ -643,7 +643,7 @@ class GenerationStore:
                                 if (isinstance(part, dict) and part.get("type") == "steer"
                                     and isinstance(part.get("steer"), str)):
                                     result.append({"role": "user", "content": merged_text(part),
-                                                   "source": "steer"})
+                                                   "source": "steer", "files": part.get("files", [])})
                     files = json.loads(row["metadata"]).get("files", [])
                     if row["role"] == "user" and files:
                         descriptors = []
