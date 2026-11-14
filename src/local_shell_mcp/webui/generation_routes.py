@@ -274,6 +274,12 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
             ).fetchone()
         if not persisted:
             return False
+    # Revalidate current LSM machine grants before even contacting an IdP
+    # refresh endpoint or rotating an expired browser authorization state.
+    policy = resolve_access(owner, generation.conversation_id)
+    for machine, level in policy.items():
+        if level in {"read", "write"}:
+            require_machine_scope(scopes, machine, level, expires=expiry)
     repo = ActionRepository(database)
     if not await access_token(repo, owner, aid):
         from .action_oauth import begin_flow
@@ -284,12 +290,6 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
             begin_flow(repo, owner, aid, generation.run_id, cid,
                        reissue={"tool_name": payload["tool_name"]})
         return False
-    # Agent permissions are read again from SQLite rather than accepting a
-    # snapshot or a CSRF cookie as fresh machine authorization.
-    policy = resolve_access(owner, generation.conversation_id)
-    for machine, level in policy.items():
-        if level in {"read", "write"}:
-            require_machine_scope(scopes, machine, level, expires=expiry)
     profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
     flags = _repo().setting(owner, "conversation.permissions." + generation.conversation_id, {}) or {}
     started = await _start_task(owner, generation, profile, agent,

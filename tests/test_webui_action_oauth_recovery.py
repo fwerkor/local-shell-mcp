@@ -362,3 +362,87 @@ async def test_user_abort_invalidates_outstanding_oauth_callback(scenario):
         assert callback.status_code == 302 and "invalid_state" in callback.headers["location"]
         assert action_oauth._token(ActionRepository(ctx.db), "local", ctx.action["action_id"], "access") is None
         assert ctx.seen == []
+
+
+@pytest.mark.asyncio
+async def test_expired_oauth_prompt_requires_machine_grants_before_reissuing(scenario):
+    """A principal without current machine scope cannot rotate IdP state."""
+    ctx = scenario
+    await _pause(ctx)
+    _repo().save_setting("local", "agent.machine_policy.global", {"local": "write"})
+    with ctx.db.connect() as db:
+        db.execute("UPDATE action_oauth_flows SET expires_at=? WHERE run_id=?",
+                   (int(time.time()) - 1, ctx.gen.run_id))
+    initial_events = ctx.store.events("local", ctx.gen.run_id)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ctx.app),
+                                 base_url="https://chat.example.org", follow_redirects=False) as client:
+        result = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
+                                  headers={"x-owner": "local", "x-scopes": "shell:read"})
+        assert result.status_code == 403
+        assert ctx.store.events("local", ctx.gen.run_id) == initial_events
+        valid = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
+                                 headers={"x-owner": "local", "x-scopes": "shell:read shell:write"})
+        assert valid.status_code == 200
+        assert len(ctx.store.events("local", ctx.gen.run_id)) == len(initial_events) + 1
+
+
+@pytest.mark.asyncio
+async def test_two_oauth_actions_in_one_model_batch_never_send_http_before_both_grants(scenario, monkeypatch):
+    """Sequential browser approvals preserve the original sibling ToolNode batch."""
+    ctx = scenario
+    actions = ActionRepository(ctx.db)
+    base = ctx.action["metadata"]["domain"]
+    second_spec = {"openapi": "3.0.3", "servers": [{"url": base}], "paths": {
+        "/record-2": {"get": {"operationId": "fetchOther", "responses": {"200": {}}}},
+    }}
+    updated_agent, second = actions.save("local", ctx.agent["id"], {
+        "metadata": {"domain": base, "raw_spec": json.dumps(second_spec), "auth": {
+            "type": "oauth", "authorization_url": "https://id.example.org/oauth/authorize",
+            "client_url": "https://id.example.org/oauth/token", "scope": "read",
+            "token_exchange_method": "default_post"},
+            "oauth_client_id": "id", "oauth_client_secret": "private-client-secret"},
+        "functions": [{"type": "function", "function": {"name": "fetchOther"}}],
+    })
+    ctx.agent = updated_agent
+    second_tool = normalize_action_tool_name(tool_name("fetchOther", base))
+
+    async def two_tools(_profile, history, *, tools, **kwargs):
+        ctx.model_calls.append(history[-1]["role"])
+        available = {item["function"]["name"] for item in tools}
+        assert ctx.tool in available and second_tool in available
+        if history[-1]["role"] == "tool":
+            assert len([m for m in history if m.get("role") == "tool"]) == 2
+            yield "Both Actions completed."
+        else:
+            yield ModelToolCall("call-oauth", ctx.tool, {})
+            yield ModelToolCall("call-oauth-2", second_tool, {})
+
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", two_tools)
+    state_first = await _pause(ctx)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ctx.app),
+                                 base_url="https://chat.example.org", follow_redirects=False) as client:
+        await _login(ctx, state_first, client)
+        assert not ctx.seen
+        status = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
+                                  headers={"x-owner": "local"})
+        assert status.status_code == 200
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        assert ctx.store.get("local", ctx.gen.run_id).status == "requires_action"
+        assert ctx.store.pending_action("local", ctx.gen.run_id)["payload"]["tool_call_id"] == "call-oauth-2"
+        assert not ctx.seen  # No sibling can dispatch before all required grants.
+        prompts = [item for _, item in ctx.store.events("local", ctx.gen.run_id)
+                   if item.get("event") == "on_run_step_delta" and item.get("data", {}).get("delta", {}).get("auth")]
+        assert len(prompts) == 2
+        state_second = parse_qs(urlsplit(prompts[-1]["data"]["delta"]["auth"]).query)["state"][0]
+        path = f"/api/actions/{second['action_id']}/oauth"
+        assert (await client.post(path + "/bind", headers={"x-owner": "local"})).status_code == 200
+        response = await client.get(path + "/callback", params={"state": state_second, "code": "oauth-code"})
+        assert response.status_code == 302 and "/oauth/success" in response.headers["location"]
+        status = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
+                                  headers={"x-owner": "local"})
+        assert status.status_code == 200
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        assert ctx.store.get("local", ctx.gen.run_id).status == "complete"
+        assert ctx.model_calls == ["user", "tool"]
+        assert len(ctx.seen) == 2
+        assert sorted(item["path"] for item in ctx.seen) == ["/record", "/record-2"]
