@@ -160,6 +160,16 @@ class AgentRunner:
             "channel_versions": {"messages": state.step}, "versions_seen": {},
         }, {"source": "loop", "step": state.step})
 
+    @staticmethod
+    def _visible_tool_args(call):
+        """Bound only the UI/SSE copy; native execution/checkpoint keep full args."""
+        args = call.arguments
+        if call.name == "file_write" and isinstance(args, dict):
+            content = args.get("content")
+            if isinstance(content, str) and len(content) > 8192:
+                return {**args, "content": f"[omitted {len(content)} characters from file-write UI event]"}
+        return args
+
     def _tool_step(self, call):
         checkpoint = self.active_config["configurable"].get("checkpoint_id", "")
         identity = "step_" + hashlib.sha256(
@@ -182,7 +192,7 @@ class AgentRunner:
                 "created_at": int(time.time() * 1000), "stepDetails": {
                     "type": "tool_calls", "tool_calls": [{
                         "id": call.call_id, "type": "tool_call", "name": call.name,
-                        "args": call.arguments,
+                        "args": self._visible_tool_args(call),
                     }],
                 }}
         self.store.append(self.owner, self.generation.run_id, {"event": "on_run_step", "data": step},
@@ -198,13 +208,31 @@ class AgentRunner:
         if self.namespace and not self.graph_node:
             return
         step = self._tool_step(call)
+        if call.name == "file_write" and isinstance(output, str):
+            # Original callbacks.js `on_tool_end` publishes tool artifacts
+            # separately from the model-visible tool result. The native LSM
+            # file-write response is the trusted success/hash evidence; keep
+            # the original file contents outside model message history.
+            from contextlib import suppress
+
+            from starlette.exceptions import HTTPException
+
+            from ..settings import get_settings
+            from .office_preview import publish_native_file_write
+
+            # The authorized tool write already completed. An optional preview
+            # failure cannot change the native result or its audit record.
+            with suppress(ValueError, PermissionError, OSError, HTTPException):
+                await publish_native_file_write(self.owner, self.generation, call, output,
+                                                database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
         self.store.append(self.owner, self.generation.run_id, {
             "event": "on_run_step_completed", "data": {"result": {
                 "id": step["id"], "index": step["index"], "completed_at": int(time.time() * 1000),
                 "type": "tool_call", "tool_call": {
-                    "id": call.call_id, "name": call.name, "args": call.arguments,
+                    "id": call.call_id, "name": call.name,
+                    "args": self._visible_tool_args(call),
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},

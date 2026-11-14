@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from .agents import AgentRepository
+from .artifact_prompts import agent_instructions, artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
@@ -256,6 +257,7 @@ approved_batch=approved_batch, on_injected=on_injected,
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
                       agent: dict | None, native_file_tools: bool = False, write_tools: bool = False,
                       ask_user_enabled: bool = False, mcp_enabled: bool = False,
+                      artifacts_mode: str | None = None,
                       resume_history: list[dict] | None = None, partial_text: str = "",
                       approved_batch=None, resume_namespace: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
@@ -276,7 +278,7 @@ event_delivery_lease: tuple[str, str] | None = None,
             return
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
-                       instructions=str((agent or {}).get("instructions") or ""),
+                       instructions=agent_instructions(agent, profile.provider, artifacts_mode),
                        parameters=(agent or {}).get("model_parameters") or {},
                        native_file_tools=native_file_tools, write_tools=write_tools,
                        ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
@@ -356,6 +358,7 @@ async def start_generation(request: Request):
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
+                          artifacts_mode=artifact_mode(payload, agent),
                           granted_scopes=frozenset(scopes), grant_expires=grant_expires)
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh, protocol_version=protocol), status_code=202,
@@ -718,6 +721,7 @@ async def resume_generation(request: Request):
                       native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
+                      artifacts_mode=state.get("artifactsMode"),
                       mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .approval_runtime import ApprovalBatch, prepare_approval_batch
+from .artifact_prompts import artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
@@ -132,6 +133,7 @@ class GenerationStore:
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
+            "artifactsMode": artifact_mode(payload, agent),
         }
         # Internal trigger delivery supplies its already-locked SQLite
         # transaction. The generation and a one-shot child result claim must
@@ -702,10 +704,16 @@ class GenerationStore:
             # rather than erasing them when the assistant text is committed.
             tool_parts = {}
             content = []
+            attachments = {}
             for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
                 value = json.loads(event["data"])
                 kind = value.get("event")
                 data = value.get("data") or {}
+                if kind == "attachment":
+                    attachment = data
+                    if (isinstance(attachment, dict) and isinstance(attachment.get("file_id"), str)
+                            and attachment.get("messageId") == generation.response_message_id):
+                        attachments[attachment["file_id"]] = attachment
                 if kind == "on_run_step_completed":
                     result = data.get("result", {})
                     if isinstance(result.get("tool_call"), dict):
@@ -736,6 +744,7 @@ class GenerationStore:
                 "sender": "Assistant", "isCreatedByUser": False,
                 "text": text,
                 "content": content,
+                **({"attachments": list(attachments.values())} if attachments else {}),
                 "unfinished": status != "complete",
             }
             if content:
@@ -745,7 +754,8 @@ class GenerationStore:
                     (generation.response_message_id, generation.conversation_id, generation.user_message_id,
                      "assistant", text, _json(response_message["content"]),
                      _json({"sender": "Assistant", "isCreatedByUser": False,
-                            "unfinished": status != "complete"}), now, now),
+                            "unfinished": status != "complete",
+                            **({"attachments": list(attachments.values())} if attachments else {})}), now, now),
                 )
             run_state = json.loads(row["state"])
             from .steering import SteeringStore

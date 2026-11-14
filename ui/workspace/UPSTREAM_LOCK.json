@@ -543,6 +543,87 @@
       "python_lsm": "webui/event_triggers.py:enqueue_event,delivery_key,_lane,process_event_deliveries",
       "status": "部分",
       "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/prompts/artifacts/index.ts",
+      "sha256": "94871f10b8fa868b40f8d19a8e54355091e6ee0501ec1526f474dc4a2912239a",
+      "symbols": "generateArtifactsPrompt, artifactsPrompt, artifactsOpenAIPrompt",
+      "python_lsm": "webui/artifact_prompts.py; artifact_prompt_snapshot.json",
+      "status": "完成（提示词源码差分）",
+      "difference": "Node 15组逐字节对照一致，three-mode端点选择与SQLite恢复写入已接入；不代表工具回调/全量Artifacts完成"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/prompts/artifacts/generate.ts",
+      "sha256": "dec5351e841dca1101ccd93aa1c15066c7ab65703e654ea9341b9b2399698033",
+      "symbols": "generateShadcnPrompt",
+      "python_lsm": "webui/artifact_prompts.py; scripts/export-librechat-artifact-prompts.py",
+      "status": "完成（Shadcn提示词生成）",
+      "difference": "JS原函数嵌套dedent文本逐字节对照通过"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/prompts/artifacts/components.ts",
+      "sha256": "62ae18fd08c6f0507294894bc30924791345fb48f3a706944393e76fd5470d01",
+      "symbols": "components, componentName/importDocs/usageDocs",
+      "python_lsm": "artifact_prompt_snapshot.json",
+      "status": "完成（Shadcn源码数据）",
+      "difference": "47源记录、33合并后有效组件，快照包含源文件SHA-256"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "client/src/components/Artifacts/ArtifactPreview.tsx",
+      "sha256": "14b41d04d19bf06e76c85bf7b8325ed657af839dbcd79afadc5298bd7c8008e7",
+      "symbols": "SandpackPreview / SandpackProvider",
+      "python_lsm": "ui/workspace/client/src/components/Artifacts/ArtifactPreview.tsx",
+      "status": "原版保留；外部依赖确认",
+      "difference": "Chromium网络拦截证实codesandbox.io静态与React bundler外部请求，不得宣称全离线"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "client/src/utils/artifacts.ts",
+      "sha256": "719f3b3a50c9aa495c2c667d5049400d5de035ed1de3e3ec75eccbf458b5e55b",
+      "symbols": "getTemplate / artifact mime routing",
+      "python_lsm": "ui/workspace/client/src/utils/artifacts.ts",
+      "status": "原版保留；部分实测",
+      "difference": "HTML/React/Mermaid/SVG/Markdown真实浏览器运行；Office转换后预览尚未端到端验证"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/routes/files/files.js",
+      "sha256": "39e115dd8e954ddfbae24fe92a78cbd50cd258f34b7cfdeb954998514214e17b",
+      "symbols": "GET /download/:userId/:file_id / getDownloadFileMetadata allowlist",
+      "python_lsm": "webui/attachments.py:download_react_file",
+      "status": "完成（本地文件下载路径；共享callback仍部分）",
+      "difference": "源格式兼容的用户路径/文件ID双参数下载、受信任owner校验、白名单X-File-Metadata及原件二进制已实测；原版其它存储策略/异步Office转换不在此次实现范围。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/data-service.ts",
+      "sha256": "0e43b4d25765bc3d0122f59e73884f53d184977136beda2e0ea37b65a89f059c",
+      "symbols": "getFileDownload(userId, file_id): blob URL + metadata cache",
+      "python_lsm": "webui/attachments.py; original retained React useArtifactDownload",
+      "status": "完成（本地文件原件路径实测）",
+      "difference": "Chromium从原有tool attachment卡片读取真实SQLite DOCX原件，Blob下载完全保真；模型产生真实Office预览的转换和工具附件事件仍由共享协议PR负责。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/files/documents/html.ts",
+      "sha256": "c0abfcc6f04a2bb2ff310489c9ffd82d2b217bb1768e75979453fbb8cb78c19f",
+      "symbols": "officeHtmlBucket/bufferToOfficeHtml; escape + DOCX, XLS/XLSX/ODS/CSV/PPTX static fallback",
+      "python_lsm": "webui/office_preview.py",
+      "status": "部分：静态语义HTML已完成；CDN/LibreOffice高保真未移植",
+      "difference": "使用Python标准库安全静态渲染及轻量xlrd支持BIFF.xls；真实上游6个二进制样例、XSS/ZIP上限与真实浏览器回归；不使用原版动态CDN高保真渲染。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/files/documents/zipSafety.ts",
+      "sha256": "c137820f3b7c0d3dcb041addd8c217e2b0d430b78bc31f887e02d065ea38ec13",
+      "symbols": "assertSafeZipSize 25MiB entry/100MiB total; XML DTD denial",
+      "python_lsm": "webui/office_preview.py",
+      "status": "完成：Python ZIP actual-inflate size preflight",
+      "difference": "使用Python标准库安全静态渲染及轻量xlrd支持BIFF.xls；真实上游6个二进制样例、XSS/ZIP上限与真实浏览器回归；不使用原版动态CDN高保真渲染。"
     }
   ],
   "runtime_dependency_lock": {
@@ -589,5 +670,13 @@
     "artifacts_integration": "Child conversation identity pre-reserved/registered with optional PR352 ActiveChildThreads.activate before GenerationStore.begin and settled after terminal; no duplicate guard table or artifact route. PR #352 must be integrated before claiming child edit protection.",
     "subagent_completion_wakeup": "Source-locked internal child continue trigger queue with pre-enqueued typed envelopes, parent branch checks, same-transaction manual/auto result claims and original AgentRunner; bounded 8-attempt 1s-5m half-jitter durable retry/dead-letter, owner-scoped trusted-only requeue as a fresh idempotency lane tail, and per-attempt CAS actor lease fenced through model tools, SSE, checkpoint and finalization. Source live branch tests and SQLite schema migrations. Other JS external inbound trigger bindings, event batching/steer/fire, complete scheduler and app-level approvals remain unported.",
     "external_events": "Source-authenticated original remote API-key event admission, issuer/revoke, SHA256 trigger idempotency, lane serialization, dead source event 8 retry CAS, real AgentRunner fire and guarded bound direct-child continue. Original TS envelope.ts run under Bun with byte-identical json.ts. No unguarded external bindings when Artifacts PR352 absent. Source steer, coalescing, expectedAction remain unported."
+  },
+  "artifacts_office_fixture_lock": {
+    "sample.docx": "23c30abe8d50720ab7acd0aad6f69427c8b101bdab39f515dd6e69d1d336de63",
+    "sample.xlsx": "394c6bd079c0d68d4e4edb4dd630a0418b0ed856d3ee2ab0e9ffcfcf5d20f2b9",
+    "sample.xls": "3f0282b67989043e5186c52e1784341ebac9649ebec416f54b57f9efcb691d2f",
+    "sample.ods": "d81a5886c068be340eb888d99854027b0b861498f874ea8328913e421aa6007e",
+    "sample.pptx": "b3c0d9957f92f98da34b9abeeadf58f6a972b07d312faa02b272bae919d535c0",
+    "empty.docx": "9106332c57592e86f80688601055761f32d2ca7da659964198f572dc48de9198"
   }
 }

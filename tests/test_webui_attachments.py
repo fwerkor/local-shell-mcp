@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import unquote
 
 import httpx
 import pytest
@@ -59,6 +60,20 @@ async def test_controller_chat_attachment_upload_and_sqlite_metadata(tmp_path, m
             download = await client.get(uploaded["filepath"])
             assert download.content == b"chat attachment"
             assert download.headers["x-content-type-options"] == "nosniff"
+            # Pinned LibreChat data-service.ts uses /download/:userId/:file_id,
+            # not the one-segment internal legacy URL returned on upload.
+            original_url = f"/api/files/download/local/{uploaded['file_id']}"
+            canonical = await client.get(original_url)
+            assert canonical.status_code == 200
+            assert canonical.content == b"chat attachment"
+            metadata = json.loads(unquote(canonical.headers["x-file-metadata"]))
+            assert metadata["file_id"] == uploaded["file_id"]
+            assert metadata["filename"] == "chat.txt"
+            assert metadata["filepath"] == uploaded["filepath"]
+            assert metadata["source"] == "local"
+            assert not {"owner", "user", "text", "machine", "path", "tenantId", "_id"}.intersection(metadata)
+            assert (await client.get(f"/api/files/download/foreign/{uploaded['file_id']}")).status_code == 404
+            assert (await client.get("/api/files/download/local/missing")).status_code == 404
             from local_shell_mcp.webui.generations import GenerationStore
             from local_shell_mcp.webui.routes import _repo
             store = GenerationStore(_repo().database)

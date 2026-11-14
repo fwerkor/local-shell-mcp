@@ -605,3 +605,49 @@ fire/continue/steer 投递 identity、CJK 字符和可信 source 字段。
 expectedAction host-observed 证据、750ms/8 项 coalescing、全局多来源
 Trigger 管理。当前 unsupported modes 和 contracts **拒绝入队**，
 没有假装完成或将不可信请求直接送到 Subagent completion 队列。
+
+
+## Artifacts model generation, original previews, active-thread edit fence (incremental)
+
+Pinned source: LibreChat 0.8.8 `e8f3be08623663d4ad7f7241e693c94469b63bb0`.
+This section supplements the existing Artifacts editor/source-vector port above;
+it does not replace that implementation.
+
+| Behavior | Pinned source | Python/React path | State / evidence |
+| --- | --- | --- | --- |
+| Prompt selection and Agent capability | `packages/api/src/prompts/artifacts/index.ts` and `packages/api/src/agents/initialize.ts` | `webui/artifact_prompts.py`, `generation_routes.py`, `generations.py` | Done for default/shadcnui/custom mode and openai/anthropic/google selectors. Original JS `generateArtifactsPrompt` and nested `generateShadcnPrompt` output compared byte-for-byte across 15 provider-mode combinations. |
+| Source-locked Shadcn component docs | `packages/api/src/prompts/artifacts/components.ts` and `generate.ts` | `artifact_prompt_snapshot.json` and `scripts/export-librechat-artifact-prompts.py` | Done, 47 source records -> 33 effective keys after object spreads; SHA-256 of pinned source stored; source-locked build-time extraction, no Node at runtime. |
+| Agent / child / handoff system injection | `packages/api/src/agents/initialize.ts`; `@librechat/agents` 4.0.1 runtime | `generation_routes._start_task`, `subagents.invoke_subagent`, `agent_runner.AgentRunner` | Done for existing supported Python graph paths. Ephemeral mode saved in SQLite run state for resume; no mutation of saved Agent instructions. Tests check real run-loop, immutable idempotent mode snapshot, incremental stream events, persistence, edit and next model-turn read; a separate Ask User / HTTP resume test proves the restored checkpoint contains exactly one original Shadcn system prompt. |
+| Artifact output delta / final history | `api/server/controllers/agents/callbacks.js`; `api/app/clients/prompts/formatMessages.js` | Existing `GenerationStore.append/finish/history` and retained `ArtifactRow` | Text Artifact format passes through unchanged; streamed partial text, full final structured text and saved edits are retained. Generated multi-artifact cards verified in original Chromium; no parallel rich/tool payload protocol introduced. |
+| Child thread read-only from registration through settlement | `packages/api/src/agents/guard.ts`; `api/server/services/Endpoints/agents/subagentThreadStore.js` | `webui/child_thread_activity.py`; `artifact_routes._update`; shared SQLite `active_subagent_threads` | Owner-scoped child registry checked inside the same SQLite write transaction as edit, before static metadata and reserved UUID checks. Trusted `activate` verifies owner/active parent run and forbids parent thread; `settle` verifies run ownership while retaining permanent read-only identity. A deleted parent generation cannot unlock its child. The **full graph task owner must wire its actual child creation/settlement paths** to these calls before runtime-wide active thread parity can be claimed. |
+| Preview MIME routing | `client/src/utils/artifacts.ts`, `client/src/components/Artifacts/ArtifactPreview.tsx` | Original retained React preview and Monaco components | HTML, React, Mermaid, SVG (including `image/svg` alias), Markdown, synthetic DOCX/spreadsheet/presentation previews and source-only code bucket now exercised in real Chromium. Office controls expose preview-only tabs; code exposes source-only. Downloaded bytes/filenames tested for model-supplied preview HTML and code. The source-mapped Python Office **binary-to-static-escaped-HTML conversion** is now tested using the original LibreChat `.docx` fixture; the real browser opens the final SQLite-persisted card, and downloads **exact original ZIP/DOCX bytes**, not the derived HTML. Full original CDN-based high-fidelity visual rendering is still out of scope. No custom editor/preview replacement. |
+| Canonical file-backed Artifact download and metadata | `packages/data-provider/src/data-service.ts:getFileDownload`; `api/server/routes/files/files.js:getDownloadFileMetadata` | `webui/attachments.py:download_react_file`; original `useArtifactDownload` and `useAttachmentLink` | The retained frontend requests `GET /api/files/download/:userId/:file_id`; the old Python implementation only exposed `/:file_id` and could not serve original-file panel downloads. Both routes now resolve through the same owner-scoped SQLite record with authenticated principal/path-owner match, content-disposition, original `application/octet-stream` bytes and URL-encoded **allowlisted** `X-File-Metadata` (no owner, text, physical path). Wrong-owner/missing records get 404; the legacy single-ID route still works. Real Chromium plus SQLite test proves original DOCX archive survives the view/download path without substituting cached HTML. Static HTML production from actual Office binary input now works through `publish_office_tool_output` for authorized native local file writes; async content extraction/agent resource/remote tool callbacks remain shared integration work. |
+| Trusted native tool-produced Office files | `api/server/controllers/agents/callbacks.js:on_tool_end`; `packages/api/src/files/documents/html.ts:bufferToOfficeHtml`; `zipSafety.ts` | `agent_runner.AgentRunner._completed` + `webui/office_preview.py` + `GenerationStore.finish` | Completed for **authorized local `file_write`** Office outputs (.docx, .xlsx, .xls, .ods, .csv, .pptx, .potx). The existing LSM native file-write must succeed and return matching filename/bytes/SHA-256; no model-provided path is opened. Source bytes are published through the existing `publish_attachment` with SQLite run owner/status validation and an atomic original `attachment` SSE. Retry of the same call+content reuses the first file without a second event; `GenerationStore.finish` attaches it to final message/SQLite metadata for refresh. Invalid preview formats retain downloadable raw bytes with `failed` status. Six pinned LibreChat office binaries, actual original-model `file_write` dispatch and real Chromium DOCX→HTML→download pass. Tool UI events omit large base64, native args/checkpoint remain untouched. Remote files, arbitrary shell outputs, MCP image/UI resources and Graph-child tool callbacks **not ported here**. |
+| Safe Office HTML fallback | `packages/api/src/files/documents/html.ts` and `zipSafety.ts` | `webui/office_preview.py` | Escaped static HTML, 512KiB output cap; actual ZIP inflation 25MiB per entry / 100MiB total, DTD/ENTITY refusal, max 5,000 rows / 500 slides / 256 cols. Original XLS BIFF via `xlrd>=2.0.2,<3` (pure Python); other parsers stdlib. No required Node or LibreOffice runtime. The original CDN-based high-fidelity DOCX/PPTX renderers are deliberately not claimed; current output is semantic/text-and-table preview only. |
+| Offline and CSP limits | Original `@codesandbox/sandpack-react` `SandpackProvider` and preview components | Retained frontend assets | Chromium with all non-loopback requests blocked confirmed `*.sandpack-static-server.codesandbox.io/__csb_relay/` for static HTML/SVG/Markdown and `2-19-8-sandpack.codesandbox.io/` for React. Monaco editor offline **does not imply offline Sandpack runtime**; blocked-network test only asserts the shell/cards, not that external previews rendered. Mermaid panel did not require an iframe in this test. |
+| Tool-produced artifacts, filtering | `api/server/controllers/agents/callbacks.js`, `packages/api/src/mcp/parsers.ts`, original host content-filter helpers | Existing tool event/attachment and message protocol paths | **Not complete**: upstream callback's file-backed artifact attachment events, `files` mapping, content-filter host policy, image/UI resource projections and full rich/tool history await their owners' shared message-protocol/attachment implementations. No duplicate payload representation was created. |
+
+Evidence commands (independent worktree):
+
+```sh
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_prompts.py tests/test_webui_artifact_routes.py tests/test_webui_artifacts_source.py
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_browser.py tests/test_webui_artifact_preview_browser.py tests/test_webui_artifact_file_download_browser.py tests/test_webui_attachments.py tests/test_webui_office_preview.py tests/test_webui_office_runtime.py
+# Source-differential oracle only; Node and npm dedent are BUILD/TEST dependencies,
+# not needed by the Python+SQLite controller:
+node scripts/check-librechat-artifact-prompt-diff.cjs /path/to/pinned-LibreChat /path/to/dedent-1.7.0
+```
+
+Original editor's retry/invalid input/owner boundaries still apply. New tests additionally
+cover active and settled child mutation denial (including deleted parent run),
+partial Artifact cancellation, multiple independent Artifacts and repeated editing,
+and two competing edits with the same original source (one 200, the stale second 400).
+The focused source/editor/preview suite passed 49 tests before the additional
+original-file download E2E, with 98.3% branch coverage across the four
+Artifacts-specific Python modules. The previous full isolated suite passed 2346
+cases and 95.33% global branch coverage; the added download route is being
+re-checked in CI (do not infer a new full-suite pass from the earlier run). No remaining behavior is
+represented as fully source-equivalent merely because an identically named
+frontend feature appears. The new Office preview's separate source-differential
+format fixtures and security tests are in `tests/test_webui_office_preview.py`,
+native runtime/owner/idempotency tests in `tests/test_webui_office_runtime.py`, and
+native-file-write-to-React replay in `test_webui_artifact_file_download_browser.py`.
