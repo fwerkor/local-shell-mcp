@@ -427,6 +427,16 @@ class AgentRunner:
             self.resume_namespace = self.namespace
             self.approved_batch = self.store.approved_batch(self.owner, self.generation.run_id)
         if self.approved_batch is not None and self.resume_namespace == self.namespace:
+            # LibreChat ToolNode approval can precede a browser OAuth login.
+            # Resolve all Action credentials before executing *any* reviewed
+            # sibling; pending review proof remains in SQLite across login.
+            reviewed_calls = [entry.tool_call() for entry in self.approved_batch.entries
+                              if entry.decision["type"] in {"approve", "edit"} and
+                              not any(call.call_id == entry.call_id and
+                                      replay_key(call, index) in self.cache
+                                      for index, call in enumerate(state.pending_calls))]
+            await self._prepare_oauth(reviewed_calls, state)
+
             async def completed(result):
                 original = next(call for call in state.pending_calls if call.call_id == result.call.call_id)
                 record = {"proposal": {"name": original.name, "args": copy.deepcopy(original.arguments)}, "output": result.raw_content if result.raw_content is not None else result.content}

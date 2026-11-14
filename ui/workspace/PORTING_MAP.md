@@ -312,6 +312,10 @@ TypeScript 模块，导出解析器、工具定义与域名验证的原版结果
   OAuth回调具备有效的WebUI登录会话时，先重新核验机器权限并自动启动原图工具节点；
   否则由原聊天页的Bearer授权`resume`/`status`/`stream`重新附着，
   成功页通过同源BroadcastChannel仅传递公开的Action ID，原标签页自行鉴权。
+  Tool Approval已通过时若OAuth尚未授权，Agent先保留已审批的SQLite
+  `approvedToolBatch`、暂停工具执行并展示OAuth登录；登录后沿原审批和检查点路径继续，
+  拒绝的工具不会发起登录也不会执行；在同批存在多个OAuth调用时先顺序授权，
+  确认所有必需令牌后才发送外部请求。
   已授权的Action在调用HTTP前持久记录`dispatching`，完成后将结果持久写入图
   checkpoint及事件；Controller异常重启时，仅在未发送HTTP或已确认结果落盘的
   情况下继续原图。对于可能产生副作用且HTTP已启动但结果未知的调用，

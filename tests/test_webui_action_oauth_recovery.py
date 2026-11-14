@@ -446,3 +446,42 @@ async def test_two_oauth_actions_in_one_model_batch_never_send_http_before_both_
         assert ctx.model_calls == ["user", "tool"]
         assert len(ctx.seen) == 2
         assert sorted(item["path"] for item in ctx.seen) == ["/record", "/record-2"]
+
+
+@pytest.mark.asyncio
+async def test_approved_action_oauth_login_keeps_review_and_calls_once(scenario, monkeypatch):
+    """Tool Approval -> sign-in -> same reviewed tool, without bypass or replay."""
+    ctx = scenario
+    _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {
+        "enabled": True, "ask": [ctx.tool],
+    }}})
+    await generation_routes._run_model("local", ctx.gen, ctx.profile, parent_agent=ctx.agent)
+    pending = ctx.store.pending_action("local", ctx.gen.run_id)
+    assert pending["payload"]["type"] == "tool_approval"
+    assert len(ctx.model_calls) == 1 and not ctx.seen
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ctx.app),
+                                 base_url="https://chat.example.org", follow_redirects=False) as client:
+        approval = await client.post("/api/agents/chat/resume", json={
+            "conversationId": ctx.gen.conversation_id, "actionId": pending["actionId"],
+            "decisions": [{"tool_call_id": "call-oauth", "decision": "approve"}],
+        }, headers={"x-owner": "local"})
+        assert approval.status_code == 200, approval.text
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        assert ctx.store.get("local", ctx.gen.run_id).status == "requires_action"
+        assert ctx.store.approved_review("local", ctx.gen.run_id) is None  # approval is retained in paused state
+        with ctx.db.connect() as conn:
+            row = conn.execute("SELECT state FROM runs WHERE id=?", (ctx.gen.run_id,)).fetchone()
+        assert json.loads(row["state"])["approvedToolBatch"]["actionId"] == pending["actionId"]
+        assert not ctx.seen
+        oauth_events = [e for _, e in ctx.store.events("local", ctx.gen.run_id)
+                        if e.get("event") == "on_run_step_delta" and e.get("data", {}).get("delta", {}).get("auth")]
+        assert len(oauth_events) == 1
+        state = parse_qs(urlsplit(oauth_events[0]["data"]["delta"]["auth"]).query)["state"][0]
+        await _login(ctx, state, client)
+        resumed = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
+                                   headers={"x-owner": "local"})
+        assert resumed.status_code == 200, resumed.text
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        assert ctx.store.get("local", ctx.gen.run_id).status == "complete"
+        assert ctx.model_calls == ["user", "tool"]
+        assert len(ctx.seen) == 1
