@@ -262,3 +262,132 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## Attachment lifecycle, reference ownership and resource processing (Python/SQLite)
+
+Reference revisions: LibreChat `e8f3be08623663d4ad7f7241e693c94469b63bb0`
+(`api/server/routes/files/files.js`, `api/server/services/Files/process.js`,
+`packages/api/src/files/deletion.ts`, `api/app/clients/prompts/formatMessages.js`),
+and `@librechat/agents@4.0.1` (`c4ffb9b1b78421bf63eba3e56993017f922387f3`).
+
+| Original behavior / API | Python port | Status and intentional differences |
+| --- | --- | --- |
+| `POST /api/files`, `POST /api/files/images`, native Controller upload | `webui/attachments.py:upload_react_file`, `publish_attachment`, `upload_attachment` | Owner-scoped Controller-local storage; `O_EXCL`, inode/size/SHA fingerprint, file and directory sync, SQLite upload intent; no external staging bridge |
+| `GET /api/files`, `GET /api/files/agent/:agent_id`, download | `webui/attachments.py:list_react_files`, `agent_files`, `download_react_file` | Authenticated owner-scoped DTOs; download bytes remain private; paths provided to the *model* only through authorized context/history |
+| `DELETE /api/files`, `buildDeleteFilesResponse`, `partitionAgentResourceFiles` | `webui/attachments.py:delete_react_files`, `webui/file_deletion.py` | Response and partition order ported; source fixture executes Node for differential parity; no Mongo transaction or Node runtime |
+| `deleteAgentResourceFiles`, last-owner reference, global owner deletion | `AttachmentDeletionStore._prepare`, `_finish`, `_remove_references` | **Stronger local guarantee**: `BEGIN IMMEDIATE` covers the final reference check, unlink, filesystem isolation, metadata and all-Agent reference cleanup; other Agent writers share SQLite writer serialization |
+| Native file and resource binding | `AgentRepository.add_resource_file(...,db=db)` | Binding and physical metadata publish atomically in one SQLite transaction |
+| `processAgentFileUpload` context extraction | `extract_context_text`, `agent_context_messages` | UTF-8 text, optional PDF text and DOCX extraction, 128 KiB budget; extracted text is injected as untrusted user-level source material, not privileged instructions |
+| `processAgentFileUpload` OCR, configured RAG, `file_search`, `execute_code`, `image_edit` | N/A | **Not ported**. Explicit 501 for unsupported permanent resource uploads. Native file tools remain LSM's existing authorized tool registry; raw upload is **not** represented as OCR, vector embedding or code environment provisioning |
+| Provider-native image/audio/video handling | Existing provider and generation components | Not complete: byte upload and Controller path are available, but provider media transformations, speech-to-text and image embeddings are not claimed |
+
+**Deletion and crash ordering:** persist `attachment_deletions` (`prepared`) → re-read
+current metadata and Agent references under SQLite `BEGIN IMMEDIATE` → rename blob
+to a same-directory quarantine and `fsync` its directory → delete metadata,
+clean Agent references and mark intent `committed` in the *same* SQLite commit →
+delete quarantine and release intent. A process-wide RLock is insufficient: the
+implementation uses the existing cross-process `.local-shell-mcp/locks` flock /
+Windows file lock plus SQLite's single writer transaction. Interrupted precommit
+operations restore bytes using atomic hardlink-with-EXCL (no overwrite of an
+external reconstruction). Postcommit quarantine is removed. Collision or
+missing evidence retains intent and bytes for inspection. Competing writes may
+bind another Agent *between* prepared and final checks; the final check detects
+that and commits only a detach. This is verified with real spawned processes.
+
+**Upload ordering:** persist `attachment_uploads` intent → exclusive creation,
+record inode and fsync parent → stream, flush and fsync bytes → persist hash and
+size → extract optional text → commit attachment row, resource association and
+intent removal atomically. Lost commit acknowledgement is handled by SQLite
+readback: published bytes must not be deleted. Recovery waits one hour to avoid
+collecting a concurrently active upload, and cleans only provably uncommitted
+files that still match inode, size and SHA-256. Unknown identity, external
+replacement or inaccessible DB retains the intent and file. State and content
+stay under the same `.local-shell-mcp/` root. Existing records are not migrated
+by destructive deletion.
+
+**Validation:** Python route/upload/delete, restart, fault injection (including
+uncertain postcommit acknowledgement and external inode reconstruction),
+cross-process competing reference writers/deleters, and Node fixture differential.
+The original React UI components and preexisting LSM file execution tools are
+unchanged; no duplicate file execution implementation is introduced.
+
+**Remaining parity blockers:** full configured OCR (incl. scanned PDFs), RAG
+extraction/chunking/vector storage and cleanup, execute_code/image_edit
+deployment and secondary-storage deletion, provider-native image/audio payload
+conversion, all project-specific retention semantics and true remote-machine
+resource provisioning. These are not silently downgraded to raw upload.
+
+### Canonical tool-generated file attachments and deferred preview
+
+Source: LibreChat `e8f3be08623663d4ad7f7241e693c94469b63bb0`
+`api/server/controllers/agents/callbacks.js:createToolEndCallback`,
+`writeAttachment`, `writeAttachmentUpdate`, `buildResponsesAttachment`,
+`packages/data-provider/src/types/files.ts:TFilePreview`, original
+`client/src/hooks/SSE/useAttachmentHandler.ts` and
+`client/src/hooks/Files/useAttachmentPreviewSync.ts`.
+
+- `webui/tool_attachments.py` now maps *already-published and owned*
+  Controller files (not paths or remote code environment file IDs) to actual
+  Agent tool-call identities. Linking requires the caller's active run,
+  persisted matching `on_run_step` and matching file owner; insertion and
+  replayable `{"event":"attachment","data":...}` happen in a single SQLite
+  transaction. `webui/agent_runner.py:_completed` consumes only explicit
+  native structured `artifact.files[].file_id` metadata from the existing LSM
+  tool executor, refusing guessed ownership and reusing its original file
+  execution logic.
+- The existing React file DTO is used directly, extended with canonical
+  `messageId` (assistant response ID), `toolCallId`, `conversationId`;
+  subsequent status updates reuse the **same file_id**. The original React
+  listener upserts by file identity and tool-call scope. There is no parallel
+  artifact payload or separate file execution engine.
+- `tool_attachment_links` uses SQLite foreign keys with delete cascade, and
+  `webui/generations.py:finish` saves assistant attachments in the final
+  message. `webui/storage.py:WorkspaceRepository.messages` overlays the
+  current owner-filtered link records on reload. Deleted links never reappear
+  through a historical message snapshot; attachment-only assistant turns
+  persist even when the text is empty.
+- `update_attachment_preview` persists `pending/ready/failed` and emits
+  repeat `attachment` events while the run is live. After completion, a
+  canonical file record updates persisted message metadata. Authenticated,
+  owner-scoped `GET /api/files/{file_id}/preview` implements the retained
+  React polling contract; it returns no-store JSON and 404 after deletion.
+  Untrusted arbitrary HTML remains **unsupported** (the original sanitizing
+  office renderer is not ported); previews accept bounded text only.
+- Last-Agent-reference deletion also checks user message file descriptors and
+  canonical tool attachment links in the same `BEGIN IMMEDIATE` transaction.
+  Concurrent message creation and tool linking both participate in SQLite
+  writer serialization. Owner-requested global deletion still removes the file
+  and all links. Removed conversation history may leave an unreferenced blob
+  until explicit owner cleanup; a full retention/TTL sweeper is still blocked.
+
+### Non-destructive Windows upload identity upgrade
+
+Earlier PR drafts recorded `st_dev` / `st_ino` as SQLite `INTEGER`; Windows
+can report unsigned NTFS file IDs greater than signed 64-bit. Fresh databases
+use TEXT and all existing databases are additively migrated with a dedicated
+`file_identity TEXT` column. New upload intents write a decimal device/inode
+pair into the TEXT field; recovery accepts exact legacy INTEGER identities
+only when SQLite retained them without REAL precision loss. Unknown and
+rounded legacy values are retained, never deleted based on a guess.
+A regression starts from a legacy INTEGER schema and verifies original data
+survives and new uploads publish correctly.
+
+The original React file-chip removal button, its deferred DELETE mutation,
+real Chromium upload, SQLite byte deletion and reload were all exercised;
+this does not claim remote machine file staging or full media conversion.
+PDF and DOCX optional text parsers were run against real generated documents,
+with 64-page PDF and 128-KiB extraction limits. Scanned pages still require
+OCR; file_search vector extraction and execution-session file downloads still
+require their dedicated upstream-style processors.
+
+**Tool-completion crash boundary:** the native LSM tool result remains the
+single execution result. When it contains explicit published Controller
+`artifact.files[].file_id` references, `GenerationStore.append_tool_completion`
+commits the `on_run_step_completed` record, `tool_attachment_links`, and
+original `attachment` SSE events within **one** `BEGIN IMMEDIATE`
+transaction. A failed file-link SQL write rolls back the completion and all
+links; a lost acknowledgement may be retried by the immutable run-step ID
+without duplicating events. A mutated replay is rejected. Foreign/remote
+unpublished file IDs are skipped and do not falsely materialize files.
+This covers the tool completion-to-file link window. Graph checkpoint and
+external code-environment file download/recovery remain separate projects.

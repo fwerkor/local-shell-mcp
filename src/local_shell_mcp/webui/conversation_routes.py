@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 from starlette.exceptions import HTTPException
@@ -10,7 +11,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from .routes import _body, _not_found, _owner, _repo
-from .storage import _now
+from .storage import _json, _now
 
 
 def _argument(body: dict) -> dict:
@@ -84,6 +85,56 @@ async def delete_all(request: Request):
     return JSONResponse({"success": True, "deletedCount": removed})
 
 
+def _clone_attachment_links(db, owner: str, source_id: str, new_id: str,
+                            messages, identities: dict[str, str], now: int) -> None:
+    """Carry live, owner-checked file references over to a new message graph.
+
+    Cloned messages get new IDs, so original run-linked references cannot be
+    reused. Completed provenance runs hold the copied links without replaying
+    the source generation or changing the original run's identity.
+    """
+    assistants = [row["id"] for row in messages if row["role"] == "assistant"]
+    if not assistants:
+        return
+    links = db.execute(
+        "SELECT l.run_id,l.response_message_id,l.tool_call_id,l.file_id,r.agent_id,r.state "
+        "FROM tool_attachment_links l JOIN runs r ON r.id=l.run_id "
+        "JOIN attachments a ON a.id=l.file_id AND a.owner=? "
+        "WHERE r.conversation_id=? AND l.response_message_id IN ("
+        + ",".join("?" for _ in assistants) + ") ORDER BY l.rowid",
+        (owner, source_id, *assistants),
+    ).fetchall()
+    runs: dict[tuple[str, str], str] = {}
+    for link in links:
+        key = (link["run_id"], link["response_message_id"])
+        run_id = runs.get(key)
+        if run_id is None:
+            run_id = str(uuid.uuid4())
+            runs[key] = run_id
+            original_state = json.loads(link["state"])
+            new_response_id = identities[link["response_message_id"]]
+            new_user_id = identities.get(original_state.get("userMessageId")) or next(
+                (identities[row["id"]] for row in messages if row["role"] == "user"), new_response_id,
+            )
+            # GenerationStore.latest/get must be able to decode every run,
+            # including completed provenance-only runs in cloned chats.
+            clone_state = {
+                "responseMessageId": new_response_id, "userMessageId": new_user_id,
+                "generationCreatedAt": now // 1000, "generationProtocolVersion":
+                original_state.get("generationProtocolVersion", 2),
+            }
+            db.execute(
+                "INSERT INTO runs(id,conversation_id,agent_id,status,state,created_at,updated_at) "
+                "VALUES(?,?,?,'complete',?,?,?)",
+                (run_id, new_id, link["agent_id"], _json(clone_state), now, now),
+            )
+        db.execute(
+            "INSERT INTO tool_attachment_links(run_id,response_message_id,tool_call_id,file_id) "
+            "VALUES(?,?,?,?)",
+            (run_id, identities[link["response_message_id"]], link["tool_call_id"], link["file_id"]),
+        )
+
+
 def _clone(owner: str, values: dict, *, only_to_message: str | None = None) -> dict:
     repo = _repo()
     cid = _conversation_id(values)
@@ -122,10 +173,20 @@ def _clone(owner: str, values: dict, *, only_to_message: str | None = None) -> d
                 (ids[row["id"]], new_cid, ids.get(row["parent_id"]), row["role"],
                  row["text"], row["content"], row["metadata"], now + i, now + i),
             )
+        _clone_attachment_links(db, owner, cid, new_cid, messages, ids, now)
         response = repo._convo(db.execute("SELECT * FROM conversations WHERE id=?", (new_cid,)).fetchone())
-        response["messages"] = [repo._message(row) for row in db.execute(
+        from .tool_attachments import response_attachments
+
+        cloned_rows = db.execute(
             "SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at,id", (new_cid,)
-        ).fetchall()]
+        ).fetchall()
+        live = response_attachments(db, owner, [row["id"] for row in cloned_rows if row["role"] == "assistant"])
+        response["messages"] = []
+        for row in cloned_rows:
+            message = repo._message(row)
+            if row["role"] == "assistant" and (row["id"] in live or "attachments" in message):
+                message["attachments"] = live.get(row["id"], [])
+            response["messages"].append(message)
     return response
 
 
