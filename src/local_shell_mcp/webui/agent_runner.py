@@ -446,7 +446,8 @@ class AgentRunner:
 
         profile = state.context.profile
         try:
-            estimate = calculate_budget(state.messages, state.context.tools, 2_000_000,
+            estimate = calculate_budget(state.provider_projection or state.messages,
+                                    state.context.tools, 2_000_000,
                                         reserve_ratio=0)
             instruction_overhead = estimate.instruction_tokens + estimate.tool_schema_tokens
             calibration = self.store.token_calibration(self.owner, self.generation.run_id,
@@ -461,6 +462,40 @@ class AgentRunner:
             # Usage is observational metadata; a failed calibration update
             # cannot invalidate an otherwise successful model response.
             logging.getLogger(__name__).warning('Token calibration failed (%s)', type(exc).__name__)
+
+    def _project_model_messages(self, state: AgentLoopState) -> list[dict]:
+        from .fading_projection import project_faded_provider_messages
+
+        return project_faded_provider_messages(state.messages, state.context.fading_tier)
+
+    def _update_fading_tier(self, state: AgentLoopState, budget, calibration, config, window: int) -> None:
+        from .fading import (
+            resolve_fading_tier,
+            seed_fading_tier,
+        )
+
+        profile = state.context.profile
+        agent_id = (state.context.agent or {}).get('id') or 'default'
+        current = state.context.fading_tier or self.store.fading_tier(
+            self.owner, self.generation.run_id, agent_id, profile.provider, profile.model)
+        seeded = seed_fading_tier(window, current)
+        current_turn = []
+        for message in reversed(state.messages):
+            if message.get('role') == 'user':
+                break
+            current_turn.append(message)
+        width = max((len(message.get('tool_calls') or []) for message in current_turn), default=1)
+        effective = max(0, budget.available_for_messages / calibration.ratio)
+        window_available = max(1, window - budget.reserve_tokens)
+        pressure = (window - budget.reserve_tokens - budget.remaining_context_tokens) / window_available
+        signals = {'contextPressure': pressure, 'effectiveRawTokens': effective,
+                   'summarizationEnabled': config.get('enabled') is not False,
+                   'toolExchangeWidth': max(1, width)}
+        resolved = resolve_fading_tier(seeded, window, signals)
+        state.context.fading_tier = resolved
+        if resolved != current:
+            self.store.record_fading_tier(self.owner, self.generation.run_id,
+                                          agent_id, profile.provider, profile.model, resolved)
 
     async def _before_model(self, state):
         """SDK-style recency + trigger, using the shared SQLite checkpoint."""
@@ -484,14 +519,13 @@ class AgentRunner:
             state.context.profile.provider, state.context.profile.model)
         try:
             config = settings.get('summarization') or {}
-            if isinstance(config, dict) and config.get('enabled') is False:
-                return
             if not isinstance(config, dict):
                 config = {}
             budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
                                       reserve_ratio=config.get('reserveRatio', 0.05),
                                       calibration_ratio=calibration.ratio)
-            if budget.remaining_context_tokens > 0:
+            self._update_fading_tier(state, budget, calibration, config, int(max_raw))
+            if config.get('enabled') is False or budget.remaining_context_tokens > 0:
                 return
             if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
                 return
@@ -524,6 +558,19 @@ class AgentRunner:
                 state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
                 self._summary_failures = 0
                 await self._save(state, [])
+                # A committed summary replaces the old prefix; restore a
+                # fresh v2 fading tier so past masking doesn't pin this run.
+                from .fading import create_fading_tier
+
+                state.context.fading_tier = create_fading_tier(int(max_raw))
+                try:
+                    self.store.record_fading_tier(
+                        self.owner, self.generation.run_id,
+                        (state.context.agent or {}).get('id') or 'default',
+                        state.context.profile.provider, state.context.profile.model,
+                        state.context.fading_tier)
+                except Exception as error:
+                    logging.getLogger(__name__).warning('Fading reset failed (%s)', type(error).__name__)
             except Exception:
                 self._summary_failures += 1
                 # The source leaves the state intact on summary failure; never
@@ -621,7 +668,8 @@ class AgentRunner:
         result = await run_agent_loop(state, stream_tools=self.stream_tools, stream_text=self.stream_text,
                                       dispatch=self._dispatch, on_text=emit, save_state=self._save,
                                       before_model=self._before_model,
-                                      on_model_usage=self._observe_model_usage)
+                                      on_model_usage=self._observe_model_usage,
+                                      project_messages=self._project_model_messages)
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
                                                review["actionId"], result, self.partial_text)

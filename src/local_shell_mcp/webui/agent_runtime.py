@@ -32,6 +32,7 @@ class AgentContext:
     tool_end: bool = False
     agent: dict | None = None
     compaction_semantic_index: SemanticSnapshot | None = None
+    fading_tier: dict | None = None
 
 
 @dataclass
@@ -43,6 +44,7 @@ class AgentLoopState:
     pending_calls: list[ModelToolCall] = field(default_factory=list)
     tool_step_started: bool = False
     completed: bool = False
+    provider_projection: list[dict] | None = None
 
 
 @dataclass
@@ -62,6 +64,7 @@ async def run_agent_loop(
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
     before_model: Callable[[AgentLoopState], Awaitable[None]] | None = None,
     on_model_usage: Callable[[ModelUsage, AgentLoopState], Awaitable[None]] | None = None,
+    project_messages: Callable[[AgentLoopState], list[dict]] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -103,9 +106,11 @@ async def run_agent_loop(
             temperature = max(0.0, min(float(temperature), 2.0))
         calls: list[ModelToolCall] = []
         text_parts: list[str] = []
-        source = stream_tools(context.profile, state.messages, tools=context.tools,
+        projected = project_messages(state) if project_messages else state.messages
+        state.provider_projection = projected
+        source = stream_tools(context.profile, projected, tools=context.tools,
                               max_tokens=max_tokens, temperature=temperature) if context.tools else \
-            stream_text(context.profile, state.messages, max_tokens=max_tokens, temperature=temperature)
+            stream_text(context.profile, projected, max_tokens=max_tokens, temperature=temperature)
         async for item in source:
             if isinstance(item, ModelToolCall):
                 calls.append(item)
