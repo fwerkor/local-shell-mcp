@@ -2,9 +2,9 @@
 
 Source: @librechat/agents 4.0.1 messages/format.ts:
 collectCompactionSemanticEntriesFromPart / formatAgentMessages.
-Only recorded tool-call outcomes with exact provider-facing text are admitted.
-Other source part kinds remain unsupported until their trusted projection is
-available. Never infer provenance from a model response or user text.
+Trust is established by owner-bound SQLite ancestry and exact provider-message
+matching. Tool calls, activity phases and reasoning labels remain host-owned;
+never infer provenance from user/model supplied text or metadata.
 """
 from __future__ import annotations
 
@@ -40,6 +40,101 @@ def _ancestry(database: Any, owner: str, conversation_id: str, anchor_id: str) -
     return list(reversed(rows))
 
 
+def _matching_visible_assistant(parts: list, messages: list[dict]) -> tuple[int, list[int]] | None:
+    """Match the exact `GenerationStore.history` projection to the saved source.
+
+    An arbitrary equal-looking model message is insufficient when multiple
+    candidates exist. Ambiguous or structured/unsupported parts are skipped.
+    """
+    text_parts = [(index, part['text']) for index, part in enumerate(parts)
+                  if isinstance(part, dict) and part.get('type') == 'text'
+                  and isinstance(part.get('text'), str)]
+    reasoning_parts = [(index, part.get('text') or part.get('thinking'))
+                       for index, part in enumerate(parts) if isinstance(part, dict)
+                       and part.get('type') in ('think', 'thinking', 'reasoning')]
+    if not text_parts and not reasoning_parts:
+        return None
+    text = ''.join(value for _, value in text_parts)
+    reasoning = '\n'.join(str(value) for _, value in reasoning_parts if value)
+    candidates = [index for index, item in enumerate(messages)
+                  if isinstance(item, dict) and item.get('role') == 'assistant'
+                  and not item.get('tool_calls') and item.get('content') == text
+                  and (item.get('reasoning_content') or '') == reasoning]
+    if len(candidates) != 1:
+        return None
+    part_indices = [index for index, _ in text_parts]
+    part_indices.extend(index for index, value in reasoning_parts if value)
+    return candidates[0], part_indices
+
+
+def _derived_semantic_snapshot(entries: list[dict]) -> SemanticSnapshot | None:
+    """Maintain the source collector's head/tail/type coverage budget.
+
+    Compaction must not discard *every* host hint when a long tool-running
+    session crosses the source 256-input-entry threshold.
+    """
+    if not entries:
+        return None
+    count = len(entries)
+    if count <= 256:
+        return snapshot_compaction_semantic_index(entries)
+    retained = set(range(min(count, 64)))
+    retained.update(range(max(0, count - 128), count))
+    for kind in ('tool_intent', 'tool_outcome', 'activity_phase', 'reasoning_label'):
+        indices = [i for i, entry in enumerate(entries) if entry['type'] == kind]
+        retained.update(indices[:8])
+        retained.update(indices[-8:])
+    # Worst-case disjoint coverage is 64+128+4*16=256.
+    selected = [entries[index] for index in sorted(retained)]
+    return snapshot_compaction_semantic_index(selected, provided_entry_count=count)
+
+
+def _labels_from_source(source: str, parts: list, visible: tuple[int, list[int]] | None,
+                        refs: dict[int, list[dict]]) -> list[dict]:
+    if visible is None:
+        return []
+    message_index, retained_indices = visible
+    anchors = set(retained_indices)
+    refs.setdefault(message_index, []).extend(
+        {'attribution': 'model', 'sourceMessageId': source,
+         'sourceContentPartIndices': [index]} for index in retained_indices if index <= 4095)
+    labels = []
+    for index, part in enumerate(parts[:4096]):
+        if not isinstance(part, dict):
+            continue
+        if part.get('type') == 'think' and index in anchors:
+            reasoning_step = part.get('reasoning_label_step_id')
+            revision = part.get('reasoning_label_revision')
+            if not isinstance(reasoning_step, str) or not 0 < len(reasoning_step) <= 512 or (
+                type(revision) is not int or revision < 0 or revision > 9007199254740991
+            ):
+                continue
+            status = part.get('reasoning_label_status')
+            label = part.get('reasoning_label')
+            malformed = status not in ('complete', 'streaming') or not isinstance(label, str)
+            labels.append({'type': 'reasoning_label', 'sourceMessageId': source,
+                           'sourceContentIndex': index, 'revision': revision,
+                           'status': 'pending' if status == 'streaming' or malformed else 'committed',
+                           'text': label if isinstance(label, str) else '',
+                           'reasoningStepId': reasoning_step,
+                           **({'redacted': True} if malformed else {})})
+        elif part.get('type') == 'activity_label' and part.get('activity_label_type') == 'phase':
+            anchor = part.get('activity_start_index')
+            revision = part.get('activity_label_revision', 0)
+            if (type(anchor) is not int or anchor not in anchors or anchor > 4095 or
+                    type(revision) is not int or revision < 0 or revision > 9007199254740991):
+                continue
+            pending = part.get('pending', False)
+            label = part.get('activity_label')
+            malformed = type(pending) is not bool or not isinstance(label, str)
+            labels.append({'type': 'activity_phase', 'sourceMessageId': source,
+                           'sourceContentIndex': anchor, 'revision': revision,
+                           'status': 'pending' if pending is True or type(pending) is not bool else 'committed',
+                           'text': label if isinstance(label, str) else '',
+                           **({'redacted': True} if malformed else {})})
+    return labels
+
+
 def derive_persisted_semantic_index(database: Any, owner: str, conversation_id: str,
                                     anchor_id: str, messages_to_refine: list[dict],
                                     *, intent_tool_names: set[str] | None = None,
@@ -62,8 +157,8 @@ def derive_persisted_semantic_index(database: Any, owner: str, conversation_id: 
                     assistant_calls.setdefault(call['id'], []).append(i)
         elif message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
             results.setdefault(message['tool_call_id'], []).append(i)
-    if not assistant_calls or not results:
-        return None, copied
+    # Activity/reasoning labels may exist without any tool execution; continue
+    # to validate assistant provenance even when the tool index is empty.
     rows = _ancestry(database, owner, conversation_id, anchor_id)
     if not rows:
         return None, copied
@@ -75,6 +170,8 @@ def derive_persisted_semantic_index(database: Any, owner: str, conversation_id: 
         source = row['id']
         if not isinstance(source, str) or not 0 < len(source) <= 512:
             continue
+        visible = _matching_visible_assistant(row['parts'], copied)
+        entries.extend(_labels_from_source(source, row['parts'], visible, refs))
         for index, part in enumerate(row['parts']):
             if index > 4095:
                 break
@@ -121,4 +218,4 @@ def derive_persisted_semantic_index(database: Any, owner: str, conversation_id: 
             # upstream formatter; it must pass its independent validation.
             continue
         copied[i]['additional_kwargs'] = {'provenance': {'version': 1, 'parts': parts}}
-    return snapshot_compaction_semantic_index(entries, provided_entry_count=len(entries)), copied
+    return _derived_semantic_snapshot(entries), copied
