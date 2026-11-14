@@ -358,3 +358,44 @@ async def test_automatic_memory_setup_failure_cannot_break_primary_chat(memory_r
     await generation_routes._run_model('alice', job, profile)
     assert store.get('alice', job.run_id).status == 'complete'
     assert store.history('alice', job.conversation_id)[-1]['content'] == 'The primary model succeeded.'
+
+
+@pytest.mark.asyncio
+async def test_auto_memory_respects_tool_argument_filter_before_memory_mutation(memory_run):
+    db, store, settings, job, profile = memory_run
+    enable(settings)
+    settings.save_setting('alice', 'webui.filters.config', {'toolArguments': {'pii': {
+        'fields': ['arguments'], 'starterPatterns': [], 'customPatterns': [{
+            'id': 'secret', 'label': 'internal', 'regex': 'PRIVATE-MEMORY-[0-9]+'}]}}})
+
+    async def stream(*args, **kwargs):
+        yield ModelToolCall('memory-private', 'set_memory', {
+            'key': 'blocked', 'value': 'PRIVATE-MEMORY-123'})
+        yield ModelToolCall('memory-safe', 'set_memory', {
+            'key': 'safe', 'value': 'The user requested summaries.'})
+
+    result = await memory_agent.run_automatic_memory('alice', job, db,
+        store.history('alice', job.conversation_id), root_agent=None, stream_tools=stream)
+    assert result == 1
+    assert [row['key'] for row in MemoryRepository(db).list('alice')] == ['safe']
+    assert 'PRIVATE-MEMORY-123' not in str(store.events('alice', job.run_id))
+
+
+@pytest.mark.asyncio
+async def test_auto_memory_assembled_context_policy_stops_provider_before_any_call(memory_run):
+    db, store, settings, job, profile = memory_run
+    enable(settings)
+    settings.save_setting('alice', 'webui.filters.config', {'messages': {'pii': {
+        'fields': ['assembled_context'], 'starterPatterns': [], 'customPatterns': [{
+            'id': 'forbidden', 'label': 'hidden', 'regex': 'Remember that I prefer short answers'}]}}})
+    called = False
+
+    async def stream(*args, **kwargs):
+        nonlocal called
+        called = True
+        yield ModelToolCall('leak', 'set_memory', {'key': 'style', 'value': 'Leak'})
+
+    assert await memory_agent.run_automatic_memory('alice', job, db,
+        store.history('alice', job.conversation_id), root_agent=None, stream_tools=stream) == 0
+    assert not called
+    assert not MemoryRepository(db).list('alice')

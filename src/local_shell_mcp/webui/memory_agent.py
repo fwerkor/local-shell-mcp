@@ -9,6 +9,13 @@ import logging
 import time
 
 from .agents import AgentRepository
+from .content_filters import (
+    ContentFilterBlocked,
+    inspect_content,
+    model_message_fragments,
+    validate_agent_instructions,
+    validate_tool_arguments,
+)
 from .memory import (
     MemoryRepository,
     agent_partition,
@@ -155,6 +162,12 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
         allowed_keys, remaining if isinstance(remaining, int) else None)) + '\n\n' + status
     messages = [{'role': 'system', 'content': instructions},
                 {'role': 'user', 'content': window}]
+    try:
+        validate_agent_instructions(instructions, filters)
+        if inspect_content(model_message_fragments(messages), filters) is not None:
+            return 0
+    except ContentFilterBlocked:
+        return 0
     writes = 0
     try:
         async for event in stream_tools(chosen, messages, tools=tool_definitions(allowed_keys),
@@ -171,6 +184,10 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
                 break
             # Re-evaluate the live deployment filter before every mutation.
             latest_filters = configured_filters(settings, owner)
+            try:
+                validate_tool_arguments(event.name, event.arguments, latest_filters)
+            except ContentFilterBlocked:
+                continue
             outcome, artifact = execute_memory_tool(store, owner, root_agent or {},
                 event.name, event.arguments, {**config, 'filters': latest_filters})
             if artifact is not None:
