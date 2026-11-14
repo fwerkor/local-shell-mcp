@@ -309,6 +309,10 @@ TypeScript 模块，导出解析器、工具定义与域名验证的原版结果
   真实token交换使用HTTPS+DNS/IP固定、完整证书校验、不跟随跳转、禁用代理和32KiB上限。
   OAuth首次等待已改为SQLite `requires_action` 持久检查点：模型的待执行工具调用
   和React登录SSE delta同时保存，Controller关闭或重启时不会继续占用协程；
+  OAuth成功/失败结果页必须位于React `AuthContextProvider`路由之外：原外层
+  AuthLayout会在未带聊天登录态的IdP回调弹窗上重定向到`/login`，尽管Python
+  前端资源路径已匿名放行。现对真实`LOCAL_SHELL_MCP_AUTH_MODE=oauth`使用
+  无WebUI会话的Chromium浏览器验证，两页不发生该跳转。
   OAuth回调具备有效的WebUI登录会话时，先重新核验机器权限并自动启动原图工具节点；
   否则由原聊天页的Bearer授权`resume`/`status`/`stream`重新附着，
   成功页通过同源BroadcastChannel仅传递公开的Action ID，原标签页自行鉴权。

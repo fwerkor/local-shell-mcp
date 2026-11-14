@@ -34,14 +34,16 @@ const baseHref = baseEl?.getAttribute('href') || '/';
 
 export const router = createBrowserRouter(
   [
+    // Provider callbacks open in a separate tab without a workspace login
+    // cookie. These are intentionally outside AuthContextProvider: the latter
+    // redirects unauthenticated pages to /login before the user can see the
+    // completion outcome, even when Python serves the public SPA correctly.
+    { path: 'oauth/success', element: <OAuthSuccess /> },
+    { path: 'oauth/error', element: <OAuthError /> },
     {
       element: <AuthLayout />,
       errorElement: <RouteErrorBoundary />,
       children: [
-        // OAuth callbacks open in a separate tab. These pages must render
-        // without the authenticated chat layout or the login redirect gate.
-        { path: 'oauth/success', element: <OAuthSuccess /> },
-        { path: 'oauth/error', element: <OAuthError /> },
         {
           path: '/',
           element: <LoginLayout />,

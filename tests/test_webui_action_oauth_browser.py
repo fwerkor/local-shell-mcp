@@ -13,13 +13,14 @@ from local_shell_mcp.settings import get_settings
 
 
 @pytest.mark.asyncio
-async def test_original_react_action_oauth_success_and_error_routes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("auth_mode", ["none", "oauth"])
+async def test_original_react_action_oauth_success_and_error_routes(tmp_path, monkeypatch, auth_mode):
     playwright = pytest.importorskip("playwright.async_api")
     import uvicorn
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", auth_mode)
     monkeypatch.setenv("LOCAL_SHELL_MCP_UI_ENABLED", "true")
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
@@ -57,11 +58,19 @@ async def test_original_react_action_oauth_success_and_error_routes(tmp_path, mo
             await success.wait_for(timeout=12000)
             assert "success" in (await success.inner_text()).lower()
             assert "Action" in (await page.locator("body").inner_text())
+            if auth_mode == "oauth":
+                # A successful callback must not be sent back to the LSM
+                # login page just because its popup lacks the chat session.
+                await page.wait_for_timeout(850)
+                assert "/oauth/success" in page.url
             await page.goto(f"http://127.0.0.1:{port}/oauth/error?error=invalid_state", wait_until="domcontentloaded")
             failed = page.get_by_role("heading", level=1)
             await failed.wait_for(timeout=12000)
             assert "fail" in (await failed.inner_text()).lower()
             assert "state" in (await page.locator("body").inner_text()).lower()
+            if auth_mode == "oauth":
+                await page.wait_for_timeout(850)
+                assert "/oauth/error" in page.url
             # The original ToolCall opens the IdP with noopener, so a popup
             # cannot address the chat tab through window.opener. Confirm that
             # the public Action completion signal crosses tabs directly.
