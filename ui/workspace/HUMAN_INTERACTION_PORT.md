@@ -183,9 +183,15 @@ no-checkpoint applied Steer replay, document/image owner authorization,
 transient historical media replay and native provider wire payloads. Malformed
 provider-specific media metadata is bounded/ignored rather than executed or
 sent onward to an untrusted media URL.
-Focused tests of the three new lease/encoding modules have **98.0% combined
-branch coverage**, each module above the unchanged 90% gate. Full-suite and
-GitHub cross-platform CI conclusions are required at the final pinned commit.
+The full source-oracle coverage suite completed **2514 passed, 5 skipped**;
+HTTP, MCP, actual native PTY and original React browser smoke checks also
+passed. An additional **123 focused tests passed**, including local Graph
+fan-out Ask User, Tool Approval, Steer recovery, Provider multimodal wire
+formats, actor claims and native registry guard paths. Combined branch coverage
+passes unchanged quality gates: **95.35% total, every module >=90%**
+(`agent_runner.py` 96.6%, `steering.py` 94.2%, `provider_multimodal.py`
+98.2%, `steer_media.py` 98%+, `generation_actor_lease.py` 98%+). The frozen
+GitHub cross-platform CI must finish before the Draft can be marked ready.
 
 Not claimed: the source's complete arbitrary Agent Trigger system, every
 LangGraph event hook and callback payload, rich audio/video attachment
