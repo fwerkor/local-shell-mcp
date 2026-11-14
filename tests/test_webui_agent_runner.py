@@ -326,11 +326,12 @@ async def test_native_result_remains_lossless_while_model_uses_source_ingestion_
         await runner.run(store.history("local", generation.conversation_id))
     raw = next(iter(runner.cache.values()))["output"]
     assert json.loads(raw)["data"]["content"] == payload
-    assert received == [truncate_approval_result(raw, 400000)]
-    if size < 400000:
-        assert received[0] == raw
-    else:
-        assert "truncated:" in received[0] and ":tail" in received[0]
+    assert received == [raw]  # checkpoint/continuation must retain raw output
+    from local_shell_mcp.webui.mcp_projection import openai_wire_messages
+    wire = openai_wire_messages([{"role": "tool", "tool_call_id": "large", "content": raw}])
+    assert wire[0]["content"] == truncate_approval_result(raw, 400000)
+    if size >= 400000:
+        assert "truncated:" in wire[0]["content"] and ":tail" in wire[0]["content"]
     saved = list(runner.saver.list(runner.config))
     assert any(write[2].get("content") == raw for checkpoint in saved
                for write in checkpoint["pendingWrites"] if isinstance(write[2], dict))

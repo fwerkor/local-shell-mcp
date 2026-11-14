@@ -262,3 +262,23 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## Provider 消息历史与 MCP 富媒体迁移（PR #343 后续独立分支）
+
+| 固定原版源码 | Python/SQLite 的唯一消息表示 | 范围、证据及保留差异 |
+| --- | --- | --- |
+| LibreChat `e8f3be08`: `api/app/clients/prompts/formatMessages.js` (`formatMessage`/`formatAgentMessages`) | `webui/message_dto.py` + `webui/generations.py:history` | 原版真实JS源码、`@langchain/core@1.2.8`导出5组差分向量，对应测试逐条一致。分轮/并行工具锚点、ID、签名、steer、图文顺序保留。继续兼容旧无完整调用结果的message（不能事后恢复已丢失的原始结果）。 |
+| LibreChat `e8f3be08`: `packages/api/src/mcp/parsers.ts` | `webui/mcp_content.py` | 使用原TS源码和固定的TypeScript 5.9.3导出13组text/image/resource/blob/ui/unknown provider差分向量；原生MCP结果外壳保留在SQLite/checkpoint。`mcp_result_envelope`按LSM嵌套MCP结果形状解包。 |
+| agents `c4ffb9b1`: `src/messages/core.ts` / `utils/truncation.ts` | `webui/mcp_projection.py` + `webui/agent_runner.py` | 保持400000字符*仅模型输入投影*阈值；React预览独立截断；SQLite保存完整原始工具输出，并在历史回放每次工具批次处重新投影富媒体。原JS的projection/provenance深层属性保留策略与provider Responses API原生映射尚非逐字段全等。 |
+| agents `4.0.1` + `@langchain/anthropic@1.5.2`、`@langchain/google-genai@2.2.0`、`@langchain/openai@1.5.x` | `webui/provider_tool_protocols.py` + `webui/providers.py` / `webui/agent_runtime.py` | OpenAI-compatible、Anthropic、Gemini合法wire结构；并行工具调用、SSE增量工具参数与错误、image block和Gemini `thoughtSignature`。三套真实本地HTTP/SSE mock provider均完成file_read→tool result→继续生成→SQLite重开→下一轮历史回放；**未使用真实厂商凭据、未作厂商验收**。 |
+| 保留原版React `runSteps`/SSE和LSM注册工具 | `webui/generation_routes.py` / `webui/lsm_tool_registry.py` | 新增`runs.state.modelSteps`原序列，`messages.content`继续供React调用卡片显示；独立worktree无生产部署。Worker无新增Node依赖。完整LangGraph graph/Command/人工交互由其余独立分支移植，不在本分支重复定义DTO。 |
+
+差分向量生成（仅测试工具；无需Node作为运行时）：
+
+```sh
+node scripts/export-librechat-message-vectors.cjs /path/to/librechat-e8f3be08 /path/to/npm-deps-core-1.2.8
+node scripts/export-librechat-mcp-vectors.cjs /path/to/librechat-e8f3be08 /path/to/npm-deps-typescript-5.9.3
+PYTHONPATH="$PWD/src" pytest -q tests/test_webui_message_parity.py tests/test_webui_provider_http_e2e.py
+```
+
+LSM消息DTO为`{role, content, tool_calls?, tool_call_id?, name?, reasoning?, artifact?, raw_result?, is_error?, provider_data?}`；graph runtime应直接读写这套表示。原生工具依旧使用原有LSM注册表、权限、审计和执行器。Provider输出时转换为厂商wire形状并剔除本地私有字段；不得将UI预览当成历史真相。

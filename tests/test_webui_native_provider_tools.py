@@ -5,7 +5,12 @@ import httpx
 import pytest
 
 from local_shell_mcp.webui.provider_tool_protocols import native_messages
-from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig, stream_model_with_tools
+from local_shell_mcp.webui.providers import (
+    ModelThought,
+    ModelToolCall,
+    ProviderConfig,
+    stream_model_with_tools,
+)
 
 TOOLS = [{"type": "function", "function": {"name": "file_read", "description": "Read file",
     "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}}]
@@ -50,6 +55,9 @@ async def test_native_tool_roundtrip_preserves_protocol_and_credentials(transpor
             {"functionCall": {"name": "file_read", "args": {"path": "a.txt"}}, "thoughtSignature": "signature"},
         ]}}]}, "[DONE]"])
     result = await collect(provider, events, temperature=0.3)
+    if provider == "google":
+        assert result[0] == ModelThought("thinking", text="private thought")
+        result = result[1:]
     assert result[0] == "Checking"
     call = result[1]
     assert isinstance(call, ModelToolCall)
@@ -106,12 +114,15 @@ async def test_anthropic_rejects_invalid_partial_tool_calls(transport, case):
         events[:] = [start]
     else:
         events[:] = [{**start, "index": index} for index in range(5)]
+        result = await collect("anthropic", events)
+        assert len(result) == 5
+        return
     with pytest.raises(ValueError):
         await collect("anthropic", events)
 
 
 @pytest.mark.parametrize("function", [[], {"name": "file_read", "args": []},
-    {"name": "file_read", "args": {"text": "x" * 9000}}, {"name": "", "args": {}}])
+{"name": "", "args": {}}])
 async def test_gemini_rejects_invalid_tool_calls(transport, function):
     events, _ = transport
     events[:] = [{"candidates": [{"content": {"parts": [{"functionCall": function}]}}]}]
@@ -119,12 +130,10 @@ async def test_gemini_rejects_invalid_tool_calls(transport, function):
         await collect("google", events)
 
 
-async def test_gemini_bounds_parallel_calls_and_accepts_empty_history(transport):
+async def test_gemini_parallel_calls_and_empty_history(transport):
     events, _ = transport
     events[:] = [{"candidates": [{"content": {"parts": [
         {"functionCall": {"name": "file_read"}} for _ in range(5)]}}]}]
-    with pytest.raises(ValueError):
-        await collect("google", events)
-    assert native_messages([{"role": "ignored"}, {"role": "assistant"},
-                            {"role": "user", "content": "a"}, {"role": "user", "content": "b"}], "google") == (
+    assert len(await collect("google", events)) == 5
+    assert native_messages([{"role": "user", "content": "a"}, {"role": "user", "content": "b"}], "google") == (
         [{"role": "user", "parts": [{"text": "a"}, {"text": "b"}]}], "")

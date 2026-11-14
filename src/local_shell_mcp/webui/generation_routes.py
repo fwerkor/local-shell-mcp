@@ -138,8 +138,16 @@ async def _run_model(
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
                              approved_batch=approved_batch)
+        # Only the first entry determines this run's prefix. After human
+        # actions, resume_history/checkpoints already contain prior run steps.
+        original_boundary = len(history) if resume_history is None else len(
+            repo.history(owner, generation.conversation_id, message_id=generation.user_message_id)
+        ) + int(bool(instructions))
+        history_start = repo.model_history_boundary(
+            owner, generation.run_id, initial=original_boundary,
+        )
         try:
-            await runner.run(history)
+            finished_messages = await runner.run(history)
         except AgentSuspended:
             return
         repo.append(owner, generation.run_id, {
@@ -149,15 +157,20 @@ async def _run_model(
                 "created_at": now_ms, "closed_at": int(time.time() * 1000),
             },
         })
-        repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text)
+        from .message_dto import model_steps
+
+        repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
+                    model_steps=model_steps(finished_messages, history_start))
     except asyncio.CancelledError:
-        repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
+        repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts),
+                    model_steps=repo.checkpoint_model_steps(owner, generation.run_id))
         raise
     except Exception as exc:
         # Do not put provider tokens, request metadata or secrets in response.
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=f"Model generation failed ({type(exc).__name__})")
+                    error=f"Model generation failed ({type(exc).__name__})",
+                    model_steps=repo.checkpoint_model_steps(owner, generation.run_id))
     finally:
         async with _TASK_GUARD:
             _TASKS.pop(generation.run_id, None)
@@ -362,7 +375,8 @@ async def abort_generation(request: Request):
     if task and not task.done():
         task.cancel()
     else:
-        store.finish(owner, generation.run_id, status="aborted")
+        store.finish(owner, generation.run_id, status="aborted",
+                     model_steps=store.checkpoint_model_steps(owner, generation.run_id))
     return JSONResponse({"success": True, "generationProtocolVersion": protocol},
                         headers=_generator_headers(protocol))
 

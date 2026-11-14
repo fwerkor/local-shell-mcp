@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .providers import ModelToolCall, ProviderConfig
+from .providers import ModelThought, ModelToolCall, ProviderConfig
 
 
 class RuntimeSafetyError(PermissionError):
@@ -91,22 +91,36 @@ async def run_agent_loop(
         state.step += 1
         state.model_turn += 1
         params = context.parameters
-        max_tokens = max(1, min(int(params.get("max_tokens") or params.get("max_output_tokens") or 2048), 16384))
+        max_tokens = max(1, int(params.get("max_tokens") or params.get("max_output_tokens") or 2048))
         temperature = params.get("temperature")
         if temperature is not None:
             temperature = max(0.0, min(float(temperature), 2.0))
         calls: list[ModelToolCall] = []
         text_parts: list[str] = []
+        reasoning: list[dict] = []
         source = stream_tools(context.profile, state.messages, tools=context.tools,
                               max_tokens=max_tokens, temperature=temperature) if context.tools else \
             stream_text(context.profile, state.messages, max_tokens=max_tokens, temperature=temperature)
         async for item in source:
             if isinstance(item, ModelToolCall):
                 calls.append(item)
+            elif isinstance(item, ModelThought):
+                if item.kind == "thinking":
+                    if reasoning and reasoning[-1].get("type") == "thinking" and not reasoning[-1].get("signature"):
+                        reasoning[-1]["thinking"] += item.text
+                    else:
+                        reasoning.append({"type": "thinking", "thinking": item.text})
+                elif item.kind == "signature":
+                    if reasoning and reasoning[-1].get("type") == "thinking":
+                        reasoning[-1]["signature"] = item.signature
+                elif item.kind == "redacted_thinking":
+                    reasoning.append({"type": "redacted_thinking", "data": item.data})
             elif item:
                 text_parts.append(item)
                 await on_text(item)
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
+        if reasoning:
+            message["reasoning"] = reasoning
         if calls:
             import json
 
