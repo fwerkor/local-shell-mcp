@@ -100,15 +100,22 @@ async def run_agent_loop(
         state.step += 1
         state.model_turn += 1
         params = context.parameters
-        max_tokens = max(1, min(int(params.get("max_tokens") or params.get("max_output_tokens") or 2048), 16384))
+        max_tokens = max(1, min(int(next((params[key] for key in ("max_tokens", "maxTokens", "max_output_tokens", "maxOutputTokens")
+                                          if params.get(key) is not None), 2048)), 16384))
         temperature = params.get("temperature")
         if temperature is not None:
             temperature = max(0.0, min(float(temperature), 2.0))
+        top_p = next((params[key] for key in ("top_p", "topP") if params.get(key) is not None), None)
+        if top_p is not None:
+            top_p = max(0.0, min(float(top_p), 1.0))
+        sampling = {"max_tokens": max_tokens, "temperature": temperature}
+        if top_p is not None:
+            sampling["top_p"] = top_p
         calls: list[ModelToolCall] = []
         text_parts: list[str] = []
         source = stream_tools(context.profile, state.messages, tools=context.tools,
-                              max_tokens=max_tokens, temperature=temperature) if context.tools else \
-            stream_text(context.profile, state.messages, max_tokens=max_tokens, temperature=temperature)
+                              **sampling) if context.tools else \
+            stream_text(context.profile, state.messages, **sampling)
         preempted = False
         async for item in source:
             if isinstance(item, ModelToolCall):
