@@ -46,6 +46,10 @@ from .memory import (
 )
 from .memory_protection import configured_filters
 from .providers import ModelToolCall, provider_config, selected_provider
+from .semantic_index import (
+    render_compaction_semantic_index,
+    snapshot_compaction_semantic_index,
+)
 from .subagents import build_subagent_configs, invoke_subagent, subagent_tools
 
 
@@ -55,7 +59,7 @@ class AgentRunner:
                  parameters=None, ask_user_enabled=False, mcp_enabled=False,
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
-                 approved_batch=None):
+                 approved_batch=None, compaction_semantic_index=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -65,6 +69,9 @@ class AgentRunner:
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
         self.resume_history, self.resume_namespace = resume_history, resume_namespace
         self.partial_text, self.approved_batch = partial_text, approved_batch
+        # The caller's host-produced index is snapshotted before yielding to
+        # the provider, preventing concurrent user-owned changes to hints.
+        self.compaction_semantic_index = snapshot_compaction_semantic_index(compaction_semantic_index)
         self.repository = AgentRepository(database)
         self.saver = SQLiteCheckpointSaver(database, owner)
         self.config = self.saver.config(generation.conversation_id, generation.run_id,
@@ -134,7 +141,8 @@ class AgentRunner:
         limit = override if type(override) in (int, float) and override > 0 else 50
         return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
                             tools, (agent or {}).get("model_parameters") or self.initial_parameters,
-                            recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent)
+                            recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent,
+                            compaction_semantic_index=self.compaction_semantic_index)
 
     def _snapshot(self, state):
         return {"messages": state.messages, "step": state.step, "model_turn": state.model_turn,
@@ -358,7 +366,8 @@ class AgentRunner:
         return ToolBatchOutput(messages, next_context=self._context(target), replace_messages=history)
 
     async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
-                                 prompt=None, update_prompt=None, head_count=0):
+                                 prompt=None, update_prompt=None, head_count=0,
+                                 semantic_index=None):
         """Request the original checkpoint prompt from the selected model.
 
         A failed/partial summary is never written, and never makes the old
@@ -378,10 +387,12 @@ class AgentRunner:
             if item.get('role') == 'system' and isinstance(text, str) and text.startswith('<summary>\n'):
                 prior = text[len('<summary>\n'):].split('\n</summary>', 1)[0]
                 break
+        semantic = render_compaction_semantic_index(semantic_index, messages)
         effective = build_summarization_instruction(
             prompt or DEFAULT_SUMMARIZATION_PROMPT,
             update_prompt or DEFAULT_UPDATE_SUMMARIZATION_PROMPT,
             prior or None,
+            semantic['appendix'],
         )
         instruction = {'role': 'user', 'content': effective}
         summary_messages = [*messages, instruction]
@@ -460,7 +471,8 @@ class AgentRunner:
                 summary = await self._summarize_history(
                     [*system, *head], head_count=len(head),
                     max_tokens=options.get('maxSummaryTokens', 2048),
-                    prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'))
+                    prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
+                    semantic_index=state.context.compaction_semantic_index)
                 # Keep stable instructions and current summary, then the exact
                 # retained recent turns. Original messages stay in SQLite.
                 plain_system = [message for message in system if not (
@@ -501,7 +513,8 @@ class AgentRunner:
             raise ValueError('Nothing to compact')
         await self._summarize_history(history, manual=True, head_count=len(non_system),
             max_tokens=(config.get('parameters') or {}).get('maxSummaryTokens', 2048),
-            prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'))
+            prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
+            semantic_index=self.compaction_semantic_index)
         return history
 
     async def run(self, history, *, recursion_limit=None):

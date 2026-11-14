@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .providers import ModelToolCall, ProviderConfig
+from .semantic_index import SemanticSnapshot
 
 
 class RuntimeSafetyError(PermissionError):
@@ -30,6 +31,7 @@ class AgentContext:
     recursion_limit: int = 50
     tool_end: bool = False
     agent: dict | None = None
+    compaction_semantic_index: SemanticSnapshot | None = None
 
 
 @dataclass
