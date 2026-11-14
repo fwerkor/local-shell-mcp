@@ -77,7 +77,8 @@ def _check_cookie(repo: ActionRepository, value: str | None, owner: str, action_
             type(payload.get("expires")) is int and payload["expires"] >= int(time.time()))
 
 
-def begin_flow(repo: ActionRepository, owner: str, action_id: str, run_id: str, call_id: str) -> tuple[str, str]:
+def begin_flow(repo: ActionRepository, owner: str, action_id: str, run_id: str, call_id: str,
+               *, reissue: dict | None = None) -> tuple[str, str] | None:
     """Create one replay-proof authorization attempt, returning (auth URL, opaque state)."""
     from .action_runtime import _allowed_domain
 
@@ -93,23 +94,57 @@ def begin_flow(repo: ActionRepository, owner: str, action_id: str, run_id: str, 
     state = secrets.token_urlsafe(32)
     redirect = f"{base}/api/actions/{action_id}/oauth/callback"
     now = int(time.time())
+    params = urlencode({"client_id": creds["oauth_client_id"], "scope": auth["scope"],
+                        "redirect_uri": redirect, "access_type": "offline", "response_type": "code",
+                        "state": state})
+    separator = "&" if target.query else "?"
+    auth_url = auth["authorization_url"] + separator + params
     with repo.database.connect() as db:
         db.execute("BEGIN IMMEDIATE")
         current = db.execute("SELECT version FROM action_records WHERE id=? AND owner=?", (action_id, owner)).fetchone()
         if current is None or current["version"] != row["version"]:
             raise ValueError("Action changed during OAuth initialization")
+        if reissue is not None:
+            run = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='requires_action'", (run_id, owner),
+            ).fetchone()
+            pending = json.loads(run["state"]).get("pendingAction") if run else None
+            payload = pending.get("payload") if isinstance(pending, dict) else None
+            if (not isinstance(payload, dict) or payload.get("type") != "action_oauth"
+                    or payload.get("action_id") != action_id or payload.get("tool_call_id") != call_id
+                    or payload.get("action_version") != row["version"]
+                    or not isinstance(payload.get("step_id"), str)
+                    or payload.get("tool_name") != reissue.get("tool_name")):
+                raise PermissionError("Stale Action OAuth prompt cannot be reissued")
+            existing = db.execute(
+                "SELECT 1 FROM action_oauth_flows WHERE run_id=? AND owner=? AND action_id=? AND call_id=? "
+                "AND expires_at>? AND used_at IS NULL LIMIT 1",
+                (run_id, owner, action_id, call_id, now),
+            ).fetchone()
+            if existing:
+                return None
         db.execute("DELETE FROM action_oauth_flows WHERE expires_at<?", (now,))
+        # Reissuing a timed-out prompt invalidates the old callback state.
+        db.execute("DELETE FROM action_oauth_flows WHERE run_id=? AND action_id=? AND call_id=?",
+                   (run_id, action_id, call_id))
         db.execute(
             "INSERT INTO action_oauth_flows(state_hash,owner,action_id,action_version,run_id,call_id,redirect_uri,expires_at) "
             "VALUES(?,?,?,?,?,?,?,?)",
             (hashlib.sha256(state.encode()).hexdigest(), owner, action_id, row["version"], run_id, call_id,
              redirect, now + _FLOW_TTL),
         )
-    params = urlencode({"client_id": creds["oauth_client_id"], "scope": auth["scope"],
-                        "redirect_uri": redirect, "access_type": "offline", "response_type": "code",
-                        "state": state})
-    separator = "&" if target.query else "?"
-    return auth["authorization_url"] + separator + params, state
+        if reissue is not None:
+            # The replacement link is committed with its one-use state. A
+            # restart cannot lose the new URL while retaining an unusable flow.
+            payload_event = {"event": "on_run_step_delta", "data": {
+                "id": payload["step_id"], "delta": {"type": "tool_calls", "tool_calls": [
+                    {"id": call_id, "name": payload["tool_name"], "args": ""}],
+                    "auth": auth_url, "expires_at": (now + _FLOW_TTL) * 1000},
+            }}
+            db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
+                       (run_id, json.dumps(payload_event, ensure_ascii=False, separators=(",", ":"))))
+    return auth_url, state
 
 
 def claim_callback(repo: ActionRepository, action_id: str, state: str, cookie: str | None) -> tuple[str, dict, dict, str]:
@@ -129,7 +164,8 @@ def claim_callback(repo: ActionRepository, action_id: str, state: str, cookie: s
             raise PermissionError("OAuth Action was updated or removed")
         db.execute("UPDATE action_oauth_flows SET used_at=? WHERE state_hash=? AND used_at IS NULL",
                    (int(time.time()), key))
-    return flow["owner"], json.loads(row["metadata"]), repo._credentials(row), flow["redirect_uri"], row["version"]
+    return (flow["owner"], json.loads(row["metadata"]), repo._credentials(row), flow["redirect_uri"],
+            flow["run_id"], flow["call_id"], row["version"])
 
 
 async def _exchange(endpoint: str, body: dict[str, str], credentials: dict, method: str) -> dict:

@@ -80,15 +80,23 @@ async def action_oauth_callback(request: Request):
         if not isinstance(state, str):
             raise ValueError("Missing state")
         repo = _repository()
-        owner, metadata, credentials, redirect, version = claim_callback(
+        owner, metadata, credentials, redirect, run_id, call_id, version = claim_callback(
             repo, action_id, state, request.cookies.get(cookie_name(action_id)))
         principal = getattr(request.state, "principal", None)
         if principal is not None and getattr(principal, "subject", None) not in (None, owner):
             raise PermissionError("OAuth browser identity mismatch")
         await exchange_code(repo, owner, action_id, metadata, credentials, redirect, code,
                             expected_version=version)
+        # An IdP popup cannot invent a fresh LSM machine grant. If it retains
+        # a valid workspace session, revalidate it and resume the saved graph.
+        # Otherwise a subsequent bearer-authenticated status/SSE reattachment
+        # will claim the OAuth continuation without losing the token.
+        from .generation_routes import resume_oauth_callback
+
+        await resume_oauth_callback(owner, run_id, action_id, call_id, version, request)
         label = str(metadata.get("domain") or "Action")
-        response = RedirectResponse("/oauth/success?serverName=" + quote(label, safe=""), status_code=302)
+        response = RedirectResponse("/oauth/success?serverName=" + quote(label, safe="") +
+                                    "&actionId=" + quote(action_id, safe=""), status_code=302)
         response.delete_cookie(cookie_name(action_id), path=f"/api/actions/{action_id}/oauth")
         response.headers["Cache-Control"] = "no-store"
         return response

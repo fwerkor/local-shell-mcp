@@ -121,6 +121,10 @@ class AgentRunner:
             "v": 1, "id": identity, "channel_values": self._snapshot(state),
             "channel_versions": {"messages": state.step}, "versions_seen": {},
         }, {"source": "loop", "step": state.step})
+        if not calls:
+            # Finish the durable OAuth replay fence only *after* the graph's
+            # post-tool checkpoint has safely left the pending-call edge.
+            self.store.clear_oauth_checkpoint(self.owner, self.generation.run_id)
 
     def _tool_step(self, call):
         checkpoint = self.active_config["configurable"].get("checkpoint_id", "")
@@ -157,6 +161,10 @@ class AgentRunner:
                 "role": "tool", "tool_call_id": call.call_id, "content": output,
             })], task_id=call.call_id)
         if self.namespace:
+            from .action_spec import is_action_tool
+
+            if is_action_tool(call.name):
+                self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
             return
         step = self._tool_step(call)
         preview = output if isinstance(output, str) else "Agent control transferred"
@@ -170,6 +178,10 @@ class AgentRunner:
                 },
             }},
         })
+        from .action_spec import is_action_tool
+
+        if is_action_tool(call.name):
+            self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -202,7 +214,7 @@ class AgentRunner:
                 current_id = (state.context.agent or {}).get("id")
                 if not current_id:
                     raise RuntimeSafetyError("Action execution requires a saved Agent")
-                from .action_oauth import access_token, await_login, begin_flow
+                from .action_oauth import access_token
                 from .actions import ActionRepository
 
                 action_repo = ActionRepository(self.database)
@@ -214,26 +226,11 @@ class AgentRunner:
                 if meta.get("auth", {}).get("type") == "oauth":
                     oauth_token = await access_token(action_repo, self.owner, operation["action_id"])
                     if not oauth_token:
-                        url, oauth_state = begin_flow(action_repo, self.owner, operation["action_id"],
-                                                     self.generation.run_id, call.call_id)
-                        step = self._tool_step(call)
-                        self.store.append(self.owner, self.generation.run_id, {
-                            "event": "on_run_step_delta", "data": {
-                                "id": step["id"], "delta": {"type": "tool_calls",
-                                    "tool_calls": [{"id": call.call_id, "name": call.name, "args": ""}],
-                                    "auth": url, "expires_at": int(time.time() * 1000) + 120_000},
-                            },
-                        })
-                        oauth_token = await await_login(action_repo, self.owner,
-                                                        operation["action_id"], oauth_state)
-                        self._check_grant()
-                        self.store.append(self.owner, self.generation.run_id, {
-                            "event": "on_run_step_delta", "data": {
-                                "id": step["id"], "delta": {"type": "tool_calls",
-                                    "tool_calls": [{"id": call.call_id, "name": call.name, "args": ""}],
-                                    "auth": None, "expires_at": None},
-                            },
-                        })
+                        raise RuntimeSafetyError("OAuth Action authorization was revoked before dispatch")
+                    # The claim-to-HTTP boundary is a one-way replay fence.
+                    # A crash during external execution cannot safely resend
+                    # a potentially consequential request.
+                    self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "dispatching")
                 return await invoke_action(self.owner, current_id, call.name, call.arguments, self.database,
                                            oauth_token=oauth_token, expected_version=operation["action_version"])
             if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
@@ -263,7 +260,47 @@ class AgentRunner:
                             partial_text=self.partial_text)
         return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
 
-    async def _pause(self, payload, state, *, approval=False):
+    async def _prepare_oauth(self, calls, state):
+        """Durably suspend *before* launching side-effecting sibling tools.
+
+        The pinned LibreChat model tool call remains in the existing checkpoint;
+        the original React tool card consumes the OAuth sign-in delta. The
+        Controller may now exit without a long-lived authorization waiter.
+        """
+        from .action_oauth import access_token, begin_flow
+        from .action_spec import is_action_tool
+        from .actions import ActionRepository
+
+        current_id = (state.context.agent or {}).get("id")
+        if not current_id:
+            return
+        repo = ActionRepository(self.database)
+        for call in calls:
+            if not is_action_tool(call.name):
+                continue
+            record = repo.get_for_tool(self.owner, current_id, call.name)
+            if record is None:
+                raise RuntimeSafetyError("Action is not bound to this Agent")
+            metadata, _, operation = record
+            if metadata.get("auth", {}).get("type") != "oauth":
+                continue
+            if await access_token(repo, self.owner, operation["action_id"]):
+                continue
+            url, _ = begin_flow(repo, self.owner, operation["action_id"],
+                                self.generation.run_id, call.call_id)
+            step = self._tool_step(call)
+            auth_delta = {"event": "on_run_step_delta", "data": {
+                "id": step["id"], "delta": {"type": "tool_calls", "tool_calls": [
+                    {"id": call.call_id, "name": call.name, "args": ""}],
+                    "auth": url, "expires_at": int(time.time() * 1000) + 600_000},
+            }}
+            await self._pause({"type": "action_oauth", "action_id": operation["action_id"],
+                               "action_version": operation["action_version"],
+                               "tool_call_id": call.call_id, "tool_name": call.name,
+                               "step_id": step["id"]},
+                              state, oauth_delta=auth_delta)
+
+    async def _pause(self, payload, state, *, approval=False, oauth_delta=None):
         import uuid
 
         pending = {"actionId": "action_" + uuid.uuid4().hex,
@@ -273,8 +310,13 @@ class AgentRunner:
                    "responseMessageId": self.generation.response_message_id,
                    "createdAt": int(time.time() * 1000), "namespace": self.namespace, "payload": payload}
         self.saver.put_writes(self.active_config, [("__interrupt__", pending)], task_id="human")
-        pause = self.store.pause_for_approval if approval else self.store.pause_for_question
-        if not pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text):
+        if oauth_delta is not None:
+            saved = self.store.pause_for_oauth(self.owner, self.generation.run_id, pending,
+                                               state.messages, self.partial_text, oauth_delta)
+        else:
+            pause = self.store.pause_for_approval if approval else self.store.pause_for_question
+            saved = pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text)
+        if not saved:
             raise RuntimeError("Unable to save pending Agent action")
         raise AgentSuspended()
 
@@ -311,6 +353,9 @@ class AgentRunner:
                 ask.append(call)
         if ask:
             await self._pause(build_approval_payload(ask), state, approval=True)
+        await self._prepare_oauth(
+            [call for call in unresolved if replay_key(call, calls.index(call)) not in self.cache], state,
+        )
         outputs = await execute_tool_batch(
             calls, lambda call: self._invoke(call, state), settled=self.cache,
             interrupting_names=frozenset({"subagent"}),

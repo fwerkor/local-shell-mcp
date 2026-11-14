@@ -48,7 +48,8 @@ async def test_original_react_action_oauth_success_and_error_routes(tmp_path, mo
                 if "Executable doesn't exist" in str(exc):
                     pytest.skip("Chromium is required in browser CI")
                 raise
-            page = await browser.new_page()
+            context = await browser.new_context()
+            page = await context.new_page()
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             await page.goto(f"http://127.0.0.1:{port}/oauth/success?serverName=Action", wait_until="domcontentloaded")
@@ -61,6 +62,28 @@ async def test_original_react_action_oauth_success_and_error_routes(tmp_path, mo
             await failed.wait_for(timeout=12000)
             assert "fail" in (await failed.inner_text()).lower()
             assert "state" in (await page.locator("body").inner_text()).lower()
+            # The original ToolCall opens the IdP with noopener, so a popup
+            # cannot address the chat tab through window.opener. Confirm that
+            # the public Action completion signal crosses tabs directly.
+            await page.evaluate("""() => {
+              window.__oauthCompletion = null;
+              window.__oauthChannel = new BroadcastChannel('lsm-action-oauth');
+              window.__oauthChannel.onmessage = event => { window.__oauthCompletion = event.data; };
+            }""")
+            success_tab = await context.new_page()
+            try:
+                await success_tab.goto(
+                    f"http://127.0.0.1:{port}/oauth/success?serverName=Action&actionId=test-action",
+                    wait_until="domcontentloaded",
+                )
+                await page.wait_for_function(
+                    "window.__oauthCompletion?.actionId === 'test-action'", timeout=12000,
+                )
+                received = await page.evaluate("window.__oauthCompletion")
+                assert received == {"type": "action_oauth_complete", "actionId": "test-action"}
+            finally:
+                await success_tab.close()
+                await page.evaluate("window.__oauthChannel.close()")
             assert not errors, errors
     finally:
         if browser is not None:

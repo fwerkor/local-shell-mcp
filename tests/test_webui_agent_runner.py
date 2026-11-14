@@ -506,6 +506,7 @@ async def test_oauth_action_prompt_callback_resumes_same_agent_tool_call(runtime
 
         monkeypatch.setattr(action_oauth, "_exchange", token_exchange)
         monkeypatch.setattr(action_routes, "_repository", lambda: ActionRepository(database))
+        monkeypatch.setattr(generation_routes, "stream_model_with_tools", model)
         runner = AgentRunner("local", generation, database, store, scopes=set(), grant_expires=None,
                              stream_tools=model, stream_text=model, on_text=emit, profile=profile, agent=agent)
         execution = asyncio.create_task(runner.run(store.history("local", generation.conversation_id)))
@@ -535,8 +536,17 @@ async def test_oauth_action_prompt_callback_resumes_same_agent_tool_call(runtime
                     "state": oauth_params["state"][0], "code": "idp-code"})
                 assert callback.status_code == 302
                 assert callback.headers["location"].startswith("/oauth/success")
-            history = await asyncio.wait_for(execution, timeout=8)
-            assert history[-1]["content"] == "Done."
+            with pytest.raises(AgentSuspended):
+                await asyncio.wait_for(execution, timeout=5)
+            # OAuth is a durable human interrupt, not a running ten-minute
+            # Python poll. The callback reclaims the checkpoint with a fresh
+            # LSM grant and must not invoke the model a second time.
+            tasks = list(generation_routes._TASKS.values())
+            assert len(tasks) == 1
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=8)
+            assert store.latest("local", generation.conversation_id).status == "complete"
+            history = [event for _, event in store.events("local", generation.run_id)]
+            assert history[-1]["responseMessage"]["text"] == "Done."
             assert json.loads(results[0])["authorized"] is True
             event_text = json.dumps(store.events("local", generation.run_id))
             for secret in ("PRIVATE-IDP-SECRET", "FROM-IDP", "KEEP-PRIVATE"):

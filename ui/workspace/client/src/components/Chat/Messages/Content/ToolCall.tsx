@@ -3,6 +3,7 @@ import { useRecoilValue } from 'recoil';
 import { Button } from '@librechat/client';
 import {
   Constants,
+  apiBaseUrl,
   dataService,
   actionDelimiter,
   actionDomainSeparator,
@@ -13,6 +14,7 @@ import { useLocalize, useProgress, useExpandCollapse, useLazyCollapseBody } from
 import { cn, getToolDisplayLabel, logger, openInNewTab } from '~/utils';
 import { ToolIcon, getToolIconType, isError } from './ToolOutput';
 import { useMCPIconMap, useMCPServerNames } from '~/hooks/MCP';
+import { postGenerationRequest } from '~/data-provider/SSE/protocol';
 import { resolveToolCallPhase } from '~/utils/toolCallPhase';
 import { toolPanelSpacingClassName } from './disclosure';
 import { useToolCallIntent } from './Parts/intent';
@@ -65,6 +67,7 @@ export default function ToolCall({
   const [oauthError, setOAuthError] = useState<string | null>(null);
   const [oauthBinding, setOAuthBinding] = useState<'pending' | 'bound' | 'failed'>('pending');
   const autoExpand = useRecoilValue(store.autoExpandTools);
+  const conversationId = useRecoilValue(store.conversationIdByIndex(0));
   const hasOutput = (output?.length ?? 0) > 0;
   const [showInfo, setShowInfo] = useState(() => autoExpand && hasOutput);
   const { style: expandStyle, ref: expandRef } = useExpandCollapse(showInfo);
@@ -166,6 +169,26 @@ export default function ToolCall({
       }
     })();
   }, [isMCPToolCall, mcpServerName, actionId]);
+
+  useEffect(() => {
+    if (!actionId || !conversationId || !auth || typeof BroadcastChannel === 'undefined') {
+      return;
+    }
+    const channel = new BroadcastChannel('lsm-action-oauth');
+    channel.onmessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'action_oauth_complete' || event.data?.actionId !== actionId) {
+        return;
+      }
+      // The popup is never an execution principal. Resume only with the
+      // chat tab's existing bearer-authenticated request and current policy.
+      void postGenerationRequest(`${apiBaseUrl()}/api/agents/chat/resume`, {
+        conversationId,
+      }).catch(() => {
+        // Another authenticated status/SSE reattachment can retry this.
+      });
+    };
+    return () => channel.close();
+  }, [actionId, conversationId, auth]);
 
   const hasError = (typeof output === 'string' && isError(output)) || runStepStatus === 'failed';
   /**

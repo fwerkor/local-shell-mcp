@@ -86,6 +86,7 @@ def test_oauth_flow_persists_only_hash_and_sealed_secrets(oauth_env):
         action_oauth.claim_callback(repo, action_id, state, None)
     result = action_oauth.claim_callback(repo, action_id, state, token)
     assert result[0] == "alice" and result[-1] == 1
+    assert result[4:6] == ("run1", "call1")
     with pytest.raises(PermissionError, match="state"):
         action_oauth.claim_callback(repo, action_id, state, token)
 
@@ -322,7 +323,8 @@ def test_action_oauth_state_validation_and_scope(oauth_env, monkeypatch):
     # Different valid state cannot consume a legitimate OAuth attempt.
     with pytest.raises(PermissionError, match="state"):
         action_oauth.claim_callback(repo, action_id, "X" * 48, cookie)
-    _, metadata, creds, _, version = action_oauth.claim_callback(repo, action_id, state, cookie)
+    _, metadata, creds, _, run_id, call_id, version = action_oauth.claim_callback(repo, action_id, state, cookie)
+    assert (run_id, call_id) == ("run", "call")
     assert metadata["auth"]["type"] == "oauth"
     with pytest.raises(PermissionError, match="changed"):
         action_oauth._store_tokens(repo, "alice", action_id, {"access_token": "secret"}, expected_version=version + 1)

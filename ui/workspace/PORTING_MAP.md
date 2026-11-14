@@ -301,14 +301,27 @@ TypeScript 模块，导出解析器、工具定义与域名验证的原版结果
   `/api/actions/:action_id/oauth/bind`要求原LSM已认证身份及同源POST，
   设置HttpOnly/Secure/SameSite=Lax、按Action区分且与owner绑定的CSRF cookie；
   callback是唯一豁免Bearer认证的Action路由，严格要求10分钟内一次性state、
-  CSRF cookie、Action归属及版本吻合。state仅以SHA-256散列落盘；
+  CSRF cookie、Action归属及版本吻合。专用`action_oauth_flows`状态表只保存state
+  的SHA-256摘要；原React需要重放的授权URL（包含原始state）仍须存在受限的
+  Generation SSE历史，不能把SSE事件表称为完全不含state；
   access/refresh token与API Key分离，使用Fernet加密存入SQLite，
   支持到期刷新及同进程同Action并发刷新去重，不会转为匿名执行；
   真实token交换使用HTTPS+DNS/IP固定、完整证书校验、不跟随跳转、禁用代理和32KiB上限。
-  OAuth等待与Agent工具调用同在运行中，无需另造MCP/LSM工具；取消可中止等待。
-  **边界**：运行中授权等待在Controller进程崩溃/重启后还不能自动继续原执行游标；
-  实际第三方IdP浏览器人工登录尚未以生产凭据验收（测试使用受控模拟IdP）。
-  因此不能将此模块判定为全部原版行为等价。
+  OAuth首次等待已改为SQLite `requires_action` 持久检查点：模型的待执行工具调用
+  和React登录SSE delta同时保存，Controller关闭或重启时不会继续占用协程；
+  OAuth回调具备有效的WebUI登录会话时，先重新核验机器权限并自动启动原图工具节点；
+  否则由原聊天页的Bearer授权`resume`/`status`/`stream`重新附着，
+  成功页通过同源BroadcastChannel仅传递公开的Action ID，原标签页自行鉴权。
+  已授权的Action在调用HTTP前持久记录`dispatching`，完成后将结果持久写入图
+  checkpoint及事件；Controller异常重启时，仅在未发送HTTP或已确认结果落盘的
+  情况下继续原图。对于可能产生副作用且HTTP已启动但结果未知的调用，
+  采用fail-closed中断，**不自动重试可能重复的外部请求**。
+  10分钟授权state到期后可在已认证状态查询中原子更新SSE链接，旧state作废；
+  多个并发请求只会发起一次新的授权。撤销WebUI/机器授权后不可借助callback的
+  OAuth CSRF cookie提升执行权限。
+  **边界**：生产第三方IdP人工授权尚无真实凭据可验收（测试使用受控模拟IdP）；
+  需由部署者提供可用外部HTTPS域名及OAuth提供方的客户端配置。
+  无法区分HTTP发送后崩溃是否已在外部生效，因而不会假称所有副作用可exactly-once。
 - **测试**：`tests/test_webui_actions.py`、`test_webui_actions_edges.py`、
   `test_webui_actions_source_oracle.py`，分别覆盖原React API契约、真实本地
   HTTP服务的成功/错误/取消/超时、多工具、重启和跨owner隔离；
@@ -319,5 +332,9 @@ TypeScript 模块，导出解析器、工具定义与域名验证的原版结果
   `tests/test_webui_action_oauth.py`还覆盖CSRF绑定、state一次性消费、过期、
   Owner隔离、令牌加密及刷新、HTTPS IP pinning/禁止代理/错误体，
   `test_webui_agent_runner.py`覆盖原始模型调用→OAuth授权提示→HTTP callback→
-  真实本地Action服务→模型恢复的完整链路。新OAuth模块本地分支覆盖率96%+；
+  真实本地Action服务→模型恢复的完整链路；`test_webui_action_oauth_recovery.py`
+  验证SQLite重开、原检查点续跑、Auth cookie与机器权限撤销、重复发送保护、
+  HTTP结果落盘后崩溃以及过期链接并发轮换。`test_webui_action_oauth_browser.py`
+  使用真实Chromium检查OAuth结果页和跨同源标签的恢复通知。
+  新OAuth模块本地分支覆盖率96%+；
   Actions各模块覆盖率须≥90%，全仓总覆盖率须由最新CI验收。
