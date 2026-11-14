@@ -172,7 +172,10 @@ or additional runtime dependency:
   resumes after a valid answer, and the conversation remains coherent after
   a second reload. The completed parallel sibling is not re-executed by
   the resumed graph scheduler. Standalone Python Graph tests also verify
-  this checkpointed sibling result at the model-call level.
+  this checkpointed sibling result at the model-call level. A second real
+  Python parallel StateGraph test checks a tool approval/rejection interrupt:
+  rejected tool actions cannot run, the question/approval branch continues,
+  and its completed sibling never executes again.
 
 Validation: real two-Controller SQLite claim races, stale-token model/event/
 final-result refusal, expired-lease takeover, no-checkpoint orphan behavior,

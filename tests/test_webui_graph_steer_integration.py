@@ -325,3 +325,70 @@ async def test_crashed_parallel_steer_recovers_only_its_original_recipient(tmp_p
     assert sum(message.get('steerId') == ack['steerId'] for message in received['left']) == 1
     assert len([e for _, e in store.events('local', job.run_id) if e.get('event') == 'on_steer_applied']) == 1
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_parallel_graph_sibling_tool_review_keeps_completed_sibling(tmp_path, monkeypatch):
+    """Source approval batch is resumed in the pending Graph node only."""
+    from local_shell_mcp.webui.agent_runtime import AgentSuspended
+    from local_shell_mcp.webui.providers import ModelToolCall
+    from local_shell_mcp.webui.routes import _repo
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.state'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'none')
+    get_settings.cache_clear()
+    db = SQLiteDatabase(tmp_path / '.state')
+    repository, store = AgentRepository(db), GenerationStore(db)
+    _repo().save_setting('local', 'endpoints', {'agents': {
+        'toolApproval': {'enabled': True, 'ask': ['plan_manage']},
+    }})
+    monkeypatch.setattr(agent_runner, 'provider_config', lambda _, model: ProviderConfig(
+        'openai', model, 'http://localhost:1234/chat/completions', ''))
+    root = repository.create('local', {'name': 'root', 'provider': 'openAI',
+                                      'model': 'root', 'tools': []})
+    left = repository.create('local', {'name': 'left', 'provider': 'openAI',
+                                      'model': 'left', 'tools': ['plan_manage']})
+    right = repository.create('local', {'name': 'right', 'provider': 'openAI',
+                                       'model': 'right', 'tools': []})
+    root = repository.update('local', root['id'], {'edges': [{
+        'from': root['id'], 'to': [left['id'], right['id']], 'edgeType': 'direct'}]})
+    job, _ = store.begin('local', {'text': 'Parallel graph review'}, root)
+    counts = {'root': 0, 'left': 0, 'right': 0}
+
+    async def model(profile, messages, **kwargs):
+        counts[profile.model] += 1
+        if profile.model == 'root':
+            yield 'Root setup.'
+        elif profile.model == 'left' and not any(m.get('role') == 'tool' for m in messages):
+            yield ModelToolCall('review-plan', 'plan_manage', {'action': 'list'})
+        elif profile.model == 'left':
+            assert messages[-1].get('tool_call_id') == 'review-plan'
+            assert messages[-1]['content'].startswith('Blocked:')
+            yield 'Left continued after review.'
+        else:
+            yield 'Right completed before review.'
+
+    async def noop(text):
+        pass
+
+    options = {'scopes': set(), 'grant_expires': None, 'stream_tools': model,
+               'stream_text': model, 'on_text': noop, 'agent': root}
+    with pytest.raises(AgentSuspended):
+        await AgentRunner('local', job, db, store, **options).run(
+            store.history('local', job.conversation_id))
+    action = store.pending_action('local', job.run_id)
+    assert action and action['namespace'].endswith('/graph:' + left['id'])
+    assert action['payload']['type'] == 'tool_approval'
+    generation, history, partial, batch = store.claim_approval('local', job.run_id, action['actionId'],
+                                                                [{'tool_call_id': 'review-plan',
+                                                                  'decision': 'reject'}])
+    resumed = AgentRunner('local', job, db, store, **options,
+                          resume_history=history, partial_text=partial,
+                          approved_batch=batch, resume_namespace=action['namespace'])
+    result = await resumed.run(history)
+    assert generation.run_id == job.run_id
+    assert any(m.get('content') == 'Left continued after review.' for m in result)
+    assert any(m.get('content') == 'Right completed before review.' for m in result)
+    assert counts == {'root': 1, 'left': 2, 'right': 1}
+    get_settings.cache_clear()
