@@ -498,6 +498,51 @@
       "python_lsm": "webui/subagent_wakeup.py:_retry_at/_dispatch_failure/process_wakeups/assert_wakeup_lease",
       "status": "部分",
       "difference": "Source 8-attempt 1s-5m half-jitter durable retry/dead-letter, trusted requeue new idempotency tail, per-claim CAS actor lease and inherited AgentRunner safety; global fire/steer/batch/multi-tenant delivery engine remains out of scope."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/envelope.ts",
+      "sha256": "15ca57ea02b04e0ce00eb9c8120fdc171113a08c27a847ac7198e5ea062e4ef1",
+      "symbols": "createAgentTriggerEnvelope, getAgentTriggerIdempotencyKey, parseAgentTriggerEnvelope",
+      "python_lsm": "webui/event_triggers.py:prepare_source_event,delivery_key",
+      "status": "部分",
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/json.ts",
+      "sha256": "dfe3ad75c53a47c2da9610641086c80bbbf7af4a46117b1a8eb7cc9bf2710246",
+      "symbols": "cloneJsonValue",
+      "python_lsm": "webui/event_triggers.py:prepare_source_event",
+      "status": "部分",
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/ingress.ts",
+      "sha256": "4dbd6e477a5ecc979054246e0893eee5bd4a3db091b5c8eecf1170ae94d9f3ec",
+      "symbols": "createAgentTriggerIngressHandlers, requireIdempotencyKey, requireSourceKeyId",
+      "python_lsm": "webui/event_trigger_routes.py:enqueue_agent_event,get_agent_event",
+      "status": "部分",
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/bindings.ts",
+      "sha256": "dd09d853b018a4e674405e74736746244f55526d358874af79b8eb3010ef1d74",
+      "symbols": "configuredChild, bindingId, register, resolve",
+      "python_lsm": "webui/event_triggers.py:register_bound_child,bound_child,binding_key;webui/event_trigger_routes.py:register_agent_event_binding",
+      "status": "部分",
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/delivery.ts",
+      "sha256": "9ee6889800e1800454d973d407fcdd1c52e723f5b50007adb6da334bff1c5354",
+      "symbols": "prepareAgentTriggerDelivery, ordered lane, fingerprint, source delivery",
+      "python_lsm": "webui/event_triggers.py:enqueue_event,delivery_key,_lane,process_event_deliveries",
+      "status": "部分",
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
     }
   ],
   "runtime_dependency_lock": {
@@ -542,6 +587,7 @@
     "reference_fixture_background": "tests/fixtures/librechat/subagent_task_real_reference.cjs",
     "background_host": "webui/subagent_task_host.py; Owner/child generation + lease CAS, scoped thread continuation and source schema; startup recover_subagent_tasks",
     "artifacts_integration": "Child conversation identity pre-reserved/registered with optional PR352 ActiveChildThreads.activate before GenerationStore.begin and settled after terminal; no duplicate guard table or artifact route. PR #352 must be integrated before claiming child edit protection.",
-    "subagent_completion_wakeup": "Source-locked internal child continue trigger queue with pre-enqueued typed envelopes, parent branch checks, same-transaction manual/auto result claims and original AgentRunner; bounded 8-attempt 1s-5m half-jitter durable retry/dead-letter, owner-scoped trusted-only requeue as a fresh idempotency lane tail, and per-attempt CAS actor lease fenced through model tools, SSE, checkpoint and finalization. Source live branch tests and SQLite schema migrations. Other JS external inbound trigger bindings, event batching/steer/fire, complete scheduler and app-level approvals remain unported."
+    "subagent_completion_wakeup": "Source-locked internal child continue trigger queue with pre-enqueued typed envelopes, parent branch checks, same-transaction manual/auto result claims and original AgentRunner; bounded 8-attempt 1s-5m half-jitter durable retry/dead-letter, owner-scoped trusted-only requeue as a fresh idempotency lane tail, and per-attempt CAS actor lease fenced through model tools, SSE, checkpoint and finalization. Source live branch tests and SQLite schema migrations. Other JS external inbound trigger bindings, event batching/steer/fire, complete scheduler and app-level approvals remain unported.",
+    "external_events": "Source-authenticated original remote API-key event admission, issuer/revoke, SHA256 trigger idempotency, lane serialization, dead source event 8 retry CAS, real AgentRunner fire and guarded bound direct-child continue. Original TS envelope.ts run under Bun with byte-identical json.ts. No unguarded external bindings when Artifacts PR352 absent. Source steer, coalescing, expectedAction remain unported."
   }
 }

@@ -35,6 +35,6 @@ def test_original_lc_source_retry_matches_python_sqlite_delivery_deferral():
         (10_000, 610_000), (0, 600_000), (0, 10_000_000),
     ]]
     result = subprocess.run([bun, str(_ORACLE)], input=json.dumps(inputs), capture_output=True,
-                            text=True, check=True, timeout=20)
+                            text=True, encoding="utf-8", errors="replace", check=True, timeout=20)
     assert [waiting_retry_seconds(case["since"], case["now"]) for case in inputs] == [
         int(value) for value in json.loads(result.stdout)]

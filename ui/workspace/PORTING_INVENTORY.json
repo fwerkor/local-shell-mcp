@@ -6,7 +6,7 @@
     "LibreChat": 1892,
     "agents": 258
   },
-  "reviewed_mapping_count": 53,
+  "reviewed_mapping_count": 58,
   "modules": [
     {
       "repository": "LibreChat",
@@ -8445,10 +8445,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/json.ts",
       "sha256": "dfe3ad75c53a47c2da9610641086c80bbbf7af4a46117b1a8eb7cc9bf2710246",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/event_triggers.py:prepare_source_event",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
     },
     {
       "repository": "LibreChat",
@@ -9102,10 +9102,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/triggers/bindings.ts",
       "sha256": "dd09d853b018a4e674405e74736746244f55526d358874af79b8eb3010ef1d74",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/event_triggers.py:register_bound_child,bound_child,binding_key;webui/event_trigger_routes.py:register_agent_event_binding",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
     },
     {
       "repository": "LibreChat",
@@ -9120,10 +9120,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/triggers/delivery.ts",
       "sha256": "9ee6889800e1800454d973d407fcdd1c52e723f5b50007adb6da334bff1c5354",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/event_triggers.py:enqueue_event,delivery_key,_lane,process_event_deliveries",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
     },
     {
       "repository": "LibreChat",
@@ -9156,10 +9156,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/triggers/envelope.ts",
       "sha256": "15ca57ea02b04e0ce00eb9c8120fdc171113a08c27a847ac7198e5ea062e4ef1",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/event_triggers.py:prepare_source_event,delivery_key",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
     },
     {
       "repository": "LibreChat",
@@ -9192,10 +9192,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/triggers/ingress.ts",
       "sha256": "4dbd6e477a5ecc979054246e0893eee5bd4a3db091b5c8eecf1170ae94d9f3ec",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/event_trigger_routes.py:enqueue_agent_event,get_agent_event",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Source-bound external remote API key, server-authored principal/source, original idempotency and ordered CAS SQLite fire; bound continue requires PR352 actual child guard; source steer/expectedAction/coalesce/global actor incomplete."
     },
     {
       "repository": "LibreChat",

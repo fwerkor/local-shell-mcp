@@ -559,3 +559,45 @@ Controller 已经退出，另一 Controller 的 poll 也会立即发现可领取
 
 本次仅提供内部 Subagent 完成事件的有界重试、死信及安全自动续接。
 其它 Agent Trigger 类型尚未引入未经授权的公共 HTTP 入口。
+
+### 2026-11-14 — 原版 Agent Trigger Remote Source、Fire 与受保护的绑定 Continue
+
+锁定 `triggers/{ingress,bindings,envelope,delivery,engine}.ts` 和
+`agents/json.ts` 原版 SHA-256。按原版 `POST /api/agents/v1/events`、
+`GET /api/agents/v1/events/:deliveryId`、
+`POST /api/agents/v1/events/bindings` 接入现有 Starlette 路由。
+原 LibreChat 使用 Remote Agents API Key，LSM 以 OAuth
+`admin:config` 受控管理的独立、可撤销 event-source bearer key
+（`/api/agents/v1/event-source-keys`，只返回一次明文）承载对应身份；
+控制器 OAuth、UI cookie、普通 MCP key **不能**冒充远程事件源。
+事件 `source`、`principal`、`receivedAt` 在可信中间件重建；强制单个
+`Idempotency-Key`，禁止多值 headers/非法字符，单包限制 1MiB，
+事件结果查询只返回来源可见的状态、有限错误类型及受限结果标识。
+
+`webui/event_triggers.py` 以独立 SQLite `agent_event_source_keys`、
+`agent_event_bindings`、`agent_event_deliveries` 表实现 `trigger_` SHA256
+原版投递键、内容指纹冲突、默认和显式 lane（SQLite seq 按入队先后）、
+重试限制、令牌 fenced 的跨 Controller 恢复与 source key 即时撤权。
+`fire` 使用原有 `GenerationStore.begin` + `AgentRunner` + SSE；入队与
+生成记录原子提交，重启/调度失败不会分配第二个根 generation。
+远程 API Key 不继承机器控制权限、MCP 工具或无人批准的 HITL 操作。
+所有 HTTP 普通 Chat 接口拒绝 clientRequestId=`trigger_*` 预占内部事件。
+
+`continue` 严格要求 API-key 所属直接子 Agent 绑定，服务器完全覆盖调用者
+提供的 conversation/agent/branch；原始 `Constants.NO_PARENT` 首轮
+和最新真实 assistant 后续分支分别由 Controller 指定。绑定须先由
+PR #352 `ActiveChildThreads.activate` 在子会话公开前登记只读保护，
+**在 PR #352 尚未合入时安全返回 503**，绝不创建未保护的子会话。
+不可用时仍可使用 `fire`；其它 Agent 的 Draft PR 不会被本 PR 自动合入。
+
+新的 SHA-256 字节完全一致的 `triggers/envelope.ts` 与依赖
+`agents/json.ts` fixture 由 Bun **直接执行**；与 Python 逐例核对
+fire/continue/steer 投递 identity、CJK 字符和可信 source 字段。
+另外覆盖完整 ASGI Key 生命周期、授权撤销即时杀死 leased actor、
+多 Controller 抢占和同一 run 恢复、顺序 lane 排他/跨 lane 并发、
+真实模型 SSE、8 次失败/死信以及含伪造目标的绑定 API。
+
+仍需后续独立实现/合入原版 `steer`（由 Draft #358 承接 Graph/HITL）、
+expectedAction host-observed 证据、750ms/8 项 coalescing、全局多来源
+Trigger 管理。当前 unsupported modes 和 contracts **拒绝入队**，
+没有假装完成或将不可信请求直接送到 Subagent completion 队列。
