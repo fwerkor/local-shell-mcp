@@ -285,3 +285,56 @@ async def test_suspend_then_resume_same_checkpoint_advances_without_another_prop
     await run_agent_loop(state, stream_tools=stream, stream_text=forbidden, dispatch=dispatch, on_text=on_text)
     assert provider_calls == 2 and dispatch_calls == 2 and state.step == 3
     assert not state.pending_calls and not state.tool_step_started
+
+
+@pytest.mark.asyncio
+async def test_reasoning_signature_and_redaction_are_kept_out_of_answer_text():
+    from local_shell_mcp.webui.providers import ModelThought
+
+    state = AgentLoopState(AgentContext(profile(), [{"name": "file_read"}]), [{"role": "user", "content": "trace"}])
+
+    async def stream(*args, **kwargs):
+        yield ModelThought("thinking", text="step-one")
+        yield ModelThought("thinking", text=" step-two")
+        yield ModelThought("signature", signature="signed-reasoning")
+        yield ModelThought("redacted_thinking", data="redacted-by-provider")
+        yield ModelThought("thinking", text="separate")
+        yield "final answer"
+        yield ModelToolCall("read", "file_read", {"path": "test.txt"}, {"thoughtSignature": "gemini-sig"})
+
+    async def dispatch(calls, current):
+        return ToolBatchOutput([{"role": "tool", "tool_call_id": "read", "content": "done"}],
+                               next_context=None)
+
+    async def stop(*args, **kwargs):
+        yield "completed"
+
+    output = []
+
+    async def on_text(chunk):
+        output.append(chunk)
+
+    calls = 0
+
+    async def model(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            async for part in stream(*args, **kwargs):
+                yield part
+        else:
+            async for part in stop(*args, **kwargs):
+                yield part
+
+    await run_agent_loop(state, stream_tools=model, stream_text=forbidden,
+                         dispatch=dispatch, on_text=on_text)
+    first = state.messages[1]
+    assert first["reasoning"] == [
+        {"type": "thinking", "thinking": "step-one step-two", "signature": "signed-reasoning"},
+        {"type": "redacted_thinking", "data": "redacted-by-provider"},
+        {"type": "thinking", "thinking": "separate"},
+    ]
+    assert first["tool_calls"][0]["provider_data"]["thoughtSignature"] == "gemini-sig"
+    assert first["content"] == "final answer"
+    assert output == ["final answer", "completed"]
+    assert state.messages[-1]["content"] == "completed"

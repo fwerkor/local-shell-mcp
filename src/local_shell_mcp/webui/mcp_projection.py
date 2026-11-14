@@ -153,6 +153,11 @@ def mcp_tool_history_message(call, raw: str, provider: str, max_chars=HARD_MAX_T
     """Split a real native MCP envelope before any text-only context clipping."""
     # Raw tool output is retained for audit, restart and model projections.
     message = {"role": "tool", "tool_call_id": call.call_id, "content": raw, "raw_result": raw}
+    # Only the nested MCP dispatch supplies a CallToolResult envelope. Other
+    # LSM tools can legitimately return JSON with a `content` field; interpreting
+    # that as MCP UI/media would invent artifacts from ordinary tool output.
+    if call.name != "mcp_tool_call":
+        return message
     try:
         envelope = _mcp_envelope(json.loads(raw), call.name)
     except (ValueError, TypeError):

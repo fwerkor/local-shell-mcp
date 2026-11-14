@@ -459,6 +459,28 @@ class GenerationStore:
                 message_id = row["parent_id"]
         return [step for group in reversed(groups) for step in group]
 
+    def model_history_boundary(self, owner: str, run_id: str, *, initial: int | None = None) -> int:
+        """Retain the original prompt boundary through Ask User/approval checkpoints.
+
+        A resumed snapshot contains this run's prior assistant/tool/steer steps.
+        Its current length cannot be used to select newly generated steps.
+        """
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError("Generation not found")
+            state = json.loads(row["state"])
+            if "modelHistoryStart" not in state:
+                if initial is None or initial < 0:
+                    raise ValueError("Missing initial model-history boundary")
+                state["modelHistoryStart"] = initial
+                db.execute("UPDATE runs SET state=? WHERE id=?", (_json(state), run_id))
+            return int(state["modelHistoryStart"])
+
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
                error: str | None = None, model_steps: list[dict] | None = None) -> bool:
         if status not in _TERMINAL:
@@ -490,6 +512,30 @@ class GenerationStore:
                         tool_parts[result["id"]] = {"type": "tool_call", "tool_call": {
                             **result["tool_call"], "stepId": result["id"],
                         }}
+            attachments: list[dict] = []
+            attachment_positions: dict[tuple, int] = {}
+            for event_row in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
+                event = json.loads(event_row["data"])
+                if event.get("event") != "attachment" or not isinstance(event.get("data"), dict):
+                    continue
+                attachment = event["data"]
+                # Native file previews can emit pending then ready/failed for a
+                # single file. Keep the final owned representation, not copies.
+                if attachment.get("file_id"):
+                    key = ("file", attachment["file_id"], attachment.get("toolCallId"))
+                elif attachment.get("type") == "ui_resources" and isinstance(attachment.get("ui_resources"), list):
+                    key = ("ui_resources", attachment.get("toolCallId"), tuple(
+                        resource.get("resourceId") for resource in attachment["ui_resources"]
+                        if isinstance(resource, dict)
+                    ))
+                else:
+                    key = None
+                if key is not None and key in attachment_positions:
+                    attachments[attachment_positions[key]] = attachment
+                else:
+                    if key is not None:
+                        attachment_positions[key] = len(attachments)
+                    attachments.append(attachment)
             content = ([{"type": "text", "text": text, "phase": "final_answer"}] if text else []) + list(tool_parts.values())
             # LibreChat agents/client.js emits ContentTypes.ERROR as a content
             # part. A top-level final.error alone is ignored by finalHandler.
@@ -504,15 +550,17 @@ class GenerationStore:
                 "text": text,
                 "content": content,
                 "unfinished": status != "complete",
+                **({"attachments": attachments} if attachments else {}),
             }
-            if content:
+            if content or attachments:
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",
                     (generation.response_message_id, generation.conversation_id, generation.user_message_id,
                      "assistant", text, _json(response_message["content"]),
                      _json({"sender": "Assistant", "isCreatedByUser": False,
-                            "unfinished": status != "complete"}), now, now),
+                            "unfinished": status != "complete",
+                            **({"attachments": attachments} if attachments else {})}), now, now),
                 )
             db.execute("UPDATE runs SET status=?, updated_at=? WHERE id=?", (status, now, run_id))
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, generation.conversation_id))

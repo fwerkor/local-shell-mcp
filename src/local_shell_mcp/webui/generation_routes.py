@@ -138,7 +138,14 @@ async def _run_model(
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
                              approved_batch=approved_batch)
-        history_start = len(history)
+        # Only the first entry determines this run's prefix. After human
+        # actions, resume_history/checkpoints already contain prior run steps.
+        original_boundary = len(history) if resume_history is None else len(
+            repo.history(owner, generation.conversation_id, message_id=generation.user_message_id)
+        ) + int(bool(instructions))
+        history_start = repo.model_history_boundary(
+            owner, generation.run_id, initial=original_boundary,
+        )
         try:
             finished_messages = await runner.run(history)
         except AgentSuspended:

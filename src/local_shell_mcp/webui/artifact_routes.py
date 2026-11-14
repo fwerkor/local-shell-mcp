@@ -15,6 +15,10 @@ from .routes import _body, _owner, _repo
 from .storage import _json, _now
 
 
+class ArtifactHistoryConflict(Exception):
+    """A visible artifact no longer matches its canonical model history."""
+
+
 async def update_artifact(request: Request):
     owner = _owner(request)
     _same_origin(request)
@@ -27,6 +31,8 @@ async def update_artifact(request: Request):
         return _update(repo, owner, request.path_params["message_id"], index, original, updated)
     except sqlite3.Error:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
+    except ArtifactHistoryConflict:
+        return JSONResponse({"error": "Canonical artifact history does not match the selected edit"}, status_code=409)
 
 
 def _update(repo, owner: str, message_id: str, index: int, original: str, updated: str):
@@ -63,7 +69,10 @@ def _update(repo, owner: str, message_id: str, index: int, original: str, update
         if run is not None:
             state = json.loads(run["state"])
             steps = state.get("modelSteps")
-            if isinstance(steps, list):
+            if "modelSteps" in state:
+                if not isinstance(steps, list):
+                    raise ArtifactHistoryConflict()
+                matched = False
                 remaining = index
                 for step in steps:
                     if not isinstance(step, dict) or step.get("role") != "assistant":
@@ -81,12 +90,15 @@ def _update(repo, owner: str, message_id: str, index: int, original: str, update
                         continue
                     try:
                         modified, _ = edit_artifact(source, remaining, original, updated)
-                    except ValueError:
-                        break
+                    except ValueError as exc:
+                        raise ArtifactHistoryConflict() from exc
                     step["content"] = modified["text"] if isinstance(content, str) else modified["content"]
                     db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                                (_json(state), _now(), run["id"]))
+                    matched = True
                     break
+                if not matched:
+                    raise ArtifactHistoryConflict()
         response = {"conversationId": value["conversationId"], "text": value["text"]}
         if "content" in value:
             response["content"] = value["content"]

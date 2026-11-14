@@ -155,6 +155,22 @@ class AgentRunner:
         step = self._tool_step(call)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
+        # A UI resource marker is only resolvable after the original client
+        # receives a canonical attachment. Derive it from the same native MCP
+        # envelope retained in the checkpoint; never infer from display JSON.
+        if call.name == "mcp_tool_call" and isinstance(output, str):
+            from .mcp_projection import mcp_tool_history_message
+
+            artifact = mcp_tool_history_message(call, output, self.initial_profile.provider if self.initial_profile else "openai").get("artifact")
+            ui = artifact.get("ui_resources") if isinstance(artifact, dict) else None
+            if isinstance(ui, dict) and isinstance(ui.get("data"), list) and ui["data"]:
+                self.store.append(self.owner, self.generation.run_id, {
+                    "event": "attachment", "data": {
+                        "type": "ui_resources", "messageId": self.generation.response_message_id,
+                        "toolCallId": call.call_id, "conversationId": self.generation.conversation_id,
+                        "ui_resources": ui["data"],
+                    },
+                })
         self.store.append(self.owner, self.generation.run_id, {
             "event": "on_run_step_completed", "data": {"result": {
                 "id": step["id"], "index": step["index"], "completed_at": int(time.time() * 1000),

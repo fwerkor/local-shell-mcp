@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 from starlette.exceptions import HTTPException
@@ -10,7 +11,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from .routes import _body, _not_found, _owner, _repo
-from .storage import _now
+from .storage import _json, _now
 
 
 def _argument(body: dict) -> dict:
@@ -116,11 +117,47 @@ def _clone(owner: str, values: dict, *, only_to_message: str | None = None) -> d
         )
         ids = {row["id"]: str(uuid.uuid4()) for row in messages}
         for i, row in enumerate(messages):
+            metadata = json.loads(row["metadata"])
+            if isinstance(metadata.get("attachments"), list):
+                # Client UI resources resolve through message-level attachments.
+                # Their clone must be owned by the copied message/conversation.
+                metadata["attachments"] = [
+                    {**item, "messageId": ids[row["id"]], "conversationId": new_cid}
+                    if isinstance(item, dict) else item
+                    for item in metadata["attachments"]
+                ]
             db.execute(
                 "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?)",
                 (ids[row["id"]], new_cid, ids.get(row["parent_id"]), row["role"],
-                 row["text"], row["content"], row["metadata"], now + i, now + i),
+                 row["text"], row["content"], _json(metadata), now + i, now + i),
+            )
+        # Canonical model steps are stored in runs.state, not React preview
+        # messages. Copy only terminal runs whose assistant is in the selected
+        # branch; preserve content and provider signatures without aliasing
+        # generation identity, conversation owner or the original run.
+        for original_id, copied_id in ids.items():
+            message = next(row for row in messages if row["id"] == original_id)
+            if message["role"] != "assistant":
+                continue
+            prior_runs = db.execute(
+                "SELECT * FROM runs WHERE conversation_id=? AND "
+                "json_extract(state,'$.responseMessageId')=? AND "
+                "status IN ('complete','aborted','error','interrupted') "
+                "ORDER BY created_at DESC LIMIT 1", (cid, original_id),
+            ).fetchone()
+            if prior_runs is None:
+                continue
+            state = json.loads(prior_runs["state"])
+            state["responseMessageId"] = copied_id
+            state["userMessageId"] = ids.get(state["userMessageId"], state["userMessageId"])
+            state.pop("clientRequestId", None)
+            state["generationCreatedAt"] = now // 1000
+            db.execute(
+                "INSERT INTO runs(id,conversation_id,agent_id,status,state,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                ("run_" + uuid.uuid4().hex, new_cid, prior_runs["agent_id"],
+                 prior_runs["status"], _json(state), now, now),
             )
         response = repo._convo(db.execute("SELECT * FROM conversations WHERE id=?", (new_cid,)).fetchone())
         response["messages"] = [repo._message(row) for row in db.execute(
