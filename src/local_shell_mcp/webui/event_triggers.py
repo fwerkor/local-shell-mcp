@@ -7,6 +7,7 @@ Source: LibreChat v0.8.8 packages/api/src/agents/triggers/{envelope,
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -205,8 +206,12 @@ def register_bound_child(database: Any, owner: str, source_key_id: str,
         from .child_thread_activity import ActiveChildThreads
     except ImportError as exc:
         raise RuntimeError("Child conversation write guard must be integrated before bindings") from exc
-    thread_id = str(uuid.uuid4())
-    ActiveChildThreads(database).activate(owner, thread_id, parent_run["id"])
+    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, identifier))
+    activity = ActiveChildThreads(database)
+    reserve = getattr(activity, "reserve_for_completed_parent", None)
+    if not callable(reserve):
+        raise RuntimeError("Child conversation write guard must support completed parent actors")
+    reserve(owner, thread_id, parent_run["id"], parent_message_id)
     now = _now()
     child_meta = {"agentEventBinding": {"bindingId": identifier,
                                        "sourceKeyId": source_key_id, "actorId": actor_id},
@@ -249,6 +254,122 @@ def delivery_key(envelope: dict) -> str:
               target.get("bindingId", "") if envelope["mode"] == "continue" else "",
               target.get("sourceKeyId", "") if envelope["mode"] == "continue" else ""]
     return "trigger_" + hashlib.sha256(_js(values).encode()).hexdigest()
+
+
+def _parse_expected_action(value: Any, mode: str, target: dict) -> dict | None:
+    """Original envelope.ts:createExpectedAction + delivery.ts bound-child only."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("expectedAction must be an object")
+    tool_name = _string(value.get("toolName"), "expectedAction.toolName", 256)
+    if len(tool_name) > 256:
+        raise ValueError("expectedAction.toolName exceeds 256 characters")
+    if mode != "continue" or not target.get("bindingId") or not target.get("sourceKeyId"):
+        raise ValueError("Expected actions require authenticated bound-child continuation")
+    result = {"toolName": tool_name}
+    subset = value.get("argumentSubset")
+    if subset is not None:
+        if not isinstance(subset, dict):
+            raise ValueError("expectedAction.argumentSubset must be an object")
+        # Enforce exactly the JSON-value shape allowed by the source clone.
+        result["argumentSubset"] = json.loads(_json(subset))
+    return result
+
+
+def _contained(actual: Any, subset: Any) -> bool:
+    if isinstance(subset, list):
+        return isinstance(actual, list) and len(actual) == len(subset) and all(
+            _contained(a, b) for a, b in zip(actual, subset, strict=True)
+        )
+    if isinstance(subset, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and _contained(actual[key], value) for key, value in subset.items()
+        )
+    return type(actual) is type(subset) and actual == subset
+
+
+def matches_expected_action(evidence: dict, expected: dict) -> bool:
+    """Direct port of triggers/expectedAction.ts:matchesExpectedAction."""
+    name = evidence.get("toolName")
+    wanted = expected["toolName"]
+    if not isinstance(name, str) or not (name == wanted or name.startswith(wanted + "_mcp_")):
+        return False
+    if "argumentSubset" not in expected:
+        return True
+    arguments = evidence.get("arguments")
+    if isinstance(arguments, str):
+        with contextlib.suppress(ValueError, TypeError):
+            arguments = json.loads(arguments)
+    return _contained(arguments, expected["argumentSubset"])
+
+
+def _observed_action(db: Any, run_id: str, expected: dict) -> bool:
+    """Trust the durable host tool-completed SSE; never the model's prose."""
+    for record in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
+        event = json.loads(record["data"])
+        if event.get("event") != "on_run_step_completed":
+            continue
+        action = (event.get("data") or {}).get("result") or {}
+        tool = action.get("tool_call")
+        if not isinstance(tool, dict):
+            continue
+        output = tool.get("output")
+        if isinstance(output, str) and (output.startswith("Tool failed (") or
+                                         output.startswith("Blocked: ")):
+            continue
+        if matches_expected_action({"toolName": tool.get("name"),
+                                    "arguments": tool.get("args")}, expected):
+            return True
+    return False
+
+
+_COALESCE_WINDOW_MS = 750
+_MAX_BATCH_SIZE = 8
+_MAX_BATCH_BYTES = 512 * 1024
+
+
+def _coalescing_key(envelope: dict, options: Any) -> str | None:
+    """Original delivery.ts:coalescingIdentity, observational bound children only."""
+    if options is None:
+        return None
+    if not isinstance(options, dict) or not isinstance(options.get("key"), str):
+        raise ValueError("coalesce.key must be a string")
+    key = options["key"].strip()
+    if not 1 <= len(key) <= 128:
+        raise ValueError("coalesce.key must contain between 1 and 128 characters")
+    target = envelope["target"]
+    if (envelope["mode"] != "continue" or not target.get("bindingId")
+            or not target.get("sourceKeyId")):
+        raise ValueError("Coalescing requires authenticated bound-child continue")
+    if envelope.get("expectedAction") is not None:
+        raise ValueError("Expected actions cannot be coalesced")
+    source = envelope["event"]["source"]
+    fields = [envelope["principal"].get("tenantId", ""),
+              envelope["principal"]["userId"], source["type"], source["id"],
+              target["agentId"], target["conversationId"], target["bindingId"],
+              target["sourceKeyId"], key]
+    return "trigger_batch_" + _digest(fields)
+
+
+def _batch_input(root: dict, members: list[dict]) -> str:
+    """Original batch.ts:createAgentTriggerBatchEnvelope event order/content."""
+    deliveries = [(root["id"], json.loads(root["envelope"]))]
+    deliveries.extend((member["id"], json.loads(member["envelope"])) for member in members)
+    deliveries.sort(key=lambda item: (item[1]["event"]["occurredAt"],
+                                       item[1]["receivedAt"], item[1]["event"]["id"], item[0]))
+    events = [{"deliveryId": envelope["deliveryId"], "event": envelope["event"],
+               "input": envelope["input"]} for _, envelope in deliveries]
+    counts: dict[str, int] = {}
+    for entry in events:
+        kind = entry["event"]["type"]
+        counts[kind] = counts.get(kind, 0) + 1
+    batch = {"kind": "librechat.agent_event_batch", "version": 1,
+             "count": len(events),
+             "summary": {"eventTypes": [{"type": kind, "count": counts[kind]}
+                                        for kind in sorted(counts)]},
+             "events": events}
+    return _js(batch)
 
 
 def _lane(envelope: dict, ordering_key: str | None) -> str:
@@ -305,8 +426,7 @@ def prepare_source_event(owner: str, source_key_id: str, identity: str, body: di
             if type(target["preempt"]) is not bool:
                 raise ValueError("target.preempt must be a boolean")
             resolved["preempt"] = target["preempt"]
-    if body.get("expectedAction") is not None or body.get("coalesce") is not None:
-        raise ValueError("Action fencing and coalescing require the source event-actor implementation")
+    expected_action = _parse_expected_action(body.get("expectedAction"), mode, resolved)
     received_at = _now() if received_at is None else received_at
     envelope = {"version": 1, "mode": mode, "requestId": str(uuid.uuid4()),
                 "deliveryId": identity, "receivedAt": received_at,
@@ -317,6 +437,8 @@ def prepare_source_event(owner: str, source_key_id: str, identity: str, body: di
                           "source": {"id": source_key_id, "type": "remote_api_key"}},
                 "target": resolved,
                 "input": _string(body.get("input"), "input")}
+    if expected_action is not None:
+        envelope["expectedAction"] = expected_action
     if "payload" in event:
         envelope["event"]["payload"] = event["payload"]
     if len(_json(envelope).encode()) > 1024 * 1024:
@@ -329,6 +451,10 @@ def enqueue_event(database: Any, owner: str, source_key_id: str, identity: str,
     from .agents import AgentRepository
 
     envelope, lane = prepare_source_event(owner, source_key_id, identity, body)
+    coalesce_key = _coalescing_key(envelope, body.get("coalesce"))
+    encoded_bytes = len(_json(envelope).encode("utf-8"))
+    if coalesce_key and encoded_bytes > _MAX_BATCH_BYTES:
+        raise ValueError("Coalesced envelope exceeds the 512KiB batch limit")
     key = delivery_key(envelope)
     source = AgentRepository(database).get(owner, envelope["target"]["agentId"])
     if source is None:
@@ -342,12 +468,10 @@ def enqueue_event(database: Any, owner: str, source_key_id: str, identity: str,
                                   envelope["target"]["conversationId"])).fetchone()
         if binding is None:
             raise PermissionError("An authenticated event binding is required for continue")
-    if envelope["mode"] == "steer":
-        raise ValueError("Steer requires the pending Graph/HITL transport integration")
     stable = dict(envelope)
     stable.pop("requestId")
     stable.pop("receivedAt")
-    fingerprint = _digest(stable)
+    fingerprint = _digest([stable, coalesce_key])
     now = _now()
     with database.connect() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -367,12 +491,32 @@ def enqueue_event(database: Any, owner: str, source_key_id: str, identity: str,
                 raise ValueError("Idempotency-Key was already used for different event content")
             return {"id": key, "status": prior["status"],
                     "availableAt": prior["available_at"], "replayed": True}
+        parent = None
+        available_at = now
+        if coalesce_key is not None:
+            parent = db.execute(
+                "SELECT id,available_at FROM agent_event_deliveries "
+                "WHERE owner=? AND source_key_id=? AND coalesce_key=? AND ordering_key=? "
+                "AND batch_root_id IS NULL AND status='pending' AND coalesce_until>? "
+                "AND batch_count<? AND batch_bytes+?<=? "
+                "ORDER BY seq DESC LIMIT 1",
+                (owner, source_key_id, coalesce_key, lane, now, _MAX_BATCH_SIZE,
+                 encoded_bytes, _MAX_BATCH_BYTES),
+            ).fetchone()
+            available_at = now + _COALESCE_WINDOW_MS if parent is None else parent["available_at"]
         db.execute("INSERT INTO agent_event_deliveries "
                    "(id,owner,source_key_id,fingerprint,envelope,mode,ordering_key,status,"
-                   "available_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'pending',?,?,?)",
-                   (key, owner, source_key_id, fingerprint, _json(envelope),
-                    envelope["mode"], lane, now, now, now))
-    return {"id": key, "status": "pending", "availableAt": now, "replayed": False}
+                   "available_at,coalesce_key,coalesce_until,batch_root_id,batch_count,batch_bytes,"
+                   "created_at,updated_at) VALUES(?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?)",
+                   (key, owner, source_key_id, fingerprint, _json(envelope), envelope["mode"],
+                    lane, available_at, coalesce_key,
+                    available_at if coalesce_key is not None and parent is None else None,
+                    parent["id"] if parent else None, 1, encoded_bytes, now, now))
+        if parent is not None:
+            db.execute("UPDATE agent_event_deliveries SET batch_count=batch_count+1,"
+                       "batch_bytes=batch_bytes+?,updated_at=? WHERE id=? AND status='pending'",
+                       (encoded_bytes, now, parent["id"]))
+    return {"id": key, "status": "pending", "availableAt": available_at, "replayed": False}
 
 
 def get_event(database: Any, owner: str, source_key_id: str, delivery_id: str) -> dict | None:
@@ -394,6 +538,27 @@ def get_event(database: Any, owner: str, source_key_id: str, delivery_id: str) -
     if row["error_code"]:
         payload["error"] = {"code": row["error_code"], "message": row["error_type"]}
     return payload
+
+
+def assert_source_steer_claim(db: Any, owner: str, lease: tuple[str, str]) -> None:
+    """Atomic source-key and actor claim fence in the SteeringStore transaction.
+
+    No separate model/Graph runner: the original native Steer FIFO sees the
+    event exactly once even when a source credential is revoked mid-dispatch.
+    """
+    from .agent_runtime import RuntimeSafetyError
+
+    delivery_id, token = lease
+    row = db.execute(
+        "SELECT 1 FROM agent_event_deliveries e JOIN agent_event_source_keys k "
+        "ON k.id=e.source_key_id AND k.owner=e.owner WHERE e.id=? "
+        "AND e.owner=? AND e.mode='steer' AND e.status='leased' "
+        "AND e.lease_owner=? AND e.lease_until>? AND k.revoked_at IS NULL "
+        "AND (k.expires_at IS NULL OR k.expires_at>?)",
+        (delivery_id, owner, token, _now(), _now()),
+    ).fetchone()
+    if row is None:
+        raise RuntimeSafetyError("Remote Agent Steer delivery lease or credential was revoked")
 
 
 def assert_event_lease(database: Any, owner: str, run_id: str,
@@ -428,7 +593,7 @@ def _failure(database: Any, db: Any, row: Any, *, code: str, error: Exception,
         ("dead" if permanent else "pending", count, code, type(error).__name__,
          _retry_at(count, attempted_at), attempted_at, row["id"], row["lease_owner"]),
     )
-    if permanent:
+    if permanent and row["mode"] != "steer":
         # Source settleSourceBeforeDeadLetter: the generation can already be
         # durably admitted even if provider lookup or scheduling failed.
         # Settle it and its original SSE in the exact same fenced transaction
@@ -480,20 +645,53 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
     with database.connect() as db:
         db.execute("BEGIN IMMEDIATE")
         db.execute(
-            "UPDATE agent_event_deliveries SET status='succeeded',lease_owner=NULL,"
-            "lease_until=NULL,updated_at=? WHERE status='leased' AND run_id IS NOT NULL "
-            "AND EXISTS(SELECT 1 FROM runs r WHERE r.id=agent_event_deliveries.run_id "
-            "AND r.status IN ('complete','error','aborted','interrupted','requires_action'))",
+            "UPDATE agent_event_deliveries SET status='dead',error_code='BATCH_ROOT_FAILED',"
+            "error_type='RuntimeError',updated_at=? WHERE batch_root_id IS NOT NULL "
+            "AND status='pending' AND EXISTS(SELECT 1 FROM agent_event_deliveries root "
+            "WHERE root.id=agent_event_deliveries.batch_root_id AND root.status='dead')",
+            (now,),
+        )
+        terminal_rows = db.execute(
+            "SELECT d.id,d.run_id,d.envelope,r.status AS run_status FROM agent_event_deliveries d "
+            "JOIN runs r ON r.id=d.run_id WHERE d.status='leased' AND d.run_id IS NOT NULL "
+            "AND r.status IN ('complete','error','aborted','interrupted','requires_action')",
+        ).fetchall()
+        for terminal in terminal_rows:
+            expected = json.loads(terminal["envelope"]).get("expectedAction")
+            if expected is not None and terminal["run_status"] == "requires_action":
+                continue  # Durable human approval must complete before proof.
+            if expected is not None and (
+                terminal["run_status"] != "complete" or
+                not _observed_action(db, terminal["run_id"], expected)
+            ):
+                db.execute("UPDATE agent_event_deliveries SET status='dead',error_code=?,"
+                           "error_type='PermissionError',lease_owner=NULL,lease_until=NULL,updated_at=? "
+                           "WHERE id=? AND status='leased'",
+                           ("EXPECTED_ACTION_NOT_OBSERVED", now, terminal["id"]))
+            else:
+                db.execute("UPDATE agent_event_deliveries SET status='succeeded',"
+                           "lease_owner=NULL,lease_until=NULL,updated_at=? "
+                           "WHERE id=? AND status='leased'", (now, terminal["id"]))
+        db.execute(
+            "UPDATE agent_event_deliveries SET status='succeeded',"
+            "result=(SELECT root.result FROM agent_event_deliveries root "
+            "WHERE root.id=agent_event_deliveries.batch_root_id),updated_at=? "
+            "WHERE batch_root_id IS NOT NULL AND status='pending' "
+            "AND EXISTS(SELECT 1 FROM agent_event_deliveries root "
+            "WHERE root.id=agent_event_deliveries.batch_root_id AND root.status='succeeded')",
             (now,),
         )
     with database.connect() as db:
         rows = db.execute(
-            "SELECT id FROM agent_event_deliveries d WHERE "
+            "SELECT id FROM agent_event_deliveries d WHERE d.batch_root_id IS NULL AND "
             "((d.status='pending' AND d.available_at<=?) "
-            "OR (d.status='leased' AND d.lease_until<=?)) "
+            "OR (d.status='leased' AND d.lease_until<=? AND NOT EXISTS("
+            "SELECT 1 FROM runs paused WHERE paused.id=d.run_id "
+            "AND paused.status='requires_action' AND instr(d.envelope,'expectedAction')>0))) "
             "AND NOT EXISTS(SELECT 1 FROM agent_event_deliveries ahead "
             "WHERE ahead.owner=d.owner AND ahead.ordering_key=d.ordering_key "
-            "AND ahead.seq<d.seq AND ahead.status IN ('pending','leased')) "
+            "AND ahead.seq<d.seq AND ahead.batch_root_id IS NULL "
+            "AND ahead.status IN ('pending','leased')) "
             "ORDER BY d.seq LIMIT ?", (now, now, max_items),
         ).fetchall()
     for candidate in rows:
@@ -509,7 +707,8 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
             if row["status"] == "leased" and row["lease_until"] > now:
                 continue
             ahead = db.execute("SELECT 1 FROM agent_event_deliveries WHERE owner=? "
-                               "AND ordering_key=? AND seq<? AND status IN ('pending','leased') "
+                               "AND ordering_key=? AND seq<? AND batch_root_id IS NULL "
+                               "AND status IN ('pending','leased') "
                                "LIMIT 1", (row["owner"], row["ordering_key"], row["seq"])).fetchone()
             if ahead is not None:
                 continue
@@ -531,7 +730,22 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
                        "lease_owner=?,lease_until=?,updated_at=? WHERE id=?",
                        (token, now + _LEASE_MS, now, row["id"]))
             try:
-                if row["run_id"]:
+                if envelope["mode"] == "steer":
+                    target = envelope["target"]
+                    observed = db.execute(
+                        "SELECT id,agent_id,state,status FROM runs WHERE conversation_id=? "
+                        "ORDER BY created_at DESC,id DESC LIMIT 1",
+                        (target["conversationId"],),
+                    ).fetchone()
+                    if observed is None or observed["agent_id"] != agent["id"]:
+                        raise PermissionError("Steer requires the same authenticated Agent run")
+                    if json.loads(observed["state"]).get("generationCreatedAt") != target["generationCreatedAt"]:
+                        raise PermissionError("Steer target generation has been replaced")
+                    ready = ("steer", row["id"], token, row["owner"], envelope)
+                    # This happens outside the transaction in the existing
+                    # SteeringStore, with a second, transaction-atomic claim
+                    # recheck before it mutates the selected generation.
+                elif row["run_id"]:
                     generation = store.get(row["owner"], row["run_id"])
                     if generation is None:
                         raise PermissionError("Previously admitted root generation no longer exists")
@@ -554,21 +768,28 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
                         ancestor = db.execute("SELECT id FROM messages WHERE conversation_id=? "
                                               "AND role='assistant' ORDER BY created_at DESC,id DESC LIMIT 1",
                                               (binding["conversation_id"],)).fetchone()
-                        payload = {"text": envelope["input"], "endpoint": "agents",
+                        members = db.execute(
+                            "SELECT id,envelope FROM agent_event_deliveries "
+                            "WHERE batch_root_id=? AND status='pending' ORDER BY seq",
+                            (row["id"],),
+                        ).fetchall()
+                        incoming_text = (_batch_input(row, members) if members else envelope["input"])
+                        payload = {"text": incoming_text, "endpoint": "agents",
                                    "conversationId": binding["conversation_id"],
                                    "parentMessageId": ancestor["id"] if ancestor else _NO_PARENT,
                                    "clientRequestId": row["id"]}
                     else:
                         raise ValueError("Unknown trusted Agent Trigger mode")
                     generation, fresh = store.begin(row["owner"], payload, agent, _connection=db)
-                profile = provider_config(selected_provider({}, agent), agent.get("model"))
-                db.execute("UPDATE agent_event_deliveries SET run_id=?,"
-                           "result=?,updated_at=? WHERE id=? AND lease_owner=?",
-                           (generation.run_id, _json({"mode": envelope["mode"],
-                                "status": "started", "conversationId": generation.conversation_id,
-                                "generationCreatedAt": generation.generation_created_at}),
-                            now, row["id"], token))
-                ready = (row["id"], token, row["owner"], generation, profile, agent, fresh)
+                if envelope["mode"] != "steer":
+                    profile = provider_config(selected_provider({}, agent), agent.get("model"))
+                    db.execute("UPDATE agent_event_deliveries SET run_id=?,"
+                               "result=?,updated_at=? WHERE id=? AND lease_owner=?",
+                               (generation.run_id, _json({"mode": envelope["mode"],
+                                    "status": "started", "conversationId": generation.conversation_id,
+                                    "generationCreatedAt": generation.generation_created_at}),
+                                now, row["id"], token))
+                    ready = (row["id"], token, row["owner"], generation, profile, agent, fresh)
             except GenerationConflict:
                 # A different actor currently owns the conversation. This is a
                 # readiness deferral, not a provider failure and not an attempt.
@@ -579,6 +800,60 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
                 current = db.execute("SELECT * FROM agent_event_deliveries WHERE id=?",
                                      (row["id"],)).fetchone()
                 _failure(database, db, current, code="DELIVERY_REJECTED", error=exc, attempted_at=now)
+        if ready is not None and ready[0] == "steer":
+            _, delivery_id, token, owner, envelope = ready
+            from .steering import SteeringStore, SteerRejection
+
+            target = envelope["target"]
+            try:
+                acknowledgement = SteeringStore(database).enqueue(
+                    owner,
+                    {"conversationId": target["conversationId"],
+                     "generationCreatedAt": target["generationCreatedAt"],
+                     "clientSteerId": delivery_id,
+                     "text": envelope["input"], "preempt": target.get("preempt", False)},
+                    preempt_capable=True, strict_delivery=True,
+                    event_delivery_lease=(delivery_id, token),
+                )
+            except SteerRejection as exc:
+                with database.connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    previous = db.execute("SELECT * FROM agent_event_deliveries "
+                                          "WHERE id=? AND lease_owner=? AND status='leased'",
+                                          (delivery_id, token)).fetchone()
+                    if previous is not None:
+                        if exc.body["code"] in {"RUN_PAUSED", "STEER_QUEUE_FULL"}:
+                            db.execute("UPDATE agent_event_deliveries SET status='pending',"
+                                       "available_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?",
+                                       (_now() + 5_000, delivery_id))
+                        else:
+                            _failure(database, db, previous, code=exc.body["code"],
+                                     error=exc, attempted_at=_now())
+                continue
+            except Exception as exc:
+                with database.connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    previous = db.execute("SELECT * FROM agent_event_deliveries WHERE "
+                                          "id=? AND lease_owner=? AND status='leased'",
+                                          (delivery_id, token)).fetchone()
+                    if previous is not None:
+                        _failure(database, db, previous, code="STEER_DISPATCH_FAILED",
+                                 error=exc, attempted_at=_now())
+                continue
+            with database.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("UPDATE agent_event_deliveries SET status='succeeded',result=?,"
+                           "lease_owner=NULL,lease_until=NULL,updated_at=? "
+                           "WHERE id=? AND lease_owner=? AND status='leased'",
+                           (_json({"mode": "steer", "status": "queued",
+                                   "conversationId": target["conversationId"],
+                                   "steerId": acknowledgement["steerId"],
+                                   "position": acknowledgement["position"],
+                                   "preempt": acknowledgement["preempt"],
+                                   "replayed": acknowledgement.get("replayed", False)}),
+                            _now(), delivery_id, token))
+            completed += 1
+            continue
         if ready is not None:
             delivery_id, token, owner, generation, profile, agent, fresh = ready
             from . import generation_routes as runner

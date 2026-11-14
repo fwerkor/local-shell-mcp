@@ -302,6 +302,11 @@ CREATE TABLE IF NOT EXISTS agent_event_deliveries (
     error_code TEXT,
     error_type TEXT,
     result TEXT,
+    coalesce_key TEXT,
+    coalesce_until INTEGER,
+    batch_root_id TEXT,
+    batch_count INTEGER NOT NULL DEFAULT 1,
+    batch_bytes INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE(owner,source_key_id,id)
@@ -428,6 +433,22 @@ class SQLiteDatabase:
             ):
                 if column not in existing_wakeup:
                     db.execute(f"ALTER TABLE subagent_wakeups ADD COLUMN {column} {definition}")
+            # Existing Controllers may already have an external Trigger queue.
+            # Add source 750ms/8-event/512KiB bound-child coalescing in place.
+            event_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(agent_event_deliveries)")
+            }
+            for column, definition in (
+                ("coalesce_key", "TEXT"),
+                ("coalesce_until", "INTEGER"),
+                ("batch_root_id", "TEXT"),
+                ("batch_count", "INTEGER NOT NULL DEFAULT 1"),
+                ("batch_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if column not in event_columns:
+                    db.execute(f"ALTER TABLE agent_event_deliveries ADD COLUMN {column} {definition}")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_agent_event_delivery_batch "
+                       "ON agent_event_deliveries(owner,coalesce_key,batch_root_id,coalesce_until)")
             # Source event-driven completion readiness: committing a parent
             # turn or durable child terminal row clears its waiting backoff in
             # the SAME transaction. No cross-process in-memory wake event.

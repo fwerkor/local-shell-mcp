@@ -119,7 +119,8 @@ class SteeringStore:
         return state.setdefault("steering", {"queue": [], "receipts": {}})
 
     def enqueue(self, owner: str, body: dict, *, preempt_capable: bool,
-                strict_delivery: bool = False) -> dict:
+                strict_delivery: bool = False,
+                event_delivery_lease: tuple[str, str] | None = None) -> dict:
         cid = body.get("conversationId")
         if not isinstance(cid, str) or not cid or cid == "new":
             raise SteerRejection(400, "INVALID_CONVERSATION")
@@ -138,6 +139,10 @@ class SteeringStore:
         fingerprint = _fingerprint(text, files, desired_preempt, quotes)
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if event_delivery_lease is not None:
+                from .event_triggers import assert_source_steer_claim
+
+                assert_source_steer_claim(db, owner, event_delivery_lease)
             row = self._latest(db, owner, cid)
             # Receipt must be read BEFORE current-run epoch fencing: a lost
             # ACK from a previous run must replay even if this chat moved on.
