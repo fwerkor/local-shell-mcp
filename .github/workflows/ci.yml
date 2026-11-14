@@ -155,7 +155,7 @@ jobs:
       - name: Install project and browser runtime
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev,browser]'
+          python -m pip install -e '.[dev,browser,webui]'
           python -m playwright install --with-deps chromium
 
       - name: Build the shared OpenTUI and WebUI
@@ -219,7 +219,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ripgrep tmux python3-gi gir1.2-atspi-2.0
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev,browser]'
+          python -m pip install -e '.[dev,browser,webui]'
           python -m playwright install --with-deps chromium
 
       - name: Build and test Human UI
@@ -316,7 +316,7 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev,browser]'
+          python -m pip install -e '.[dev,browser,webui]'
 
       - name: Show runtime versions
         run: |
@@ -416,7 +416,7 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev,browser]'
+          python -m pip install -e '.[dev,browser,webui]'
 
       - name: Boot server and run endpoint smoke test
         run: python scripts/ci-smoke.py --mode ${{ matrix.mode }} --auth ${{ matrix.auth }}

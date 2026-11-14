@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import time
 
 from .agent_execution import execute_tool_batch, replay_key
@@ -34,7 +35,22 @@ from .handoff import (
     is_transfer_tool,
     receive_handoff,
 )
-from .providers import ModelToolCall, provider_config, selected_provider
+from .memory import (
+    MEMORY_TOOL_USAGE_GUARD,
+    MemoryRepository,
+    agent_partition,
+    execute_memory_tool,
+    format_memory_context,
+    memory_config,
+    memory_enabled,
+    tool_definitions,
+)
+from .memory_protection import configured_filters
+from .providers import ModelToolCall, ModelUsage, provider_config, selected_provider
+from .semantic_index import (
+    render_compaction_semantic_index,
+    snapshot_compaction_semantic_index,
+)
 from .subagents import build_subagent_configs, invoke_subagent, subagent_tools
 
 
@@ -44,7 +60,7 @@ class AgentRunner:
                  parameters=None, ask_user_enabled=False, mcp_enabled=False,
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
-                 approved_batch=None):
+                 approved_batch=None, compaction_semantic_index=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -54,6 +70,9 @@ class AgentRunner:
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
         self.resume_history, self.resume_namespace = resume_history, resume_namespace
         self.partial_text, self.approved_batch = partial_text, approved_batch
+        # The caller's host-produced index is snapshotted before yielding to
+        # the provider, preventing concurrent user-owned changes to hints.
+        self.compaction_semantic_index = snapshot_compaction_semantic_index(compaction_semantic_index)
         self.repository = AgentRepository(database)
         self.saver = SQLiteCheckpointSaver(database, owner)
         self.config = self.saver.config(generation.conversation_id, generation.run_id,
@@ -62,10 +81,31 @@ class AgentRunner:
         self.cache = {}
         self.configs = {}
         self.route = HandoffRouting((agent or {}).get("id") or "default")
+        self.memory_artifacts: dict[str, dict] = {}
+        self._last_compaction_attempt_size = -1
+        self._summary_failures = 0
 
     def _check_grant(self):
         if self.grant_expires is not None and self.grant_expires <= time.time():
             raise RuntimeSafetyError("Authentication grant expired")
+
+    def _memory_context(self, agent: dict | None) -> str:
+        from .storage import WorkspaceRepository
+
+        settings = WorkspaceRepository(self.database)
+        if not memory_enabled(settings, self.owner):
+            return ''
+        # The original primary Agent reads shared personal memories even when
+        # it has no inline memory tool. Only an Agent explicitly registering
+        # the memory capability receives keys and a mutation-tool prompt.
+        has_tools = ('memory' in ((agent or {}).get('tools') or [])
+                     and memory_enabled(settings, self.owner, tools=True))
+        formatted = MemoryRepository(self.database).formatted(
+            self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
+        if formatted.get('readFailed'):
+            return ''
+        context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
+        return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
@@ -83,6 +123,18 @@ class AgentRunner:
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
                       if unrestricted or tool["function"]["name"] in selected]
+        from .storage import WorkspaceRepository
+        settings = WorkspaceRepository(self.database)
+        from .content_filters import validate_agent_instructions, validate_model_parameters
+
+        filters = configured_filters(settings, self.owner)
+        validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
+        parameters = (agent or {}).get('model_parameters') or self.initial_parameters
+        if isinstance(parameters, dict):
+            validate_model_parameters({'model_parameters': parameters}, filters)
+        if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
+            config = memory_config(settings, self.owner) or {}
+            tools += tool_definitions(config.get('validKeys'))
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
@@ -97,7 +149,8 @@ class AgentRunner:
         limit = override if type(override) in (int, float) and override > 0 else 50
         return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
                             tools, (agent or {}).get("model_parameters") or self.initial_parameters,
-                            recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent)
+                            recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent,
+                            compaction_semantic_index=self.compaction_semantic_index)
 
     def _snapshot(self, state):
         return {"messages": state.messages, "step": state.step, "model_turn": state.model_turn,
@@ -162,6 +215,7 @@ class AgentRunner:
                 "type": "tool_call", "tool_call": {
                     "id": call.call_id, "name": call.name, "args": call.arguments,
                     "type": "tool_call", "output": preview, "progress": 1,
+                    **({'artifact': self.memory_artifacts[call.call_id]} if call.call_id in self.memory_artifacts else {}),
                 },
             }},
         })
@@ -173,6 +227,18 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name in {'set_memory', 'delete_memory'}:
+            from .storage import WorkspaceRepository
+            settings = WorkspaceRepository(self.database)
+            if not memory_enabled(settings, self.owner, tools=True):
+                raise RuntimeSafetyError('Memory tools are disabled')
+            config = {**(memory_config(settings, self.owner) or {}),
+                      'filters': configured_filters(settings, self.owner)}
+            result, artifact = execute_memory_tool(MemoryRepository(self.database), self.owner,
+                state.context.agent or {}, call.name, call.arguments, config)
+            if artifact is not None:
+                self.memory_artifacts[call.call_id] = artifact
+            return result
         if call.name == "subagent":
             return await invoke_subagent(
                 call, self.configs[(state.context.agent or {}).get("id") or "default"],
@@ -234,9 +300,57 @@ class AgentRunner:
             raise RuntimeError("Unable to save pending Agent action")
         raise AgentSuspended()
 
+    @staticmethod
+    def _blocked_call(call: ModelToolCall) -> bool:
+        return call.arguments == {'_content_filter_blocked': True}
+
+    def _preflight_model_calls(self, calls: list[ModelToolCall], state: AgentLoopState) -> list[ModelToolCall]:
+        """Strip forbidden model tool arguments before event/checkpoint writes."""
+        from .content_filters import ContentFilterBlocked, validate_tool_arguments
+        from .storage import WorkspaceRepository
+
+        filters = configured_filters(WorkspaceRepository(self.database), self.owner)
+        sanitized = []
+        for call in calls:
+            if self._blocked_call(call):
+                sanitized.append(call)
+                continue
+            try:
+                validate_tool_arguments(call.name, call.arguments, filters)
+            except ContentFilterBlocked:
+                sanitized.append(ModelToolCall(call.call_id, call.name,
+                                               {'_content_filter_blocked': True}))
+            else:
+                sanitized.append(call)
+        return sanitized
+
+    async def _filtered_invoke(self, call, state):
+        """Apply source-scoped input and output policy on every tool path.
+
+        The same wrapper runs for ordinary batches and approved retries; it
+        must not expose blocked credentials in checkpoints or result previews.
+        """
+        from .content_filters import (
+            ContentFilterBlocked,
+            filtered_tool_output,
+            validate_tool_arguments,
+        )
+        from .storage import WorkspaceRepository
+
+        if self._blocked_call(call):
+            return 'Tool call blocked by configured content protection policy.'
+        filters = configured_filters(WorkspaceRepository(self.database), self.owner)
+        try:
+            validate_tool_arguments(call.name, call.arguments, filters)
+        except ContentFilterBlocked:
+            return 'Tool call blocked by configured content protection policy.'
+        result = await self._invoke(call, state)
+        return filtered_tool_output(call.name, result, filters)
+
     async def _dispatch(self, calls, state):
         from .routes import _repo
 
+        calls = self._preflight_model_calls(calls, state)
         if len({call.call_id for call in calls}) != len(calls) or any(not call.call_id for call in calls):
             raise ValueError("Tool call IDs must be non-empty and unique")
         if sum(is_transfer_tool(call.name) for call in calls) > 1:
@@ -248,7 +362,7 @@ class AgentRunner:
         if not self.namespace:
             for call in unresolved:
                 self._tool_step(call)
-        asking = [call for call in unresolved if call.name == "ask_user_question"]
+        asking = [call for call in unresolved if call.name == "ask_user_question" and not self._blocked_call(call)]
         if asking:
             if len(calls) != 1:
                 raise ValueError("Ask User cannot run in parallel with another tool")
@@ -258,6 +372,8 @@ class AgentRunner:
         ask = []
         for call in unresolved:
             decision = approval_policy_decision(policy, call.name)
+            if self._blocked_call(call):
+                continue
             if decision and decision["decision"] == "deny":
                 output = "Blocked: " + decision.get("reason", "Rejected by policy")
                 record = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)}, "output": output}
@@ -268,7 +384,7 @@ class AgentRunner:
         if ask:
             await self._pause(build_approval_payload(ask), state, approval=True)
         outputs = await execute_tool_batch(
-            calls, lambda call: self._invoke(call, state), settled=self.cache,
+            calls, lambda call: self._filtered_invoke(call, state), settled=self.cache,
             interrupting_names=frozenset({"subagent"}),
             is_interrupt=lambda error: isinstance(error, AgentSuspended),
             check_breaker=self._check_grant, on_completed=self._completed,
@@ -300,13 +416,287 @@ class AgentRunner:
         instructions = target.get("instructions") or ""
         if received and received.get("instructions"):
             instructions += "\n\n" + received["instructions"]
+        memory_text = self._memory_context(target)
+        if memory_text:
+            instructions += ('\n\n' if instructions else '') + memory_text
         if instructions:
             history.insert(0, {"role": "system", "content": instructions})
         return ToolBatchOutput(messages, next_context=self._context(target), replace_messages=history)
 
+    async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
+                                 prompt=None, update_prompt=None, head_count=0,
+                                 semantic_index=None):
+        """Request the original checkpoint prompt from the selected model.
+
+        A failed/partial summary is never written, and never makes the old
+        context unreachable. The live model receives the same intact history.
+        """
+        from .compaction import (
+            DEFAULT_SUMMARIZATION_PROMPT,
+            DEFAULT_UPDATE_SUMMARIZATION_PROMPT,
+            build_summarization_instruction,
+            build_summary_carrier_text,
+        )
+        from .tokenizer import count_tokens
+
+        prior = ''
+        for item in reversed(messages):
+            text = item.get('content')
+            if item.get('role') == 'system' and isinstance(text, str) and text.startswith('<summary>\n'):
+                prior = text[len('<summary>\n'):].split('\n</summary>', 1)[0]
+                break
+        render_messages = messages
+        if semantic_index is None and not self.namespace:
+            # formatAgentMessages derives source indices from persisted host
+            # content. Reconstruct only one-to-one tool outcomes verified by
+            # the owner-bound SQLite ancestry and provider-visible text.
+            from .semantic_index_source import derive_persisted_semantic_index
+
+            semantic_index, render_messages = derive_persisted_semantic_index(
+                self.database, self.owner, self.generation.conversation_id,
+                self.generation.user_message_id, messages)
+        semantic = render_compaction_semantic_index(semantic_index, render_messages)
+        effective = build_summarization_instruction(
+            prompt or DEFAULT_SUMMARIZATION_PROMPT,
+            update_prompt or DEFAULT_UPDATE_SUMMARIZATION_PROMPT,
+            prior or None,
+            semantic['appendix'],
+        )
+        instruction = {'role': 'user', 'content': effective}
+        summary_messages = [*messages, instruction]
+        chunks = []
+        limit = max(128, min(int(max_tokens), 16384))
+        async for value in self.stream_text(self.initial_profile or
+                self._context(self.root_agent).profile, summary_messages, max_tokens=limit):
+            if isinstance(value, str):
+                chunks.append(value)
+            elif isinstance(value, ModelUsage):
+                # A summarizer's provider metadata must never be inserted into
+                # user-visible checkpoint text or mistaken for a tool call.
+                continue
+            else:
+                raise ValueError('Summary provider returned a tool call instead of text')
+        summary = ''.join(chunks).strip()
+        if not summary:
+            raise ValueError('Summarization produced empty output')
+        count = count_tokens(build_summary_carrier_text(summary), exact=False)
+        self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
+                                 boundary=head_count, manual=manual)
+        if not self.namespace:
+            import secrets
+            identity = 'summary_' + secrets.token_hex(8)
+            self.store.append(self.owner, self.generation.run_id, {
+                'event': 'on_run_step_completed', 'data': {'result': {
+                    'id': identity, 'type': 'summary', 'summary': {
+                        'type': 'summary', 'content': [{'type': 'text', 'text': summary}],
+                        'boundary': {'messageIndex': head_count}, 'tokenCount': count,
+                        **({'initiatedBy': 'user'} if manual else {}),
+                    }},},
+            })
+        return summary
+
+    async def _observe_model_usage(self, usage: ModelUsage, state: AgentLoopState) -> None:
+        """Update cumulative raw/provider ratio only on genuine usage frames."""
+        if self.namespace or usage.provider != state.context.profile.provider:
+            return
+        from .context_budget import calculate_budget
+
+        profile = state.context.profile
+        try:
+            estimate = calculate_budget(state.provider_projection or state.messages,
+                                    state.context.tools, 2_000_000,
+                                        reserve_ratio=0)
+            instruction_overhead = estimate.instruction_tokens + estimate.tool_schema_tokens
+            calibration = self.store.token_calibration(self.owner, self.generation.run_id,
+                                                       profile.provider, profile.model)
+            updated = calibration.observe(provider_input_tokens=usage.input_tokens,
+                                          raw_sent_this_turn=estimate.message_tokens,
+                                          instruction_overhead=instruction_overhead)
+            if updated != calibration:
+                self.store.record_token_calibration(self.owner, self.generation.run_id,
+                                                    profile.provider, profile.model, updated)
+        except Exception as exc:
+            # Usage is observational metadata; a failed calibration update
+            # cannot invalidate an otherwise successful model response.
+            logging.getLogger(__name__).warning('Token calibration failed (%s)', type(exc).__name__)
+
+    def _project_model_messages(self, state: AgentLoopState) -> list[dict]:
+        from .fading_projection import project_faded_provider_messages
+
+        return project_faded_provider_messages(state.messages, state.context.fading_tier)
+
+    def _update_fading_tier(self, state: AgentLoopState, budget, calibration, config, window: int) -> None:
+        from .fading import (
+            resolve_fading_tier,
+            seed_fading_tier,
+        )
+
+        profile = state.context.profile
+        agent_id = (state.context.agent or {}).get('id') or 'default'
+        current = state.context.fading_tier or self.store.fading_tier(
+            self.owner, self.generation.run_id, agent_id, profile.provider, profile.model)
+        seeded = seed_fading_tier(window, current)
+        current_turn = []
+        for message in reversed(state.messages):
+            if message.get('role') == 'user':
+                break
+            current_turn.append(message)
+        width = max((len(message.get('tool_calls') or []) for message in current_turn), default=1)
+        effective = max(0, budget.available_for_messages / calibration.ratio)
+        window_available = max(1, window - budget.reserve_tokens)
+        pressure = (window - budget.reserve_tokens - budget.remaining_context_tokens) / window_available
+        signals = {'contextPressure': pressure, 'effectiveRawTokens': effective,
+                   'summarizationEnabled': config.get('enabled') is not False,
+                   'toolExchangeWidth': max(1, width)}
+        resolved = resolve_fading_tier(seeded, window, signals)
+        state.context.fading_tier = resolved
+        if resolved != current:
+            self.store.record_fading_tier(self.owner, self.generation.run_id,
+                                          agent_id, profile.provider, profile.model, resolved)
+
+    async def _before_model(self, state):
+        """SDK-style recency + trigger, using the shared SQLite checkpoint."""
+        from .compaction import build_summary_carrier_text
+        from .content_filters import inspect_content, model_message_fragments
+        from .context_budget import (
+            calculate_budget,
+            should_trigger_summarization,
+            split_recent_turns,
+        )
+        from .storage import WorkspaceRepository
+
+        repository = WorkspaceRepository(self.database)
+        policy = configured_filters(repository, self.owner)
+        blocked = inspect_content(model_message_fragments(state.messages), policy)
+        if blocked is not None:
+            # No source text is copied into a model/user-visible error.
+            raise RuntimeSafetyError('Assembled model context was blocked by content protection')
+        if self.namespace:
+            return
+        settings = repository.setting(self.owner, 'endpoints', {}) or {}
+        agent_settings = settings.get('agents') or {}
+        params = state.context.parameters or {}
+        max_raw = params.get('max_context_tokens') or params.get('maxContextTokens') or agent_settings.get('maxContextTokens')
+        if not isinstance(max_raw, (int, float)) or isinstance(max_raw, bool) or not 0 < max_raw <= 2000000:
+            return
+        calibration = self.store.token_calibration(
+            self.owner, self.generation.run_id,
+            state.context.profile.provider, state.context.profile.model)
+        try:
+            config = settings.get('summarization') or {}
+            if not isinstance(config, dict):
+                config = {}
+            budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
+                                      reserve_ratio=config.get('reserveRatio', 0.05),
+                                      calibration_ratio=calibration.ratio)
+            self._update_fading_tier(state, budget, calibration, config, int(max_raw))
+            if config.get('enabled') is False or budget.remaining_context_tokens > 0:
+                return
+            if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
+                return
+            system = [message for message in state.messages if message.get('role') == 'system']
+            messages = [message for message in state.messages if message.get('role') != 'system']
+            retain = config.get('retainRecent') or {}
+            head, tail = split_recent_turns(messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'))
+            if not should_trigger_summarization(
+                messages_to_refine_count=len(head), trigger=config.get('trigger'),
+                max_context_tokens=budget.max_context_tokens,
+                pre_prune_context_tokens=budget.max_context_tokens - budget.remaining_context_tokens,
+                remaining_context_tokens=budget.remaining_context_tokens,
+            ):
+                return
+            self._last_compaction_attempt_size = len(state.messages)
+            if budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
+                return
+            try:
+                options = config.get('parameters') or {}
+                summary = await self._summarize_history(
+                    [*system, *head], head_count=len(head),
+                    max_tokens=options.get('maxSummaryTokens', 2048),
+                    prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
+                    semantic_index=state.context.compaction_semantic_index)
+                # Keep stable instructions and current summary, then the exact
+                # retained recent turns. Original messages stay in SQLite.
+                plain_system = [message for message in system if not (
+                    isinstance(message.get('content'), str)
+                    and message['content'].startswith('<summary>\n'))]
+                state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
+                self._summary_failures = 0
+                await self._save(state, [])
+                # A committed summary replaces the old prefix; restore a
+                # fresh v2 fading tier so past masking doesn't pin this run.
+                from .fading import create_fading_tier
+
+                state.context.fading_tier = create_fading_tier(int(max_raw))
+                try:
+                    self.store.record_fading_tier(
+                        self.owner, self.generation.run_id,
+                        (state.context.agent or {}).get('id') or 'default',
+                        state.context.profile.provider, state.context.profile.model,
+                        state.context.fading_tier)
+                except Exception as error:
+                    logging.getLogger(__name__).warning('Fading reset failed (%s)', type(error).__name__)
+            except Exception:
+                self._summary_failures += 1
+                # The source leaves the state intact on summary failure; never
+                # substitute an empty checkpoint or truncate a tool result.
+                return
+
+        finally:
+            # The pinned frontend consumes this event before the model call and
+            # reads the same last snapshot from response metadata after reload.
+            from .context_budget import context_usage_snapshot
+
+            config = settings.get('summarization') or {}
+            ratio = config.get('reserveRatio', 0.05) if isinstance(config, dict) else 0.05
+            snapshot = context_usage_snapshot(
+                state.messages, state.context.tools, int(max_raw), reserve_ratio=ratio,
+                run_id=self.generation.run_id,
+                agent_id=(state.context.agent or {}).get('id'),
+                calibration_ratio=calibration.ratio,
+            )
+            self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
+
+    async def _manual_compact(self, history):
+        from .storage import WorkspaceRepository
+        settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+        config = settings.get('summarization') or {}
+        if isinstance(config, dict) and config.get('enabled') is False:
+            raise ValueError('Compaction is disabled for this deployment')
+        config = config if isinstance(config, dict) else {}
+        non_system = [message for message in history if message.get('role') != 'system']
+        if not non_system:
+            raise ValueError('Nothing to compact')
+        await self._summarize_history(history, manual=True, head_count=len(non_system),
+            max_tokens=(config.get('parameters') or {}).get('maxSummaryTokens', 2048),
+            prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
+            semantic_index=self.compaction_semantic_index)
+        # Explicit compaction, like its automatic counterpart, resets the
+        # hysteresis ladder after the checkpoint was safely staged.
+        params = self.initial_parameters or {}
+        raw = params.get('max_context_tokens') or params.get('maxContextTokens') or (settings.get('agents') or {}).get('maxContextTokens')
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and 0 < raw <= 2_000_000:
+            from .fading import create_fading_tier
+
+            try:
+                self.store.record_fading_tier(
+                    self.owner, self.generation.run_id,
+                    (self.root_agent or {}).get('id') or 'default',
+                    self.initial_profile.provider, self.initial_profile.model,
+                    create_fading_tier(int(raw)))
+            except Exception as exc:
+                logging.getLogger(__name__).warning('Manual fading reset failed (%s)', type(exc).__name__)
+        return history
+
     async def run(self, history, *, recursion_limit=None):
+        if not self.namespace and self.store.manual_compaction(self.owner, self.generation.run_id):
+            return await self._manual_compact(history)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
+        if not self.namespace:
+            memory_text = self._memory_context(self.root_agent)
+            if memory_text:
+                history = [{'role': 'system', 'content': memory_text}, *history]
         state = AgentLoopState(context, history)
         if restored:
             self.active_config = restored["config"]
@@ -346,7 +736,7 @@ class AgentRunner:
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
                 cached = self.cache.get(replay_key(original, state.pending_calls.index(original)))
-                return cached["output"] if cached else await self._invoke(call, state)
+                return cached["output"] if cached else await self._filtered_invoke(call, state)
 
             await execute_approval_batch(self.approved_batch, dispatch=reviewed_dispatch,
                                          on_completed=completed)
@@ -356,7 +746,11 @@ class AgentRunner:
             await self.on_text(text)
 
         result = await run_agent_loop(state, stream_tools=self.stream_tools, stream_text=self.stream_text,
-                                      dispatch=self._dispatch, on_text=emit, save_state=self._save)
+                                      dispatch=self._dispatch, on_text=emit, save_state=self._save,
+                                      before_model=self._before_model,
+                                      on_model_usage=self._observe_model_usage,
+                                      project_messages=self._project_model_messages,
+                                      preflight_calls=self._preflight_model_calls)
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
                                                review["actionId"], result, self.partial_text)

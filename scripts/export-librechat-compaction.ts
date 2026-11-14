@@ -1,0 +1,21 @@
+// Source-only oracle exporter; never required by the Python runtime.
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+const [lc, agents, output] = process.argv.slice(2);
+if (!lc || !agents || !output) throw new Error('usage: exporter LibreChat-root agents-root output');
+mkdirSync(output, { recursive: true });
+const compile = (source: string) => new Bun.Transpiler({ loader: 'ts', target: 'node' }).transformSync(source).replace(/^export /gm, '');
+const sourceFile = 'packages/api/src/agents/compaction.ts';
+const sharedFile = 'src/summarization/shared.ts';
+const source = readFileSync(resolve(lc, sourceFile), 'utf8');
+const shared = readFileSync(resolve(agents, sharedFile), 'utf8');
+const selected = source.slice(source.indexOf('/** Text of a summary'), source.indexOf('function snapshotEntry('));
+const names = ['getSummaryPartText','isUsableSummaryPart','findCheckpointSummaryPart','resolveCheckpointMessage','resolveFailedTurnContent','markCompactionOutcome','dropUnusableSummaryParts','stripUnusableSummaryParts'];
+const sharedNames = ['buildSummaryCarrierText','separateSummarizationParameters','buildSummarizationInstruction','DEFAULT_SUMMARIZATION_PROMPT','DEFAULT_UPDATE_SUMMARIZATION_PROMPT'];
+const compiled = '// Derived from LibreChat e8f3be08, ISC license; exact TS bodies.\nconst ContentTypes={SUMMARY:"summary",TEXT:"text",ERROR:"error"}; const ErrorTypes={COMPACTION_FAILED:"compaction_failed"};\n' + compile(selected) + '\nmodule.exports={' + names.join(',') + '};\n';
+const compiledShared = '// Derived from @librechat/agents c4ffb9b1, MIT license; exact TS bodies.\n' + compile(shared) + '\nmodule.exports={' + sharedNames.join(',') + '};\n';
+writeFileSync(resolve(output,'compaction_reference.cjs'), compiled);
+writeFileSync(resolve(output,'summary_shared_reference.cjs'), compiledShared);
+const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+writeFileSync(resolve(output,'compaction_sources.json'),JSON.stringify({librechat:{commit:'e8f3be08623663d4ad7f7241e693c94469b63bb0',file:sourceFile,sha256:sha(source)},agents:{commit:'c4ffb9b1b78421bf63eba3e56993017f922387f3',file:sharedFile,sha256:sha(shared)},compiled:{'compaction_reference.cjs':sha(compiled),'summary_shared_reference.cjs':sha(compiledShared)}},null,2)+'\n');

@@ -27,9 +27,9 @@
       "path": "api/server/controllers/agents/request.js",
       "sha256": "3ca1d4f69dc76b00410fb60f84a70f26514c935b3f705292d595091c41c2ab93",
       "symbols": "generation ingress / disconnect",
-      "python_lsm": "webui/generation_routes.py:start_generation",
+      "python_lsm": "webui/generations.py; generation_routes.py",
       "status": "部分",
-      "difference": "缺失完整入口预检及断线处置语义"
+      "difference": "manual compact 现有generation入口复用原会话leaf，不产生伪用户，拒绝new/edit/regenerate/continue；原版全部流事件/首次guard尚未完成。"
     },
     {
       "repository": "LibreChat",
@@ -54,9 +54,9 @@
       "path": "api/server/controllers/agents/client.js",
       "sha256": "9b2f6accf56544096aa530d5bccff4b1cc5b76651a746da2a8aee94cc20020e1",
       "symbols": "AgentClient / history / run lifecycle",
-      "python_lsm": "webui/generations.py; generation_routes.py",
+      "python_lsm": "webui/generations.py; generation_routes.py; memory_agent.py",
       "status": "部分",
-      "difference": "未移植完整AgentClient和事件actor生命周期"
+      "difference": "Memory useMemory/runMemory显式自动配置/上下文窗口、原SSE工具与artifact已接通；其余完整AgentClient、event-actor生命周期及hook未实现"
     },
     {
       "repository": "LibreChat",
@@ -162,18 +162,18 @@
       "path": "packages/api/src/agents/compaction.ts",
       "sha256": "a8ba0ef364731835c437f1b9feb6e4eeb3f92390f7d3d67fede8bf65255b5b50",
       "symbols": "summary checkpoint / manual outcome",
-      "python_lsm": "webui/generations.py:history",
-      "status": "未实现",
-      "difference": "50消息截断无summary，不能标记compact完成"
+      "python_lsm": "webui/compaction.py; generations.py",
+      "status": "部分",
+      "difference": "2079组原版固定差分全部通过；有效summary checkpoint、失败摘要忽略、手动compact标记/历史恢复；完整语义索引与event actor projection尚未实现。"
     },
     {
       "repository": "LibreChat",
       "path": "packages/api/src/agents/memory.ts",
       "sha256": "f493a11e02b5bc2ec16abe0426614afcd8dfffa288f619c50e22987cfe0e71fc",
       "symbols": "registerMemoryTools / tool usage guard",
-      "python_lsm": "webui/misc_routes.py",
-      "status": "未实现",
-      "difference": "memory权限返回关闭；无对应持久化与工具执行"
+      "python_lsm": "webui/memory.py; memory_agent.py; memory_routes.py; agent_runner.py",
+      "status": "部分",
+      "difference": "inline memory工具与可选MemoryRun均有真实Python实现，explicit-only提示、SQLite额度、SSE附件、模型transport与自动配置生效；完整Graph/跨source过滤/usage事件仍缺"
     },
     {
       "repository": "LibreChat",
@@ -381,6 +381,231 @@
       "python_lsm": "webui/generations.py:GenerationStore.history",
       "status": "部分",
       "difference": "已保存结构化text优先于旧text快照，Artifact编辑进入下一轮模型；完整tool/rich/steer重建未完成。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/routes/memories.js",
+      "sha256": "0fe243fa8bac29f0cbaf665536da92e1008a5e10e7dde31c07e40a4adffe9135",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/memory_routes.py",
+      "status": "部分",
+      "difference": "GET/POST/PATCH/DELETE、opt-out、隔离和负向测试通过；原RBAC映射为已认证LSM owner；filters投影尚未移植。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/memory/handlers.ts",
+      "sha256": "3b21cc7fc7277946f9b664feae4bb5e6f8cc91dd25b5f9b6d507f75262dfd51e",
+      "symbols": "Memory REST/SQLite implementation",
+      "python_lsm": "webui/memory_routes.py; memory.py",
+      "status": "部分",
+      "difference": "不可猜测opaque id，按id/键修改删除、冲突、额度限制和失败回滚验证；原版content-filter/management handler的完整error body待补。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-schemas/src/methods/memory.ts",
+      "sha256": "f4984bced122c4a2d78398a70f0e945a8bb65053cf04bef3c13b53d3cc68206f",
+      "symbols": "Memory REST/SQLite implementation",
+      "python_lsm": "webui/memory.py; sqlite_store.py",
+      "status": "部分",
+      "difference": "SQLite唯一约束+BEGIN IMMEDIATE原子upsert、rename、create冲突、delete/format/count；时间升序、重启恢复、并发额度测试；原Mongoose无关。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-schemas/src/schema/memory.ts",
+      "sha256": "ed8b6e3e0655193686f440d468ae5d42a35cec9811fcb876a3e56f9a1751bc08",
+      "symbols": "Memory REST/SQLite implementation",
+      "python_lsm": "webui/memory.py; sqlite_store.py",
+      "status": "部分",
+      "difference": "SQLite单表owner+agent_id+key唯一约束，空agent_id映射原null/undefined分区；未迁移Mongo中已有的个人记忆内容。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/utils/tokenizer.ts",
+      "sha256": "54b7be49219301368a80cac2f2ef9991152a7fb5c4bfbdb4c158c3aab43597b5",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/tokenizer.py; webui/encodings/o200k_base.tiktoken.gz",
+      "status": "部分",
+      "difference": "o200k_base编码文件官方SHA256固定，离线分发、lazy import；BPE分段按原4096 UTF-16单位、256连续类别阈值及代理对保护；158组跨语言Node o200k_base差分全部通过；极端U+0085/U+FEFF混合输入仍有1–3 token差异，待原ai-tokenizer完整协议校验。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/summarization/shared.ts",
+      "sha256": "567a7a5d497acda8390b2f48f03869039434bfc13ac0ae3ca6648abfbd011d1c",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/compaction.py; agent_runner.py",
+      "status": "完成（纯函数）",
+      "difference": "总结提示词构造、carrier、参数分离：2079固定向量覆盖与原版source AST参考；实际图摘要见node.ts记录。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/summarization/index.ts",
+      "sha256": "547f5fe25792f1ca0322d6aee534f5b0fc45cbf812f19e80e3f27fda013617d4",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/context_budget.py",
+      "status": "部分",
+      "difference": "token_ratio/remaining_tokens/messages_to_refine触发条件已移植并有阈值单测；日志warn去重未移植。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/summarization/node.ts",
+      "sha256": "306915291a6b64bff49764abbff3c13b1039e784895f8984bca3fd6f30528b7e",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/agent_runner.py; generations.py",
+      "status": "部分",
+      "difference": "失败保持历史、有效摘要才换上下文、阶段化持久检查点、模型SSE实测；完整模型参数/provenance/semanticIndex/event actor提示词流与递归回退未移植。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/messages/recency.ts",
+      "sha256": "9aea2598bb090e13db73f2c146d785c0c471b770a990f905d801e87a9cdef953",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/context_budget.py",
+      "status": "部分",
+      "difference": "最近N轮保留及token cap、open tool-call保护；完整provider-native pairing与intra-turn fallback应由消息协议任务继续移植。"
+    },
+    {
+      "repository": "agents",
+      "path": "src/messages/prune.ts",
+      "sha256": "88bb120616bad3e1573c42c5e2878e04f55d1b2628d6a76c756f235f481ced09",
+      "symbols": "context / summary / token algorithm",
+      "python_lsm": "webui/context_budget.py; agent_runner.py",
+      "status": "部分",
+      "difference": "默认reserveRatio=0.05用于预算；内容屏蔽、tool result压缩与provider校准未完整移植。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/types/runs.ts",
+      "sha256": "d676ba8c59b0cf73010b390c77ece6e7206444bcdc9916a8fbe938ba4e7210ff",
+      "symbols": "TContextUsageEvent / TTokenBudgetBreakdown",
+      "python_lsm": "webui/context_budget.py; generations.py; agent_runner.py",
+      "status": "部分",
+      "difference": "固定React ON_CONTEXT_USAGE形状及message.metadata.contextUsage存储，HTTP SSE重播与SQLite重启已测试；输出为保守BPE估计，尚未接入provider校准/完整usage rollup"
+    },
+    {
+      "repository": "agents",
+      "path": "src/types/graph.ts",
+      "sha256": "c86173de125f47a5675139de18115d014902637bb0ae5894d2a5285b4137744a",
+      "symbols": "ContextUsageEvent",
+      "python_lsm": "webui/context_budget.py; agent_runner.py",
+      "status": "部分",
+      "difference": "已接入Graph on_context_usage结构、模型调用前的消息/指令/摘要/tool schema预算快照；未覆盖Graph原provider tokenizer校准与分层fading"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/memory/protection.ts",
+      "sha256": "655e8d51a8449e1c3d68124e447f3b2c7b88cfe2dd0da2316a4ccb79ad68bcfb",
+      "symbols": "projectStoredMemories",
+      "python_lsm": "webui/memory_protection.py; memory_routes.py; memory.py",
+      "status": "部分",
+      "difference": "Memory source字段审查、旧记录只读投影和敏感字段置空已接入；自定义pattern由限时Python regex执行，完整RE2JS程序大小/全局跨source过滤仍有差异"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/protection/detectors/pattern.ts",
+      "sha256": "990a1ddd9a676f4b9e0747f0ba16f983b0dc17022bbe854dcb002d413fde2743",
+      "symbols": "STARTER_PATTERNS / custom patterns",
+      "python_lsm": "webui/memory_protection.py",
+      "status": "部分",
+      "difference": "starter三规则和custom regex严格时限已适配；完整RE2JS/patternAction审计链尚未等价"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/summarization/semanticIndex.ts",
+      "sha256": "ce9b5eb9976ddc4e74aa55b98d4a8967e17c6e25d1679b98da17e28317b8ca19",
+      "symbols": "snapshotCompactionSemanticIndex / renderCompactionSemanticIndex",
+      "python_lsm": "webui/semantic_index.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "230条原版TS差分向量全部通过，来源校验/版本、pending/遮蔽、冲突、覆盖优先级和预算正确；未自动构造formatAgentMessages的来源索引"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/provenance.ts",
+      "sha256": "4d7b40ad4ac281ccee121f53713a5d1805bdc8e27842cbd53d9606b98336804b",
+      "symbols": "inspectProviderMessageProvenance",
+      "python_lsm": "webui/semantic_index.py",
+      "status": "部分",
+      "difference": "version1 provenance强校验，阻止未认证归属的提示进入摘要；内部模型消息格式化的完整provenance生产仍归其它Graph/Provider协议模块"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/format.ts",
+      "sha256": "7e48988b137cdffef5923fd3870bbf9627ccc45907cd664b5c122d37340cb325",
+      "symbols": "collectCompactionSemanticEntriesFromPart / formatAgentMessages",
+      "python_lsm": "webui/semantic_index_source.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "自动发现已提交且可验证的SQLite工具结果/可选intent，生成model-visible provenance；完整activity/reasoning与collector覆盖逻辑仍未实现"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/prune.ts",
+      "sha256": "88bb120616bad3e1573c42c5e2878e04f55d1b2628d6a76c756f235f481ced09",
+      "symbols": "clampCalibrationRatio / cumulativeRawSent / cumulativeProviderReported",
+      "python_lsm": "webui/context_calibration.py; webui/context_budget.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "按provider-confirmed usage计算累积token校准；跨轮sqlite恢复，校准限制0.5..5；完整原生prune/fading裁剪未移植"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/budget.ts",
+      "sha256": "6bd31bb2c9605243f6fbcd8e88e28f9378ec98862ae7cb245c0fd0914a926015",
+      "symbols": "computeToolMessageUsage / TokenBudgetBreakdown",
+      "python_lsm": "webui/context_budget.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "只校准消息和工具结果占比，原完整TokenBudgetBreakdown工具结果分配仍未逐字段完全移植"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/fading.ts",
+      "sha256": "fa4a417b7dad3eb78c30a27b8ca3c36b03c2f73b33d9c77a84d9df6eda65cf02",
+      "symbols": "resolveFadingTier / resolveFadingCaps / seedFadingTier",
+      "python_lsm": "webui/fading.py; fading_projection.py; agent_runner.py; generations.py",
+      "status": "部分",
+      "difference": "纯函数450条锁定TypeScript差分向量一致；provider-only工具结果/input截断、owner/model v2 tier持久化和摘要后reset已接入；完整originalToolContent消费语义和source all-step recency策略仍有差异"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/utils/truncation.ts",
+      "sha256": "1ac67580d2171339b299eae1a4de6f19e33cf0ebf6c5e14e295b72096d0e3a70",
+      "symbols": "calculateMaxToolCallInputChars / calculateMaxToolResultChars",
+      "python_lsm": "webui/fading.py; fading_projection.py; truncation_source.py",
+      "status": "部分",
+      "difference": "动态结果/input caps以及truncateToolInput/ResultContent含UTF-16的300组源TS差分均等价；python provider JSON包装的完整最大预算与TypeScript通用ToolContent各类原生块序列化仍是部分适配"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/protection/runtime.ts",
+      "sha256": "638463e1d34a6008737c665457c2cd6fa22a4b8d2e569129ff538f73ac4b05fb",
+      "symbols": "getFilterCompilationPlans / inspectContent / cross-source block-vs-audit",
+      "python_lsm": "webui/content_filters.py; agent_runner.py; generation_routes.py; memory_protection.py",
+      "status": "部分",
+      "difference": "13个来源核心scope/fields、全局pattern上限、audit元数据聚合与请求/工具前后校验；源完整RE2Set与所有REST资源适配待其余PR"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/protection/adapters/submissions.ts",
+      "sha256": "805a3075b1f674df36ca558e0fb3871d43a8c49436dfbe8dfcfb62517ec6152a",
+      "symbols": "extractSubmittedValueContent / extractToolArgumentContent / text fragments",
+      "python_lsm": "webui/content_filters.py; agent_runner.py",
+      "status": "部分",
+      "difference": "有限嵌套遍历键值和tool input/output模型视图；完整文件/Action/Prompt字段路径及structured fragment provenance仍待适配"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/protection/audit.ts",
+      "sha256": "1caa7bd06c15b68db3e3692ed2b338dfa2a3764bf9530b5b0b77e163e4f66956",
+      "symbols": "recordAuditFinding / aggregateAuditFindings",
+      "python_lsm": "webui/content_filters.py; audit.py",
+      "status": "部分",
+      "difference": "一遍检查聚合metadata并记录到已有LSM Audit；未移植Node AsyncLocalStorage跨操作原scope语义"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/filters.ts",
+      "sha256": "b74bcf692d54793311c2b59428a8db58381bda676f3f83433cba5967170eadb7",
+      "symbols": "MAX_PII_PATTERNS_PER_SOURCE / source fields / global validation",
+      "python_lsm": "webui/content_filters.py; memory_protection.py",
+      "status": "部分",
+      "difference": "跨source数目/regex长度上限和字段选择；RE2JS program instruction准确计算未移植"
     }
   ],
   "runtime_dependency_lock": {

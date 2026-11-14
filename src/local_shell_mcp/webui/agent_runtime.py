@@ -11,7 +11,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .providers import ModelToolCall, ProviderConfig
+from .providers import ModelToolCall, ModelUsage, ProviderConfig
+from .semantic_index import SemanticSnapshot
 
 
 class RuntimeSafetyError(PermissionError):
@@ -30,6 +31,8 @@ class AgentContext:
     recursion_limit: int = 50
     tool_end: bool = False
     agent: dict | None = None
+    compaction_semantic_index: SemanticSnapshot | None = None
+    fading_tier: dict | None = None
 
 
 @dataclass
@@ -41,6 +44,7 @@ class AgentLoopState:
     pending_calls: list[ModelToolCall] = field(default_factory=list)
     tool_step_started: bool = False
     completed: bool = False
+    provider_projection: list[dict] | None = None
 
 
 @dataclass
@@ -58,6 +62,10 @@ async def run_agent_loop(
     dispatch: Callable[[list[ModelToolCall], AgentLoopState], Awaitable[ToolBatchOutput]],
     on_text: Callable[[str], Awaitable[None]],
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
+    before_model: Callable[[AgentLoopState], Awaitable[None]] | None = None,
+    on_model_usage: Callable[[ModelUsage, AgentLoopState], Awaitable[None]] | None = None,
+    project_messages: Callable[[AgentLoopState], list[dict]] | None = None,
+    preflight_calls: Callable[[list[ModelToolCall], AgentLoopState], list[ModelToolCall]] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -87,6 +95,8 @@ async def run_agent_loop(
             continue
         if state.step >= state.context.recursion_limit:
             raise ValueError("Recursion limit reached without hitting a stop condition")
+        if before_model is not None:
+            await before_model(state)
         context = state.context
         state.step += 1
         state.model_turn += 1
@@ -104,15 +114,24 @@ async def run_agent_loop(
             sampling["top_p"] = top_p
         calls: list[ModelToolCall] = []
         text_parts: list[str] = []
-        source = stream_tools(context.profile, state.messages, tools=context.tools,
+        projected = project_messages(state) if project_messages else state.messages
+        state.provider_projection = projected
+        source = stream_tools(context.profile, projected, tools=context.tools,
                               **sampling) if context.tools else \
-            stream_text(context.profile, state.messages, **sampling)
+            stream_text(context.profile, projected, **sampling)
         async for item in source:
             if isinstance(item, ModelToolCall):
                 calls.append(item)
+            elif isinstance(item, ModelUsage):
+                if on_model_usage is not None:
+                    await on_model_usage(item, state)
             elif item:
                 text_parts.append(item)
                 await on_text(item)
+        if calls and preflight_calls is not None:
+            # Content protection happens before the first checkpoint/SSE
+            # record. Rejected model arguments must never enter durable state.
+            calls = preflight_calls(calls, state)
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if calls:
             import json

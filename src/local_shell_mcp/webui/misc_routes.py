@@ -78,6 +78,8 @@ async def role(request: Request):
         raise HTTPException(404, detail="Role does not exist")
     # LSM is a single-user Controller. Ownership and OAuth scopes remain the
     # authority; these UI metadata fields never grant endpoint capabilities.
+    from .memory import memory_enabled
+    has_memory = memory_enabled(_repo(), _owner(request))
     return JSONResponse({
         "name": name,
         "permissions": {
@@ -87,7 +89,7 @@ async def role(request: Request):
             "AGENTS": {"USE": True, "CREATE": True, "SHARE": False, "SHARE_PUBLIC": False},
             "MCP_SERVERS": {"USE": True, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
             "PROMPTS": {"USE": False, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
-            "MEMORIES": {"USE": False, "CREATE": False, "UPDATE": False, "READ": False},
+            "MEMORIES": {"USE": has_memory, "CREATE": has_memory, "UPDATE": has_memory, "READ": has_memory, "OPT_OUT": has_memory},
         },
     })
 

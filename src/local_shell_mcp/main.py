@@ -183,6 +183,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.controller_routes import controller_routes
             from .webui.conversation_routes import conversation_routes
             from .webui.generation_routes import generation_routes
+            from .webui.memory_routes import memory_routes
             from .webui.misc_routes import misc_routes
             from .webui.routes import webui_routes
 
@@ -193,6 +194,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             routes[2:2] = agent_routes()
             routes[2:2] = generation_routes()
             routes[2:2] = misc_routes()
+            routes[2:2] = memory_routes()
             routes[2:2] = controller_routes()
     if settings.remote_enabled:
         routes[2:2] = remote_routes()

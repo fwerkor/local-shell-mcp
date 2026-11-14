@@ -101,7 +101,7 @@ COPY --from=ui-builder /source/src/local_shell_mcp/ui_static /app/src/local_shel
 COPY --from=react-bundler /out/frontend.tar.gz /app/src/local_shell_mcp/webui/frontend.tar.gz
 # Browser automation is optional; neither Playwright nor browser runtimes
 # belong in the base image.
-RUN pip install --no-cache-dir -e . \
+RUN pip install --no-cache-dir -e '.[webui]' \
   && rm -rf /root/.cache/pip \
   && python -c "import zstandard" \
   && test -s /app/src/local_shell_mcp/webui/frontend.tar.gz \
