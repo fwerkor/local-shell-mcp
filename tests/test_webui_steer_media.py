@@ -182,3 +182,89 @@ def test_openai_payload_strips_steering_metadata():
     payload = _openai_messages([{'role': 'user', 'source': 'steer',
         'files': [{'file_id': 'f1'}], 'content': 'Please correct the answer.'}])
     assert payload == [{'role': 'user', 'content': 'Please correct the answer.'}]
+
+
+def test_native_media_validation_rejects_untrusted_or_malformed_payloads():
+    """Cover malformed parts while retaining genuine source-formatted text."""
+    assert native_content_parts('Plain message', 'anthropic') == [
+        {'type': 'text', 'text': 'Plain message'}]
+    assert native_content_parts('', 'google') == []
+    assert native_content_parts(None, 'google') == []
+    assert native_content_parts(['text', None, {}, {'type': 'audio'},
+                                 {'type': 'text', 'text': None}], 'google') == []
+    cases = [
+        {'type': 'image_url', 'image_url': {'url': 'https://untrusted.invalid/x.png'}},
+        {'type': 'image_url', 'image_url': {'url': 123}},
+        {'type': 'image_url'},
+        {'type': 'file'},
+        {'type': 'image_url', 'image_url': {'url': 'data:image/svg+xml;base64,YQ=='}},
+        {'type': 'file', 'file': {'file_data': 'data:application/pdf;base64,!!'}},
+        {'type': 'file', 'file': {'file_data': 'data:application/pdf;base64,YQ==='}},
+    ]
+    assert native_content_parts(cases, 'anthropic') == []
+    assert native_content_parts(cases, 'google') == []
+    assert native_content_parts([{'type': 'text', 'text': 'Valid'}], 'anthropic') == [
+        {'type': 'text', 'text': 'Valid'}]
+
+
+@pytest.mark.asyncio
+async def test_media_magic_variants_and_text_binary_size_guards(context, tmp_path):
+    from local_shell_mcp.webui.steer_media import _detected_type
+
+    db, _, _, root = context
+    assert _detected_type(b'\xff\xd8\xffJPG') == 'image/jpeg'
+    assert _detected_type(b'GIF87a' + b'a') == 'image/gif'
+    assert _detected_type(b'GIF89a' + b'a') == 'image/gif'
+    assert _detected_type(b'RIFF0000WEBPVP8') == 'image/webp'
+    assert _detected_type(b'Unrecognized') is None
+    txt = insert_file(db, root, 'notes.txt', b'Human-readable context', 'text/plain')
+    nul = insert_file(db, root, 'binary.bin', b'\x00binary', 'application/octet-stream')
+    large = insert_file(db, root, 'too-large.txt', b'x' * 100_000, 'text/plain')
+    image = insert_file(db, root, 'jpeg.jpg', b'\xff\xd8\xffvery-minimal', 'image/png')
+    result = await encode_steer_media(db, 'local', {
+        'text': 'Please consult attachments',
+        'files': [txt, nul, large, image, {'file_id': 412}, {'file_id': 'not-available'}],
+    }, root)
+    assert len(result) == 5
+    assert result[1]['text'].endswith('Human-readable context')
+    assert result[2]['text'].endswith('use authorized file tools if available.')
+    assert result[3]['text'].endswith('use authorized file tools if available.')
+    assert result[4]['image_url']['url'].startswith('data:image/jpeg;base64,')
+    assert all('\\x00binary' not in str(part) for part in result)
+
+    # The server's legitimate SQLite path cannot be used as a traversal/SSRF
+    # escape even if an old row had been tampered with or the upload moved.
+    secret = tmp_path / 'outside.txt'
+    secret.write_text('owner-secret', encoding='utf-8')
+    with db.connect() as conn:
+        conn.execute('UPDATE attachments SET path=? WHERE id=?', (str(secret), txt['file_id']))
+    failed = await encode_steer_media(db, 'local', {'text': 'Still answer', 'files': [txt]}, root)
+    assert failed[0]['text'] == 'Still answer'
+    assert 'owner-secret' not in str(failed)
+
+
+@pytest.mark.asyncio
+async def test_media_budget_and_storage_move_degrade_without_losing_steer(context):
+    db, _, _, root = context
+    too_large = insert_file(db, root, 'big.png', b'\x89PNG\r\n\x1a\n' + b'a' * (4 * 1024 * 1024), 'image/png')
+    result = await encode_steer_media(db, 'local', {
+        'text': 'Always keep instruction', 'files': [too_large]}, root)
+    assert len(result) == 2 and result[0]['text'] == 'Always keep instruction'
+    assert result[1]['type'] == 'text'
+    assert 'data:' not in str(result)
+    # Valid recorded file path but bytes missing after deferred removal.
+    folder = root / 'attachments' / hashlib.sha256(b'local').hexdigest()[:32]
+    (folder / 'big.png').unlink()
+    assert len(await encode_steer_media(db, 'local', {
+        'text': 'Unchanged', 'files': [too_large]}, root)) == 2
+
+
+@pytest.mark.asyncio
+async def test_steer_without_file_and_plain_untouched_history(context):
+    from local_shell_mcp.webui.steer_media import stamp_model_messages
+
+    db, _, _, root = context
+    history = [{'role': 'system', 'content': 'System'},
+               {'role': 'user', 'source': 'steer', 'content': 'New request'},
+               {'role': 'assistant', 'content': 'Previous answer'}]
+    assert await stamp_model_messages(db, 'local', history, root) == history

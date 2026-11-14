@@ -483,11 +483,14 @@ class GenerationStore:
                        (_json(state), _now(), run_id))
             return True
 
-    def append(self, owner: str, run_id: str, event: dict) -> int:
+    def append(self, owner: str, run_id: str, event: dict, *, actor_lease=None) -> int:
         encoded = _json(event)
         if len(encoded.encode("utf-8")) > 256 * 1024:
             raise ValueError("Generation event exceeds 256 KiB")
         with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             if not db.execute(
                 "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -643,7 +646,9 @@ class GenerationStore:
                                 if (isinstance(part, dict) and part.get("type") == "steer"
                                     and isinstance(part.get("steer"), str)):
                                     result.append({"role": "user", "content": merged_text(part),
-                                                   "source": "steer", "files": part.get("files", [])})
+                                                   "source": "steer", "steerId": part.get("steerId"),
+                                                   "id": "steer:" + str(part.get("steerId")),
+                                                   "files": part.get("files", [])})
                     files = json.loads(row["metadata"]).get("files", [])
                     if row["role"] == "user" and files:
                         descriptors = []
@@ -661,11 +666,14 @@ class GenerationStore:
         return list(reversed(result))
 
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
-               error: str | None = None, expired_action_id: str | None = None) -> bool:
+               error: str | None = None, expired_action_id: str | None = None,
+               actor_lease=None) -> bool:
         if status not in _TERMINAL:
             raise ValueError("Only terminal statuses can finish a generation")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=?", (run_id, owner),

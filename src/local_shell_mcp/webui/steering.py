@@ -312,10 +312,12 @@ class SteeringStore:
             return bool(row and any(item.get("preempt") for item in
                                     (self._state(row).get("steering") or {}).get("queue", [])))
 
-    def drain(self, owner, run_id, *, boundary):
+    def drain(self, owner, run_id, *, boundary, actor_lease=None):
         """Atomic FIFO dequeue and SSE publication; never inject a newer run's items."""
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute("SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                              "WHERE r.id=? AND c.owner=? AND r.status='running'",
                              (run_id, owner)).fetchone()
@@ -368,6 +370,20 @@ class SteeringStore:
             db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                        (_json(state), _now(), run_id))
             return applied
+
+    def applied_parts(self, owner: str, run_id: str) -> list[dict]:
+        """One source of durable delivery truth across a failed graph checkpoint.
+
+        The queue is atomically consumed with the on_steer_applied receipt, but
+        the later agent/graph checkpoint can be lost in a crash. Replaying only
+        missing deterministic steer IDs repairs that crash window.
+        """
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+        return list(self._state(row).get("steerParts") or []) if row else []
 
     def pending(self, owner, run_id):
         with self.database.connect() as db:

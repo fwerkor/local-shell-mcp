@@ -113,7 +113,9 @@ def _messages_for_anthropic(messages: list[dict]) -> tuple[list[dict], str]:
     from .provider_multimodal import native_content_parts
 
     items = [{"role": item["role"],
-              "content": native_content_parts(item.get("content") or "", "anthropic")}
+              "content": (native_content_parts(item["content"], "anthropic")
+                          if isinstance(item.get("content"), list)
+                          else item.get("content") or "")}
              for item in messages if item.get("role") in {"user", "assistant"}]
     return items, "\n".join(systems)
 

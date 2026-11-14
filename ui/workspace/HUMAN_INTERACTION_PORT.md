@@ -129,3 +129,56 @@ advertised as exact full upstream parity without those tests and fixes.
 Local complete suite after the Graph trigger retry update: **2490 passed,
 5 skipped**. The additional graph actor lease-takeover regression was added
 after that full run and separately passed with the serial/parallel steer tests.
+
+## 2026-11-14 — foreground actor leases, crash repair and native Steer media
+
+A separate source-compatible integration continuation on Draft PR #358 adds the
+following controller-only paths; Worker still has no React, browser, LangGraph
+or additional runtime dependency:
+
+- `generation_actor_lease.py` and SQLite `generation_actor_leases` now provide
+  fresh high-entropy lease tokens, transactional single-actor admission,
+  20-second renewal, 120-second expiry, transactional event/final/Steer commit
+  fencing, and per-token safe release. `AgentRunner`, its compiled StateGraph
+  members and synchronous child agents inherit the parent lease; interrupted
+  tool-only provider streams re-check the token before executing proposals.
+- Startup recognizes foreign live Controller leases and does not terminate
+  their runs. A crashed ordinary actor's checkpoint remains available in
+  SQLite for **fresh authorized browser SSE/resume** reattachment, which
+  resolves the Agent and machine grants anew; startup does not silently
+  re-execute native tools using an expired OAuth token. Closed event-loop task
+  handles are pruned before a new Controller loop can schedule/reap tasks.
+- Source `steering/runtime.ts:drainAndBuildInjections` applies an event before
+  asynchronous media encoding. SQLite similarly commits the applied receipt
+  and SSE atomically. `SteeringStore.applied_parts` plus deterministic
+  `steer:<steerId>` message IDs re-inject only uncheckpointed applied parts
+  during an authenticated recovery, not on an ordinary parallel graph run.
+- `steer_media.py` resolves every media file from its **owner-scoped SQLite**
+  ID at the injection boundary; only legitimate attachments under the private
+  state directory are read. Image formats (JPEG/PNG/GIF/WebP), PDF and bounded
+  UTF-8 file context can be assembled into native OpenAI-compatible,
+  Anthropic and Gemini request formats; malformed/oversized/revoked files
+  degrade to text without discarding the user instruction. File bytes are
+  never included in source React SSE events, persisted chat parts or graph
+  checkpoints. `provider_multimodal.py` encodes model-turn content transiently
+  and preserves plain-string Anthropic compatibility.
+- The original unmodified React Chromium client is tested against a real
+  Python LangGraph graph: its child Agent asks a question, the page reloads,
+  the exact pending action resumes after a valid answer, and the conversation
+  remains coherent after a second reload.
+
+Validation: real two-Controller SQLite claim races, stale-token model/event/
+final-result refusal, expired-lease takeover, no-checkpoint orphan behavior,
+no-checkpoint applied Steer replay, document/image owner authorization,
+transient historical media replay and native provider wire payloads.
+Focused tests of the three new lease/encoding modules have **98.0% combined
+branch coverage**, each module above the unchanged 90% gate. Full-suite and
+GitHub cross-platform CI conclusions are required at the final pinned commit.
+
+Not claimed: the source's complete arbitrary Agent Trigger system, every
+LangGraph event hook and callback payload, rich audio/video attachment
+transcoding, or an exactly-once guarantee for *external irreversible native
+side effects* across a crash. An old actor may have completed an external
+operation before losing its lease; native tool replay still depends on the
+underlying LSM idempotency/ownership contract. These are separate from the
+once-only persisted Steer receipt and replay-safe graph checkpoint claims.

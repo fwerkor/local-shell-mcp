@@ -49,7 +49,7 @@ class AgentRunner:
                  graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None,
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
-                 on_injected=None, wakeup_lease=None):
+                 on_injected=None, wakeup_lease=None, actor_lease=None, recovery_steers=False):
         self.on_injected = on_injected
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
@@ -65,6 +65,8 @@ class AgentRunner:
         self.task_control_host, self.task_control_id = task_control_host, task_control_id
         self.subagent_depth = subagent_depth
         self.wakeup_lease = wakeup_lease
+        self.actor_lease = actor_lease
+        self.recovery_steers = recovery_steers
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
@@ -81,6 +83,8 @@ class AgentRunner:
         self.route = HandoffRouting(self.graph_entry_id, self.graph_max_handoffs, self.graph_parallel)
 
     def _check_grant(self):
+        if self.actor_lease is not None:
+            self.actor_lease.assert_current()
         if self.grant_expires is not None and self.grant_expires <= time.time():
             raise RuntimeSafetyError("Authentication grant expired")
         if self.task_control_host is not None and self.task_control_id is not None:
@@ -273,7 +277,8 @@ class AgentRunner:
                             background_deny=self.background_deny,
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
                             subagent_depth=invocation.remaining_depth,
-                            wakeup_lease=self.wakeup_lease)
+                            wakeup_lease=self.wakeup_lease, actor_lease=self.actor_lease,
+                            recovery_steers=self.recovery_steers)
         return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
 
     async def _pause(self, payload, state, *, approval=False):
@@ -395,6 +400,24 @@ class AgentRunner:
                     self.cache[replay_key(call, index)] = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)},
                                                          "output": match["content"]}
                     self.saver.put_writes(self.active_config, [("messages", match)], task_id=call.call_id)
+        # Crash seam: the durable FIFO/event claim may have committed before
+        # the model-loop checkpoint recorded its injected HumanMessage. Repair
+        # against deterministic IDs, so retries and parallel graph reducers
+        # never create a second public steer part.
+        is_foreground = (not self.namespace or
+                         (self.graph_node and self.namespace.startswith("/graph:")))
+        if is_foreground and self.recovery_steers:
+            existing_steers = {message.get("steerId") for message in state.messages
+                               if isinstance(message, dict)}
+            for part in self.steers.applied_parts(self.owner, self.generation.run_id):
+                steer_id = part.get("steerId")
+                if not isinstance(steer_id, str) or steer_id in existing_steers:
+                    continue
+                state.messages.append({"role": "user", "content": merged_text(part),
+                                       "source": "steer", "steerId": steer_id,
+                                       "id": "steer:" + steer_id, "files": part.get("files", [])})
+                existing_steers.add(steer_id)
+                state.completed = False
         if recursion_limit is not None:
             state.context.recursion_limit = recursion_limit
         review = self.store.approved_review(self.owner, self.generation.run_id)
@@ -448,14 +471,17 @@ class AgentRunner:
             # BEGIN IMMEDIATE drain elects one consumer in parallel fan-out.
             if self.namespace and not (self.graph_node and self.namespace.startswith("/graph:")):
                 return False
-            applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary)
+            applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary,
+                                        actor_lease=self.actor_lease)
             if applied and self.on_injected is not None:
                 await self.on_injected()
             for item in applied:
                 # The graph checkpoint contains only durable owned references.
                 # Encode actual media per provider request, never persist base64.
                 current.messages.append({"role": "user", "content": merged_text(item),
-                                         "source": "steer", "files": item.get("files", [])})
+                                         "source": "steer", "steerId": item["steerId"],
+                                         "id": "steer:" + item["steerId"],
+                                         "files": item.get("files", [])})
             return bool(applied)
 
         async def should_seal_stream():
