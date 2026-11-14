@@ -175,3 +175,36 @@ async def test_graph_node_fences_revoked_completion_wakeup_lease(environment, mo
     assert called == ['parent']
     assert revoked
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_tool_only_chunk_checks_revoked_wakeup_lease_before_dispatch(environment, monkeypatch):
+    """Token fencing is checked for a streamed tool proposal with no text."""
+    from wakeup_helpers import begin_automatic
+
+    from local_shell_mcp.webui.agent_runtime import RuntimeSafetyError
+    from local_shell_mcp.webui.providers import ModelToolCall
+    from local_shell_mcp.webui.subagent_task_host import shutdown_subagent_tasks
+
+    db, repo, store, _, parent, _ = environment
+    host, task_id, job = await begin_automatic(environment)
+    with db.connect() as conn:
+        token = conn.execute('SELECT lease_owner FROM subagent_wakeups WHERE task_id=?',
+                             (task_id,)).fetchone()[0]
+
+    async def model(profile, messages, **kwargs):
+        with db.connect() as conn:
+            conn.execute("UPDATE subagent_wakeups SET lease_owner='competing-controller' "
+                         "WHERE task_id=?", (task_id,))
+        yield ModelToolCall('untrusted-proposal', 'plan_manage', {'action': 'list'})
+
+    async def noop(text):
+        pass
+
+    runner = AgentRunner('local', job, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=model, stream_text=model, on_text=noop,
+                         agent=parent, wakeup_lease=(task_id, token))
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        await runner.run(store.history('local', job.conversation_id))
+    assert store.get('local', job.run_id).status == 'running'
+    await shutdown_subagent_tasks()

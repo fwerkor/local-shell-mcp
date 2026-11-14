@@ -146,6 +146,7 @@ async def _run_model(
 
         async def on_injected():
             nonlocal step_id, step_index, now_ms
+            check_wakeup_lease()
             closed_at = int(time.time() * 1000)
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step_closed", "data": {

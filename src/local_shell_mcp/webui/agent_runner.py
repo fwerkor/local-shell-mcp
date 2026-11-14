@@ -441,6 +441,8 @@ class AgentRunner:
             return bool(additions)
 
         async def inject_steers(current, boundary):
+            # A stolen Controller actor may not dequeue or publish a steer.
+            self._check_grant()
             # Foreground graph nodes share the originating generation's user
             # steer queue. Detached subagents have their own control channel.
             # BEGIN IMMEDIATE drain elects one consumer in parallel fan-out.
@@ -459,6 +461,9 @@ class AgentRunner:
             return bool(applied)
 
         async def should_seal_stream():
+            # Check even tool-only provider chunks: they produce no on_text
+            # callback, but may otherwise schedule irreversible tools.
+            self._check_grant()
             owns_user_queue = (not self.namespace or
                                (self.graph_node and self.namespace.startswith("/graph:")))
             return owns_user_queue and self.steers.has_preempt(self.owner, self.generation.run_id)
