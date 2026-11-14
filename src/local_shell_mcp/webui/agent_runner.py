@@ -49,7 +49,8 @@ class AgentRunner:
                  graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None,
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
-on_injected=None, wakeup_lease=None, event_delivery_lease=None, actor_lease=None, recovery_steers=False):
+                 on_injected=None, wakeup_lease=None, event_delivery_lease=None,
+                 actor_lease=None, recovery_steers=False):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -63,6 +64,7 @@ on_injected=None, wakeup_lease=None, event_delivery_lease=None, actor_lease=None
         self.background_deny = background_deny
         self.task_control_host, self.task_control_id = task_control_host, task_control_id
         self.subagent_depth = subagent_depth
+        self.on_injected = on_injected
         self.wakeup_lease = wakeup_lease
         self.event_delivery_lease = event_delivery_lease
         self.actor_lease = actor_lease
