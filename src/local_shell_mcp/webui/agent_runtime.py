@@ -111,15 +111,22 @@ async def run_agent_loop(
                 elif item:
                     text_parts.append(item)
                     await on_text(item)
-                    if on_stream_chunk is not None and await on_stream_chunk():
-                        sealed = True
-                        break
+                # An interrupted provider can emit only tool_calls, without
+                # ever yielding text. Inspect *every* chunk before dispatching
+                # proposals, including the final tool-call chunk.
+                if on_stream_chunk is not None and await on_stream_chunk():
+                    sealed = True
+                    break
         finally:
             # Closing the async iterator releases provider SSE/HTTP resources
             # after an intentional provider-safe steer preemption.
             close = getattr(source, "aclose", None)
             if close is not None:
                 await close()
+        # A steer may arrive after the provider's last chunk and before
+        # dispatch. Recheck the durable queue at this execution boundary.
+        if not sealed and on_stream_chunk is not None and await on_stream_chunk():
+            sealed = True
         # A preempted provider turn is incomplete. None of its buffered
         # tool proposals may dispatch: the injected user steer must be heard
         # by the model before it can authorize another batch.

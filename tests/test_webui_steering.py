@@ -208,3 +208,71 @@ async def test_preempt_discards_uncommitted_model_tool_batch(context, monkeypatc
     assert generations.latest("local", job.conversation_id).status == "complete"
     last = generations.events("local", job.run_id)[-1][1]
     assert "This chunk must not appear." not in last["responseMessage"]["text"]
+
+
+@pytest.mark.asyncio
+async def test_tool_only_provider_stream_can_be_preempted_before_dispatch(context, monkeypatch):
+    """Provider SSE may emit only tool proposals, with no assistant text chunks."""
+    from local_shell_mcp.webui import lsm_tool_registry
+    from local_shell_mcp.webui.providers import ModelToolCall
+
+    generations, steering, job, profile = context
+    calls = []
+    dispatched = []
+
+    async def fake_dispatch(*args, **kwargs):
+        dispatched.append((args, kwargs))
+        return "A stale tool was executed"
+
+    async def provider(profile, messages, **kwargs):
+        calls.append(list(messages))
+        if len(calls) == 1:
+            yield ModelToolCall("stale-tool", "plan_manage", {"action": "list"})
+            _enqueue(steering, job, cid="tool-only", text="Discard that tool", preempt=True)
+            yield ModelToolCall("stale-tool2", "plan_manage", {"action": "list"})
+        else:
+            assert "Discard that tool" in messages[-1]["content"]
+            yield "Preempting tool-only stream worked."
+
+    monkeypatch.setattr(lsm_tool_registry, "call_tool", fake_dispatch)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", provider)
+    await generation_routes._run_model("local", job, profile)
+    assert not dispatched
+    assert len(calls) == 2
+    assert generations.latest("local", job.conversation_id).status == "complete"
+    last = generations.events("local", job.run_id)[-1][1]["responseMessage"]
+    assert last["text"] == "Preempting tool-only stream worked."
+
+
+@pytest.mark.asyncio
+async def test_final_provider_boundary_preempt_does_not_execute_proposals(context, monkeypatch):
+    """Catch a late steer after the final SSE frame and before tool dispatch."""
+    from local_shell_mcp.webui import lsm_tool_registry
+    from local_shell_mcp.webui.providers import ModelToolCall
+
+    generations, steering, job, profile = context
+    calls = []
+    dispatched = []
+
+    async def fake_dispatch(*args, **kwargs):
+        dispatched.append((args, kwargs))
+        return "Executed stale tool"
+
+    async def provider(profile, messages, **kwargs):
+        calls.append(list(messages))
+        if len(calls) == 1:
+            yield ModelToolCall("tool-id", "plan_manage", {"action": "list"})
+            # This code runs on the stream's next pull, after the previous
+            # per-chunk preempt check, but before the end-of-stream check.
+            _enqueue(steering, job, cid="late-steer", text="Late request", preempt=True)
+        else:
+            assert "Late request" in messages[-1]["content"]
+            yield "Late steer acknowledged."
+
+    monkeypatch.setattr(lsm_tool_registry, "call_tool", fake_dispatch)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", provider)
+    await generation_routes._run_model("local", job, profile)
+    assert not dispatched
+    assert len(calls) == 2
+    assert generations.latest("local", job.conversation_id).status == "complete"
+    assert generations.events("local", job.run_id)[-1][1]["responseMessage"]["text"] == "Late steer acknowledged."
