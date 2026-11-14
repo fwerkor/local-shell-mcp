@@ -246,7 +246,7 @@ async def start_generation(request: Request):
         validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
         params = (agent or {}).get('model_parameters') or payload.get('model_parameters')
         if isinstance(params, dict):
-            validate_model_parameters(params, filters)
+            validate_model_parameters({'model_parameters': params}, filters)
     except ContentFilterBlocked as blocked:
         return JSONResponse(blocked.response(), status_code=400)
     # Permission inheritance is resolved against SQLite at the start and

@@ -297,16 +297,52 @@ def filtered_tool_output(name: str, output: object, filters: dict | None) -> obj
     return 'Tool output withheld by configured content protection policy.'
 
 
+_MODEL_PARAMETER_FIELDS = {
+    'stop': 'stop',
+    'additionalModelRequestFields': 'request_fields',
+    'additional_model_request_fields': 'request_fields',
+    'response_format': 'response_format',
+    'responseFormat': 'response_format',
+    'metadata': 'metadata',
+}
+
+
 def model_parameter_fragments(parameters: dict) -> list[ContentFragment]:
-    """Inspect nested user/Agent model controls with bounded key/value walks."""
-    fragments = []
-    for field, value in parameters.items():
-        try:
-            strings = _nested_strings(value)
-        except ValueError:
-            strings = ['x' * (_MAX_FIELD_CHARS + 1)]
-        fragments.extend(ContentFragment('model_parameter', str(field), text, 'administrator')
-                         for text in strings)
+    """Map named and wrapped model settings as original submissions.ts does."""
+    fragments: list[ContentFragment] = []
+    seen: set[int] = set()
+    budget = 0
+
+    def visit(current: dict, *, wrapper: bool = False, depth: int = 0) -> None:
+        nonlocal budget
+        if id(current) in seen:
+            return
+        seen.add(id(current))
+        budget += 1
+        if depth > _MAX_DEPTH or budget > _MAX_NODES:
+            fragments.extend(ContentFragment('model_parameter', field,
+                                             'x' * (_MAX_FIELD_CHARS + 1), 'administrator')
+                             for field in ('stop', 'request_fields', 'response_format', 'metadata'))
+            return
+        for name, value in current.items():
+            field = _MODEL_PARAMETER_FIELDS.get(str(name))
+            if field is None and name in ('model_parameters', 'options'):
+                if isinstance(value, dict):
+                    visit(value, wrapper=True, depth=depth + 1)
+                    continue
+                field = 'request_fields'
+            elif field is None and wrapper:
+                field = 'request_fields'
+            if field is None:
+                continue
+            try:
+                strings = _nested_strings(value)
+            except ValueError:
+                strings = ['x' * (_MAX_FIELD_CHARS + 1)]
+            fragments.extend(ContentFragment('model_parameter', field, text, 'administrator')
+                             for text in strings)
+
+    visit(parameters)
     return fragments
 
 

@@ -240,3 +240,26 @@ def test_audit_logger_failure_cannot_denial_of_service_a_permitted_generation():
 
     assert inspect_content([ContentFragment('message', 'content_part', 'Bearer SECRET')],
                            filters, audit_sink=broken_sink) is None
+
+
+def test_model_parameter_source_aliases_wrappers_and_unknown_request_fields():
+    from local_shell_mcp.webui.content_filters import (
+        model_parameter_fragments,
+        validate_model_parameters,
+    )
+
+    value = {'stop': ['safe'], 'additionalModelRequestFields': {'nested': 'private_123'},
+             'responseFormat': {'type': 'json_object'}, 'options': {'outer': {'key': 'private_123'}},
+             'noise': 'private_123'}
+    fragments = model_parameter_fragments(value)
+    selected = {(item.field, item.text) for item in fragments}
+    assert ('request_fields', 'private_123') in selected
+    assert ('response_format', 'json_object') in selected
+    assert not any(item.field == 'noise' for item in fragments)
+    config = _policy('modelParameters', fields=['request_fields'], starter=[], custom=[
+        {'id': 'request', 'label': 'secret request', 'regex': 'private_[0-9]+'}])
+    with pytest.raises(ContentFilterBlocked):
+        validate_model_parameters(value, config)
+    assert validate_model_parameters({'noise': 'private_123'}, config) is None
+    with pytest.raises(ContentFilterBlocked):
+        validate_model_parameters({'model_parameters': {'noise': 'private_123'}}, config)

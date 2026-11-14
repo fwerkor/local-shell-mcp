@@ -131,7 +131,7 @@ class AgentRunner:
         validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
         parameters = (agent or {}).get('model_parameters') or self.initial_parameters
         if isinstance(parameters, dict):
-            validate_model_parameters(parameters, filters)
+            validate_model_parameters({'model_parameters': parameters}, filters)
         if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
