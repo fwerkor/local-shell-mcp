@@ -392,13 +392,14 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
 
 
 async def _run_python(
-    code: str, cwd: str = ".", timeout_s: int = 60, persist_on_timeout: bool = False
+    code: str, cwd: str = ".", timeout_s: int = 60, persist_on_timeout: bool = False,
+    idempotency_key: str | None = None,
 ) -> dict:
     _assert_text_input_size("Python script", code)
     if persist_on_timeout:
         public_run_shell_timeout(timeout_s)
         resolve_path(cwd, must_exist=True)
-        path = await asyncio.to_thread(write_durable_python_script, code)
+        path = await asyncio.to_thread(write_durable_python_script, code, idempotency_key)
     else:
         await asyncio.to_thread(prune_temp_dir)
         path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
@@ -408,7 +409,8 @@ async def _run_python(
     command = f"{python} {quote_shell_argument(str(path))}"
     if persist_on_timeout:
         try:
-            result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=path)
+            result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=path,
+                                                idempotency_key=idempotency_key)
         except BaseException:
             with suppress(Exception):
                 await asyncio.to_thread(discard_unreferenced_python_script, path)
@@ -2962,6 +2964,7 @@ async def _start_transfer_job(
     destination_machine: str | None = None,
     overwrite: bool = False,
     chunk_size: int | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     if not source_machine and not destination_machine:
         raise ValueError("At least one transfer endpoint must be a remote machine")
@@ -2983,6 +2986,7 @@ async def _start_transfer_job(
         payload,
         name=name,
         command=f"transfer {source} -> {destination}",
+        idempotency_key=idempotency_key,
     )
 
 
@@ -3832,6 +3836,7 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
         explanation: str | None = None,
         machine: str | None = None,
         persist_on_timeout: bool = False,
+        idempotency_key: str | None = None,
     ) -> ToolResult:
         """Run a shell command locally or remotely for builds, tests, package managers, and Git. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields state why it runs. With persist_on_timeout=true (default false), start one tracked job and wait up to timeout_s; if still running, return its job_id without rerunning the command. Persistent-job output combines stdout and stderr."""
         _audit_tool_purpose("run_shell", purpose, explanation)
@@ -3845,12 +3850,15 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
                     "cwd": cwd,
                     "timeout_s": timeout_s,
                     "max_output_bytes": max_output_bytes,
+                    **({"idempotency_key": idempotency_key} if persist_on_timeout and idempotency_key else {}),
                 },
                 execution_timeout_s=public_run_shell_timeout(timeout_s) + (30 if persist_on_timeout else 0),
             )
         try:
             if persist_on_timeout:
-                return _ok(await run_job_with_timeout(command, cwd, timeout_s, max_output_bytes))
+                kwargs = {"idempotency_key": idempotency_key} if idempotency_key else {}
+                return _ok(await run_job_with_timeout(command, cwd, timeout_s, max_output_bytes,
+                                                      **kwargs))
             return _ok(
                 (await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump()
             )
@@ -3866,6 +3874,7 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
         explanation: str | None = None,
         machine: str | None = None,
         persist_on_timeout: bool = False,
+        idempotency_key: str | None = None,
     ) -> ToolResult:
         """Write and run Python locally or remotely. persist_on_timeout=true (default false) keeps the same tracked job running and returns job_id when timeout_s expires; query it with job_tail/job_list. Persistent-job output combines stdout and stderr."""
         _audit_tool_purpose("run_python", purpose, explanation)
@@ -3874,10 +3883,13 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
                 settings,
                 machine,
                 "run_python_persist_tool" if persist_on_timeout else "run_python_tool",
-                {"code": code, "cwd": cwd, "timeout_s": public_run_shell_timeout(timeout_s)},
+                {"code": code, "cwd": cwd, "timeout_s": public_run_shell_timeout(timeout_s),
+                 **({"idempotency_key": idempotency_key} if persist_on_timeout and idempotency_key else {})},
                 execution_timeout_s=public_run_shell_timeout(timeout_s) + (30 if persist_on_timeout else 0),
             )
         if persist_on_timeout:
+            if idempotency_key:
+                return await _tool_call(_run_python, code, cwd, timeout_s, True, idempotency_key)
             return await _tool_call(_run_python, code, cwd, timeout_s, True)
         return await _tool_call(_run_python, code, cwd, timeout_s)
 
@@ -4378,6 +4390,7 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
         chunk_size: int | None = None,
         purpose: str | None = None,
         explanation: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ToolResult:
         """Start a tracked job that copies a file or directory between the controller and remote machines. Remote uploads use resumable raw-binary chunks; use job_list, job_tail, job_stop, and job_retry to manage the transfer."""
         _audit_tool_purpose("remote_transfer", purpose, explanation)
@@ -4389,6 +4402,7 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
             destination_machine,
             overwrite,
             chunk_size,
+            idempotency_key,
         )
 
 
