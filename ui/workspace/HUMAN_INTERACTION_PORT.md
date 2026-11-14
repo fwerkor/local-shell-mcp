@@ -153,6 +153,10 @@ or additional runtime dependency:
   and SSE atomically. `SteeringStore.applied_parts` plus deterministic
   `steer:<steerId>` message IDs re-inject only uncheckpointed applied parts
   during an authenticated recovery, not on an ordinary parallel graph run.
+  The same SQLite drain transaction privately stores the elected graph node
+  namespace for each claimed steer; only that node can consume its recovery
+  message if sibling nodes race after a crash. The public SSE part excludes
+  the node namespace, retaining the original React contract.
 - `steer_media.py` resolves every media file from its **owner-scoped SQLite**
   ID at the injection boundary; only legitimate attachments under the private
   state directory are read. Image formats (JPEG/PNG/GIF/WebP), PDF and bounded

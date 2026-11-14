@@ -409,7 +409,8 @@ class AgentRunner:
         if is_foreground and self.recovery_steers:
             existing_steers = {message.get("steerId") for message in state.messages
                                if isinstance(message, dict)}
-            for part in self.steers.applied_parts(self.owner, self.generation.run_id):
+            for part in self.steers.applied_parts(self.owner, self.generation.run_id,
+                                                   namespace=self.namespace):
                 steer_id = part.get("steerId")
                 if not isinstance(steer_id, str) or steer_id in existing_steers:
                     continue
@@ -472,7 +473,8 @@ class AgentRunner:
             if self.namespace and not (self.graph_node and self.namespace.startswith("/graph:")):
                 return False
             applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary,
-                                        actor_lease=self.actor_lease)
+                                        actor_lease=self.actor_lease,
+                                        recipient_namespace=self.namespace)
             if applied and self.on_injected is not None:
                 await self.on_injected()
             for item in applied:

@@ -312,7 +312,7 @@ class SteeringStore:
             return bool(row and any(item.get("preempt") for item in
                                     (self._state(row).get("steering") or {}).get("queue", [])))
 
-    def drain(self, owner, run_id, *, boundary, actor_lease=None):
+    def drain(self, owner, run_id, *, boundary, actor_lease=None, recipient_namespace=""):
         """Atomic FIFO dequeue and SSE publication; never inject a newer run's items."""
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -358,6 +358,10 @@ class SteeringStore:
                         **({"clientSteerId": item["clientSteerId"]} if item.get("clientSteerId") else {}),
                         "createdAt": item["createdAt"], "files": item["files"], "quotes": item["quotes"]}
                 state.setdefault("steerParts", []).append(part)
+                # Only the winning Graph node may replay this claimed Steer
+                # after the event write but before its own model checkpoint.
+                # Keep this routing private in run state, not React parts.
+                state.setdefault("steerDelivery", {})[item["steerId"]] = recipient_namespace
                 db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                            (run_id, _json({"event": "on_steer_applied", "data": {
                                "steerId": item["steerId"],
@@ -371,7 +375,7 @@ class SteeringStore:
                        (_json(state), _now(), run_id))
             return applied
 
-    def applied_parts(self, owner: str, run_id: str) -> list[dict]:
+    def applied_parts(self, owner: str, run_id: str, *, namespace: str | None = None) -> list[dict]:
         """One source of durable delivery truth across a failed graph checkpoint.
 
         The queue is atomically consumed with the on_steer_applied receipt, but
@@ -383,7 +387,14 @@ class SteeringStore:
                 "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
             ).fetchone()
-        return list(self._state(row).get("steerParts") or []) if row else []
+        if row is None:
+            return []
+        state = self._state(row)
+        parts = state.get("steerParts") or []
+        if namespace is None:
+            return list(parts)
+        routes = state.get("steerDelivery") or {}
+        return [part for part in parts if routes.get(part.get("steerId"), "") == namespace]
 
     def pending(self, owner, run_id):
         with self.database.connect() as db:

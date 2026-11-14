@@ -271,3 +271,57 @@ async def test_parallel_graph_sibling_ask_user_resumes_without_rerunning_complet
     assert any(m.get('content') == 'Right sibling complete.' for m in result)
     assert counts == {'root': 1, 'left': 2, 'right': 1}
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_crashed_parallel_steer_recovers_only_its_original_recipient(tmp_path, monkeypatch):
+    """Claimed Steer persisted before Graph checkpoint cannot jump siblings."""
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.state'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'none')
+    get_settings.cache_clear()
+    db = SQLiteDatabase(tmp_path / '.state')
+    repo, store = AgentRepository(db), GenerationStore(db)
+    monkeypatch.setattr(agent_runner, 'provider_config', lambda _, model: ProviderConfig(
+        'openai', model, 'http://localhost:1234/chat/completions', ''))
+    root, left, right = [repo.create('local', {'name': name, 'provider': 'openAI',
+                                             'model': name, 'tools': []})
+                         for name in ('root', 'left', 'right')]
+    root = repo.update('local', root['id'], {'edges': [
+        {'from': root['id'], 'to': [left['id'], right['id']], 'edgeType': 'direct'}]})
+    job, _ = store.begin('local', {'text': 'Original question'}, root)
+    steer = SteeringStore(db)
+    ack = steer.enqueue('local', {
+        'conversationId': job.conversation_id,
+        'generationCreatedAt': job.generation_created_at,
+        'text': 'Recover the original left recipient only',
+        'clientSteerId': 'one-recipient',
+    }, preempt_capable=True)
+    left_ns, right_ns = '/graph:' + left['id'], '/graph:' + right['id']
+    assert len(steer.drain('local', job.run_id, boundary='terminal', recipient_namespace=left_ns)) == 1
+    # Simulated crash: the public receipt is committed, but no child model
+    # checkpoint has the injected message yet. Both siblings now retry.
+    assert [part['steerId'] for part in steer.applied_parts('local', job.run_id, namespace=left_ns)] == [ack['steerId']]
+    assert steer.applied_parts('local', job.run_id, namespace=right_ns) == []
+    public = [e for _, e in store.events('local', job.run_id) if e.get('event') == 'on_steer_applied']
+    assert len(public) == 1 and 'recipient_namespace' not in str(public)
+    assert 'steerDelivery' not in str(public)
+    received = {}
+
+    async def model(profile, messages, **kwargs):
+        received[profile.model] = messages
+        yield 'response:' + profile.model
+
+    async def noop(text):
+        pass
+
+    for current, namespace in [(right, right_ns), (left, left_ns)]:
+        child = AgentRunner('local', job, db, store, scopes=set(), grant_expires=None,
+                            stream_tools=model, stream_text=model, on_text=noop,
+                            agent=current, graph_definition=root, graph_node=True,
+                            namespace=namespace, recovery_steers=True)
+        await child.run(store.history('local', job.conversation_id))
+    assert not any(message.get('steerId') == ack['steerId'] for message in received['right'])
+    assert sum(message.get('steerId') == ack['steerId'] for message in received['left']) == 1
+    assert len([e for _, e in store.events('local', job.run_id) if e.get('event') == 'on_steer_applied']) == 1
+    get_settings.cache_clear()
