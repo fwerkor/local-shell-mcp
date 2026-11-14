@@ -83,10 +83,13 @@ async def role(request: Request):
     return JSONResponse({
         "name": name,
         "permissions": {
-            "agents": {"use": True, "create": True, "share": False, "sharePublic": False},
-            "mcpServers": {"use": True, "create": False, "share": False, "sharePublic": False},
-            "prompts": {"use": False, "create": False, "share": False, "sharePublic": False},
-            "memories": {"use": has_memory, "create": has_memory, "update": has_memory, "read": has_memory, "optOut": has_memory},
+            # Match the retained React PermissionTypes and Permissions enum
+            # wire values exactly. Lowercase interface config keys are NOT
+            # interchangeable with these RBAC role-permission identifiers.
+            "AGENTS": {"USE": True, "CREATE": True, "SHARE": False, "SHARE_PUBLIC": False},
+            "MCP_SERVERS": {"USE": True, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
+            "PROMPTS": {"USE": False, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
+            "MEMORIES": {"USE": has_memory, "CREATE": has_memory, "UPDATE": has_memory, "READ": has_memory, "OPT_OUT": has_memory},
         },
     })
 
@@ -146,8 +149,8 @@ async def conversation_permissions(request: Request):
 async def user_key(request: Request):
     _owner(request)
     provider = request.query_params.get("name", "")
-    if provider not in {"openAI", "google", "anthropic"}:
-        raise HTTPException(404, detail="Unknown model provider")
+    if not provider:
+        raise HTTPException(404, detail="Unknown model channel")
     # The API key belongs to the server environment and is never echoed to
     # React. A fixed expiry advertises availability without secret disclosure.
     from .providers import provider_config

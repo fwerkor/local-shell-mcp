@@ -163,3 +163,109 @@ async def test_profile_usage_option_survives_config_updates_and_rejects_invalid_
             failed = await client.put('/api/lsm/providers', json={**body, 'include_usage': invalid})
             assert failed.status_code == 400
             assert provider_config('openai').include_usage is False
+
+
+@pytest.mark.asyncio
+async def test_named_channels_same_provider_are_independent_and_survive_restart(setup_profiles):
+    settings, app = setup_profiles
+    from local_shell_mcp.webui.provider_profiles import profile
+    from local_shell_mcp.webui.providers import selected_provider
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        # The original single-channel API and storage key are unchanged.
+        old = {"provider": "openai", "base_url": "https://primary.invalid/v1", "models": ["same-model"], "api_key": "old-secret"}
+        assert (await client.put("/api/lsm/providers", json=old)).status_code == 200
+        for name, base, secret in (("Primary Research", "https://research.invalid/v1", "first-secret"),
+                                   ("Secondary Research", "https://second.invalid/v1", "second-secret")):
+            body = {"name": name, "provider": "openai", "base_url": base,
+                    "models": ["same-model", "distinct-model"], "api_key": secret}
+            response = await client.put("/api/lsm/providers", json=body)
+            assert response.status_code == 200, response.text
+            assert secret not in response.text and "api_key" not in response.text
+            assert provider_config(name, "same-model").url == base + "/chat/completions"
+            assert provider_config(name).token == secret
+            assert selected_provider({"endpoint": name}) == name
+            assert selected_provider({"endpoint": "agents"}, {"provider": name}) == name
+        assert provider_config("openAI").token == "old-secret"
+        # Saved legacy endpoint aliases must keep resolving after channel migration.
+        assert provider_config("custom").token == "old-secret"
+        assert provider_config("custom").url == "https://primary.invalid/v1/chat/completions"
+        names = (await client.get("/api/models")).json()
+        assert names["openAI"] == ["same-model"]
+        assert names["Primary Research"] == ["same-model", "distinct-model"]
+        assert names["Secondary Research"] == ["same-model", "distinct-model"]
+        endpoint = (await client.get("/api/endpoints")).json()
+        assert endpoint["agents"]["allowedProviders"] == ["openAI", "Primary Research", "Secondary Research"]
+        assert endpoint["Primary Research"]["type"] == "openAI"
+        assert "ask_user_question" in endpoint["agents"]["capabilities"]
+        # Key preservation works independently for every channel.
+        assert (await client.put("/api/lsm/providers", json={"name": "Primary Research", "provider": "openai",
+                    "base_url": "https://new.invalid/v1", "models": ["updated"]})).status_code == 200
+        assert provider_config("Primary Research").token == "first-secret"
+        assert provider_config("Secondary Research").token == "second-secret"
+        assert provider_config("openai").token == "old-secret"
+        public = (await client.get("/api/lsm/providers")).text
+        for secret in ("first-secret", "second-secret", "old-secret"):
+            assert secret not in public
+        assert profile("Primary Research")["name"] == "Primary Research"
+        with routes._repo().database.connect() as db:
+            rows = db.execute("SELECT key FROM settings WHERE owner='__lsm_controller__' ORDER BY key").fetchall()
+        assert {row[0] for row in rows} >= {"model.provider.openai", "model.channel.Primary Research", "model.channel.Secondary Research"}
+        restarted = subprocess.run([sys.executable, "-c", "from local_shell_mcp.webui.providers import provider_config; import json; print(json.dumps([(p,provider_config(p).url,provider_config(p).token) for p in ('openai','Primary Research','Secondary Research')]))"],
+                                   env={**os.environ, "LOCAL_SHELL_MCP_STATE_DIR": str(settings.state_dir),
+                                        "LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(settings.state_dir / "workspace")},
+                                   capture_output=True, text=True, check=True)
+        assert json.loads(restarted.stdout) == [
+            ["openai", "https://primary.invalid/v1/chat/completions", "old-secret"],
+            ["Primary Research", "https://new.invalid/v1/chat/completions", "first-secret"],
+            ["Secondary Research", "https://second.invalid/v1/chat/completions", "second-secret"],
+        ]
+
+
+@pytest.mark.asyncio
+async def test_named_channel_protocols_validation_and_delete_protection(setup_profiles):
+    _, app = setup_profiles
+    from local_shell_mcp.webui.agents import AgentRepository
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        for name, kind, base, suffix in (("Anthropic Gateway", "anthropic", "https://anthropic-gateway.invalid/v1", "/messages"),
+                                         ("Gemini Gateway", "google", "https://gemini-gateway.invalid/v1beta", "/models/gemini-test:streamGenerateContent?alt=sse")):
+            body = {"name": name, "provider": kind, "base_url": base,
+                    "models": ["gemini-test"], "api_key": "private-named-token"}
+            response = await client.put("/api/lsm/providers", json=body)
+            assert response.status_code == 200, response.text
+            config = provider_config(name)
+            assert config.url == base + suffix
+            assert config.provider == kind and config.token == "private-named-token"
+            assert config.model == "gemini-test"
+            assert (await client.get("/api/models")).json()[name] == ["gemini-test"]
+            assert "private-named-token" not in (await client.get("/api/endpoints")).text
+            assert "private-named-token" not in (await client.get("/api/models")).text
+            assert (await client.put("/api/lsm/providers", json={**body, "provider": "openai"})).status_code == 409
+        for bad in ("openAI", "agents", "custom", "ollama", "Research Assistants", "mini-assistants", "Assistants Overlay Assistants", "bad/name", " name", "name ", "", "bad\nname"):
+            result = await client.put("/api/lsm/providers", json={"name": bad, "provider": "openai",
+                "base_url": "https://example.invalid/v1", "models": ["m"]})
+            assert result.status_code == 400, (bad, result.text)
+        # Historical names predating validation must remain removable.
+        routes._repo().save_setting("__lsm_controller__", "model.channel.Legacy Assistants", {
+            "name": "Legacy Assistants", "provider": "openai",
+            "base_url": "https://legacy.invalid/v1", "models": ["m"], "api_key": "secret"})
+        assert (await client.delete("/api/lsm/providers?name=Legacy%20Assistants")).status_code == 200
+        assert (await client.put("/api/lsm/providers", json={"name": "anthropic gateway", "provider": "anthropic",
+            "base_url": "https://example.invalid/v1", "models": ["m"]})).status_code == 409
+        assert (await client.delete("/api/lsm/providers?name=Anthropic%20Gateway")).status_code == 200
+        assert (await client.get("/api/models")).json().get("Anthropic Gateway") is None
+        with pytest.raises(ValueError, match="Unknown model channel"):
+            provider_config("Anthropic Gateway")
+        repo = AgentRepository(routes._repo().database)
+        agent = repo.create("owner", {"name": "Persistent Agent", "description": "", "provider": "Gemini Gateway", "model": "gemini-test"})
+        assert (await client.delete("/api/lsm/providers?name=Gemini%20Gateway")).status_code == 409
+        assert repo.get("owner", agent["id"])["provider"] == "Gemini Gateway"
+        # Version rollback must never restore a dangling provider after a
+        # newer Agent revision has switched to a different named channel.
+        repo.update("owner", agent["id"], {"provider": "openai", "model": "safe-model"})
+        assert repo.get("owner", agent["id"])["provider"] == "openai"
+        assert (await client.delete("/api/lsm/providers?name=Gemini%20Gateway")).status_code == 409
+        assert provider_config("Gemini Gateway").token == "private-named-token"
+        assert (await client.delete("/api/lsm/providers?name=google")).status_code == 400
+        assert (await client.delete("/api/lsm/providers?name=not%20existing")).status_code == 200
