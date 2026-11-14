@@ -23,6 +23,10 @@ def runtime(tmp_path, monkeypatch):
     db = SQLiteDatabase(tmp_path / 'state')
     store = GenerationStore(db)
     repo = WorkspaceRepository(db)
+    # These tests must not create the Controller's default /workspace directory
+    # (which is unavailable to an unprivileged CI runner).
+    from local_shell_mcp.webui import routes as workspace_routes
+    monkeypatch.setattr(workspace_routes, '_repo', lambda: repo)
     profile = ProviderConfig('openai', 'mock', 'http://127.0.0.1:9000/v1/chat/completions', '')
     monkeypatch.setattr(routes, '_database', lambda: db)
     monkeypatch.setattr(routes, '_generation_store', lambda: store)
