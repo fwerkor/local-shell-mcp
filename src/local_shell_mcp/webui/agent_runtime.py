@@ -120,6 +120,11 @@ async def run_agent_loop(
             close = getattr(source, "aclose", None)
             if close is not None:
                 await close()
+        # A preempted provider turn is incomplete. None of its buffered
+        # tool proposals may dispatch: the injected user steer must be heard
+        # by the model before it can authorize another batch.
+        if sealed:
+            calls.clear()
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if calls:
             import json
