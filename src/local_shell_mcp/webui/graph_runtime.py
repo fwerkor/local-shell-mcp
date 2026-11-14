@@ -223,7 +223,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             if sources:
                 graph.add_edge(sources if len(sources) > 1 else sources[0], to_node)
 
-    saver = OwnedGraphCheckpointer(parent.database, parent.owner)
+    saver = OwnedGraphCheckpointer(parent.database, parent.owner, actor_lease=parent.actor_lease)
     checkpoint_config = saver.storage.config(
         parent.generation.conversation_id, parent.generation.run_id + ":graph:" + parent.namespace,
         event_actor=True,

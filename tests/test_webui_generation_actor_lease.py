@@ -239,3 +239,88 @@ def test_recovery_exclusion_preserves_other_live_controller(context):
     assert owner is not None
     assert resumable_run_ids(second, excludes=active_run_ids(second)) == set()
     owner.release()
+
+
+def test_checkpoint_and_human_pause_writes_fenced_in_their_own_transaction(context):
+    """An old Controller cannot mutate either checkpoint or pause after takeover.
+
+    A lease precheck outside the write transaction is not enough: the other
+    Controller could have claimed the run in between the two operations.
+    """
+    from local_shell_mcp.webui.checkpoints import SQLiteCheckpointSaver
+    from local_shell_mcp.webui.graph_checkpoint import OwnedGraphCheckpointer
+
+    first, second, store, job = context
+    old = ActorLease.claim(first, 'local', job.run_id)
+    assert old is not None
+    saver = SQLiteCheckpointSaver(first, 'local', actor_lease=old)
+    graph = OwnedGraphCheckpointer(first, 'local', actor_lease=old)
+    config = saver.config(job.conversation_id, job.run_id, event_actor=True)
+    initial = {'v': 1, 'id': '000001', 'channel_values': {'messages': []},
+               'channel_versions': {}, 'versions_seen': {}}
+    saved = saver.put(config, initial, {'source': 'checkpoint-start'})
+    saver.put_writes(saved, [('messages', {'role': 'assistant', 'content': 'before'})], task_id='tool-before')
+    graph_config = graph.storage.config(job.conversation_id, job.run_id + ':graph:', event_actor=True)
+    assert graph.storage.put(graph_config, initial, {'source': 'graph-start'})
+
+    with first.connect() as db:
+        db.execute('UPDATE generation_actor_leases SET expires_at=0 WHERE run_id=?', (job.run_id,))
+    replacement = ActorLease.claim(second, 'local', job.run_id)
+    assert replacement is not None
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        saver.put(saved, {**initial, 'id': '000002'}, {'source': 'stale checkpoint'})
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        saver.put_writes(saved, [('messages', {'role': 'tool', 'content': 'stale'})], task_id='stale')
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        graph.storage.put(graph_config, {**initial, 'id': '000002'}, {'source': 'stale graph'})
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        graph.storage.put_writes(graph_config | {'configurable': {
+            **graph_config['configurable'], 'checkpoint_id': '000001'}},
+            [('messages', {'role': 'tool', 'content': 'stale graph write'})], task_id='stale')
+    pending = {'actionId': 'human', 'payload': {'type': 'ask_user_question'},
+               'runId': job.run_id, 'namespace': ''}
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        store.pause_for_question('local', job.run_id, pending, [], '', actor_lease=old)
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        store.pause_for_approval('local', job.run_id, pending, [], '', actor_lease=old)
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        store.complete_approval_batch('local', job.run_id, 'human', [], '', actor_lease=old)
+    assert store.get('local', job.run_id).status == 'running'
+    assert saver.get_tuple(saved)['checkpoint']['channel_values']['messages'] == []
+    with first.connect() as db:
+        assert db.execute("SELECT count(*) FROM agent_checkpoint_writes WHERE task_id='stale'").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM agent_checkpoints WHERE checkpoint_id='000002'").fetchone()[0] == 0
+    assert store.pending_action('local', job.run_id) is None
+    # The new actor remains authorized to continue both original data stores.
+    fresh = SQLiteCheckpointSaver(second, 'local', actor_lease=replacement)
+    assert fresh.put(saved, {**initial, 'id': '000003'}, {'source': 'new actor'})
+    assert store.pause_for_question('local', job.run_id, pending, [], '', actor_lease=replacement)
+    replacement.release()
+
+
+@pytest.mark.asyncio
+async def test_tool_progress_sse_refuses_stale_actor_token(context):
+    """Tool and step-completion events must not bypass the root event fence."""
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
+
+    first, second, store, job = context
+    lease = ActorLease.claim(first, 'local', job.run_id)
+    assert lease
+
+    async def stream(*args, **kwargs):
+        yield ''
+
+    async def on_text(text):
+        pass
+
+    runner = AgentRunner('local', job, first, store, scopes=set(), grant_expires=None,
+                         stream_tools=stream, stream_text=stream, on_text=on_text,
+                         profile=ProviderConfig('openai', 'mock', 'http://localhost:15', ''),
+                         actor_lease=lease)
+    with first.connect() as db:
+        db.execute('UPDATE generation_actor_leases SET expires_at=0 WHERE run_id=?', (job.run_id,))
+    assert ActorLease.claim(second, 'local', job.run_id)
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        runner._tool_step(ModelToolCall('old-call', 'plan_manage', {'action': 'list'}))
+    assert not any(e.get('event') == 'on_run_step' for _, e in store.events('local', job.run_id))

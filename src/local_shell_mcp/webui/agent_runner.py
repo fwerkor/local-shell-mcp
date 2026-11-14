@@ -73,7 +73,7 @@ class AgentRunner:
         self.resume_history, self.resume_namespace = resume_history, resume_namespace
         self.partial_text, self.approved_batch = partial_text, approved_batch
         self.repository = AgentRepository(database)
-        self.saver = SQLiteCheckpointSaver(database, owner)
+        self.saver = SQLiteCheckpointSaver(database, owner, actor_lease=actor_lease)
         self.steers = SteeringStore(database)
         self.config = self.saver.config(generation.conversation_id, generation.run_id,
                                        checkpoint_ns=namespace, event_actor=True)
@@ -178,7 +178,8 @@ class AgentRunner:
                         "args": call.arguments,
                     }],
                 }}
-        self.store.append(self.owner, self.generation.run_id, {"event": "on_run_step", "data": step})
+        self.store.append(self.owner, self.generation.run_id, {"event": "on_run_step", "data": step},
+                          actor_lease=self.actor_lease)
         return step
 
     async def _completed(self, call, record):
@@ -200,7 +201,7 @@ class AgentRunner:
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},
-        })
+        }, actor_lease=self.actor_lease)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -292,7 +293,8 @@ class AgentRunner:
                    "createdAt": int(time.time() * 1000), "namespace": self.namespace, "payload": payload}
         self.saver.put_writes(self.active_config, [("__interrupt__", pending)], task_id="human")
         pause = self.store.pause_for_approval if approval else self.store.pause_for_question
-        if not pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text):
+        if not pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text,
+                     actor_lease=self.actor_lease):
             raise RuntimeError("Unable to save pending Agent action")
         raise AgentSuspended()
 
@@ -521,5 +523,6 @@ class AgentRunner:
         self.graph_commands = state.graph_commands
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
-                                               review["actionId"], result, self.partial_text)
+                                               review["actionId"], result, self.partial_text,
+                                               actor_lease=self.actor_lease)
         return result

@@ -16,9 +16,9 @@ from .checkpoints import SQLiteCheckpointSaver
 
 
 class OwnedGraphCheckpointer(BaseCheckpointSaver):
-    def __init__(self, database: Any, owner: str):
+    def __init__(self, database: Any, owner: str, *, actor_lease=None):
         super().__init__()
-        self.storage = SQLiteCheckpointSaver(database, owner)
+        self.storage = SQLiteCheckpointSaver(database, owner, actor_lease=actor_lease)
 
     def _encode(self, value: Any) -> dict:
         kind, data = self.serde.dumps_typed(value)

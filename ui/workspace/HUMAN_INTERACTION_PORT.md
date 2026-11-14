@@ -200,3 +200,20 @@ side effects* across a crash. An old actor may have completed an external
 operation before losing its lease; native tool replay still depends on the
 underlying LSM idempotency/ownership contract. These are separate from the
 once-only persisted Steer receipt and replay-safe graph checkpoint claims.
+
+## 2026-11-14 — transactional checkpoint and HITL lease fencing
+
+After merging the then-current `main` (`992c3c74`) into the isolated stacked
+branch, the Provider's new model-level `top_p` sampling contract coexists with
+source preemptive Steer stream control. Ordinary and parallel Graph actor
+ownership is now verified **inside the same `BEGIN IMMEDIATE` transaction** as
+SQLite agent checkpoint writes, checkpoint pending tool/interrupt writes,
+human Ask User or Tool Approval pause, approval proof retirement, as well as
+original generation SSE/final state and Steer FIFO commits. The sibling
+LangGraph saver inherits the exact parent actor lease. An old Controller whose
+lease expired cannot publish an old graph checkpoint or pending action even
+when the token was valid before the transaction started. Regressions include
+a full two-Controller takeover between checkpoint creation and subsequent
+writes, stale tool-step refusal, and a successful fresh lease writing the same
+owned checkpoint. Original local and graph-only savers without an active HTTP
+actor keep their existing separate owner-bound semantics.

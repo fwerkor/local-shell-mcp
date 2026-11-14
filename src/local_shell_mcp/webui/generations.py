@@ -240,11 +240,13 @@ class GenerationStore:
         return json.loads(row["state"]).get("pendingAction")
 
     def pause_for_question(self, owner: str, run_id: str, pending: dict,
-                           history: list[dict], partial_text: str) -> bool:
+                           history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
         if len(_json(history).encode("utf-8")) > 512 * 1024:
             raise ValueError("Agent continuation state is too large")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -314,8 +316,9 @@ class GenerationStore:
             return self._run(row), history, partial_text
 
     def pause_for_approval(self, owner: str, run_id: str, pending: dict,
-                           history: list[dict], partial_text: str) -> bool:
-        return self.pause_for_question(owner, run_id, pending, history, partial_text)
+                           history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
+        return self.pause_for_question(owner, run_id, pending, history, partial_text,
+                                       actor_lease=actor_lease)
 
     def claim_approval(self, owner: str, run_id: str, action_id: str,
                        decisions: list[dict]) -> tuple[Generation, list[dict], str, ApprovalBatch]:
@@ -460,12 +463,14 @@ class GenerationStore:
         return prepare_approval_batch(review["payload"], review["resolutions"]) if review else None
 
     def complete_approval_batch(self, owner: str, run_id: str, action_id: str,
-                                history: list[dict], partial_text: str) -> bool:
+                                history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
         """Retire approval proof only after checkpointed tool results are saved."""
         if len(_json(history).encode("utf-8")) > 512 * 1024:
             raise ValueError("Agent continuation state is too large")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
