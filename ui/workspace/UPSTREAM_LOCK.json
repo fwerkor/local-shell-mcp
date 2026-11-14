@@ -507,6 +507,24 @@
       "python_lsm": "webui/memory_protection.py",
       "status": "部分",
       "difference": "starter三规则和custom regex严格时限已适配；完整RE2JS/patternAction审计链尚未等价"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/summarization/semanticIndex.ts",
+      "sha256": "ce9b5eb9976ddc4e74aa55b98d4a8967e17c6e25d1679b98da17e28317b8ca19",
+      "symbols": "snapshotCompactionSemanticIndex / renderCompactionSemanticIndex",
+      "python_lsm": "webui/semantic_index.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "230条原版TS差分向量全部通过，来源校验/版本、pending/遮蔽、冲突、覆盖优先级和预算正确；未自动构造formatAgentMessages的来源索引"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/provenance.ts",
+      "sha256": "4d7b40ad4ac281ccee121f53713a5d1805bdc8e27842cbd53d9606b98336804b",
+      "symbols": "inspectProviderMessageProvenance",
+      "python_lsm": "webui/semantic_index.py",
+      "status": "部分",
+      "difference": "version1 provenance强校验，阻止未认证归属的提示进入摘要；内部模型消息格式化的完整provenance生产仍归其它Graph/Provider协议模块"
     }
   ],
   "runtime_dependency_lock": {

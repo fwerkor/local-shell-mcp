@@ -279,6 +279,7 @@ React schema remains unchanged.
 - 已验证：纯函数2079组源向量、memory SQLite CRUD+并发/配额/隔离、51轮长会话/tool结果配对/思考内容、失败与取消、完整HTTP/SSE summarizer和原版React浏览器下一轮及刷新后恢复。
 - context usage：原版 `on_context_usage` 事件形状接入SSE重播；根据每次模型调用前的有效消息计算system、summary、tool schema及message份额，写入同一run的state并在结束事务中固定到 `responseMessage.metadata.contextUsage`，React刷新后可恢复。该预算是离线BPE保守估计，缺少provider真实token校准/请求cache/fading费用，不能当作provider计费统计；只有指定了合法max context时才生成快照。授权后的启动配置开放原版上下文用量UI，匿名仍不暴露接口能力。
 - 新增Windows粗粒度事件循环下GUI TTL回归稳定性测试；新增真实SQLite重启后“摘要已完成但answer崩溃”与“摘要失败”两种历史恢复测试，CI旧Linux安装失败是Runner解析Ubuntu包源域名中断，未擅改构建依赖。
+- 源码索引差分：`semantic_index.py`已实现`@librechat/agents@4.0.1` 的 `snapshotCompactionSemanticIndex`、`renderCompactionSemanticIndex` 及可信`provider provenance`读入，包含前后端身份、修订冲突、未提交/脱敏排除、XML安全预算、覆盖均衡算法；用锁定TypeScript代码生成的230组fixture（包含代理校验）差分全部通过，并在`_summarize_history`及自动预算触发链中接入（只有可信上下文提供索引时才注入）。目前原`formatAgentMessages`的索引自动生成与完整Graph事件actor尚未完成。
 - 未完全等价：源RBAC（适配为LSM单用户owner）、完整跨source filter审计/RE2JS、SDK provider token校准和按provider native消息格式计算、跨tool pair的intra-turn fallback、动态semantic index/完整事件actor、自定义摘要策略的Graph reducer；这些仍标记“部分”，不可用这批纯函数向量充当整套图运行时已完成的证据。
 - Memory字段过滤：按原版保护来源配置读取 `webui.filters.config` 或 `endpoints.filters`，支持`memories.pii.fields`、starter三规则、custom regex及`audit`不阻止行为；旧记录在GET与模型上下文读取前按最新policy投影，原始SQLite行不篡改且总token按存储值计算；写入新记录或修改在提交前阻止并返回不泄漏原值的`content_filter_block`。为规避Python正则退化，超时及不支持的pattern在memory路径 fail-closed，完整原RE2JS与跨source事件审计尚未移植。
 
