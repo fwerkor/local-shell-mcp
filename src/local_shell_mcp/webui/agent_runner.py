@@ -387,7 +387,17 @@ class AgentRunner:
             if item.get('role') == 'system' and isinstance(text, str) and text.startswith('<summary>\n'):
                 prior = text[len('<summary>\n'):].split('\n</summary>', 1)[0]
                 break
-        semantic = render_compaction_semantic_index(semantic_index, messages)
+        render_messages = messages
+        if semantic_index is None and not self.namespace:
+            # formatAgentMessages derives source indices from persisted host
+            # content. Reconstruct only one-to-one tool outcomes verified by
+            # the owner-bound SQLite ancestry and provider-visible text.
+            from .semantic_index_source import derive_persisted_semantic_index
+
+            semantic_index, render_messages = derive_persisted_semantic_index(
+                self.database, self.owner, self.generation.conversation_id,
+                self.generation.user_message_id, messages)
+        semantic = render_compaction_semantic_index(semantic_index, render_messages)
         effective = build_summarization_instruction(
             prompt or DEFAULT_SUMMARIZATION_PROMPT,
             update_prompt or DEFAULT_UPDATE_SUMMARIZATION_PROMPT,

@@ -525,6 +525,15 @@
       "python_lsm": "webui/semantic_index.py",
       "status": "部分",
       "difference": "version1 provenance强校验，阻止未认证归属的提示进入摘要；内部模型消息格式化的完整provenance生产仍归其它Graph/Provider协议模块"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/format.ts",
+      "sha256": "7e48988b137cdffef5923fd3870bbf9627ccc45907cd664b5c122d37340cb325",
+      "symbols": "collectCompactionSemanticEntriesFromPart / formatAgentMessages",
+      "python_lsm": "webui/semantic_index_source.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "自动发现已提交且可验证的SQLite工具结果/可选intent，生成model-visible provenance；完整activity/reasoning与collector覆盖逻辑仍未实现"
     }
   ],
   "runtime_dependency_lock": {
