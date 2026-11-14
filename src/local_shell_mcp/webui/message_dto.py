@@ -142,3 +142,50 @@ def _collapse(parts: list[dict]):
 def model_steps(messages: list[dict], start: int) -> list[dict]:
     """Take this run's exact ordered model steps, not its UI render snapshot."""
     return copy.deepcopy(messages[start:])
+
+
+def completed_model_steps(messages: list[dict], start: int) -> list[dict]:
+    """Recover only complete model steps when a generation is interrupted.
+
+    A cancelled tool batch can contain a call declaration with no matching
+    ToolMessage. Replaying it would make the next OpenAI/Gemini request invalid.
+    Do not synthesize tool results or mix checkpoint-local raw previews into
+    the saved history.
+    """
+    steps: list[dict] = []
+    index = start
+    while index < len(messages):
+        item = messages[index]
+        if not isinstance(item, dict):
+            break
+        role = item.get("role")
+        if role == "assistant" and item.get("tool_calls"):
+            declared = item["tool_calls"]
+            if not isinstance(declared, list) or not all(isinstance(call, dict) and
+                    isinstance(call.get("id"), str) and call.get("id") for call in declared):
+                break
+            expected = {call["id"] for call in declared}
+            replies = []
+            cursor = index + 1
+            while cursor < len(messages):
+                reply = messages[cursor]
+                if not isinstance(reply, dict) or reply.get("role") != "tool":
+                    break
+                call_id = reply.get("tool_call_id")
+                if call_id not in expected or call_id in {r["tool_call_id"] for r in replies}:
+                    break
+                replies.append(reply)
+                cursor += 1
+            if len(replies) != len(expected):
+                break
+            steps.extend(copy.deepcopy([item, *replies]))
+            index = cursor
+        elif role == "tool":
+            # A tool result without its declaration can never be replayed.
+            break
+        elif role in {"assistant", "user", "system"}:
+            steps.append(copy.deepcopy(item))
+            index += 1
+        else:
+            break
+    return steps

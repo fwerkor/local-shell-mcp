@@ -481,6 +481,37 @@ class GenerationStore:
                 db.execute("UPDATE runs SET state=? WHERE id=?", (_json(state), run_id))
             return int(state["modelHistoryStart"])
 
+    def checkpoint_model_steps(self, owner: str, run_id: str) -> list[dict] | None:
+        """Recover canonical, complete steps from a durable owned checkpoint.
+
+        This is used only for interrupted/error/aborted runs. The checkpoint is
+        server-owned and scoped to this generation, not the latest conversation
+        step or the short run-step preview emitted to the browser.
+        """
+        from .checkpoints import SQLiteCheckpointSaver
+        from .message_dto import completed_model_steps
+
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.conversation_id,r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                return None
+            boundary = json.loads(row["state"]).get("modelHistoryStart")
+            if type(boundary) is not int or boundary < 0:
+                return None
+            cid = row["conversation_id"]
+        saver = SQLiteCheckpointSaver(self.database, owner)
+        checkpoint = saver.get_tuple(saver.config(cid, run_id, event_actor=True))
+        if checkpoint is None:
+            return None
+        values = checkpoint["checkpoint"].get("channel_values") or {}
+        messages = values.get("messages")
+        if not isinstance(messages, list) or boundary > len(messages):
+            return None
+        return completed_model_steps(messages, boundary)
+
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
                error: str | None = None, model_steps: list[dict] | None = None) -> bool:
         if status not in _TERMINAL:
@@ -552,7 +583,7 @@ class GenerationStore:
                 "unfinished": status != "complete",
                 **({"attachments": attachments} if attachments else {}),
             }
-            if content or attachments:
+            if content or attachments or model_steps:
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",
@@ -585,6 +616,9 @@ class GenerationStore:
             ).fetchall()
         recovered = 0
         for row in rows:
-            if row["id"] not in active and self.finish(row["owner"], row["id"], status="interrupted"):
+            if row["id"] not in active and self.finish(
+                row["owner"], row["id"], status="interrupted",
+                model_steps=self.checkpoint_model_steps(row["owner"], row["id"]),
+            ):
                 recovered += 1
         return recovered

@@ -162,13 +162,15 @@ async def _run_model(
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
                     model_steps=model_steps(finished_messages, history_start))
     except asyncio.CancelledError:
-        repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
+        repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts),
+                    model_steps=repo.checkpoint_model_steps(owner, generation.run_id))
         raise
     except Exception as exc:
         # Do not put provider tokens, request metadata or secrets in response.
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=f"Model generation failed ({type(exc).__name__})")
+                    error=f"Model generation failed ({type(exc).__name__})",
+                    model_steps=repo.checkpoint_model_steps(owner, generation.run_id))
     finally:
         async with _TASK_GUARD:
             _TASKS.pop(generation.run_id, None)
@@ -373,7 +375,8 @@ async def abort_generation(request: Request):
     if task and not task.done():
         task.cancel()
     else:
-        store.finish(owner, generation.run_id, status="aborted")
+        store.finish(owner, generation.run_id, status="aborted",
+                     model_steps=store.checkpoint_model_steps(owner, generation.run_id))
     return JSONResponse({"success": True, "generationProtocolVersion": protocol},
                         headers=_generator_headers(protocol))
 

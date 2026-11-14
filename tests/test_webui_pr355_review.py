@@ -196,3 +196,50 @@ async def test_approval_resume_preserves_declared_tool_call_before_result(web_st
     canonical = store.history("local", run.conversation_id)
     assert [step["role"] for step in canonical] == ["user", "assistant", "tool", "assistant"]
     assert canonical[1]["tool_calls"][0]["id"] == canonical[2]["tool_call_id"] == "write-1"
+
+
+def test_abort_and_orphaned_recovery_replay_only_completed_checkpoint_batches(web_store):
+    from local_shell_mcp.webui.checkpoints import SQLiteCheckpointSaver
+    from local_shell_mcp.webui.message_dto import completed_model_steps
+
+    store = web_store
+    prompt = {"role": "user", "content": "Check two sources"}
+    good_call = {"role": "assistant", "content": "", "tool_calls": [{"id": "complete",
+                 "type": "function", "function": {"name": "file_read", "arguments": "{}"}}]}
+    good_result = {"role": "tool", "tool_call_id": "complete", "content": "full file content"}
+    partial = {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "pending-1", "type": "function", "function": {"name": "file_read", "arguments": "{}"}},
+        {"id": "pending-2", "type": "function", "function": {"name": "file_read", "arguments": "{}"}},
+    ]}
+    incomplete_result = {"role": "tool", "tool_call_id": "pending-1", "content": "first only"}
+    expected = [good_call, good_result]
+
+    for status in ("interrupted", "aborted"):
+        run, _ = store.begin("local", {"text": "Check two sources"})
+        assert store.model_history_boundary("local", run.run_id, initial=1) == 1
+        saver = SQLiteCheckpointSaver(store.database, "local")
+        config = saver.config(run.conversation_id, run.run_id, event_actor=True)
+        saver.put(config, {
+            "v": 1, "id": "00000000000000000001", "channel_values": {
+                "messages": [prompt, *expected, partial, incomplete_result], "step": 5,
+            }, "channel_versions": {}, "versions_seen": {},
+        }, {"source": "loop", "step": 5})
+        assert store.checkpoint_model_steps("local", run.run_id) == expected
+        assert store.checkpoint_model_steps("another-owner", run.run_id) is None
+        if status == "interrupted":
+            assert store.recover_orphans() == 1
+            assert store.recover_orphans() == 0
+        else:
+            assert store.finish("local", run.run_id, status="aborted",
+                                model_steps=store.checkpoint_model_steps("local", run.run_id))
+        assert store.latest("local", run.conversation_id).status == status
+        assert store.history("local", run.conversation_id) == [prompt, *expected]
+        followup, _ = store.begin("local", {"conversationId": run.conversation_id, "text": "Proceed"})
+        assert store.history("local", run.conversation_id, message_id=followup.user_message_id)[:-1] == [prompt, *expected]
+        store.finish("local", followup.run_id, status="aborted")
+
+    assert completed_model_steps([prompt, {"role": "tool", "tool_call_id": "orphan", "content": "data"}], 1) == []
+    assert completed_model_steps([prompt, partial, incomplete_result], 1) == []
+    assert completed_model_steps([prompt, good_call, good_result, {"role": "assistant", "content": "Done"}], 1) == [
+        good_call, good_result, {"role": "assistant", "content": "Done"},
+    ]
