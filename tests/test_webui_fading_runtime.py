@@ -184,3 +184,30 @@ def test_clip_bounded_head_and_tail_always_respect_cap():
     assert len(_clip('z' * 500, 40)) <= 40
     assert len(_clip('z' * 500, 5)) == 5
     assert _clip('z' * 500, 40) != 'z' * 500
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_resets_persisted_fading_hysteresis(fade_state):
+    db, store, previous, profile = fade_state
+    store.finish('alice', previous.run_id, status='complete', text='Original answer.')
+    manual, _ = store.begin('alice', {'conversationId': previous.conversation_id,
+        'parentMessageId': previous.response_message_id, 'compact': True})
+    WorkspaceRepository(db).save_setting('alice', 'endpoints', {
+        'summarization': {'enabled': True}, 'agents': {'maxContextTokens': 512}})
+    store.record_fading_tier('alice', manual.run_id, 'default', 'openai', 'mock-model',
+        {'v': 2, 'budgetTokens': 170, 'masked': True, 'latched': True})
+
+    async def summary(*args, **kwargs):
+        yield '## Checkpoint\nRestored the prior turn.'
+
+    async def emit(_):
+        pass
+
+    runner = AgentRunner('alice', manual, db, store, scopes=set(), grant_expires=None,
+        stream_tools=summary, stream_text=summary, on_text=emit, profile=profile)
+    history = store.history('alice', previous.conversation_id)
+    assert await runner.run(history) == history
+    assert store.fading_tier('alice', manual.run_id, 'default', 'openai', 'mock-model') == create_fading_tier(512)
+    assert store.finish('alice', manual.run_id, status='complete', text='')
+    persisted = GenerationStore(SQLiteDatabase(db.root))
+    assert persisted.fading_tier('alice', manual.run_id, 'default', 'openai', 'mock-model') == create_fading_tier(512)

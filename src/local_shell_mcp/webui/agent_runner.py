@@ -606,6 +606,21 @@ class AgentRunner:
             max_tokens=(config.get('parameters') or {}).get('maxSummaryTokens', 2048),
             prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
             semantic_index=self.compaction_semantic_index)
+        # Explicit compaction, like its automatic counterpart, resets the
+        # hysteresis ladder after the checkpoint was safely staged.
+        params = self.initial_parameters or {}
+        raw = params.get('max_context_tokens') or params.get('maxContextTokens') or (settings.get('agents') or {}).get('maxContextTokens')
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and 0 < raw <= 2_000_000:
+            from .fading import create_fading_tier
+
+            try:
+                self.store.record_fading_tier(
+                    self.owner, self.generation.run_id,
+                    (self.root_agent or {}).get('id') or 'default',
+                    self.initial_profile.provider, self.initial_profile.model,
+                    create_fading_tier(int(raw)))
+            except Exception as exc:
+                logging.getLogger(__name__).warning('Manual fading reset failed (%s)', type(exc).__name__)
         return history
 
     async def run(self, history, *, recursion_limit=None):
