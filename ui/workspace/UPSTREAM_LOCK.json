@@ -570,6 +570,42 @@
       "python_lsm": "webui/fading.py; fading_projection.py",
       "status": "部分",
       "difference": "两个源动态cap纯函数差分等价，Python模型视图截断标记为兼容适配，原TypeScript结构化裁剪器尚未全部移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/protection/runtime.ts",
+      "sha256": "638463e1d34a6008737c665457c2cd6fa22a4b8d2e569129ff538f73ac4b05fb",
+      "symbols": "getFilterCompilationPlans / inspectContent / cross-source block-vs-audit",
+      "python_lsm": "webui/content_filters.py; agent_runner.py; generation_routes.py; memory_protection.py",
+      "status": "部分",
+      "difference": "13个来源核心scope/fields、全局pattern上限、audit元数据聚合与请求/工具前后校验；源完整RE2Set与所有REST资源适配待其余PR"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/protection/adapters/submissions.ts",
+      "sha256": "805a3075b1f674df36ca558e0fb3871d43a8c49436dfbe8dfcfb62517ec6152a",
+      "symbols": "extractSubmittedValueContent / extractToolArgumentContent / text fragments",
+      "python_lsm": "webui/content_filters.py; agent_runner.py",
+      "status": "部分",
+      "difference": "有限嵌套遍历键值和tool input/output模型视图；完整文件/Action/Prompt字段路径及structured fragment provenance仍待适配"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/protection/audit.ts",
+      "sha256": "1caa7bd06c15b68db3e3692ed2b338dfa2a3764bf9530b5b0b77e163e4f66956",
+      "symbols": "recordAuditFinding / aggregateAuditFindings",
+      "python_lsm": "webui/content_filters.py; audit.py",
+      "status": "部分",
+      "difference": "一遍检查聚合metadata并记录到已有LSM Audit；未移植Node AsyncLocalStorage跨操作原scope语义"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/filters.ts",
+      "sha256": "b74bcf692d54793311c2b59428a8db58381bda676f3f83433cba5967170eadb7",
+      "symbols": "MAX_PII_PATTERNS_PER_SOURCE / source fields / global validation",
+      "python_lsm": "webui/content_filters.py; memory_protection.py",
+      "status": "部分",
+      "difference": "跨source数目/regex长度上限和字段选择；RE2JS program instruction准确计算未移植"
     }
   ],
   "runtime_dependency_lock": {
