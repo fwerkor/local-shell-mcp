@@ -8,6 +8,7 @@ owned by the Controller's event loop, not by the browser connection.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import secrets
@@ -380,7 +381,17 @@ class GenerationStore:
                 (run_id, step_id),
             ).fetchone()
             if prior:
-                if json.loads(prior["data"]) != event:
+                persisted = json.loads(prior["data"])
+                # ``completed_at`` is the wall-clock acknowledgement time,
+                # not part of the immutable tool result. Approval recovery
+                # calls _completed again after restart with a fresh timestamp.
+                # Compare every other field, including output, arguments and
+                # call identity, so a genuinely changed result still fails.
+                earlier = copy.deepcopy(persisted)
+                replayed = copy.deepcopy(event)
+                for value in (earlier, replayed):
+                    value.get("data", {}).get("result", {}).pop("completed_at", None)
+                if earlier != replayed:
                     raise ValueError("Cannot change a persisted tool completion")
                 return int(prior["seq"])
             count = db.execute(

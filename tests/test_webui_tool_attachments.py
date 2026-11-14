@@ -367,6 +367,33 @@ def test_tool_completion_and_link_roll_back_together_on_database_fault(workspace
         }, "call-123", ["generated"])
 
 
+def test_replayed_approved_tool_completion_ignores_only_fresh_completion_timestamp(workspace):
+    file(workspace, "generated")
+    run = run_with_step(workspace)
+    store = GenerationStore(workspace)
+    event = {"event": "on_run_step_completed", "data": {"result": {
+        "id": "step-real", "index": 1, "completed_at": 1000,
+        "type": "tool_call", "tool_call": {
+            "id": "call-123", "name": "file_write", "args": {}, "output": "same bytes", "progress": 1,
+        },
+    }}}
+    first = store.append_tool_completion("alice", run.run_id, event, "call-123", ["generated"])
+    events = store.events("alice", run.run_id)
+    replay = {**event, "data": {"result": {**event["data"]["result"], "completed_at": 9000}}}
+    assert store.append_tool_completion("alice", run.run_id, replay, "call-123", ["generated"]) == first
+    assert store.events("alice", run.run_id) == events
+    assert sum(value.get("event") == "attachment" for _, value in events) == 1
+    with workspace.connect() as db:
+        assert db.execute("SELECT count(*) FROM tool_attachment_links").fetchone()[0] == 1
+    for mutation in ({"index": 2}, {"tool_call": {
+        **event["data"]["result"]["tool_call"], "output": "tampered",
+    }}):
+        altered = {**replay, "data": {"result": {**replay["data"]["result"], **mutation}}}
+        with pytest.raises(ValueError, match="Cannot change"):
+            store.append_tool_completion("alice", run.run_id, altered, "call-123", ["generated"])
+    assert store.events("alice", run.run_id) == events
+
+
 def test_completed_tool_does_not_link_file_from_different_owner_during_atomic_append(workspace):
     file(workspace, "foreign", owner="bob")
     run = run_with_step(workspace)
