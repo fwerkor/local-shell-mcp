@@ -46,7 +46,8 @@ class AgentRunner:
                  approved_batch=None, graph_node=False, graph_definition=None,
                  graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None,
                  authorization_conversation_id=None, background_deny=False,
-                 task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH):
+                 task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
+                 wakeup_lease=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -60,6 +61,7 @@ class AgentRunner:
         self.background_deny = background_deny
         self.task_control_host, self.task_control_id = task_control_host, task_control_id
         self.subagent_depth = subagent_depth
+        self.wakeup_lease = wakeup_lease
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
@@ -79,6 +81,11 @@ class AgentRunner:
             raise RuntimeSafetyError("Authentication grant expired")
         if self.task_control_host is not None and self.task_control_id is not None:
             self.task_control_host.assert_execution_lease(self.task_control_id)
+        if self.wakeup_lease is not None:
+            from .subagent_wakeup import assert_wakeup_lease
+
+            assert_wakeup_lease(self.database, self.owner,
+                                self.generation.run_id, self.wakeup_lease)
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
@@ -261,7 +268,8 @@ class AgentRunner:
                             authorization_conversation_id=self.authorization_conversation_id,
                             background_deny=self.background_deny,
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
-                            subagent_depth=invocation.remaining_depth)
+                            subagent_depth=invocation.remaining_depth,
+                            wakeup_lease=self.wakeup_lease)
         return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
 
     async def _pause(self, payload, state, *, approval=False):

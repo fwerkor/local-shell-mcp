@@ -93,12 +93,20 @@ async def _run_model(
     resume_history: list[dict] | None = None, partial_text: str = "",
     approved_batch=None, resume_namespace: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+    wakeup_lease: tuple[str, str] | None = None,
 ) -> None:
     repo = _generation_store()
     text_parts: list[str] = [partial_text] if partial_text else []
     params = parameters or {}
     step_id = "step_" + generation.run_id
     now_ms = int(time.time() * 1000)
+
+    def check_wakeup_lease():
+        if wakeup_lease is not None:
+            from .subagent_wakeup import assert_wakeup_lease
+
+            assert_wakeup_lease(repo.database, owner, generation.run_id, wakeup_lease)
+
     try:
         from .agent_runner import AgentRunner
         from .agent_runtime import AgentSuspended
@@ -109,6 +117,7 @@ async def _run_model(
         if instructions and resume_history is None:
             history.insert(0, {"role": "system", "content": instructions})
         if resume_history is None:
+            check_wakeup_lease()
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step", "data": {
                     "type": "message_creation", "id": step_id,
@@ -122,6 +131,7 @@ async def _run_model(
             })
 
         async def append_text(chunk):
+            check_wakeup_lease()
             if not chunk:
                 return
             text_parts.append(chunk)
@@ -140,11 +150,12 @@ async def _run_model(
                              parameters=params, ask_user_enabled=ask_user_enabled,
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
-                             approved_batch=approved_batch)
+                             approved_batch=approved_batch, wakeup_lease=wakeup_lease)
         try:
             await runner.run(history)
         except AgentSuspended:
             return
+        check_wakeup_lease()
         repo.append(owner, generation.run_id, {
             "event": "on_run_step_closed", "data": {
                 "id": step_id, "index": 0, "type": "message_creation",
@@ -154,10 +165,21 @@ async def _run_model(
         })
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text)
     except asyncio.CancelledError:
+        if wakeup_lease is not None:
+            try:
+                check_wakeup_lease()
+            except Exception:
+                raise  # The actor lost its token: leave checkpoint for new owner.
         if asyncio.current_task() not in _SHUTDOWN_TASKS:
             repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
         raise
     except Exception as exc:
+        # A former controller cannot publish failure after its lease changed.
+        if wakeup_lease is not None:
+            try:
+                check_wakeup_lease()
+            except Exception:
+                return
         # Do not put provider tokens, request metadata or secrets in response.
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
@@ -173,7 +195,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       ask_user_enabled: bool = False, mcp_enabled: bool = False,
                       resume_history: list[dict] | None = None, partial_text: str = "",
                       approved_batch=None, resume_namespace: str = "",
-                      granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None) -> None:
+                      granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+                      wakeup_lease: tuple[str, str] | None = None) -> None:
     async with _TASK_GUARD:
         existing = _TASKS.get(generation.run_id)
         if existing and not existing.done():
@@ -187,7 +210,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        parent_agent=agent,
                        resume_history=resume_history, partial_text=partial_text,
                        approved_batch=approved_batch, resume_namespace=resume_namespace,
-                       granted_scopes=granted_scopes, grant_expires=grant_expires),
+                       granted_scopes=granted_scopes, grant_expires=grant_expires,
+                       wakeup_lease=wakeup_lease),
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task
