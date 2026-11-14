@@ -228,6 +228,27 @@ async def start_generation(request: Request):
             raise HTTPException(404, detail="Agent not found")
     kind = selected_provider(payload, agent)
     model = (agent or {}).get("model") or payload.get("model")
+    # Apply configured source-specific policy before SQLite claims a run or
+    # emits SSE. Bad content is never persisted or sent to the model.
+    from .content_filters import (
+        ContentFilterBlocked,
+        validate_agent_instructions,
+        validate_message_submission,
+        validate_model_parameters,
+    )
+    from .memory_protection import configured_filters
+    from .storage import WorkspaceRepository
+
+    filters = configured_filters(WorkspaceRepository(_database()), owner)
+    try:
+        if isinstance(payload.get('text'), str):
+            validate_message_submission(payload['text'], filters)
+        validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
+        params = (agent or {}).get('model_parameters') or payload.get('model_parameters')
+        if isinstance(params, dict):
+            validate_model_parameters(params, filters)
+    except ContentFilterBlocked as blocked:
+        return JSONResponse(blocked.response(), status_code=400)
     # Permission inheritance is resolved against SQLite at the start and
     # rechecked before every tool. The initial OAuth grant cannot be elevated
     # by modifying defaults while a generation is in progress.

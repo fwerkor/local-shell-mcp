@@ -106,7 +106,13 @@ def _rules(policy: dict) -> list[tuple[Any, str]]:
 
 def inspect_memory_content(entry: dict, filters: dict | None) -> MemoryContentBlocked | None:
     policy = _policy(filters)
-    if policy is None or policy.get('action') == 'audit':
+    if policy is None:
+        return None
+    if policy.get('action') == 'audit':
+        from .content_filters import ContentFragment, inspect_content
+
+        inspect_content([ContentFragment('memory', field, value, 'user')
+                         for field, value in entry.items() if isinstance(value, str)], filters)
         return None
     fields = _fields(policy)
     if not fields:
@@ -135,7 +141,11 @@ def inspect_memory_content(entry: dict, filters: dict | None) -> MemoryContentBl
 def project_stored_memories(records: list[dict], filters: dict | None) -> list[dict]:
     """Project old rows under current policy while retaining management metadata."""
     policy = _policy(filters)
-    if policy is None or policy.get('action') == 'audit':
+    if policy is None:
+        return records
+    if policy.get('action') == 'audit':
+        for record in records:
+            inspect_memory_content(record, filters)
         return records
     selected = _fields(policy)
     projected = []

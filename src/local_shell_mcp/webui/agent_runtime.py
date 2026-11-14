@@ -65,6 +65,7 @@ async def run_agent_loop(
     before_model: Callable[[AgentLoopState], Awaitable[None]] | None = None,
     on_model_usage: Callable[[ModelUsage, AgentLoopState], Awaitable[None]] | None = None,
     project_messages: Callable[[AgentLoopState], list[dict]] | None = None,
+    preflight_calls: Callable[[list[ModelToolCall], AgentLoopState], list[ModelToolCall]] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -127,6 +128,10 @@ async def run_agent_loop(
             elif item:
                 text_parts.append(item)
                 await on_text(item)
+        if calls and preflight_calls is not None:
+            # Content protection happens before the first checkpoint/SSE
+            # record. Rejected model arguments must never enter durable state.
+            calls = preflight_calls(calls, state)
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if calls:
             import json

@@ -125,6 +125,13 @@ class AgentRunner:
                       if unrestricted or tool["function"]["name"] in selected]
         from .storage import WorkspaceRepository
         settings = WorkspaceRepository(self.database)
+        from .content_filters import validate_agent_instructions, validate_model_parameters
+
+        filters = configured_filters(settings, self.owner)
+        validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
+        parameters = (agent or {}).get('model_parameters') or self.initial_parameters
+        if isinstance(parameters, dict):
+            validate_model_parameters(parameters, filters)
         if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
@@ -293,9 +300,57 @@ class AgentRunner:
             raise RuntimeError("Unable to save pending Agent action")
         raise AgentSuspended()
 
+    @staticmethod
+    def _blocked_call(call: ModelToolCall) -> bool:
+        return call.arguments == {'_content_filter_blocked': True}
+
+    def _preflight_model_calls(self, calls: list[ModelToolCall], state: AgentLoopState) -> list[ModelToolCall]:
+        """Strip forbidden model tool arguments before event/checkpoint writes."""
+        from .content_filters import ContentFilterBlocked, validate_tool_arguments
+        from .storage import WorkspaceRepository
+
+        filters = configured_filters(WorkspaceRepository(self.database), self.owner)
+        sanitized = []
+        for call in calls:
+            if self._blocked_call(call):
+                sanitized.append(call)
+                continue
+            try:
+                validate_tool_arguments(call.name, call.arguments, filters)
+            except ContentFilterBlocked:
+                sanitized.append(ModelToolCall(call.call_id, call.name,
+                                               {'_content_filter_blocked': True}))
+            else:
+                sanitized.append(call)
+        return sanitized
+
+    async def _filtered_invoke(self, call, state):
+        """Apply source-scoped input and output policy on every tool path.
+
+        The same wrapper runs for ordinary batches and approved retries; it
+        must not expose blocked credentials in checkpoints or result previews.
+        """
+        from .content_filters import (
+            ContentFilterBlocked,
+            filtered_tool_output,
+            validate_tool_arguments,
+        )
+        from .storage import WorkspaceRepository
+
+        if self._blocked_call(call):
+            return 'Tool call blocked by configured content protection policy.'
+        filters = configured_filters(WorkspaceRepository(self.database), self.owner)
+        try:
+            validate_tool_arguments(call.name, call.arguments, filters)
+        except ContentFilterBlocked:
+            return 'Tool call blocked by configured content protection policy.'
+        result = await self._invoke(call, state)
+        return filtered_tool_output(call.name, result, filters)
+
     async def _dispatch(self, calls, state):
         from .routes import _repo
 
+        calls = self._preflight_model_calls(calls, state)
         if len({call.call_id for call in calls}) != len(calls) or any(not call.call_id for call in calls):
             raise ValueError("Tool call IDs must be non-empty and unique")
         if sum(is_transfer_tool(call.name) for call in calls) > 1:
@@ -307,7 +362,7 @@ class AgentRunner:
         if not self.namespace:
             for call in unresolved:
                 self._tool_step(call)
-        asking = [call for call in unresolved if call.name == "ask_user_question"]
+        asking = [call for call in unresolved if call.name == "ask_user_question" and not self._blocked_call(call)]
         if asking:
             if len(calls) != 1:
                 raise ValueError("Ask User cannot run in parallel with another tool")
@@ -317,6 +372,8 @@ class AgentRunner:
         ask = []
         for call in unresolved:
             decision = approval_policy_decision(policy, call.name)
+            if self._blocked_call(call):
+                continue
             if decision and decision["decision"] == "deny":
                 output = "Blocked: " + decision.get("reason", "Rejected by policy")
                 record = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)}, "output": output}
@@ -327,7 +384,7 @@ class AgentRunner:
         if ask:
             await self._pause(build_approval_payload(ask), state, approval=True)
         outputs = await execute_tool_batch(
-            calls, lambda call: self._invoke(call, state), settled=self.cache,
+            calls, lambda call: self._filtered_invoke(call, state), settled=self.cache,
             interrupting_names=frozenset({"subagent"}),
             is_interrupt=lambda error: isinstance(error, AgentSuspended),
             check_breaker=self._check_grant, on_completed=self._completed,
@@ -499,16 +556,24 @@ class AgentRunner:
 
     async def _before_model(self, state):
         """SDK-style recency + trigger, using the shared SQLite checkpoint."""
-        if self.namespace:
-            return
         from .compaction import build_summary_carrier_text
+        from .content_filters import inspect_content, model_message_fragments
         from .context_budget import (
             calculate_budget,
             should_trigger_summarization,
             split_recent_turns,
         )
         from .storage import WorkspaceRepository
-        settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+
+        repository = WorkspaceRepository(self.database)
+        policy = configured_filters(repository, self.owner)
+        blocked = inspect_content(model_message_fragments(state.messages), policy)
+        if blocked is not None:
+            # No source text is copied into a model/user-visible error.
+            raise RuntimeSafetyError('Assembled model context was blocked by content protection')
+        if self.namespace:
+            return
+        settings = repository.setting(self.owner, 'endpoints', {}) or {}
         agent_settings = settings.get('agents') or {}
         params = state.context.parameters or {}
         max_raw = params.get('max_context_tokens') or params.get('maxContextTokens') or agent_settings.get('maxContextTokens')
@@ -671,7 +736,7 @@ class AgentRunner:
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
                 cached = self.cache.get(replay_key(original, state.pending_calls.index(original)))
-                return cached["output"] if cached else await self._invoke(call, state)
+                return cached["output"] if cached else await self._filtered_invoke(call, state)
 
             await execute_approval_batch(self.approved_batch, dispatch=reviewed_dispatch,
                                          on_completed=completed)
@@ -684,7 +749,8 @@ class AgentRunner:
                                       dispatch=self._dispatch, on_text=emit, save_state=self._save,
                                       before_model=self._before_model,
                                       on_model_usage=self._observe_model_usage,
-                                      project_messages=self._project_model_messages)
+                                      project_messages=self._project_model_messages,
+                                      preflight_calls=self._preflight_model_calls)
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
                                                review["actionId"], result, self.partial_text)
