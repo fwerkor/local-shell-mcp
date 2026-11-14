@@ -94,6 +94,7 @@ async def _run_model(
     approved_batch=None, resume_namespace: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
     wakeup_lease: tuple[str, str] | None = None,
+    event_delivery_lease: tuple[str, str] | None = None,
 ) -> None:
     repo = _generation_store()
     text_parts: list[str] = [partial_text] if partial_text else []
@@ -106,6 +107,10 @@ async def _run_model(
             from .subagent_wakeup import assert_wakeup_lease
 
             assert_wakeup_lease(repo.database, owner, generation.run_id, wakeup_lease)
+        if event_delivery_lease is not None:
+            from .event_triggers import assert_event_lease
+
+            assert_event_lease(repo.database, owner, generation.run_id, event_delivery_lease)
 
     try:
         from .agent_runner import AgentRunner
@@ -150,7 +155,8 @@ async def _run_model(
                              parameters=params, ask_user_enabled=ask_user_enabled,
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
-                             approved_batch=approved_batch, wakeup_lease=wakeup_lease)
+                             approved_batch=approved_batch, wakeup_lease=wakeup_lease,
+                             event_delivery_lease=event_delivery_lease)
         try:
             await runner.run(history)
         except AgentSuspended:
@@ -165,7 +171,7 @@ async def _run_model(
         })
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text)
     except asyncio.CancelledError:
-        if wakeup_lease is not None:
+        if wakeup_lease is not None or event_delivery_lease is not None:
             try:
                 check_wakeup_lease()
             except Exception:
@@ -175,7 +181,7 @@ async def _run_model(
         raise
     except Exception as exc:
         # A former controller cannot publish failure after its lease changed.
-        if wakeup_lease is not None:
+        if wakeup_lease is not None or event_delivery_lease is not None:
             try:
                 check_wakeup_lease()
             except Exception:
@@ -196,7 +202,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       resume_history: list[dict] | None = None, partial_text: str = "",
                       approved_batch=None, resume_namespace: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
-                      wakeup_lease: tuple[str, str] | None = None) -> None:
+                      wakeup_lease: tuple[str, str] | None = None,
+                      event_delivery_lease: tuple[str, str] | None = None) -> None:
     async with _TASK_GUARD:
         existing = _TASKS.get(generation.run_id)
         if existing and not existing.done():
@@ -211,7 +218,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        resume_history=resume_history, partial_text=partial_text,
                        approved_batch=approved_batch, resume_namespace=resume_namespace,
                        granted_scopes=granted_scopes, grant_expires=grant_expires,
-                       wakeup_lease=wakeup_lease),
+                       wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease),
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task

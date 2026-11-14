@@ -300,6 +300,26 @@ def verify_request(request: Request) -> Principal:
                 )
             if settings.auth_mode == "none":
                 raise HTTPException(status_code=401, detail="Invalid live workspace credential")
+    # LibreChat Agent Trigger ingress uses a distinct, revocable source API
+    # key. It must NEVER inherit OAuth/PIN/localhost-bypass authentication;
+    # neither arbitrary OAuth bearer nor a browser cookie may emit an event.
+    if (settings.ui_enabled and settings.state_backend == "sqlite" and
+            (path == "/api/agents/v1/events" or path.startswith("/api/agents/v1/events/"))):
+        from .sqlite_store import shared_database
+        from .webui.event_triggers import validate_source_key
+
+        authorization = request.headers.get("authorization", "")
+        if not authorization.lower().startswith("bearer "):
+            raise HTTPException(401, detail="A remote Agent event API key is required")
+        source = validate_source_key(shared_database(settings.state_dir.resolve()),
+                                     authorization[7:].strip())
+        if source is None:
+            raise HTTPException(401, detail="Invalid or revoked Agent event API key")
+        return Principal(email=None, subject=source["owner"], claims={
+            "auth": "agent-event", "scope": "agent:event",
+            "source_key_id": source["id"],
+            "source_permissions": source["permissions"],
+        })
     if settings.auth_mode == "none":
         if path.startswith((HUMAN_UI_API_PREFIX, LIVE_UI_API_PREFIX, CONTROLLER_API_PREFIX)) and _is_cross_origin_request(
             request

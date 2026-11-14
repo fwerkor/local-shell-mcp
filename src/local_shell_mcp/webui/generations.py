@@ -92,6 +92,8 @@ class GenerationStore:
                 raise ValueError("Internal completion idempotency key cannot be submitted")
             if client_request_id.startswith("subagent:") and trusted_new_conversation_id is None:
                 raise ValueError("Internal child idempotency key cannot be submitted")
+            if client_request_id.startswith("trigger_") and _connection is None:
+                raise ValueError("Internal Agent Trigger idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")
         new_conversation = raw_conversation_id in (None, "", "new", "new_conversation")
         if raw_conversation_id is not None and not isinstance(raw_conversation_id, str):
@@ -464,11 +466,15 @@ class GenerationStore:
         return list(reversed(result))
 
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
-               error: str | None = None) -> bool:
+               error: str | None = None, _connection: Any | None = None) -> bool:
         if status not in _TERMINAL:
             raise ValueError("Only terminal statuses can finish a generation")
-        with self.database.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        # The trusted trigger service may finish a dead-lettered generation in
+        # the same SQLite transaction as its terminal delivery receipt.
+        with (contextlib.nullcontext(_connection) if _connection is not None
+              else self.database.connect()) as db:
+            if _connection is None:
+                db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=?", (run_id, owner),

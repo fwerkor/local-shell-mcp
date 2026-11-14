@@ -47,7 +47,7 @@ class AgentRunner:
                  graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None,
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
-                 wakeup_lease=None):
+                 wakeup_lease=None, event_delivery_lease=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -62,6 +62,7 @@ class AgentRunner:
         self.task_control_host, self.task_control_id = task_control_host, task_control_id
         self.subagent_depth = subagent_depth
         self.wakeup_lease = wakeup_lease
+        self.event_delivery_lease = event_delivery_lease
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
@@ -86,6 +87,11 @@ class AgentRunner:
 
             assert_wakeup_lease(self.database, self.owner,
                                 self.generation.run_id, self.wakeup_lease)
+        if self.event_delivery_lease is not None:
+            from .event_triggers import assert_event_lease
+
+            assert_event_lease(self.database, self.owner, self.generation.run_id,
+                               self.event_delivery_lease)
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
@@ -269,7 +275,8 @@ class AgentRunner:
                             background_deny=self.background_deny,
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
                             subagent_depth=invocation.remaining_depth,
-                            wakeup_lease=self.wakeup_lease)
+                            wakeup_lease=self.wakeup_lease,
+                            event_delivery_lease=self.event_delivery_lease)
         return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
 
     async def _pause(self, payload, state, *, approval=False):
