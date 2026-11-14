@@ -19,6 +19,7 @@ class ProviderConfig:
     url: str
     token: str
     timeout_s: float = 180.0
+    include_usage: bool = False
 
 
 def _require_https_or_loopback(value: str) -> str:
@@ -68,7 +69,9 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
         if any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in name):
             raise ValueError("Unsupported Gemini model identifier")
         url = _require_https_or_loopback(base.rstrip("/") + f"/models/{quote(name)}:streamGenerateContent?alt=sse")
-    return ProviderConfig(kind, name, url, token)
+    return ProviderConfig(kind, name, url, token,
+                          include_usage=kind == 'openai' and (
+                              value.get('include_usage') is True or urlsplit(base).hostname == 'api.openai.com'))
 
 
 async def _data_frames(response) -> AsyncIterator[str]:
@@ -105,14 +108,63 @@ def _messages_for_anthropic(messages: list[dict]) -> tuple[list[dict], str]:
     return items, "\n".join(systems)
 
 
+@dataclass(frozen=True)
+class ModelUsage:
+    """Confirmed provider token counts, never a local token estimate."""
+    provider: str
+    input_tokens: int
+    output_tokens: int
+
+
+def _usage_frame(provider: str, event: dict, previous: ModelUsage | None = None) -> ModelUsage | None:
+    if provider == 'openai':
+        usage = event.get('usage')
+        if not isinstance(usage, dict):
+            return previous
+        raw_input = usage.get('prompt_tokens', usage.get('input_tokens'))
+        raw_output = usage.get('completion_tokens', usage.get('output_tokens'))
+    elif provider == 'anthropic':
+        kind = event.get('type')
+        if kind == 'message_start':
+            metadata = event.get('message')
+            usage = metadata.get('usage') if isinstance(metadata, dict) else None
+        elif kind == 'message_delta':
+            usage = event.get('usage')
+        else:
+            return previous
+        if not isinstance(usage, dict):
+            return previous
+        raw_input = usage.get('input_tokens', previous.input_tokens if previous else None)
+        if 'input_tokens' in usage and kind == 'message_start' and type(raw_input) is int:
+            # Anthropic reports cache reads/writes separately from ordinary
+            # input_tokens. Counts include all provider-confirmed input, while
+            # cache billing remains an independent accounting problem.
+            cached_read = usage.get('cache_read_input_tokens', 0)
+            cached_write = usage.get('cache_creation_input_tokens', 0)
+            if type(cached_read) is not int or type(cached_write) is not int:
+                return previous
+            raw_input += cached_read + cached_write
+        raw_output = usage.get('output_tokens', previous.output_tokens if previous else None)
+    else:
+        usage = event.get('usageMetadata')
+        if not isinstance(usage, dict):
+            return previous
+        raw_input = usage.get('promptTokenCount')
+        raw_output = usage.get('candidatesTokenCount')
+    if (type(raw_input) is not int or raw_input < 0 or raw_input > 10**12
+            or type(raw_output) is not int or raw_output < 0 or raw_output > 10**12):
+        return previous
+    return ModelUsage(provider, raw_input, raw_output)
+
+
 async def stream_model(
     config: ProviderConfig,
     messages: list[dict],
     *,
     max_tokens: int = 2048,
     temperature: float | None = None,
-) -> AsyncIterator[str]:
-    """Stream user-visible answer text without buffering the provider response."""
+) -> AsyncIterator[str | ModelUsage]:
+    """Stream answer text and provider-confirmed usage when available."""
     import httpx
 
     headers = {"accept": "text/event-stream", "content-type": "application/json"}
@@ -124,6 +176,8 @@ async def stream_model(
         # empty `Bearer ` value is illegal HTTP and breaks streaming.
         body["messages"] = messages
         body["max_completion_tokens"] = max_tokens
+        if config.include_usage:
+            body['stream_options'] = {'include_usage': True}
         if temperature is not None:
             body["temperature"] = temperature
     elif config.provider == "anthropic":
@@ -146,6 +200,7 @@ async def stream_model(
     else:
         raise ValueError("Unsupported model provider")
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
+    usage_snapshot = None
     async with (
         httpx.AsyncClient(timeout=timeout) as http,
         http.stream("POST", config.url, json=body, headers=headers) as response,
@@ -153,13 +208,14 @@ async def stream_model(
         response.raise_for_status()
         async for frame in _data_frames(response):
             if frame == "[DONE]":
-                return
+                break
             try:
                 event = json.loads(frame)
             except json.JSONDecodeError:
                 continue
             if "error" in event:
                 raise RuntimeError("Model provider rejected the generation request")
+            usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "openai":
                 for choice in event.get("choices", []):
                     content = choice.get("delta", {}).get("content")
@@ -180,6 +236,9 @@ async def stream_model(
                         text = part.get("text")
                         if isinstance(text, str) and text:
                             yield text
+
+    if usage_snapshot is not None:
+        yield usage_snapshot
 
 
 @dataclass(frozen=True)
@@ -202,7 +261,7 @@ async def stream_model_with_tools(
     tools: list[dict],
     max_tokens: int = 2048,
     temperature: float | None = None,
-) -> AsyncIterator[str | ModelToolCall]:
+) -> AsyncIterator[str | ModelToolCall | ModelUsage]:
     """Stream OpenAI text and reconstruct complete tool calls, bounded by size.
 
     Unsupported providers do not receive tool declarations. Their ordinary
@@ -229,10 +288,13 @@ async def stream_model_with_tools(
         "max_completion_tokens": max_tokens, "tools": tools,
         "tool_choice": "auto", "parallel_tool_calls": False,
     }
+    if config.include_usage:
+        body['stream_options'] = {'include_usage': True}
     if temperature is not None:
         body["temperature"] = temperature
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     pending: dict[int, dict[str, str]] = {}
+    usage_snapshot = None
     async with (
         httpx.AsyncClient(timeout=timeout) as client,
         client.stream("POST", config.url, headers=headers, json=body) as response,
@@ -247,6 +309,7 @@ async def stream_model_with_tools(
                 continue
             if "error" in event:
                 raise RuntimeError("Model provider rejected the generation request")
+            usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             for choice in event.get("choices", []):
                 delta = choice.get("delta") or {}
                 content = delta.get("content")
@@ -279,3 +342,5 @@ async def stream_model_with_tools(
         if not isinstance(params, dict):
             raise ValueError("Model tool arguments must be an object")
         yield ModelToolCall(tool["id"], tool["name"], params)
+    if usage_snapshot is not None:
+        yield usage_snapshot

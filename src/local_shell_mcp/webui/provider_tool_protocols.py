@@ -9,7 +9,7 @@ import json
 import secrets
 from collections.abc import AsyncIterator
 
-from .providers import ModelToolCall, ProviderConfig, _data_frames
+from .providers import ModelToolCall, ModelUsage, ProviderConfig, _data_frames, _usage_frame
 
 
 def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], str]:
@@ -59,7 +59,7 @@ def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], st
 
 
 async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, tools: list[dict],
-                              max_tokens: int, temperature: float | None) -> AsyncIterator[str | ModelToolCall]:
+                              max_tokens: int, temperature: float | None) -> AsyncIterator[str | ModelToolCall | ModelUsage]:
     import httpx
 
     history, instructions = native_messages(messages, config.provider)
@@ -84,6 +84,7 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
         if temperature is not None:
             body["generationConfig"]["temperature"] = temperature
     pending = {}
+    usage_snapshot = None
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
         "POST", config.url, headers=headers, json=body,
@@ -98,6 +99,7 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
                 continue
             if "error" in event:
                 raise RuntimeError("Model provider rejected the generation request")
+            usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "anthropic":
                 kind = event.get("type")
                 index = event.get("index")
@@ -136,3 +138,5 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
             not isinstance(item["id"], str) or not 1 <= len(item["id"]) <= 128):
             raise ValueError("Invalid model tool call")
         yield ModelToolCall(item["id"], item["name"], arguments, item.get("metadata"))
+    if usage_snapshot is not None:
+        yield usage_snapshot
