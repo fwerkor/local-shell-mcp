@@ -9,7 +9,12 @@ import json
 import secrets
 from collections.abc import AsyncIterator
 
-from .providers import ModelToolCall, ProviderConfig, _data_frames
+from .providers import (
+    ModelToolCall,
+    ProviderConfig,
+    _anthropic_omits_sampling_parameters,
+    _data_frames,
+)
 
 
 def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], str]:
@@ -72,10 +77,11 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
                            "input_schema": t["function"]["parameters"]} for t in tools]}
         if instructions:
             body["system"] = instructions
-        if temperature is not None:
-            body["temperature"] = temperature
-        if top_p is not None:
-            body["top_p"] = top_p
+        if not _anthropic_omits_sampling_parameters(config.model):
+            if temperature is not None:
+                body["temperature"] = temperature
+            if top_p is not None:
+                body["top_p"] = top_p
     else:
         headers["x-goog-api-key"] = config.token
         body = {"contents": history, "generationConfig": {"maxOutputTokens": max_tokens},

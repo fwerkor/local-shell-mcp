@@ -56,7 +56,7 @@ def profile(channel: str) -> dict:
     if not isinstance(channel, str):
         raise ValueError("Invalid model channel")
     normalized = channel.strip().lower()
-    if normalized in {"openai-compatible", "ollama", "azureopenai"}:
+    if normalized in {"openai-compatible", "ollama", "azureopenai", "custom"}:
         normalized = "openai"
     if normalized == "gemini":
         normalized = "google"
@@ -97,7 +97,7 @@ def _validate(body: dict) -> dict:
     if not isinstance(kind, str) or kind not in _DEFAULTS:
         raise ValueError("Unsupported model provider")
     name = body.get("name")
-    if name is not None and (not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or name.lower() in _RESERVED):
+    if name is not None and (not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or (name.lower() in _RESERVED or name.lower().endswith("assistants"))):
         raise ValueError("Invalid or reserved channel name")
     base = body.get("base_url")
     if not isinstance(base, str) or not base.strip() or len(base) > 2048:

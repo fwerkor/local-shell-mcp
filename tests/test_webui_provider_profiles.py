@@ -163,6 +163,9 @@ async def test_named_channels_same_provider_are_independent_and_survive_restart(
             assert selected_provider({"endpoint": name}) == name
             assert selected_provider({"endpoint": "agents"}, {"provider": name}) == name
         assert provider_config("openAI").token == "old-secret"
+        # Saved legacy endpoint aliases must keep resolving after channel migration.
+        assert provider_config("custom").token == "old-secret"
+        assert provider_config("custom").url == "https://primary.invalid/v1/chat/completions"
         names = (await client.get("/api/models")).json()
         assert names["openAI"] == ["same-model"]
         assert names["Primary Research"] == ["same-model", "distinct-model"]
@@ -215,10 +218,15 @@ async def test_named_channel_protocols_validation_and_delete_protection(setup_pr
             assert "private-named-token" not in (await client.get("/api/endpoints")).text
             assert "private-named-token" not in (await client.get("/api/models")).text
             assert (await client.put("/api/lsm/providers", json={**body, "provider": "openai"})).status_code == 409
-        for bad in ("openAI", "agents", "custom", "ollama", "bad/name", " name", "name ", "", "bad\nname"):
+        for bad in ("openAI", "agents", "custom", "ollama", "Research Assistants", "mini-assistants", "Assistants Overlay Assistants", "bad/name", " name", "name ", "", "bad\nname"):
             result = await client.put("/api/lsm/providers", json={"name": bad, "provider": "openai",
                 "base_url": "https://example.invalid/v1", "models": ["m"]})
             assert result.status_code == 400, (bad, result.text)
+        # Historical names predating validation must remain removable.
+        routes._repo().save_setting("__lsm_controller__", "model.channel.Legacy Assistants", {
+            "name": "Legacy Assistants", "provider": "openai",
+            "base_url": "https://legacy.invalid/v1", "models": ["m"], "api_key": "secret"})
+        assert (await client.delete("/api/lsm/providers?name=Legacy%20Assistants")).status_code == 200
         assert (await client.put("/api/lsm/providers", json={"name": "anthropic gateway", "provider": "anthropic",
             "base_url": "https://example.invalid/v1", "models": ["m"]})).status_code == 409
         assert (await client.delete("/api/lsm/providers?name=Anthropic%20Gateway")).status_code == 200

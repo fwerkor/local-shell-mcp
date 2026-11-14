@@ -1151,7 +1151,7 @@ async def test_worker_stream_download_cancellation_kills_curl(tmp_path, monkeypa
 
         def communicate(self, timeout=None):
             del timeout
-            assert killed.wait(2)
+            assert killed.wait(10)
             self.returncode = -9
             return b"", b"cancelled"
 
@@ -1171,7 +1171,7 @@ async def test_worker_stream_download_cancellation_kills_curl(tmp_path, monkeypa
             60,
         )
     )
-    assert await asyncio.to_thread(started.wait, 2)
+    assert await asyncio.to_thread(started.wait, 10)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

@@ -7,6 +7,7 @@ server-side SQLite settings (with environment defaults), not part of an Agent's 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
@@ -101,6 +102,26 @@ def _messages_for_anthropic(messages: list[dict]) -> tuple[list[dict], str]:
     return items, "\n".join(systems)
 
 
+def _anthropic_omits_sampling_parameters(model: str) -> bool:
+    """Match LibreChat model-aware sampling restrictions for newer Claude models.
+
+    Builder hides incompatible controls but retains saved Agent parameters.
+    Accept both Claude version naming formats; do not parse model dates as minors.
+    """
+    if re.search(r"claude-(?:fable|mythos)[-.]?\d", model):
+        return True
+    for family, minimum in (("opus", (4, 7)), ("sonnet", (5, 0)), ("haiku", (5, 5))):
+        expressions = (
+            rf"claude-{family}[-.]?(\d+)(?:[-.](\d{{1,2}})(?!\d))?",
+            rf"claude-(\d+)(?:[-.](\d{{1,2}})(?!\d))?-{family}",
+        )
+        for expression in expressions:
+            match = re.search(expression, model)
+            if match and (int(match[1]), int(match[2] or 0)) >= minimum:
+                return True
+    return False
+
+
 async def stream_model(
     config: ProviderConfig,
     messages: list[dict],
@@ -132,10 +153,11 @@ async def stream_model(
         body = {"model": config.model, "messages": items, "max_tokens": max_tokens, "stream": True}
         if instructions:
             body["system"] = instructions
-        if temperature is not None:
-            body["temperature"] = temperature
-        if top_p is not None:
-            body["top_p"] = top_p
+        if not _anthropic_omits_sampling_parameters(config.model):
+            if temperature is not None:
+                body["temperature"] = temperature
+            if top_p is not None:
+                body["top_p"] = top_p
     elif config.provider == "google":
         headers["x-goog-api-key"] = config.token
         items, instructions = _messages_for_google(messages)
