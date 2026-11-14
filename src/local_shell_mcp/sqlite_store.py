@@ -247,6 +247,58 @@ CREATE TABLE IF NOT EXISTS subagent_wakeups (
 );
 CREATE INDEX IF NOT EXISTS idx_subagent_wakeups_pending ON
     subagent_wakeups(status,created_at);
+-- Original LibreChat Agent Trigger source admission: separate API-key identity,
+-- envelope idempotency, ordered SQLite lane and per-replica leased dispatch.
+CREATE TABLE IF NOT EXISTS agent_event_source_keys (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    label TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    permissions TEXT NOT NULL,
+    expires_at INTEGER,
+    revoked_at INTEGER,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_keys_owner ON agent_event_source_keys(owner,created_at);
+CREATE TABLE IF NOT EXISTS agent_event_bindings (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    source_key_id TEXT NOT NULL REFERENCES agent_event_source_keys(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL,
+    parent_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_message_id TEXT NOT NULL,
+    parent_agent_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_bindings_owner ON agent_event_bindings(owner,source_key_id);
+CREATE TABLE IF NOT EXISTS agent_event_deliveries (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    owner TEXT NOT NULL,
+    source_key_id TEXT NOT NULL REFERENCES agent_event_source_keys(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK(mode IN ('fire','continue','steer')),
+    ordering_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending','leased','succeeded','dead')),
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    lease_owner TEXT,
+    lease_until INTEGER,
+    error_code TEXT,
+    error_type TEXT,
+    result TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,source_key_id,id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_deliveries_lane
+    ON agent_event_deliveries(owner,ordering_key,seq,status);
+CREATE INDEX IF NOT EXISTS idx_agent_event_deliveries_eligible
+    ON agent_event_deliveries(status,available_at,lease_until);
 CREATE TABLE IF NOT EXISTS agent_durable_tasks (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
