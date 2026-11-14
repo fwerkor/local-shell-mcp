@@ -73,7 +73,8 @@ class Intent:
 
 
 def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
-            name: str, arguments: dict, scopes: set[str], expires: int | None) -> Intent:
+            name: str, arguments: dict, scopes: set[str], expires: int | None,
+            *, authorization_conversation_id: str | None = None) -> Intent:
     """Atomic ownership reservation prior to *any* native creation RPC."""
     import sqlite3
 
@@ -105,6 +106,11 @@ def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
         conversation = db.execute("SELECT owner FROM conversations WHERE id=?", (conversation_id,)).fetchone()
         if conversation is None or conversation["owner"] != owner:
             raise PermissionError("Conversation ownership is no longer valid")
+        if authorization_conversation_id is not None:
+            authorization = db.execute("SELECT owner FROM conversations WHERE id=?",
+                                       (authorization_conversation_id,)).fetchone()
+            if authorization is None or authorization["owner"] != owner:
+                raise PermissionError("Inherited conversation authorization is no longer valid")
         if run_id:
             run = db.execute("SELECT status FROM runs WHERE id=? AND conversation_id=?", (run_id, conversation_id)).fetchone()
             if run is None or run["status"] in {"aborted", "error", "interrupted"}:
@@ -114,10 +120,12 @@ def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
         # Native key ownership is exclusive for each operation and machine.
         try:
             db.execute(
-                "INSERT INTO agent_durable_tasks(id,owner,conversation_id,run_id,call_id,tool,kind,machine,"
-                "requirements,fingerprint,idempotency_key,key_hash,scopes,grant_expires,state,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (identity, owner, conversation_id, run_id, call_id, name, _kind(name), machine,
+                "INSERT INTO agent_durable_tasks(id,owner,conversation_id,authorization_conversation_id,"
+                "run_id,call_id,tool,kind,machine,requirements,fingerprint,idempotency_key,key_hash,"
+                "scopes,grant_expires,state,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (identity, owner, conversation_id, authorization_conversation_id,
+                 run_id, call_id, name, _kind(name), machine,
                  json.dumps(required), fingerprint, key, key_hash, json.dumps(sorted(scopes)), expires,
                  "reserved", _stamp(), _stamp()),
             )
@@ -254,6 +262,10 @@ def _revoked(row: Any) -> bool:
     try:
         if _repo().conversation(row["owner"], row["conversation_id"]) is None:
             return True
+        permission_conversation_id = (row["authorization_conversation_id"]
+                                      if row["authorization_conversation_id"] else row["conversation_id"])
+        if _repo().conversation(row["owner"], permission_conversation_id) is None:
+            return True
         if row["run_id"]:
             with _repo().database.connect() as db:
                 if db.execute("SELECT 1 FROM agent_run_cancellations WHERE run_id=?", (row["run_id"],)).fetchone():
@@ -265,7 +277,7 @@ def _revoked(row: Any) -> bool:
                 if run is not None and run["status"] == "aborted":
                     return True
         for machine, operation in json.loads(row["requirements"]).items():
-            authorize_machine_action(row["owner"], row["conversation_id"], machine, operation,
+            authorize_machine_action(row["owner"], permission_conversation_id, machine, operation,
                                      scopes=set(json.loads(row["scopes"])), expires=row["grant_expires"])
         return False
     except (PermissionError, KeyError, ValueError):

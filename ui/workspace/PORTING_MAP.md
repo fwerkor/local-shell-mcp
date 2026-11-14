@@ -262,3 +262,425 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## Multi-agent StateGraph runtime (2026-11-11, independent Draft PR)
+
+Baseline: LibreChat v0.8.8 at `e8f3be08623663d4ad7f7241e693c94469b63bb0`;
+`@librechat/agents@4.0.1` at `c4ffb9b1b78421bf63eba3e56993017f922387f3`;
+original integrated **JS** `@langchain/langgraph@1.4.8`,
+`@langchain/langgraph-checkpoint@1.1.3`, `@langchain/core@1.2.8`.
+The upstream `bun.lock` newer agents version is **not** the runtime baseline.
+
+| Upstream source and event/state contract | Python WebUI implementation | Evidence / limitation |
+|---|---|---|
+| `src/messages/reducer.ts`, `@langchain/langgraph.messagesStateReducer` | `webui/message_reducers.py`: `messages` merge/replace/RemoveMessage/remove-all, `agentMessages` last-value | `tests/fixtures/librechat/graph_runtime_real_reference.cjs` instantiates actual JS `HumanMessage` / `AIMessage` / `ToolMessage` / `RemoveMessage` from exact locked npm packages (11 real-object vectors); `test_webui_graph_real_differential.py`. Canonical LSM dictionaries at Python boundary, not an independent JS BaseMessage class hierarchy. |
+| `src/graphs/MultiAgentGraph.ts:createWorkflow`, `src/graphs/Graph.ts` | `webui/graph_runtime.py`: Python `StateGraph(MultiAgentState)` with official `Command` / `Send`, direct/default fan-out, conditional source handoff routing, join edges, prompted fan-in, per-node AgentRunner | Original JS real-class `StateGraph` fan-out/barrier, `Command` and `Send` traces matched to real Python LangGraph 1.0.10. Multiple entry/superstep, direct+handoff exclusive dispatch, parallel receivers tested. AgentRunner is still the only model/provider/tool loop. |
+| `graphs/handoff.ts:HandoffRouting/mergeHandoffState` | existing `webui/handoff.py` reducers and pending transfer commands; `graph_runtime.py` owns routing | Existing source-oracle handoff reducers retained; native graph converts to actual Python `Send`, never schedules using the old single-destination fallback. Shared transitions are checkpointed and merged in graph channels. |
+| `packages/api/src/agents/run.ts:buildSubagentConfigs` | `webui/subagents.py` graph-team configurations, `graph_runtime.py` child isolated namespace | Owned member verification, DAG entry/result, foreground child context and filtered final tool result tested. Subgraph child uses the same generation, grants, executor and checkpoint backend. |
+| `agents/checkpoints/saver.ts`, `@langchain/langgraph-checkpoint` | `webui/graph_checkpoint.py:OwnedGraphCheckpointer` wraps existing `SQLiteCheckpointSaver` and SDK's typed `serde`, preserving `Send` and pending writes | Durable graph/parent-child checkpoints in unified `.local-shell-mcp/` SQLite, restart after cancellation and new runner replay, owner rejection, list/async API and pending Send tested. No Worker import or Node/Mongo runtime dependency. |
+| `agents/hitl/resume.ts`, AskUser, Approval | Existing `webui/generation_routes.py`, `generations.py`, `AgentRunner._pause` | Graph-node Ask User and file-write tool approval verified by actual pending action, one-shot claim, HTTP resume and second Runner. Existing machine ACL and scopes still gate actual LSM execution; enabling tool never grants access. |
+| `Run` callbacks and background Subagent hosts | Existing `GenerationStore` event log and graph-node tool events | **Not complete**: durable background child task/thread queue and continuation are not implemented by this PR; current explicit refusal remains. Full structured RunStepState/Graph stream and arbitrary JS BaseMessage/tool-call fidelity remain outstanding and depend on host-message protocol work. |
+
+`pyproject.toml` defines optional `webui-graph` dependency (`langgraph>=1.0.10,<1.1`,
+`langchain-core>=1.2.8,<2`). CI test jobs install this Controller-only extra. The browser/source E2E job
+installs exact original JS npm runtime versions in a temporary oracle-only
+directory, and runs the live original-message classes and graph traces with
+`LSM_REQUIRE_SOURCE_ORACLES=1`, without leaking Node into production.
+Production Worker distribution remains independent of LangGraph, Bun, Node and Mongo.
+No changes to underlying LSM MCP registration/execution, machine permission scopes,
+Shell/Job/File implementations, timeout policy, idempotency or audit hooks.
+
+To rerun in a clean isolated worktree: `PYTHONPATH="$PWD/src" .venv/bin/python -m pytest -q tests/test_webui_full_graph_runtime.py tests/test_webui_graph_real_differential.py tests/test_webui_graph_checkpoint_reducer.py`.
+For the real JS oracle provide Node, the exact pinned npm packages and
+`LSM_JS_ORACLE_ROOT` pointing at their installed package root. A committed fixture
+retains the reference output for test environments without Node dependencies.
+CI coverage gates remain unchanged (global ≥95%, per module ≥90%).
+
+### Graph checkpoint and HTTP recovery contract
+
+`MultiAgentState` uses the original source channel names: `messages` (ID-aware
+LangGraph message reducer), `agentMessages` (last-value replacement),
+`handoffState` (source merge reducer), `subagentResult` (designated team sink)
+and `manualSummary` (optional summary). A node emits existing generation events
+`on_run_step` / `on_message_delta` / `on_run_step_completed`; tools retain the
+source event IDs and full owner ACL. The graph adds no separate provider loop
+or task dispatcher.
+
+Checkpoint identity: `(owner, conversation_id, run_id + ':graph:' + namespace)`
+for graph supersteps, `(owner, conversation_id, run_id, checkpoint_ns=namespace)`
+for per-node model/tool states. The single unified SQLite database stores
+`pendingWrites` and serialized SDK `Send` instances; runtime extras are
+Controller-only, not Worker dependencies. A resumed `ainvoke(None)` reads the
+latest graph checkpoint and executes only unfinished nodes. On a cooperative
+Controller shutdown (not explicit Abort), running generations retain their
+checkpoint and status. A client can `POST /api/agents/chat/resume` with
+`conversationId` (and optionally `generationCreatedAt`) to use the **existing**
+`_start_task` generation scheduler; no duplicate initial `on_run_step` or SSE
+deltas are emitted. Previously sent text is reconstructed from the owner-scoped
+`generation_events`. This recovery path rechecks machine ACL and grant scopes;
+a missing checkpoint or an expired/mismatched generation identity is rejected.
+
+The no-action recovery path assumes the project's single active Controller
+process; **no cross-process SQLite execution lease** is introduced. An HA
+multi-Controller deployment would need a shared generation-lease protocol.
+Restart after a previously consumed Ask User response before the continuation
+has created a checkpoint also needs a durable input replay record. Detached
+background child threads are still explicitly unavailable until the shared
+host task/thread store and message-protocol PRs land.
+
+### 2026-11-12 — 后台 Subagent / 子线程宿主与重启恢复（PR #354 续）
+
+固定参考仍是 LibreChat `e8f3be08` 与原集成 npm `@librechat/agents@4.0.1`
+(`c4ffb9b1`)，**没有**使用上游 bun.lock 的不同 agents 版本。
+关键对应关系：
+
+| 固定原版调用链 | Python/SQLite 一对一执行位置 | 证据与保留限制 |
+|---|---|---|
+| `Graph.ts:subagentTool → SubagentExecutor.executeInBackground` | `subagents.invoke_subagent → SQLiteSubagentTaskHost.start → _ensure_active → AgentRunner.run` | 根父调用 ID、Agent ID、run ID 与可信 conversation 作用域在首次 SQLite `BEGIN IMMEDIATE` 中写入，然后才允许启动后台模型/工具；重试参数不一致拒绝。独立 child Generation 与既有 AgentRunner/StateGraph 共用执行器，**没有实现新的 Graph 或 LSM 工具调度器**。 |
+| `types/subagentTasks.ts` + `InMemorySubagentTaskStore.ts` | `webui/subagent_task_host.py` 与共享 `sqlite_store.py` 中的 task/thread/control/invocation 表 | 完整任务状态、capacity、过期清理、一次性 result claim，`steer/queue/interrupt/cancel_message` 受限 message length、control count 与 SQLite 回执；收敛在工具、preempt、turn 边界，checkpoint 写成功后 ack。真实 npm 4.0.1 类和 `HumanMessage`/`AIMessage` 的差分见 `subagent_task_real_reference.cjs`。 |
+| `subagentThreads.ts:SubagentThreadTaskStore` | `SQLiteSubagentTaskHost.start` 的 owned-thread 查询与 `initial_messages` | 线程属于 `(owner, parent_conversation_id, subagent_type)`，完成后持久化 history，后续 `subagent_thread_id` 创建新的 child generation；父子任务使用相同根 conversation 授权，嵌套 parentRunId 还须由可信 active task lineage 证实。 |
+| `background.ts:registerBackgroundTaskTool / runCheckBackgroundTask` | `agent_runner._context/_invoke` → `check_background_task_tools / host.check` | 与原版相同的 `check_background_task` 工具名、枚举、参数长度限制，模型不能通过 task id 查看/取消他人 scope；按 `run+agent+tool_call_id` 做不可变 control invocation fence，失败的模糊重放不伪装成已接受。 |
+| 原宿主对任务生命周期的拥有权 | `main.py:lifespan → active_child_generations/recover_subagent_tasks` | Controller 启动时保留可恢复 child generation 的 running 状态；SQLite 租约过期后自动认领，不必等待用户再轮询。每次执行有独立 lease token；持有者续租，失去授权/租约后下一个模型/工具检查拒绝，取消报告与真正任务终态区分。 |
+
+**边界说明：** 后台子任务的模型、工具调用和 checkpoint 持续复用原有
+`AgentRunner`、`OwnedGraphCheckpointer`、`GenerationStore`、`lsm_tool_registry`，
+没有修改 Job/Shell/File 执行实现或机器 `none/read/write` 权限模型。
+权限、已启用工具、有效 grant、scope 和 owner 在线上运行前及各工具调用前重新检查。
+单 Controller 中断与重新启动、嵌套 root→middle→leaf、续线程、取消/远端租约、
+控制回执、线程跨作用域阻断均有实测；原版 JS TaskStore 的真实对象对照纳入源码 CI。
+
+尚需另行完成：原版 background completion wakeup/attachment/普通工具后台化，
+跨 Controller 的外部 event/control routing、所有 Hook 回调和富媒体 RunStepState，
+以及全量自动问答/审批事件的 host actor 恢复。上述不应以当前子任务成功测试冒充
+整个 LibreChat 运行时等价。保持全局 ≥95% 和单模块 ≥90% 的覆盖门槛不变。
+
+### 2026-11-12 — 与 Artifacts Draft PR #352 的原版 child-thread guard 接口
+
+按 PR #352 明确公开的接口而非臆造 UUID/提示词识别：
+`packages/api/src/agents/guard.ts:isSubagentThreadWriteBlocked` 的 Python Artifacts
+实现依赖 `webui/child_thread_activity.py:ActiveChildThreads` 和
+`active_subagent_threads` 表。这个模块仍归 PR #352 所有；**本 PR 不复制其表或写入路由**。
+后台任务宿主现在在首个原子 task intent 中保存 host 产生的 UUID 和 parent run
+身份；`ActiveChildThreads.activate(owner, childConversationId, parentRunId)`
+发生在 `GenerationStore.begin(trusted_new_conversation_id=...)` 创建 child conversation
+**之前**，而非在文件编辑时推断。另一个同幂等键调用在 `child_registered=1`
+持久确认之前不能执行子模型。如果进程在 marker 持久化后、task admission 确认前崩溃，
+恢复时仅凭 `(owner,child_id,parent_run_id)` 的原版宿主标记重建 admission；无可信
+标记则拒绝启动。运行最终完成/取消/错误后，调用
+`ActiveChildThreads.settle(owner, childConversationId, parentRunId)`，不删除已登记子线程，
+以便 PR #352 的 artifact mutation guard 按源码一直保持只读。
+
+`tests/test_webui_subagent_task_artifact_guard.py` 在无 PR #352 情况下使用其实际
+`activate/settle` API 的可验证契约替身，覆盖创建前登记、所有者范围、正常终态、取消、
+幂等重放、缺失可信 marker 的 fail-closed、恢复重建以及非法外部 conversation ID。
+待 PR #352 合入，需要用其真实 `ActiveChildThreads` 与 Artifact 编辑路由联合测试，
+才可以把本项由“部分/依赖 PR #352”提升为完整等价；此前不声称写保护端到端验收。
+
+### 2026-11-12 — child terminal publication / stale lease CI hardening
+
+PR #354 的多平台 CI（`334e111d`）暴露一个真实可观察的竞态：`_execute`
+先提交 `subagent_tasks.status='completed'`，随后才在 `finally` 调用
+PR #352 的 `ActiveChildThreads.settle`。另一个 Controller 或测试观察者可能
+见到已完成的 task，却仍看到 child 活跃。这一顺序已更正：成功、失败、取消和
+过期的每个终态发布路径，在释放任务终态之前先通过 PR #352 原始 API 持久化
+保护标记；不在持有同一 SQLite 写锁时重入该 API。若两个提交之间崩溃，task
+仍为 running，而 child 标记已只读，重试可以安全再调用幂等 `settle`。
+
+修复同时涵盖失去执行租约后旧 Controller 继续 `GenerationStore.finish` 的风险：
+子 generation 只允许在同一租约成功提交任务终态后才完成；父调用请求取消期间
+不应把晚到的模型结果改写为成功。新测试覆盖原子可观察顺序、迟到租约接管、
+取消与正常结束。此外，跨平台 Job 测试夹具 `_wait_job` 原先把过渡态
+`retrying` 当成终态，导致 macOS 的 `exit_code=None` 偶发失败；现只在
+取得实际退出码后返回，生产 Job/Shell 实现保持不变。
+
+### 2026-11-12 — 长租约远程重连的持续恢复
+
+对照原版 `packages/api/src/agents/subagentThreads.ts` 租约续期以及
+`triggers/README.md` 的 idle recovery 语义，Controller 启动时的一次性
+`lease_until` 计时器不足以恢复续过租的子任务：其他正常 Controller 在第一次
+租约到期前续期会阻止认领，后续掉线则使任务永久遗留 `running`。
+
+`recover_subagent_tasks` 现在针对尚由远端持有的任务维护有界、可取消的
+SQLite 租约 watcher：不抢占有效租约、不重写任务身份，重复启动不会增加同一任务
+的 watcher，远端续租后继续读取真实 `lease_until`，真正超时才调用现有
+`_ensure_active` 按 CAS 认领，并在本机恢复 `AgentRunner` 后退出 watcher。
+`shutdown_subagent_tasks` 会取消和收拢 watcher，避免泄漏异步任务。
+回归测试模拟远端第一次续租后才停止续约，验证不提前接管、最终正确恢复结果。
+这属于子任务租约恢复，不等于原版所有 Agent Trigger 的自动 completion
+wakeup/外部队列/跨 Controller 事件协议已经移植；后者仍单列为未完成。
+
+### 2026-11-12 — Windows CI 调度时间容限
+
+当前 CI Windows x86_64 Python 3.12 曾在高负载下因两个测试中固定的
+2 秒/4 秒短等待而偶发失败：`test_job_mutation_recovery` 在拦截
+`start_shell` 前尚未得到调度，`test_webui_subagent_task_host_edges` 的
+异步 Child Generation 尚未完成。测试等待窗口改为有上界的 15 秒和
+20 秒，继续验证真实启动/终态、所有权及 `exit_code`，失败时显示受限状态。
+没有放宽任何生产操作 timeout 或权限检查。
+
+### 2026-11-13 — 持久 Subagent Completion Wakeup（原版 source 部分移植）
+
+源码锁定：`packages/api/src/agents/subagentDelivery.ts`、
+`subagentCompletionWakeup.ts`、`subagentThreads.ts`、
+`api/server/services/Endpoints/agents/subagentThreadStore.js` 和
+`packages/api/src/agents/triggers/README.md`。SHA-256 和逐符号对应见
+`UPSTREAM_LOCK.json`、`PORTING_INVENTORY.json`；`@librechat/agents@4.0.1`
+的工具 Schema 保持原版 JS 真实类差分不变。
+
+`webui/subagent_wakeup.py` 使用统一 SQLite 中的 `subagent_wakeups` 作为
+可信内部 `AgentContinueTriggerEnvelope` 队列，**在子 task intent 的同一个
+BEGIN IMMEDIATE 事务中预登记**，且只有原 owner + parent Agent + run +
+responseMessageId 绑定允许派发。源码默认启用，管理员可用
+`settings.backgroundTasks.completionWakeups=false` 关闭。宿主工具返回
+源码 `SUBAGENT_WAKEUP_GUIDANCE`，禁止无意义地反复 poll。
+
+子结果落地后仅在父 generation 完成时启动续接：先验证可信父 Agent 和
+原 reply，选当前 branch 中最新 assistant descendant（含兄弟 completion
+链），保留有上界的宿主 orchestration snapshot；调用现有
+`GenerationStore.begin`（受约束的 internal `_connection`）与子任务
+`result_claimed=1` **同一 SQLite 原子提交**。并发手动 poll 在该事务前
+领取时会撤销 wakeup；自动续接抢先时 poll 显示 `delivery_scheduled`。
+授权过期、父 generation 失败、Agent 删除或分支不匹配均安全拒绝，
+不执行模型。已经被派发的 generation 由原 `generation_routes._start_task`
+执行：保留原 MCP/Ask User 设置和不可提升的旧授权，复用 Provider、
+AgentRunner/StateGraph、generation SSE 和持久事件，不新建模型调度器。
+
+任务 crash 后以稳定 task ID 和原有 generation run ID 重接，不重复创建
+模型会话；`recover_orphans` 跳过尚有有效 wakeup 归属的根 generation，
+lease 延续/抢占由 SQLite 控制；失效后释放自动 claim 供人工领取。
+后续仍需补齐全局原版 Agent Trigger 的外部事件、死信重排、重试退避、
+富媒体 artifact delivery 和所有 Controller 之间对根生成 actor 的 HA
+强拥有权与恢复语义，不能把本次局部可信内部触发说成整个 JS Trigger
+子系统的 100% 等价移植。
+
+测试拆为 `test_webui_subagent_wakeup.py`、`_guard.py`、`_recovery.py`，
+共 32 个真实 SQLite E2E/异常/并发/恢复测试，包括一例真实 Parent AgentRunner
+调用 + SSE on_run_step 与最终 responseMessage 持久化；共享 fixture 在
+`tests/wakeup_helpers.py`，原版 source-locked UI CI 增加了全部三个文件。
+
+### 2026-11-13 — 对接已合入 main 的 PR #353 持久原生 Job
+
+PR #353 新增 `agent_durable_tasks` 和按 `(owner,conversation_id,run_id)`
+验证的不可冒用原生 Job/Shell 持久所有权。其 `run_id` 必须属于所记录的
+实际 conversation；原版 Subagent 继承机器权限的 context 却属于父 conversation。
+本合并保留两条**不可混淆的可信维度**：
+`AgentRunner.generation.conversation_id` 负责 native Job 持久拥有权、
+`AgentRunner.authorization_conversation_id` 负责每个机器操作的权限检查。
+`lsm_tool_registry.call_tool` 在内部接收原授权 scope，传给
+`durable_tasks.reserve` 时同时记录独立 `authorization_conversation_id`，
+PR #353 的 `_revoked` 使用该可信 parent scope 检查权限变更，同时先验证
+child conversation 原拥有权及 child run 的显式取消。旧版本只有 PR #353
+表时使用同步 `PRAGMA table_info` + `BEGIN IMMEDIATE` 安全迁移新增字段，
+默认 NULL 维持现有根任务兼容性；不复制/重写任何 Job/Shell/Worker RPC。
+
+`tests/test_webui_graph_durable_bridge.py` 真实 SQLite 验证：child run 可以
+创建受父会话 machine policy 约束的原生 Job intent；子会话单独的 `none`
+权限不被冒用作为授权；父会话撤权触发 `mark_revoked` 的 durable cancel，
+并测试对 PR #353 旧数据库的原地升级。源码锁定的 Graph/Ask User
+测试不因此修改原版 `@librechat/agents@4.0.1` 工具参数 schema。
+
+### 2026-11-13 — 嵌套 Background Subagent 可信续接边界与内部幂等键
+
+完整跨平台回归发现在根会话内托管的中间 Subagent，其 `parent_run_id`
+实际属于隐藏 child conversation。它是可信且合法的嵌套 task，却没有根会话
+的 assistant `responseMessageId` 分支可以用于自动续接。
+`register_wakeup` 现在通过 owner、实际 child run 和仍在运行的
+`subagent_tasks.child_run_id` 证实此嵌套关系，并仅关闭缺少准确目标分支的
+**嵌套自动续接**；child 仍正常执行、保存 thread、轮询/控制/领取结果。
+绝不把隐藏 child 的完成通知伪装为根 conversation 的新模型轮次。
+真实 `test_webui_subagent_task_nested.py` 验证根 child 获得一个 wakeup，
+嵌套 child 则不登记错误的第二个 wakeup。
+
+普通 HTTP 请求可见 task ID，但不能占用服务器生成的
+`clientRequestId=subagent:<opaque>` 或
+`clientRequestId=subagent-wakeup:<opaque>`。`GenerationStore.begin`
+将这两种命名空间只开放给可信内部 child conversation 分配或原子 SQLite
+wakeup 连接；浏览器直接提交立即拒绝，防止内部续接幂等性被用户预占。
+`test_webui_generations.py` 覆盖无写入副作用的拒绝路径。
+
+### 2026-11-13 — 完成续接消息的 child transcript 归属与并发竞争回归
+
+原版 `createSubagentCompletionWakeupResolver` 在尝试将 child 结果注入根父
+conversation 前校验源 child conversation 的存在和归属。Python
+`process_wakeups` 现使用实际 `(child_run_id, child_conversation_id, owner)`
+查询已提交的 child，并验证已存档 metadata 的 `subagentTask` 与
+`parentConversationId`；child 被删除、元数据格式不合法或归属信息不匹配
+时仅撤销自动事件，保留人工可领取的终态，不会把孤儿内容注入父 Agent。
+child run 尚在 `running/requires_action` 时等待持久终态，不用抢先注入消息。
+
+新增真实 SQLite 并发回归：手工 `check_background_task` 与自动
+`process_wakeups` 同时竞争同一终态，原子领取唯一获胜者；两条兄弟 child
+完成时先派发一个续接，第二条排队到第一个 parent assistant message
+写入，再挂接到其最新 descendant 分支。还补齐了删除 child、伪造元数据、
+非法 JSON 和终态持久化前的 fail-closed 行为。固定源码后单独测试
+`subagent_wakeup.py` 分支覆盖率为 **93.9%**（38 测试通过）。
+
+## 2026-11-12 人工交互移植增量
+
+源码、HTTP/SSE、SQLite恢复、原React浏览器验证与未完成范围详见 HUMAN_INTERACTION_PORT.md。新增原版 Ask User 显式审批优先级、原 resumeState 与 sync、同一决策崩溃恢复。仍未验收完整 steer/arm/cancel、actor 和多 Agent 并行子图调度；状态标记为部分。
+
+### 2026-11-14 — Source Agent Trigger Retry/Dead Letter 与父续接租约隔离
+
+对照锁定源码 `packages/api/src/agents/triggers/engine.ts` 中
+`DEFAULT_MAX_ATTEMPTS=8`、`DEFAULT_RETRY_BASE_MS=1000`、
+`DEFAULT_RETRY_CAP_MS=300000`、`retryAt`，在内部 Subagent 完成事件队列
+增加持久 attempt、可领取截止时刻、错误类型和有界 failure history，
+迁移旧 SQLite 表时保留已提交任务。调度器派发失败时按原版半区间随机
+指数退避，同一个 task ID 重放**原有根 generation**，不重复创建对话。
+每次认领使用新的高熵租约令牌（包括同进程重试）；旧持有者无权结算失败。
+达到 8 次上限后落持久死信，释放 child 的自动结果占用供人工领取；
+`get_dead_wakeups` 和 `requeue_dead_wakeup` 是可信、owner-scoped 的内部接口，
+未引入未经授权的公开路由/Agent 工具。手动 requeue 位于新队列尾部，
+增加持久 requeue ordinal 与新的 generation 幂等 key，避免采用旧失败轮次。
+
+跨 Controller 根 generation 在真实 `AgentRunner._check_grant`、
+Graph 子节点、模型 token/SSE 回调及最终完成写入之前检查 SQLite
+`(owner,run_id,task_id,lease_owner,lease_until)`。本地 worker 活跃期间
+按 token CAS 续租；租约被其他 Controller 领取后，旧 actor 不能继续写
+消息、tool、checkpoint 或结算回执，新的 actor 从旧 generation checkpoint
+恢复。测试采用真实模型流中途劫持 lease 的 E2E；另有 8 次退避、死信重排、
+过期授权、旧版本 SQLite 原地升级，以及冒用旧 token 失败的定向回归。
+
+这实现的是**内部 Subagent continuation** 的 bounded retry 和 actor fencing。
+原版通用 fire/steer/batch webhook、绑定/密钥管理、多租户队列、批处理及
+全局 Agent Trigger 调度仍是独立后续移植项，不据此声称完全一致。
+
+### 2026-11-14 — JS source waitingRetryAfter 差分和跨进程 Ready 通知
+
+新增 SHA-256 完全相同的上游原版 `triggers/backoff.ts` TypeScript fixture，
+CI 用 Bun 直接执行原始 `waitingRetryAfter`，验证 Python
+`waiting_retry_seconds` 在 5s/60s 限界、按等待年龄 10% 回退及
+Math.ceil 浮点临界点上的逐例完全一致。源码锁与执行器 SHA-256 记录在
+`UPSTREAM_LOCK.json`；同页新增 `triggers/engine.ts` 的重试/租约映射。
+
+未满足 readiness 的 parent/child 在统一 SQLite 中设置
+`next_attempt_at`，不增加失败 attempt。为避免错过跨 Controller 通知，
+在父 `runs.status` 终态和子 `subagent_tasks.status` 终态的**同一个 SQLite
+写入事务**中使用数据库 trigger 清空该截止时间；即使负责原任务的
+Controller 已经退出，另一 Controller 的 poll 也会立即发现可领取事件。
+旧数据库从 `CREATE TRIGGER IF NOT EXISTS` 安全迁移，测试覆盖进行中 child
+和等待中 parent 两种情况的自动唤醒、超过五秒但无需等待实际 timeout 的路径。
+
+本次仅提供内部 Subagent 完成事件的有界重试、死信及安全自动续接。
+其它 Agent Trigger 类型尚未引入未经授权的公共 HTTP 入口。
+
+### 2026-11-14 — 原版 Agent Trigger Remote Source、Fire 与受保护的绑定 Continue
+
+锁定 `triggers/{ingress,bindings,envelope,delivery,engine}.ts` 和
+`agents/json.ts` 原版 SHA-256。按原版 `POST /api/agents/v1/events`、
+`GET /api/agents/v1/events/:deliveryId`、
+`POST /api/agents/v1/events/bindings` 接入现有 Starlette 路由。
+原 LibreChat 使用 Remote Agents API Key，LSM 以 OAuth
+`admin:config` 受控管理的独立、可撤销 event-source bearer key
+（`/api/agents/v1/event-source-keys`，只返回一次明文）承载对应身份；
+控制器 OAuth、UI cookie、普通 MCP key **不能**冒充远程事件源。
+事件 `source`、`principal`、`receivedAt` 在可信中间件重建；强制单个
+`Idempotency-Key`，禁止多值 headers/非法字符，单包限制 1MiB，
+事件结果查询只返回来源可见的状态、有限错误类型及受限结果标识。
+
+`webui/event_triggers.py` 以独立 SQLite `agent_event_source_keys`、
+`agent_event_bindings`、`agent_event_deliveries` 表实现 `trigger_` SHA256
+原版投递键、内容指纹冲突、默认和显式 lane（SQLite seq 按入队先后）、
+重试限制、令牌 fenced 的跨 Controller 恢复与 source key 即时撤权。
+`fire` 使用原有 `GenerationStore.begin` + `AgentRunner` + SSE；入队与
+生成记录原子提交，重启/调度失败不会分配第二个根 generation。
+远程 API Key 不继承机器控制权限、MCP 工具或无人批准的 HITL 操作。
+所有 HTTP 普通 Chat 接口拒绝 clientRequestId=`trigger_*` 预占内部事件。
+
+`continue` 严格要求 API-key 所属直接子 Agent 绑定，服务器完全覆盖调用者
+提供的 conversation/agent/branch；原始 `Constants.NO_PARENT` 首轮
+和最新真实 assistant 后续分支分别由 Controller 指定。绑定须先由
+PR #352 `ActiveChildThreads.activate` 在子会话公开前登记只读保护，
+**在 PR #352 尚未合入时安全返回 503**，绝不创建未保护的子会话。
+不可用时仍可使用 `fire`；其它 Agent 的 Draft PR 不会被本 PR 自动合入。
+
+新的 SHA-256 字节完全一致的 `triggers/envelope.ts` 与依赖
+`agents/json.ts` fixture 由 Bun **直接执行**；与 Python 逐例核对
+fire/continue/steer 投递 identity、CJK 字符和可信 source 字段。
+另外覆盖完整 ASGI Key 生命周期、授权撤销即时杀死 leased actor、
+多 Controller 抢占和同一 run 恢复、顺序 lane 排他/跨 lane 并发、
+真实模型 SSE、8 次失败/死信以及含伪造目标的绑定 API。
+
+仍需后续独立实现/合入原版 `steer`（由 Draft #358 承接 Graph/HITL）、
+expectedAction host-observed 证据、750ms/8 项 coalescing、全局多来源
+Trigger 管理。当前 unsupported modes 和 contracts **拒绝入队**，
+没有假装完成或将不可信请求直接送到 Subagent completion 队列。
+
+
+## Artifacts model generation, original previews, active-thread edit fence (incremental)
+
+Pinned source: LibreChat 0.8.8 `e8f3be08623663d4ad7f7241e693c94469b63bb0`.
+This section supplements the existing Artifacts editor/source-vector port above;
+it does not replace that implementation.
+
+| Behavior | Pinned source | Python/React path | State / evidence |
+| --- | --- | --- | --- |
+| Prompt selection and Agent capability | `packages/api/src/prompts/artifacts/index.ts` and `packages/api/src/agents/initialize.ts` | `webui/artifact_prompts.py`, `generation_routes.py`, `generations.py` | Done for default/shadcnui/custom mode and openai/anthropic/google selectors. Original JS `generateArtifactsPrompt` and nested `generateShadcnPrompt` output compared byte-for-byte across 15 provider-mode combinations. |
+| Source-locked Shadcn component docs | `packages/api/src/prompts/artifacts/components.ts` and `generate.ts` | `artifact_prompt_snapshot.json` and `scripts/export-librechat-artifact-prompts.py` | Done, 47 source records -> 33 effective keys after object spreads; SHA-256 of pinned source stored; source-locked build-time extraction, no Node at runtime. |
+| Agent / child / handoff system injection | `packages/api/src/agents/initialize.ts`; `@librechat/agents` 4.0.1 runtime | `generation_routes._start_task`, `subagents.invoke_subagent`, `agent_runner.AgentRunner` | Done for existing supported Python graph paths. Ephemeral mode saved in SQLite run state for resume; no mutation of saved Agent instructions. Tests check real run-loop, immutable idempotent mode snapshot, incremental stream events, persistence, edit and next model-turn read; a separate Ask User / HTTP resume test proves the restored checkpoint contains exactly one original Shadcn system prompt. |
+| Artifact output delta / final history | `api/server/controllers/agents/callbacks.js`; `api/app/clients/prompts/formatMessages.js` | Existing `GenerationStore.append/finish/history` and retained `ArtifactRow` | Text Artifact format passes through unchanged; streamed partial text, full final structured text and saved edits are retained. Generated multi-artifact cards verified in original Chromium; no parallel rich/tool payload protocol introduced. |
+| Child thread read-only from registration through settlement | `packages/api/src/agents/guard.ts`; `api/server/services/Endpoints/agents/subagentThreadStore.js` | `webui/child_thread_activity.py`; `artifact_routes._update`; shared SQLite `active_subagent_threads` | Owner-scoped child registry checked inside the same SQLite write transaction as edit, before static metadata and reserved UUID checks. Trusted `activate` verifies owner/active parent run and forbids parent thread; `settle` verifies run ownership while retaining permanent read-only identity. A deleted parent generation cannot unlock its child. The **full graph task owner must wire its actual child creation/settlement paths** to these calls before runtime-wide active thread parity can be claimed. |
+| Preview MIME routing | `client/src/utils/artifacts.ts`, `client/src/components/Artifacts/ArtifactPreview.tsx` | Original retained React preview and Monaco components | HTML, React, Mermaid, SVG (including `image/svg` alias), Markdown, synthetic DOCX/spreadsheet/presentation previews and source-only code bucket now exercised in real Chromium. Office controls expose preview-only tabs; code exposes source-only. Downloaded bytes/filenames tested for model-supplied preview HTML and code. The source-mapped Python Office **binary-to-static-escaped-HTML conversion** is now tested using the original LibreChat `.docx` fixture; the real browser opens the final SQLite-persisted card, and downloads **exact original ZIP/DOCX bytes**, not the derived HTML. Full original CDN-based high-fidelity visual rendering is still out of scope. No custom editor/preview replacement. |
+| Canonical file-backed Artifact download and metadata | `packages/data-provider/src/data-service.ts:getFileDownload`; `api/server/routes/files/files.js:getDownloadFileMetadata` | `webui/attachments.py:download_react_file`; original `useArtifactDownload` and `useAttachmentLink` | The retained frontend requests `GET /api/files/download/:userId/:file_id`; the old Python implementation only exposed `/:file_id` and could not serve original-file panel downloads. Both routes now resolve through the same owner-scoped SQLite record with authenticated principal/path-owner match, content-disposition, original `application/octet-stream` bytes and URL-encoded **allowlisted** `X-File-Metadata` (no owner, text, physical path). Wrong-owner/missing records get 404; the legacy single-ID route still works. Real Chromium plus SQLite test proves original DOCX archive survives the view/download path without substituting cached HTML. Static HTML production from actual Office binary input now works through `publish_office_tool_output` for authorized native local file writes; async content extraction/agent resource/remote tool callbacks remain shared integration work. |
+| Trusted native tool-produced Office files | `api/server/controllers/agents/callbacks.js:on_tool_end`; `packages/api/src/files/documents/html.ts:bufferToOfficeHtml`; `zipSafety.ts` | `agent_runner.AgentRunner._completed` + `webui/office_preview.py` + `GenerationStore.finish` | Completed for **authorized local `file_write`** Office outputs (.docx, .xlsx, .xls, .ods, .csv, .pptx, .potx). The existing LSM native file-write must succeed and return matching filename/bytes/SHA-256; no model-provided path is opened. Source bytes are published through the existing `publish_attachment` with SQLite run owner/status validation and an atomic original `attachment` SSE. Retry of the same call+content reuses the first file without a second event; `GenerationStore.finish` attaches it to final message/SQLite metadata for refresh. Invalid preview formats retain downloadable raw bytes with `failed` status. Six pinned LibreChat office binaries, actual original-model `file_write` dispatch and real Chromium DOCX→HTML→download pass. Tool UI events omit large base64, native args/checkpoint remain untouched. Remote files, arbitrary shell outputs, MCP image/UI resources and Graph-child tool callbacks **not ported here**. |
+| Safe Office HTML fallback | `packages/api/src/files/documents/html.ts` and `zipSafety.ts` | `webui/office_preview.py` | Escaped static HTML, 512KiB output cap; actual ZIP inflation 25MiB per entry / 100MiB total, DTD/ENTITY refusal, max 5,000 rows / 500 slides / 256 cols. Original XLS BIFF via `xlrd>=2.0.2,<3` (pure Python); other parsers stdlib. No required Node or LibreOffice runtime. The original CDN-based high-fidelity DOCX/PPTX renderers are deliberately not claimed; current output is semantic/text-and-table preview only. |
+| Offline and CSP limits | Original `@codesandbox/sandpack-react` `SandpackProvider` and preview components | Retained frontend assets | Chromium with all non-loopback requests blocked confirmed `*.sandpack-static-server.codesandbox.io/__csb_relay/` for static HTML/SVG/Markdown and `2-19-8-sandpack.codesandbox.io/` for React. Monaco editor offline **does not imply offline Sandpack runtime**; blocked-network test only asserts the shell/cards, not that external previews rendered. Mermaid panel did not require an iframe in this test. |
+| Tool-produced artifacts, filtering | `api/server/controllers/agents/callbacks.js`, `packages/api/src/mcp/parsers.ts`, original host content-filter helpers | Existing tool event/attachment and message protocol paths | **Not complete**: upstream callback's file-backed artifact attachment events, `files` mapping, content-filter host policy, image/UI resource projections and full rich/tool history await their owners' shared message-protocol/attachment implementations. No duplicate payload representation was created. |
+
+Evidence commands (independent worktree):
+
+```sh
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_prompts.py tests/test_webui_artifact_routes.py tests/test_webui_artifacts_source.py
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_browser.py tests/test_webui_artifact_preview_browser.py tests/test_webui_artifact_file_download_browser.py tests/test_webui_attachments.py tests/test_webui_office_preview.py tests/test_webui_office_runtime.py
+# Source-differential oracle only; Node and npm dedent are BUILD/TEST dependencies,
+# not needed by the Python+SQLite controller:
+node scripts/check-librechat-artifact-prompt-diff.cjs /path/to/pinned-LibreChat /path/to/dedent-1.7.0
+```
+
+Original editor's retry/invalid input/owner boundaries still apply. New tests additionally
+cover active and settled child mutation denial (including deleted parent run),
+partial Artifact cancellation, multiple independent Artifacts and repeated editing,
+and two competing edits with the same original source (one 200, the stale second 400).
+The focused source/editor/preview suite passed 49 tests before the additional
+original-file download E2E, with 98.3% branch coverage across the four
+Artifacts-specific Python modules. The previous full isolated suite passed 2346
+cases and 95.33% global branch coverage; the added download route is being
+re-checked in CI (do not infer a new full-suite pass from the earlier run). No remaining behavior is
+represented as fully source-equivalent merely because an identically named
+frontend feature appears. The new Office preview's separate source-differential
+format fixtures and security tests are in `tests/test_webui_office_preview.py`,
+native runtime/owner/idempotency tests in `tests/test_webui_office_runtime.py`, and
+native-file-write-to-React replay in `test_webui_artifact_file_download_browser.py`.
+
+### 2026-11-14 — 合并 source Graph/HITL #358、Artifacts #352、Remote Event Steer/Batch/ExpectedAction
+
+已将最新 `origin/main`、原版 Graph/HITL/Steer 集成 PR #358 和源 Artifacts/Office
+PR #352 合入 PR #354 的独立 worktree（仅代码分支；不操作另两个 PR）。
+Graph 代次 ownership 与 SQLite actor lease、审批中断、原版 SSE/RunStepState、
+Tool Approval/Ask User 和真正的 Artifacts child 活动只读标记同时生效。
+外部 Event Actor 可以严格使用 *已完成* 的父 Agent assistant reply 预登记
+`ActiveChildThreads.reserve_for_completed_parent`，并保留永久不可编辑的子会话
+保护；不能把已完成父 generation 当作当前运行中的普通 Subagent。
+
+`triggers/host.ts` 的 `steer` 复用既有 `SteeringStore.enqueue`，一次性
+`clientSteerId=trigger_*` 与原本 SSE 事件；在**同一 SQLite 事务**中复核
+事件源密钥、owner、lease 和 generation CreatedAt，旧 Controller 被撤权后
+不得再修改 steering FIFO。即便入队完成后程序崩溃，重试也复用原
+Steer receipt 而非二次注入。
+
+`triggers/batch.ts` observational bound-child `continue` 支持 opt-in
+`coalesce.key`、750ms 聚合窗口、8 项最大批次与 512KiB 上限，
+按源 occurredAt、接收时间、事件 ID、delivery key 稳定排序，
+组装真实 `kind:librechat.agent_event_batch` JSON 输入，成员 receipt 由
+root terminal 同步结算；无绑定/expectedAction/steer 不能合并。
+
+`triggers/expectedAction.ts` 用 byte-pinned 原 TS `matchesExpectedAction`
+Bun 差分覆盖完整工具名、`_mcp_` 前缀、JSON 参数解析和递归 subset
+匹配。任务终态只能根据本机宿主保存的
+`on_run_step_completed.data.result.tool_call` 证据确认动作是否发生；
+仅模型文字、失败工具结果、错误参数与无效生成不作为成功证据。暂停的人审
+必须等持久审批完成后再判断。
+
+尚需进一步处理 source `background.ts` 普通工具后台化、事件源完整的
+Detached Action 证据持久重传、复杂跨机 Coalescing 操作回执与剩余
+源 Graph RunStepState 边缘消息类型。本节不代表这几项已经全部完成。

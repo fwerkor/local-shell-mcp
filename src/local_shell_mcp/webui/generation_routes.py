@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from .agents import AgentRepository
+from .artifact_prompts import agent_instructions, artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
@@ -34,6 +35,23 @@ from .routes import _body, _owner
 log = logging.getLogger(__name__)
 _TASKS: dict[str, asyncio.Task] = {}
 _TASK_GUARD = asyncio.Lock()
+# Preserve durable running checkpoints only for cooperative Controller shutdown.
+# Explicit abort/disconnect cancellation keeps its existing terminal semantics.
+_SHUTDOWN_TASKS: set[asyncio.Task] = set()
+
+
+def _prune_stale_task_handles() -> None:
+    """Do not hand tasks tied to a terminated loop to a replacement loop.
+
+    A Controller restart creates a fresh event loop; durable state is in SQLite,
+    not in these ephemeral handles. Test in-process reloads can retain module
+    globals across closed loops, so those handles must never enter gather().
+    """
+    for run_id, task in list(_TASKS.items()):
+        if task.done() or task.get_loop().is_closed():
+            if _TASKS.get(run_id) is task:
+                _TASKS.pop(run_id, None)
+            _SHUTDOWN_TASKS.discard(task)
 
 
 def _database():
@@ -90,12 +108,32 @@ async def _run_model(
     resume_history: list[dict] | None = None, partial_text: str = "",
     approved_batch=None, resume_namespace: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+    wakeup_lease: tuple[str, str] | None = None,
+    event_delivery_lease: tuple[str, str] | None = None,
+    actor_lease=None,
+    recovery_steers: bool = False,
 ) -> None:
     repo = _generation_store()
+    heartbeat = asyncio.create_task(actor_lease.keep_alive(), name="generation-lease-" + generation.run_id) \
+        if actor_lease is not None else None
     text_parts: list[str] = [partial_text] if partial_text else []
     params = parameters or {}
     step_id = "step_" + generation.run_id
+    step_index = 0
     now_ms = int(time.time() * 1000)
+
+    def check_wakeup_lease():
+        if actor_lease is not None:
+            actor_lease.assert_current()
+        if wakeup_lease is not None:
+            from .subagent_wakeup import assert_wakeup_lease
+
+            assert_wakeup_lease(repo.database, owner, generation.run_id, wakeup_lease)
+        if event_delivery_lease is not None:
+            from .event_triggers import assert_event_lease
+
+            assert_event_lease(repo.database, owner, generation.run_id, event_delivery_lease)
+
     try:
         from .agent_runner import AgentRunner
         from .agent_runtime import AgentSuspended
@@ -106,6 +144,7 @@ async def _run_model(
         if instructions and resume_history is None:
             history.insert(0, {"role": "system", "content": instructions})
         if resume_history is None:
+            check_wakeup_lease()
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step", "data": {
                     "type": "message_creation", "id": step_id,
@@ -116,9 +155,10 @@ async def _run_model(
                         "content_type": "text", "phase": "final_answer",
                     }},
                 },
-            })
+            }, actor_lease=actor_lease)
 
         async def append_text(chunk):
+            check_wakeup_lease()
             if not chunk:
                 return
             text_parts.append(chunk)
@@ -128,7 +168,34 @@ async def _run_model(
                         "type": "text", "text": chunk, "phase": "final_answer",
                     }},
                 },
-            })
+            }, actor_lease=actor_lease)
+
+        async def on_injected():
+            nonlocal step_id, step_index, now_ms
+            check_wakeup_lease()
+            closed_at = int(time.time() * 1000)
+            repo.append(owner, generation.run_id, {
+                "event": "on_run_step_closed", "data": {
+                    "id": step_id, "index": step_index, "type": "message_creation",
+                    "status": "completed", "runId": generation.response_message_id,
+                    "created_at": now_ms, "closed_at": closed_at,
+                },
+            }, actor_lease=actor_lease)
+            snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
+            step_index = len(snapshot["aggregatedContent"])
+            step_id = f"step_{generation.run_id}_after_steer_{step_index}"
+            now_ms = closed_at
+            repo.append(owner, generation.run_id, {
+                "event": "on_run_step", "data": {
+                    "type": "message_creation", "id": step_id,
+                    "runId": generation.response_message_id, "index": step_index,
+                    "created_at": now_ms, "status": "in_progress",
+                    "stepDetails": {"type": "message_creation", "message_creation": {
+                        "message_id": generation.response_message_id,
+                        "content_type": "text", "phase": "final_answer",
+                    }},
+                },
+            }, actor_lease=actor_lease)
 
         runner = AgentRunner(owner, generation, _database(), repo,
                              scopes=granted_scopes, grant_expires=grant_expires,
@@ -137,52 +204,90 @@ async def _run_model(
                              parameters=params, ask_user_enabled=ask_user_enabled,
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
-                             approved_batch=approved_batch)
+approved_batch=approved_batch, on_injected=on_injected,
+                             wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
+                             actor_lease=actor_lease, recovery_steers=recovery_steers)
         try:
             await runner.run(history)
         except AgentSuspended:
             return
+        check_wakeup_lease()
         repo.append(owner, generation.run_id, {
             "event": "on_run_step_closed", "data": {
-                "id": step_id, "index": 0, "type": "message_creation",
+                "id": step_id, "index": step_index, "type": "message_creation",
                 "status": "completed", "runId": generation.response_message_id,
                 "created_at": now_ms, "closed_at": int(time.time() * 1000),
             },
-        })
-        repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text)
+        }, actor_lease=actor_lease)
+        repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
+                    actor_lease=actor_lease)
     except asyncio.CancelledError:
-        repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
+        if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
+            try:
+                check_wakeup_lease()
+            except Exception:
+                raise  # The actor lost its token: leave checkpoint for new owner.
+        if asyncio.current_task() not in _SHUTDOWN_TASKS:
+            repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts),
+                        actor_lease=actor_lease)
         raise
     except Exception as exc:
+        # A former controller cannot publish failure after its lease changed.
+        if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
+            try:
+                check_wakeup_lease()
+            except Exception:
+                return
         # Do not put provider tokens, request metadata or secrets in response.
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=f"Model generation failed ({type(exc).__name__})")
+                    error=f"Model generation failed ({type(exc).__name__})", actor_lease=actor_lease)
     finally:
+        if heartbeat is not None:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+        if actor_lease is not None:
+            actor_lease.release()
+        _SHUTDOWN_TASKS.discard(asyncio.current_task())
         async with _TASK_GUARD:
-            _TASKS.pop(generation.run_id, None)
+            if _TASKS.get(generation.run_id) is asyncio.current_task():
+                _TASKS.pop(generation.run_id, None)
 
 
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
                       agent: dict | None, native_file_tools: bool = False, write_tools: bool = False,
                       ask_user_enabled: bool = False, mcp_enabled: bool = False,
+                      artifacts_mode: str | None = None,
                       resume_history: list[dict] | None = None, partial_text: str = "",
                       approved_batch=None, resume_namespace: str = "",
-                      granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None) -> None:
+                      granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+                      wakeup_lease: tuple[str, str] | None = None,
+event_delivery_lease: tuple[str, str] | None = None,
+                                            recovery_steers: bool = False) -> None:
+    from .generation_actor_lease import ActorLease
+
     async with _TASK_GUARD:
+        _prune_stale_task_handles()
         existing = _TASKS.get(generation.run_id)
         if existing and not existing.done():
             return
+        actor_lease = ActorLease.claim(_database(), owner, generation.run_id)
+        if actor_lease is None:
+            # A different Controller currently owns this generation. Never
+            # launch a second model/tool executor against the same run.
+            return
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
-                       instructions=str((agent or {}).get("instructions") or ""),
+                       instructions=agent_instructions(agent, profile.provider, artifacts_mode),
                        parameters=(agent or {}).get("model_parameters") or {},
                        native_file_tools=native_file_tools, write_tools=write_tools,
                        ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                        parent_agent=agent,
                        resume_history=resume_history, partial_text=partial_text,
                        approved_batch=approved_batch, resume_namespace=resume_namespace,
-                       granted_scopes=granted_scopes, grant_expires=grant_expires),
+                       granted_scopes=granted_scopes, grant_expires=grant_expires,
+                       wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
+                       actor_lease=actor_lease, recovery_steers=recovery_steers),
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task
@@ -253,15 +358,25 @@ async def start_generation(request: Request):
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
+                          artifacts_mode=artifact_mode(payload, agent),
                           granted_scopes=frozenset(scopes), grant_expires=grant_expires)
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh, protocol_version=protocol), status_code=202,
                         headers=_generator_headers(protocol))
 
 
-async def _events(owner: str, generation: Generation, after: int = 0) -> AsyncIterator[bytes]:
+async def _events(owner: str, generation: Generation, after: int = 0,
+                  *, resume: bool = False) -> AsyncIterator[bytes]:
     store = _generation_store()
     last = max(0, after)
+    if resume:
+        snapshot, watermark = store.resume_snapshot(owner, generation.run_id)
+        if watermark > last:
+            last = watermark
+        yield ("data: " + json.dumps({
+            "sync": True, "resumeState": snapshot, "pendingEvents": [],
+            "generationProtocolVersion": generation.protocol_version,
+        }, ensure_ascii=False, separators=(",", ":")) + "\n\n").encode()
     last_heartbeat = time.monotonic()
     while True:
         results = store.events(owner, generation.run_id, last)
@@ -297,7 +412,11 @@ async def stream_generation(request: Request):
         after = max(0, int(cursor)) if cursor else 0
     except ValueError as exc:
         raise HTTPException(400, detail="Invalid SSE replay cursor") from exc
-    return StreamingResponse(_events(owner, generation, after), media_type="text/event-stream",
+    resume = request.query_params.get("resume") == "true"
+    if resume and generation.status == "running":
+        await _reattach_running_actor(request, owner, generation)
+    return StreamingResponse(_events(owner, generation, after, resume=resume),
+                             media_type="text/event-stream",
                              headers=_generator_headers(request_protocol(request, stored_version=generation.protocol_version)))
 
 
@@ -309,11 +428,15 @@ async def generation_status(request: Request):
         return JSONResponse({"active": False, "generationProtocolVersion": protocol},
                             headers=_generator_headers(protocol))
     active = generation.status in {"running", "requires_action"}
-    pending = _generation_store().pending_action(owner, generation.run_id)
+    store = _generation_store()
+    pending = store.client_pending_action(store.pending_action(owner, generation.run_id))
+    resume_state, _ = store.resume_snapshot(owner, generation.run_id)
     return JSONResponse({
         "active": active,
         "status": generation.status,
         **({"pendingAction": pending} if pending is not None else {}),
+        "resumeState": resume_state,
+        "aggregatedContent": resume_state["aggregatedContent"],
         "streamId": generation.conversation_id,
         "createdAt": generation.generation_created_at,
         "elapsedMs": max(0, int(time.time() * 1000) - generation.generation_created_at),
@@ -339,6 +462,60 @@ async def active_generations(request: Request):
                          "generationProtocolVersion": protocol}, headers=_generator_headers(protocol))
 
 
+async def steer_generation(request: Request):
+    """Original React steering POST contract, no provider-bound side effects on replay."""
+    from .steering import SteeringStore, SteerRejection
+
+    owner = _owner(request)
+    body = await _body(request)
+    protocol = request_protocol(request, body)
+    store = SteeringStore(_database())
+    cid = body.get("conversationId")
+    if isinstance(cid, str):
+        current = _generation_store().latest(owner, cid)
+        if (current is not None and current.agent_id and
+            AgentRepository(_database()).get(owner, current.agent_id) is None):
+            return JSONResponse({"code": "FORBIDDEN", "generationProtocolVersion": protocol},
+                                status_code=403, headers=_generator_headers(protocol))
+        if current is not None:
+            # Model-bound instructions cannot bypass revoked machine scopes
+            # merely because the originating generation still exists.
+            from .machine_permissions import require_machine_scope, resolve_access
+
+            scopes, expiry = _request_grant(request)
+            try:
+                policy = resolve_access(owner, cid)
+                for machine, level in policy.items():
+                    if level in {"read", "write"}:
+                        require_machine_scope(scopes, machine, level, expires=expiry)
+            except (PermissionError, KeyError):
+                return JSONResponse({"code": "FORBIDDEN", "generationProtocolVersion": protocol},
+                                    status_code=403, headers=_generator_headers(protocol))
+    try:
+        result = store.enqueue(owner, body, preempt_capable=True,
+                               strict_delivery=request.url.path.endswith("/deliver"))
+    except SteerRejection as exc:
+        return JSONResponse({**exc.body, "generationProtocolVersion": protocol},
+                            status_code=exc.status, headers=_generator_headers(protocol))
+    return JSONResponse({**result, "generationProtocolVersion": protocol},
+                        status_code=202, headers=_generator_headers(protocol))
+
+async def mutate_steer(request: Request):
+    from .steering import SteeringStore, SteerRejection
+
+    owner = _owner(request)
+    body = await _body(request)
+    protocol = request_protocol(request, body)
+    arm = request.url.path.endswith("/arm")
+    try:
+        result = SteeringStore(_database()).mutate(owner, body, arm=arm, preempt_capable=True)
+    except SteerRejection as exc:
+        return JSONResponse({**exc.body, "generationProtocolVersion": protocol},
+                            status_code=exc.status, headers=_generator_headers(protocol))
+    return JSONResponse({**result, "generationProtocolVersion": protocol},
+                        headers=_generator_headers(protocol))
+
+
 async def abort_generation(request: Request):
     owner = _owner(request)
     payload = await _body(request)
@@ -356,15 +533,75 @@ async def abort_generation(request: Request):
     if generation.status not in {"running", "requires_action"}:
         raise HTTPException(409, detail="Generation is not active")
     from .durable_tasks import cancel_run
+    from .steering import SteeringStore
 
+    pending_steers = SteeringStore(_database()).pending(owner, generation.run_id)
     cancel_run(owner, generation.run_id)
     task = _TASKS.get(generation.run_id)
     if task and not task.done():
         task.cancel()
     else:
         store.finish(owner, generation.run_id, status="aborted")
-    return JSONResponse({"success": True, "generationProtocolVersion": protocol},
+    return JSONResponse({"success": True, "generationProtocolVersion": protocol,
+                         **({"pendingSteers": pending_steers} if pending_steers else {})},
                         headers=_generator_headers(protocol))
+
+
+async def _reattach_running_actor(request: Request, owner: str, generation: Generation) -> None:
+    """Fresh-request authorization for reconnecting a checkpointed root actor.
+
+    No controller startup process can inherit a machine grant or run tools.
+    Live foreign actors remain the unique owners of the run and only get SSE.
+    """
+    from .checkpoints import SQLiteCheckpointSaver
+    from .generation_actor_lease import active_run_ids
+    from .machine_permissions import require_machine_scope, resolve_access
+    from .routes import _repo
+
+    current = _TASKS.get(generation.run_id)
+    if current is not None and not current.done():
+        return
+    if generation.run_id in active_run_ids(_database()):
+        return
+    cid = generation.conversation_id
+    saver = SQLiteCheckpointSaver(_database(), owner)
+    checkpoint = saver.get_tuple(saver.config(cid, generation.run_id, event_actor=True))
+    graph_checkpoint = saver.get_tuple(saver.config(
+        cid, generation.run_id + ":graph:", event_actor=True))
+    if checkpoint is None and graph_checkpoint is None:
+        from .steering import SteeringStore
+
+        if not SteeringStore(_database()).applied_parts(owner, generation.run_id):
+            raise HTTPException(409, detail="Generation has no recoverable checkpoint")
+    try:
+        scopes, expiry = _request_grant(request)
+        machine_policy = resolve_access(owner, cid)
+        for machine, level in machine_policy.items():
+            if level in {"read", "write"}:
+                require_machine_scope(scopes, machine, level, expires=expiry)
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    with _database().connect() as db:
+        row = db.execute("SELECT state,agent_id FROM runs WHERE id=?", (generation.run_id,)).fetchone()
+    state = json.loads(row["state"])
+    try:
+        profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    agent = AgentRepository(_database()).get(owner, row["agent_id"]) if row["agent_id"] else None
+    if row["agent_id"] and agent is None:
+        raise HTTPException(404, detail="Agent no longer available")
+    await _start_task(
+        owner, generation, profile, agent,
+        native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
+        write_tools=any(level == "write" for level in machine_policy.values()),
+        ask_user_enabled=bool(state.get("askUserEnabled")),
+        mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+        resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
+        partial_text=_generation_store().accumulated_text(owner, generation.run_id),
+        granted_scopes=frozenset(scopes), grant_expires=expiry,
+        recovery_steers=True,
+    )
 
 
 async def resume_generation(request: Request):
@@ -382,12 +619,16 @@ async def resume_generation(request: Request):
     if action_id is None:
         if generation.status != "running":
             raise HTTPException(409, detail="Generation cannot be resumed")
+        expected = payload.get("generationCreatedAt")
+        if expected is not None and str(generation.generation_created_at) != str(expected):
+            raise HTTPException(409, detail="Generation identity mismatch")
+        await _reattach_running_actor(request, owner, generation)
         return JSONResponse(_generation_body(generation, status="resumed", resumed=True, protocol_version=protocol),
                             headers=_generator_headers(protocol))
 
     if not isinstance(action_id, str) or not action_id:
         raise HTTPException(400, detail="Invalid human action id")
-    if generation.status != "requires_action":
+    if generation.status not in {"requires_action", "running"}:
         raise HTTPException(409, detail="No pending human action")
     expected = payload.get("generationCreatedAt")
     if expected is not None and str(generation.generation_created_at) != str(expected):
@@ -402,9 +643,16 @@ async def resume_generation(request: Request):
         for machine, level in machine_policy.items():
             if level in {"read", "write"}:
                 require_machine_scope(scopes, machine, level, expires=expiry)
+        claim = store.resume_claim(owner, generation.run_id)
         pending = store.pending_action(owner, generation.run_id)
+        if claim is not None and claim.get("actionId") == action_id:
+            pending = claim.get("pendingAction")
         if pending is None or pending.get("actionId") != action_id:
             raise HTTPException(409, detail="Stale or mismatched human action")
+        if claim is None and store.action_expired(pending):
+            store.finish(owner, generation.run_id, status="interrupted",
+                         error="Human action expired", expired_action_id=action_id)
+            raise HTTPException(409, detail="No live pending action to resume")
         # Read and validate the provider before mutating SQLite. Failed config
         # cannot consume a one-shot answer and strand the pending generation.
         with _database().connect() as db:
@@ -412,6 +660,13 @@ async def resume_generation(request: Request):
         state = json.loads(row["state"])
         profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
         agent = AgentRepository(_database()).get(owner, row["agent_id"]) if row["agent_id"] else None
+        if row["agent_id"] and agent is None:
+            raise HTTPException(403, detail="The originating Agent is no longer accessible")
+        if payload.get("agent_id") not in (None, row["agent_id"]):
+            raise HTTPException(409, detail="Agent identity mismatch")
+        if (payload.get("model") is not None and state.get("model") and
+            payload["model"] != state["model"]):
+            raise HTTPException(409, detail="Model identity mismatch")
         paused_task = _TASKS.get(generation.run_id)
         if paused_task and not paused_task.done():
             await asyncio.wait_for(asyncio.shield(paused_task), timeout=5)
@@ -424,18 +679,38 @@ async def resume_generation(request: Request):
             decisions = payload.get("decisions")
             if not isinstance(decisions, list):
                 raise HTTPException(400, detail="Tool approval decisions are required")
-            if any(isinstance(decision, dict) and decision.get("decision") in {"approve", "edit"}
-                   for decision in decisions):
-                _check_mcp_access(owner, cid, scopes, execution=True) if any(
-                    item.get("name") == "mcp_tool_call" for item in pending["payload"].get("action_requests", [])
-                ) else None
-            resumed, history, previous_text, approved_batch = store.claim_approval(
-                owner, generation.run_id, action_id, decisions,
-            )
+            if (
+                any(isinstance(decision, dict) and decision.get("decision") in {"approve", "edit"}
+                    for decision in decisions)
+                and any(item.get("name") == "mcp_tool_call" for item in
+                        pending["payload"].get("action_requests", []))
+            ):
+                _check_mcp_access(owner, cid, scopes, execution=True)
+            submission = {"decisions": decisions}
+            if claim is not None:
+                resumed, history, previous_text, approved_batch, resume_namespace = (
+                    store.restart_claimed_resume(owner, generation.run_id, action_id, submission))
+            else:
+                try:
+                    resumed, history, previous_text, approved_batch = store.claim_approval(
+                        owner, generation.run_id, action_id, decisions,
+                    )
+                except KeyError:
+                    resumed, history, previous_text, approved_batch, resume_namespace = (
+                        store.restart_claimed_resume(owner, generation.run_id, action_id, submission))
         else:
-            resumed, history, previous_text = store.answer_question(
-                owner, generation.run_id, action_id, payload,
-            )
+            submission = {key: payload[key] for key in ("answer", "answers") if key in payload}
+            if claim is not None:
+                resumed, history, previous_text, approved_batch, resume_namespace = (
+                    store.restart_claimed_resume(owner, generation.run_id, action_id, submission))
+            else:
+                try:
+                    resumed, history, previous_text = store.answer_question(
+                        owner, generation.run_id, action_id, submission,
+                    )
+                except KeyError:
+                    resumed, history, previous_text, approved_batch, resume_namespace = (
+                        store.restart_claimed_resume(owner, generation.run_id, action_id, submission))
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
     except (ValueError, KeyError) as exc:
@@ -446,22 +721,29 @@ async def resume_generation(request: Request):
                       native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
+                      artifacts_mode=state.get("artifactsMode"),
                       mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
-                      granted_scopes=frozenset(scopes), grant_expires=expiry)
-    return JSONResponse(_generation_body(resumed, status="resumed", resumed=True, protocol_version=protocol),
+                      granted_scopes=frozenset(scopes), grant_expires=expiry,
+                      recovery_steers=True)
+    return JSONResponse(_generation_body(resumed, status="resuming", resumed=True, protocol_version=protocol),
                         headers=_generator_headers(protocol))
 
 
 async def shutdown_generations() -> None:
     async with _TASK_GUARD:
+        _prune_stale_task_handles()
         tasks = list(_TASKS.values())
         for task in tasks:
+            _SHUTDOWN_TASKS.add(task)
             task.cancel()
     if tasks:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
+    from .subagent_task_host import shutdown_subagent_tasks
+
+    await shutdown_subagent_tasks()
 
 
 def generation_routes() -> list[Route]:
@@ -470,6 +752,10 @@ def generation_routes() -> list[Route]:
         Route("/api/agents/chat/status/{conversation_id}", generation_status, methods=["GET"]),
         Route("/api/agents/chat/active", active_generations, methods=["GET"]),
         Route("/api/agents/chat/abort", abort_generation, methods=["POST"]),
+        Route("/api/agents/chat/steer", steer_generation, methods=["POST"]),
+        Route("/api/agents/chat/steer/deliver", steer_generation, methods=["POST"]),
+        Route("/api/agents/chat/steer/cancel", mutate_steer, methods=["POST"]),
+        Route("/api/agents/chat/steer/arm", mutate_steer, methods=["POST"]),
         Route("/api/agents/chat/resume", resume_generation, methods=["POST"]),
         Route("/api/agents/chat", start_generation, methods=["POST"]),
         Route("/api/agents/chat/{endpoint}", start_generation, methods=["POST"]),

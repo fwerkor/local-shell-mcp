@@ -138,9 +138,29 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
         if enabled:
             # A crash can leave an old generation marked as running. Replay
             # final 'interrupted' events before admitting new chat requests.
+            from .webui.event_triggers import active_event_generations, start_event_worker
             from .webui.generation_routes import _generation_store
+            from .webui.providers import stream_model, stream_model_with_tools
+            from .webui.subagent_task_host import active_child_generations, recover_subagent_tasks
 
-            _generation_store().recover_orphans()
+            generation_store = _generation_store()
+            from .webui.generation_actor_lease import active_run_ids, resumable_run_ids
+
+            children = active_child_generations(generation_store.database) | active_event_generations(generation_store.database)
+            # A second healthy Controller may own the other live runs. Never
+            # rewrite its pending action or terminate it on startup.
+            live = children | active_run_ids(generation_store.database)
+            generation_store.recover_claimed_resumes(live)
+            # A crashed Controller cannot transfer its prior OAuth grant.
+            # Keep checkpointed sessions recoverable, but do not execute tools
+            # until an authenticated browser SSE/resume request re-attaches.
+            recoverable = resumable_run_ids(generation_store.database, excludes=live)
+            generation_store.recover_orphans(live | recoverable)
+            await recover_subagent_tasks(
+                generation_store.database,
+                stream_tools=stream_model_with_tools, stream_text=stream_model,
+            )
+            await start_event_worker(generation_store.database)
         recovery_task = None
         if enabled:
             from .webui.durable_tasks import serve
@@ -151,8 +171,10 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
                 yield
             finally:
                 if enabled:
+                    from .webui.event_triggers import shutdown_event_workers
                     from .webui.generation_routes import shutdown_generations
 
+                    await shutdown_event_workers()
                     await shutdown_generations()
                 if recovery_task is not None:
                     recovery_task.cancel()
@@ -182,6 +204,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.config_routes import config_routes
             from .webui.controller_routes import controller_routes
             from .webui.conversation_routes import conversation_routes
+            from .webui.event_trigger_routes import event_trigger_routes
             from .webui.generation_routes import generation_routes
             from .webui.misc_routes import misc_routes
             from .webui.routes import webui_routes
@@ -192,6 +215,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             routes[2:2] = conversation_routes()
             routes[2:2] = agent_routes()
             routes[2:2] = generation_routes()
+            routes[2:2] = event_trigger_routes()
             routes[2:2] = misc_routes()
             routes[2:2] = controller_routes()
     if settings.remote_enabled:

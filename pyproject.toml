@@ -35,10 +35,12 @@ dependencies = [
   "pathspec>=0.12.1",
   "zstandard>=0.23.0,<1",
   "pillow>=10.3.0",
+  "xlrd>=2.0.2,<3",  # Lightweight BIFF/XLS-only preview; no SheetJS or Node runtime.
   "pywinpty>=2.0.13; platform_system == \"Windows\"",
 ]
 
 [project.optional-dependencies]
+webui-graph = ["langgraph>=1.0.10,<1.1", "langchain-core>=1.2.8,<2"]
 browser = ["playwright>=1.44.0"]
 dev = [
   "coverage[toml]>=7.8.0",
