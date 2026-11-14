@@ -262,3 +262,7 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## 2026-11-12 人工交互移植增量
+
+源码、HTTP/SSE、SQLite恢复、原React浏览器验证与未完成范围详见 HUMAN_INTERACTION_PORT.md。新增原版 Ask User 显式审批优先级、原 resumeState 与 sync、同一决策崩溃恢复。仍未验收完整 steer/arm/cancel、actor 和多 Agent 并行子图调度；状态标记为部分。

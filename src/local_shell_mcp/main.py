@@ -140,7 +140,9 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             # final 'interrupted' events before admitting new chat requests.
             from .webui.generation_routes import _generation_store
 
-            _generation_store().recover_orphans()
+            store = _generation_store()
+            store.recover_claimed_resumes()
+            store.recover_orphans()
         recovery_task = None
         if enabled:
             from .webui.durable_tasks import serve

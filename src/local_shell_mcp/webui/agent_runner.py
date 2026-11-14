@@ -19,6 +19,7 @@ from .agent_runtime import (
 from .agents import AgentRepository
 from .approval_runtime import (
     approval_policy_decision,
+    ask_user_approval_policy,
     build_approval_payload,
     execute_approval_batch,
     truncate_approval_result,
@@ -35,6 +36,7 @@ from .handoff import (
     receive_handoff,
 )
 from .providers import ModelToolCall, provider_config, selected_provider
+from .steering import SteeringStore, merged_text
 from .subagents import build_subagent_configs, invoke_subagent, subagent_tools
 
 
@@ -44,7 +46,8 @@ class AgentRunner:
                  parameters=None, ask_user_enabled=False, mcp_enabled=False,
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
-                 approved_batch=None):
+                 approved_batch=None, on_injected=None):
+        self.on_injected = on_injected
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -56,6 +59,7 @@ class AgentRunner:
         self.partial_text, self.approved_batch = partial_text, approved_batch
         self.repository = AgentRepository(database)
         self.saver = SQLiteCheckpointSaver(database, owner)
+        self.steers = SteeringStore(database)
         self.config = self.saver.config(generation.conversation_id, generation.run_id,
                                        checkpoint_ns=namespace, event_actor=True)
         self.active_config = self.config
@@ -222,12 +226,14 @@ class AgentRunner:
     async def _pause(self, payload, state, *, approval=False):
         import uuid
 
+        created_at = int(time.time() * 1000)
         pending = {"actionId": "action_" + uuid.uuid4().hex,
                    "streamId": self.generation.conversation_id,
                    "conversationId": self.generation.conversation_id,
                    "runId": self.generation.run_id,
                    "responseMessageId": self.generation.response_message_id,
-                   "createdAt": int(time.time() * 1000), "namespace": self.namespace, "payload": payload}
+                   "createdAt": created_at, "expiresAt": created_at + 24 * 60 * 60 * 1000,
+                   "namespace": self.namespace, "payload": payload}
         self.saver.put_writes(self.active_config, [("__interrupt__", pending)], task_id="human")
         pause = self.store.pause_for_approval if approval else self.store.pause_for_question
         if not pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text):
@@ -248,16 +254,13 @@ class AgentRunner:
         if not self.namespace:
             for call in unresolved:
                 self._tool_step(call)
-        asking = [call for call in unresolved if call.name == "ask_user_question"]
-        if asking:
-            if len(calls) != 1:
-                raise ValueError("Ask User cannot run in parallel with another tool")
-            await self._pause(build_ask_user_payload(asking[0].arguments, asking[0].call_id), state)
         endpoints = _repo().setting(self.owner, "endpoints", {}) or {}
         policy = (endpoints.get("agents") or {}).get("toolApproval")
         ask = []
+        questions = []
         for call in unresolved:
-            decision = approval_policy_decision(policy, call.name)
+            selected_policy = ask_user_approval_policy(policy) if call.name == "ask_user_question" else policy
+            decision = approval_policy_decision(selected_policy, call.name)
             if decision and decision["decision"] == "deny":
                 output = "Blocked: " + decision.get("reason", "Rejected by policy")
                 record = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)}, "output": output}
@@ -265,8 +268,14 @@ class AgentRunner:
                 self.cache[replay_key(call, calls.index(call))] = record
             elif decision and decision["decision"] == "ask":
                 ask.append(call)
+            elif call.name == "ask_user_question":
+                questions.append(call)
         if ask:
             await self._pause(build_approval_payload(ask), state, approval=True)
+        if questions:
+            if len(calls) != 1:
+                raise ValueError("Ask User cannot run in parallel with another tool")
+            await self._pause(build_ask_user_payload(questions[0].arguments, questions[0].call_id), state)
         outputs = await execute_tool_batch(
             calls, lambda call: self._invoke(call, state), settled=self.cache,
             interrupting_names=frozenset({"subagent"}),
@@ -346,7 +355,12 @@ class AgentRunner:
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
                 cached = self.cache.get(replay_key(original, state.pending_calls.index(original)))
-                return cached["output"] if cached else await self._invoke(call, state)
+                if cached:
+                    return cached["output"]
+                if call.name == "ask_user_question":
+                    await self._pause(build_ask_user_payload(call.arguments, call.call_id), state)
+                    raise AssertionError("Suspended question should not return")
+                return await self._invoke(call, state)
 
             await execute_approval_batch(self.approved_batch, dispatch=reviewed_dispatch,
                                          on_completed=completed)
@@ -355,8 +369,33 @@ class AgentRunner:
                 self.partial_text += text
             await self.on_text(text)
 
-        result = await run_agent_loop(state, stream_tools=self.stream_tools, stream_text=self.stream_text,
-                                      dispatch=self._dispatch, on_text=emit, save_state=self._save)
+        async def inject_steers(loop_state, boundary):
+            # Source PostToolBatch, PreemptBoundary and StopFinalize hooks all
+            # inject from the same owner/epoch-fenced durable queue.
+            if self.namespace:
+                return False
+            applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary)
+            if applied and self.on_injected is not None:
+                await self.on_injected()
+            for item in applied:
+                content = merged_text(item)
+                if item.get("files"):
+                    # Retain validated upload refs for native tools; the model
+                    # cannot claim multimodal inline encoding from this path.
+                    content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
+                        item["files"], ensure_ascii=False,
+                    )
+                loop_state.messages.append({"role": "user", "content": content, "source": "steer"})
+            return bool(applied)
+
+        async def should_seal_stream():
+            return not self.namespace and self.steers.has_preempt(self.owner, self.generation.run_id)
+
+        result = await run_agent_loop(
+            state, stream_tools=self.stream_tools, stream_text=self.stream_text,
+            dispatch=self._dispatch, on_text=emit, save_state=self._save,
+            on_boundary=inject_steers, on_stream_chunk=should_seal_stream,
+        )
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
                                                review["actionId"], result, self.partial_text)
