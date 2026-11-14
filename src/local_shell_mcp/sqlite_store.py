@@ -238,6 +238,10 @@ CREATE TABLE IF NOT EXISTS subagent_wakeups (
     lease_owner TEXT,
     lease_until INTEGER,
     error TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER,
+    failure_history TEXT NOT NULL DEFAULT '[]',
+    requeue_count INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -338,6 +342,33 @@ class SQLiteDatabase:
             }:
                 db.execute("ALTER TABLE agent_durable_tasks "
                            "ADD COLUMN authorization_conversation_id TEXT")
+            # Upgrade pre-retry completion queue rows without losing accepted
+            # turns or violating the existing native durable Job migrations.
+            existing_wakeup = {
+                row["name"] for row in db.execute("PRAGMA table_info(subagent_wakeups)")
+            }
+            for column, definition in (
+                ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+                ("next_attempt_at", "INTEGER"),
+                ("failure_history", "TEXT NOT NULL DEFAULT '[]'"),
+                ("requeue_count", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if column not in existing_wakeup:
+                    db.execute(f"ALTER TABLE subagent_wakeups ADD COLUMN {column} {definition}")
+            # Source event-driven completion readiness: committing a parent
+            # turn or durable child terminal row clears its waiting backoff in
+            # the SAME transaction. No cross-process in-memory wake event.
+            db.execute("CREATE TRIGGER IF NOT EXISTS subagent_wakeup_parent_settled "
+                       "AFTER UPDATE OF status ON runs "
+                       "WHEN NEW.status IN ('complete','aborted','error','interrupted','requires_action') "
+                       "BEGIN UPDATE subagent_wakeups SET next_attempt_at=NULL "
+                       "WHERE parent_conversation_id=NEW.conversation_id "
+                       "AND status='pending'; END")
+            db.execute("CREATE TRIGGER IF NOT EXISTS subagent_wakeup_child_settled "
+                       "AFTER UPDATE OF status ON subagent_tasks "
+                       "WHEN NEW.status!='running' "
+                       "BEGIN UPDATE subagent_wakeups SET next_attempt_at=NULL "
+                       "WHERE task_id=NEW.id AND status='pending'; END")
             db.execute("PRAGMA user_version=1")
 
     @contextlib.contextmanager

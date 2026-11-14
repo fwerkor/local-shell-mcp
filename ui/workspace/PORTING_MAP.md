@@ -518,3 +518,48 @@ child run 尚在 `running/requires_action` 时等待持久终态，不用抢先�
 ## 2026-11-12 人工交互移植增量
 
 源码、HTTP/SSE、SQLite恢复、原React浏览器验证与未完成范围详见 HUMAN_INTERACTION_PORT.md。新增原版 Ask User 显式审批优先级、原 resumeState 与 sync、同一决策崩溃恢复。仍未验收完整 steer/arm/cancel、actor 和多 Agent 并行子图调度；状态标记为部分。
+
+### 2026-11-14 — Source Agent Trigger Retry/Dead Letter 与父续接租约隔离
+
+对照锁定源码 `packages/api/src/agents/triggers/engine.ts` 中
+`DEFAULT_MAX_ATTEMPTS=8`、`DEFAULT_RETRY_BASE_MS=1000`、
+`DEFAULT_RETRY_CAP_MS=300000`、`retryAt`，在内部 Subagent 完成事件队列
+增加持久 attempt、可领取截止时刻、错误类型和有界 failure history，
+迁移旧 SQLite 表时保留已提交任务。调度器派发失败时按原版半区间随机
+指数退避，同一个 task ID 重放**原有根 generation**，不重复创建对话。
+每次认领使用新的高熵租约令牌（包括同进程重试）；旧持有者无权结算失败。
+达到 8 次上限后落持久死信，释放 child 的自动结果占用供人工领取；
+`get_dead_wakeups` 和 `requeue_dead_wakeup` 是可信、owner-scoped 的内部接口，
+未引入未经授权的公开路由/Agent 工具。手动 requeue 位于新队列尾部，
+增加持久 requeue ordinal 与新的 generation 幂等 key，避免采用旧失败轮次。
+
+跨 Controller 根 generation 在真实 `AgentRunner._check_grant`、
+Graph 子节点、模型 token/SSE 回调及最终完成写入之前检查 SQLite
+`(owner,run_id,task_id,lease_owner,lease_until)`。本地 worker 活跃期间
+按 token CAS 续租；租约被其他 Controller 领取后，旧 actor 不能继续写
+消息、tool、checkpoint 或结算回执，新的 actor 从旧 generation checkpoint
+恢复。测试采用真实模型流中途劫持 lease 的 E2E；另有 8 次退避、死信重排、
+过期授权、旧版本 SQLite 原地升级，以及冒用旧 token 失败的定向回归。
+
+这实现的是**内部 Subagent continuation** 的 bounded retry 和 actor fencing。
+原版通用 fire/steer/batch webhook、绑定/密钥管理、多租户队列、批处理及
+全局 Agent Trigger 调度仍是独立后续移植项，不据此声称完全一致。
+
+### 2026-11-14 — JS source waitingRetryAfter 差分和跨进程 Ready 通知
+
+新增 SHA-256 完全相同的上游原版 `triggers/backoff.ts` TypeScript fixture，
+CI 用 Bun 直接执行原始 `waitingRetryAfter`，验证 Python
+`waiting_retry_seconds` 在 5s/60s 限界、按等待年龄 10% 回退及
+Math.ceil 浮点临界点上的逐例完全一致。源码锁与执行器 SHA-256 记录在
+`UPSTREAM_LOCK.json`；同页新增 `triggers/engine.ts` 的重试/租约映射。
+
+未满足 readiness 的 parent/child 在统一 SQLite 中设置
+`next_attempt_at`，不增加失败 attempt。为避免错过跨 Controller 通知，
+在父 `runs.status` 终态和子 `subagent_tasks.status` 终态的**同一个 SQLite
+写入事务**中使用数据库 trigger 清空该截止时间；即使负责原任务的
+Controller 已经退出，另一 Controller 的 poll 也会立即发现可领取事件。
+旧数据库从 `CREATE TRIGGER IF NOT EXISTS` 安全迁移，测试覆盖进行中 child
+和等待中 parent 两种情况的自动唤醒、超过五秒但无需等待实际 timeout 的路径。
+
+本次仅提供内部 Subagent 完成事件的有界重试、死信及安全自动续接。
+其它 Agent Trigger 类型尚未引入未经授权的公共 HTTP 入口。

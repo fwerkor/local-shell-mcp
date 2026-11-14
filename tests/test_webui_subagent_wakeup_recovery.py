@@ -61,14 +61,20 @@ async def test_dispatch_crash_before_start_replays_exact_same_generation(environ
         seen.append(generation.run_id)
         raise RuntimeError("Crash between persisted generation and local scheduler")
 
-    with pytest.raises(RuntimeError, match="Crash"):
-        await process_wakeups(db, dispatch=broken)
+    assert await process_wakeups(db, dispatch=broken) == 0
+    with db.connect() as conn:
+        failure = conn.execute("SELECT attempts, next_attempt_at,failure_history "
+                               "FROM subagent_wakeups WHERE task_id=?", (task_id,)).fetchone()
+        assert failure["attempts"] == 1
+        assert failure["next_attempt_at"] > 0
+        assert json.loads(failure["failure_history"])[0]["errorType"] == "RuntimeError"
     from local_shell_mcp.webui.subagent_task_host import active_child_generations
 
     assert seen[0] in active_child_generations(db)
     assert store.recover_orphans(active_child_generations(db)) == 0
     with db.connect() as conn:
-        conn.execute("UPDATE subagent_wakeups SET lease_until=0 WHERE task_id=?", (task_id,))
+        conn.execute("UPDATE subagent_wakeups SET lease_until=0,next_attempt_at=0 "
+                     "WHERE task_id=?", (task_id,))
 
     async def recover(owner, generation, profile, agent, **kwargs):
         seen.append(generation.run_id)
@@ -171,12 +177,16 @@ async def test_queue_waits_for_other_active_generation_and_uses_later_branch(env
 @pytest.mark.asyncio
 async def test_active_wakeup_lease_is_renewed_and_does_not_dispatch_twice(environment):
     from local_shell_mcp.webui import generation_routes
-    from local_shell_mcp.webui.subagent_wakeup import _now
+    from local_shell_mcp.webui.subagent_wakeup import _OWNED_LEASES, _now
 
     db, repo, store, child, parent, parent_run = environment
     host, task_id, generation = await begin_automatic(environment)
     blocker = asyncio.create_task(asyncio.sleep(30))
     generation_routes._TASKS[generation.run_id] = blocker
+    with db.connect() as conn:
+        token = conn.execute("SELECT lease_owner FROM subagent_wakeups WHERE task_id=?",
+                             (task_id,)).fetchone()[0]
+    _OWNED_LEASES[task_id] = (generation.run_id, token)
     try:
         with db.connect() as conn:
             conn.execute("UPDATE subagent_wakeups SET lease_until=? WHERE task_id=?",

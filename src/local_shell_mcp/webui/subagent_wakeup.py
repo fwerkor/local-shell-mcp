@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import secrets
 import time
 import uuid
@@ -27,9 +28,81 @@ SOURCE_WAKEUP_GUIDANCE = (
     "explicit status or control, or as a fallback if automatic delivery is unavailable."
 )
 _DELAY_MS = 250
-_LEASE_MS = 30_000
+_LEASE_MS = 2 * 60_000  # original trigger engine DEFAULT_LEASE_MS
+_MAX_ATTEMPTS = 8
+_RETRY_BASE_MS = 1_000
+_RETRY_CAP_MS = 5 * 60_000
 _WORKERS: dict[str, asyncio.Task] = {}
 _PROCESS = secrets.token_hex(12)
+_OWNED_LEASES: dict[str, tuple[str, str]] = {}  # child task -> (root run, fresh claim token)
+
+
+def waiting_retry_seconds(waiting_since_ms: int, now_ms: int) -> int:
+    """Exact original triggers/backoff.ts:waitingRetryAfter default 5..60s.
+
+    Defer not-ready parent/child deliveries without consuming an attempt.
+    Readiness changes should clear next_attempt_at in the same SQLite commit.
+    """
+    elapsed = max(0, now_ms - waiting_since_ms)
+    delay_ms = min(60_000, max(5_000, elapsed * .1))
+    return math.ceil(delay_ms / 1_000)
+
+
+def _defer_pending(db: Any, row: Any, now: int) -> None:
+    db.execute("UPDATE subagent_wakeups SET next_attempt_at=?,updated_at=? "
+               "WHERE task_id=? AND status='pending'",
+               (now + waiting_retry_seconds(row["created_at"], now) * 1000,
+                now, row["task_id"]))
+
+
+def _retry_at(attempt: int, now: int, *, random_half: float | None = None) -> int:
+    """Original triggers/engine.ts:retryAt half-to-full jitter, bounded 1s..5m.
+
+    Time budgets are durable milliseconds; a retry never allocates a fresh
+    root run or consumes a second manual child result claim.
+    """
+    if not isinstance(attempt, int) or attempt < 1:
+        raise ValueError("A retry attempt number must be positive")
+    delay = min(_RETRY_BASE_MS * (2 ** min(attempt - 1, 30)), _RETRY_CAP_MS)
+    jitter = secrets.randbelow(max(1, delay // 2)) if random_half is None else int(
+        max(0, min(0.999999, random_half)) * (delay / 2)
+    )
+    return now + delay // 2 + jitter
+
+
+def _dispatch_failure(database: Any, task_id: str, run_id: str, lease_token: str,
+                      error: Exception, *, at: int | None = None) -> bool:
+    """Fenced original bounded retry; False means permanent dead letter.
+
+    Source engine does not log provider exception strings into Agent history:
+    records expose only a stable error type, never possible credentials.
+    """
+    current = _now() if at is None else at
+    with database.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT attempts,failure_history FROM subagent_wakeups WHERE "
+                         "task_id=? AND run_id=? AND lease_owner=? AND status='dispatched'",
+                         (task_id, run_id, lease_token)).fetchone()
+        if row is None:
+            return True  # stale actor is not allowed to mutate the durable claim
+        attempt = row["attempts"] + 1
+        event = {"attempt": attempt, "code": "DELIVERY_FAILED",
+                 "errorType": type(error).__name__, "at": current}
+        prior = json.loads(row["failure_history"])
+        history = _json((prior + [event])[-_MAX_ATTEMPTS:])
+        if attempt >= _MAX_ATTEMPTS:
+            db.execute("UPDATE subagent_wakeups SET status='dead',attempts=?,failure_history=?,"
+                       "error=?,next_attempt_at=NULL,lease_owner=NULL,lease_until=NULL,"
+                       "updated_at=? WHERE task_id=?",
+                       (attempt, history, "Automatic delivery exhausted retry attempts", current, task_id))
+            db.execute("UPDATE subagent_tasks SET result_claimed=0,result_claim_key=NULL "
+                       "WHERE id=? AND result_claim_key=?", (task_id, "wakeup:" + task_id))
+            return False
+        db.execute("UPDATE subagent_wakeups SET attempts=?,failure_history=?,error=?,"
+                   "next_attempt_at=?,lease_owner=NULL,lease_until=NULL,updated_at=? "
+                   "WHERE task_id=?", (attempt, history, type(error).__name__,
+                                       _retry_at(attempt, current), current, task_id))
+        return True
 
 
 def _now() -> int:
@@ -91,6 +164,51 @@ def register_wakeup(db: Any, *, task_id: str, owner: str, conversation_id: str,
     )
 
 
+def get_dead_wakeups(database: Any, owner: str, *, limit: int = 50) -> list[dict]:
+    """Original triggers service: trusted, owner-scoped in-process dead letters.
+
+    This deliberately has no unverified public HTTP route or model tool.
+    """
+    with database.connect() as db:
+        rows = db.execute(
+            "SELECT task_id,run_id,error,attempts,failure_history,updated_at "
+            "FROM subagent_wakeups WHERE owner=? AND status='dead' "
+            "ORDER BY updated_at,task_id LIMIT ?", (owner, max(1, min(limit, 100))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def requeue_dead_wakeup(database: Any, owner: str, task_id: str) -> bool:
+    """Original trusted requeue: a dead delivery joins the lane tail anew.
+
+    Incrementing a durable sequence is essential: replay must never adopt the
+    old generation's persisted idempotency key after the previous root failed.
+    Requeue is denied if a person already claimed the child result.
+    """
+    now = _now()
+    with database.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT w.envelope FROM subagent_wakeups w JOIN subagent_tasks t "
+            "ON t.id=w.task_id WHERE w.owner=? AND t.owner=? AND w.task_id=? "
+            "AND w.status='dead' AND t.status!='running' AND t.result_claimed=0",
+            (owner, owner, task_id),
+        ).fetchone()
+        if row is None:
+            return False
+        envelope = json.loads(row["envelope"])
+        envelope["requestId"] = str(uuid.uuid4())
+        envelope["receivedAt"] = now
+        updated = db.execute(
+            "UPDATE subagent_wakeups SET envelope=?,status='pending',run_id=NULL,"
+            "lease_owner=NULL,lease_until=NULL,attempts=0,next_attempt_at=NULL,"
+            "requeue_count=requeue_count+1,error=NULL,created_at=?,updated_at=? "
+            "WHERE task_id=? AND owner=? AND status='dead'",
+            (_json(envelope), now, now, task_id, owner),
+        )
+        return updated.rowcount == 1
+
+
 def _latest_branch(db: Any, conversation_id: str, anchor: str) -> str | None:
     """Find newest persisted assistant descendant of the source parent reply."""
     messages = db.execute(
@@ -147,6 +265,26 @@ def _input(db: Any, task: Any, anchor: str) -> str:
     ])
 
 
+def assert_wakeup_lease(database: Any, owner: str, run_id: str,
+                        wakeup_lease: tuple[str, str]) -> None:
+    """A stale Controller can neither checkpoint nor invoke model tools.
+
+    Claim tokens are fresh on each attempt, including a lease reacquired by
+    the same process. The durable run remains unique across replays.
+    """
+    from .agent_runtime import RuntimeSafetyError
+
+    task_id, token = wakeup_lease
+    with database.connect() as db:
+        valid = db.execute(
+            "SELECT 1 FROM subagent_wakeups WHERE task_id=? AND run_id=? "
+            "AND owner=? AND status='dispatched' AND lease_owner=? AND lease_until>?",
+            (task_id, run_id, owner, token, _now()),
+        ).fetchone()
+    if valid is None:
+        raise RuntimeSafetyError("Automatic completion actor lease was revoked")
+
+
 def _retire(db: Any, task_id: str, reason: str) -> None:
     db.execute("UPDATE subagent_wakeups SET status='retired',error=?,updated_at=? "
                "WHERE task_id=? AND status='pending'", (reason, _now(), task_id))
@@ -174,10 +312,12 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
         candidates = db.execute(
             "SELECT w.task_id FROM subagent_wakeups w JOIN subagent_tasks t ON t.id=w.task_id "
             "LEFT JOIN runs r ON r.id=w.run_id "
-            "WHERE (w.status='pending' AND t.status!='running') OR "
-            "(w.status='dispatched' AND (w.lease_until IS NULL OR w.lease_until<=? "
+            "WHERE (w.status='pending' "
+            "AND (w.next_attempt_at IS NULL OR w.next_attempt_at<=?)) OR "
+            "(w.status='dispatched' AND (w.next_attempt_at IS NULL OR w.next_attempt_at<=?) "
+            "AND (w.lease_until IS NULL OR w.lease_until<=? "
             "OR r.status IN ('complete','requires_action','error','aborted','interrupted'))) "
-            "ORDER BY w.created_at,w.task_id LIMIT 20", (now,),
+            "ORDER BY w.created_at,w.task_id LIMIT 20", (now, now, now),
         ).fetchall()
     processed = 0
     for candidate in candidates:
@@ -200,7 +340,10 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
             scopes = frozenset(json.loads(row["granted_scopes"]))
             expiry = row["grant_expires"]
             if row["status"] == "pending":
-                if row["child_status"] == "running" or now - row["created_at"] < _DELAY_MS:
+                if now - row["created_at"] < _DELAY_MS:
+                    continue
+                if row["child_status"] == "running":
+                    _defer_pending(db, row, now)
                     continue
                 if row["child_status"] == "cancelled":
                     _retire(db, task_id, "Cancelled child has no automatic delivery")
@@ -233,6 +376,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     _retire(db, task_id, "The child transcript lineage no longer matches its owner")
                     continue
                 if child["status"] in {"running", "requires_action"}:
+                    _defer_pending(db, row, now)
                     continue  # Child terminal messages are not durable yet.
                 if expiry is not None and expiry <= time.time():
                     _retire(db, task_id, "Parent authorization grant expired")
@@ -245,6 +389,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     _retire(db, task_id, "Parent lineage no longer exists")
                     continue
                 if parent["status"] in {"running", "requires_action"}:
+                    _defer_pending(db, row, now)
                     continue
                 if parent["status"] != "complete":
                     _retire(db, task_id, "Parent generation did not complete")
@@ -280,17 +425,22 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                         "conversationId": row["parent_conversation_id"],
                         "parentMessageId": branch,
                         "text": _input(db, row, original),
-                        "clientRequestId": "subagent-wakeup:" + task_id,
+                        "clientRequestId": "subagent-wakeup:" + task_id + (
+                            ":requeue:" + str(row["requeue_count"])
+                            if row["requeue_count"] else ""
+                        ),
                         "endpoint": "agents",
                     }, agent, _connection=db)
                 except GenerationConflict:
+                    _defer_pending(db, row, now)
                     continue
                 db.execute("UPDATE subagent_tasks SET result_claimed=1,result_claim_key=? "
                            "WHERE id=? AND result_claimed=0", ("wakeup:" + task_id, task_id))
+                token = _PROCESS + ":" + secrets.token_hex(12)
                 db.execute("UPDATE subagent_wakeups SET status='dispatched',run_id=?,"
                            "lease_owner=?,lease_until=?,updated_at=? WHERE task_id=? AND status='pending'",
-                           (generation.run_id, _PROCESS, now + _LEASE_MS, now, task_id))
-                prepared = (generation, profile, agent, owner, scopes, expiry, policy, True)
+                           (generation.run_id, token, now + _LEASE_MS, now, task_id))
+                prepared = (generation, profile, agent, owner, scopes, expiry, policy, True, task_id, token)
             else:
                 generation = store.get(owner, row["run_id"]) if row["run_id"] else None
                 if generation is None:
@@ -336,11 +486,13 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     db.execute("UPDATE subagent_tasks SET result_claimed=0,result_claim_key=NULL "
                                "WHERE id=? AND result_claim_key=?", (task_id, "wakeup:" + task_id))
                     continue
-                db.execute("UPDATE subagent_wakeups SET lease_owner=?,lease_until=?,updated_at=? "
-                           "WHERE task_id=?", (_PROCESS, now + _LEASE_MS, now, task_id))
-                prepared = (generation, profile, agent, owner, scopes, expiry, policy, False)
+                token = _PROCESS + ":" + secrets.token_hex(12)
+                db.execute("UPDATE subagent_wakeups SET lease_owner=?,lease_until=?,"
+                           "next_attempt_at=NULL,updated_at=? WHERE task_id=?",
+                           (token, now + _LEASE_MS, now, task_id))
+                prepared = (generation, profile, agent, owner, scopes, expiry, policy, False, task_id, token)
         if prepared is not None:
-            generation, profile, agent, owner, scopes, expiry, policy, new_turn = prepared
+            generation, profile, agent, owner, scopes, expiry, policy, new_turn, task_id, token = prepared
             from . import generation_routes as runner
             # The existing scheduler owns provider streaming and tools. It is
             # the only task runner; the wakeup queue only admits trusted turns.
@@ -348,27 +500,42 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
             if current is None or current.done():
                 flags = WorkspaceRepository(database).setting(
                     owner, "conversation.permissions." + generation.conversation_id, {})
-                await dispatch(owner, generation, profile, agent,
-                               native_file_tools=any(v in {"read", "write"} for v in policy.values()),
-                               write_tools=any(v == "write" for v in policy.values()),
-                               ask_user_enabled=ask_user_requested(agent, {}),
-                               mcp_enabled=isinstance(flags, dict) and flags.get("mcp") is True,
-                               resume_history=None if new_turn else store.history(
-                                   owner, generation.conversation_id,
-                                   message_id=generation.user_message_id),
-                               partial_text="" if new_turn else store.accumulated_text(owner, generation.run_id),
-                               granted_scopes=scopes, grant_expires=expiry)
+                try:
+                    await dispatch(owner, generation, profile, agent,
+                                   native_file_tools=any(v in {"read", "write"} for v in policy.values()),
+                                   write_tools=any(v == "write" for v in policy.values()),
+                                   ask_user_enabled=ask_user_requested(agent, {}),
+                                   mcp_enabled=isinstance(flags, dict) and flags.get("mcp") is True,
+                                   resume_history=None if new_turn else store.history(
+                                       owner, generation.conversation_id,
+                                       message_id=generation.user_message_id),
+                                   partial_text="" if new_turn else store.accumulated_text(owner, generation.run_id),
+                                   granted_scopes=scopes, grant_expires=expiry,
+                                   wakeup_lease=(task_id, token))
+                except Exception as exc:
+                    retry = _dispatch_failure(database, task_id, generation.run_id, token, exc)
+                    if not retry:
+                        store.finish(owner, generation.run_id, status="error",
+                                     error="Automatic completion delivery exhausted retries")
+                    log.warning("Subagent completion dispatch failed: %s", type(exc).__name__)
+                    continue
+                _OWNED_LEASES[task_id] = (generation.run_id, token)
                 processed += 1
     # Keep live leases alive while the single existing scheduler is running.
     with database.connect() as db:
-        rows = db.execute("SELECT task_id,run_id FROM subagent_wakeups WHERE status='dispatched' "
-                          "AND lease_owner=?", (_PROCESS,)).fetchall()
-        for row in rows:
-            from .generation_routes import _TASKS
-            current = _TASKS.get(row["run_id"])
-            if current is not None and not current.done():
-                db.execute("UPDATE subagent_wakeups SET lease_until=?,updated_at=? WHERE task_id=? "
-                           "AND lease_owner=?", (_now() + _LEASE_MS, _now(), row["task_id"], _PROCESS))
+        from .generation_routes import _TASKS
+        for key, (run_id, token) in list(_OWNED_LEASES.items()):
+            current = _TASKS.get(run_id)
+            if current is None or current.done():
+                _OWNED_LEASES.pop(key, None)
+                continue
+            updated = db.execute(
+                "UPDATE subagent_wakeups SET lease_until=?,updated_at=? WHERE task_id=? "
+                "AND lease_owner=? AND status='dispatched' AND lease_until>?",
+                (_now() + _LEASE_MS, _now(), key, token, _now()),
+            )
+            if updated.rowcount != 1:
+                _OWNED_LEASES.pop(key, None)
     return processed
 
 
@@ -397,3 +564,4 @@ async def shutdown_wakeup_workers() -> None:
     if current:
         await asyncio.gather(*current, return_exceptions=True)
     _WORKERS.clear()
+    _OWNED_LEASES.clear()
