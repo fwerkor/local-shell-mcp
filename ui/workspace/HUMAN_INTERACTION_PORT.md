@@ -113,8 +113,11 @@ index after an applied Steer, including when a graph node is producing text.
 Regression: `tests/test_webui_graph_steer_integration.py` exercises real
 Python LangGraph and a preempted foreground graph node; its model observes the
 user's new instruction before the stale old response can finish.
-The combined full-suite run completed **2479 passed, 4 skipped** before the
-additional graph-Steer regression was added (the new test separately passed).
+The initial combined full-suite run completed **2479 passed, 4 skipped** before
+new graph-Steer regressions were added. The dedicated real LangGraph tests now
+cover both a serial steer and concurrent fan-out where one SQLite receipt is
+applied exactly once. Both dedicated tests pass; a refreshed complete suite is
+required for the later Graph actor lease update.
 
 Unverified: deterministic Steer delivery across simultaneous fan-out siblings,
 true cross-process root-generation actor ownership/lease fencing, full original
