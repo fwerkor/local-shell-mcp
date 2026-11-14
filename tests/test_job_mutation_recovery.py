@@ -82,7 +82,10 @@ async def test_cancelled_mutation_keeps_uncertain_shell_visible(
         operation = jobs.stop_job(original["job_id"])
     task = asyncio.create_task(operation)
     try:
-        await asyncio.wait_for(entered.wait(), 2)
+        # Windows runners can spend several seconds creating the isolated
+        # subprocess. Wait for the real interception boundary, not the CI
+        # machine's scheduling speed; the postcondition remains unchanged.
+        await asyncio.wait_for(entered.wait(), 15)
         if inspection_fails:
             monkeypatch.setattr(jobs, "list_shells", failed_inspection)
         task.cancel()

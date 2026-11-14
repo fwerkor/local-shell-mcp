@@ -1,6 +1,7 @@
 """Integrated source Agent execution with real LSM tools, human review and SQLite."""
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -334,3 +335,83 @@ async def test_native_result_remains_lossless_while_model_uses_source_ingestion_
     saved = list(runner.saver.list(runner.config))
     assert any(write[2].get("content") == raw for checkpoint in saved
                for write in checkpoint["pendingWrites"] if isinstance(write[2], dict))
+
+
+@pytest.mark.asyncio
+async def test_explicit_question_approval_is_a_separate_interrupt_before_asking(runtime):
+    """Original policy exemption is overridden by an exact ask entry."""
+    _, database, store, profile = runtime
+    agent = AgentRepository(database).create("local", {
+        "name": "Questioner", "provider": "openAI", "model": "test", "tools": ["ask_user_question"],
+    })
+    _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {
+        "enabled": True, "ask": ["ask_user_question"],
+    }}})
+    generation, _ = store.begin("local", {"text": "Choose an output format"}, agent)
+    call_count = 0
+
+    async def model(profile, history, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if not any(message.get("role") == "tool" for message in history):
+            yield ModelToolCall("ask-one", "ask_user_question", {"question": "Which format?"})
+        else:
+            assert history[-1]["tool_call_id"] == "ask-one"
+            assert json.loads(history[-1]["content"]) == {"answer": "markdown"}
+            yield "Answer acknowledged."
+
+    async def emit(text):
+        pass
+
+    opts = dict(scopes=set(), grant_expires=None, stream_tools=model, stream_text=model,
+                on_text=emit, agent=agent, profile=profile, ask_user_enabled=True)
+    with pytest.raises(AgentSuspended):
+        await AgentRunner("local", generation, database, store, **opts).run(
+            store.history("local", generation.conversation_id))
+    approval = store.pending_action("local", generation.run_id)
+    assert approval["payload"]["type"] == "tool_approval"
+    assert approval["payload"]["action_requests"][0]["tool_call_id"] == "ask-one"
+    _, history, text, batch = store.claim_approval("local", generation.run_id, approval["actionId"],
+                                                   [{"tool_call_id": "ask-one", "decision": "approve"}])
+    with pytest.raises(AgentSuspended):
+        await AgentRunner("local", generation, database, store, **opts,
+                          resume_history=history, partial_text=text, approved_batch=batch).run(history)
+    question = store.pending_action("local", generation.run_id)
+    assert question["actionId"] != approval["actionId"]
+    assert question["payload"]["type"] == "ask_user_question"
+    assert question["payload"]["tool_call_id"] == "ask-one"
+    assert store.approved_review("local", generation.run_id) is None
+    _, answered_history, _ = store.answer_question("local", generation.run_id, question["actionId"],
+                                                    {"answer": "markdown"})
+    await AgentRunner("local", generation, database, store, **opts,
+                      resume_history=answered_history).run(answered_history)
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_explicit_question_deny_returns_blocked_tool_without_asking(runtime):
+    _, database, store, profile = runtime
+    agent = AgentRepository(database).create("local", {
+        "name": "Questioner", "provider": "openAI", "model": "test", "tools": ["ask_user_question"],
+    })
+    _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {
+        "enabled": True, "deny": ["ask_user_question"], "reason": "Questions disabled",
+    }}})
+    generation, _ = store.begin("local", {"text": "Question"}, agent)
+
+    async def model(profile, history, **kwargs):
+        if not any(message.get("role") == "tool" for message in history):
+            yield ModelToolCall("denied-one", "ask_user_question", {"question": "Which format?"})
+        else:
+            assert history[-1]["content"] == "Blocked: Questions disabled"
+            yield "Question skipped."
+
+    async def emit(text):
+        pass
+
+    runner = AgentRunner("local", generation, database, store, scopes=set(), grant_expires=None,
+                         stream_tools=model, stream_text=model, on_text=emit,
+                         agent=agent, profile=profile, ask_user_enabled=True)
+    result = await runner.run(store.history("local", generation.conversation_id))
+    assert result[-1]["content"] == "Question skipped."
+    assert store.pending_action("local", generation.run_id) is None
