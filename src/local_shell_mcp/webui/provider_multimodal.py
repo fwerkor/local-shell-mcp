@@ -23,9 +23,12 @@ def native_content_parts(content, provider: str) -> list[dict]:
             result.append({"type": "text", "text": part["text"]} if provider == "anthropic"
                           else {"text": part["text"]})
         elif kind in {"image_url", "file"}:
-            data_url = ((part.get("image_url") or {}).get("url") if kind == "image_url"
-                        else (part.get("file") or {}).get("file_data"))
-            if not isinstance(data_url, str) or not data_url.startswith("data:") or ";base64," not in data_url:
+            fields = part.get("image_url") if kind == "image_url" else part.get("file")
+            if not isinstance(fields, dict):
+                continue
+            data_url = fields.get("url" if kind == "image_url" else "file_data")
+            if (not isinstance(data_url, str) or len(data_url) > 8 * 1024 * 1024 or
+                not data_url.startswith("data:") or ";base64," not in data_url):
                 continue
             mime, data = data_url[5:].split(";base64,", 1)
             if mime not in {"image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"}:

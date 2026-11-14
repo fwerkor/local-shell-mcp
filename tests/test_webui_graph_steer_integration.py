@@ -1,6 +1,8 @@
 """Unmerged Graph/HITL draft cross-contract: in-flight steer reaches active graph node."""
 from __future__ import annotations
 
+import json
+
 import pytest
 from wakeup_helpers import environment as environment
 
@@ -208,3 +210,64 @@ async def test_tool_only_chunk_checks_revoked_wakeup_lease_before_dispatch(envir
         await runner.run(store.history('local', job.conversation_id))
     assert store.get('local', job.run_id).status == 'running'
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_parallel_graph_sibling_ask_user_resumes_without_rerunning_completed_node(tmp_path, monkeypatch):
+    """A paused sibling must not lose the other sibling's completed superstep."""
+    from local_shell_mcp.webui.agent_runtime import AgentSuspended
+    from local_shell_mcp.webui.providers import ModelToolCall
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.state'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'none')
+    get_settings.cache_clear()
+    db = SQLiteDatabase(tmp_path / '.state')
+    repository, store = AgentRepository(db), GenerationStore(db)
+    monkeypatch.setattr(agent_runner, 'provider_config', lambda _, model: ProviderConfig(
+        'openai', model, 'http://localhost:1234/chat/completions', ''))
+    root = repository.create('local', {'name': 'root', 'provider': 'openAI',
+                                      'model': 'root', 'tools': ['ask_user_question']})
+    left = repository.create('local', {'name': 'left', 'provider': 'openAI',
+                                      'model': 'left', 'tools': ['ask_user_question']})
+    right = repository.create('local', {'name': 'right', 'provider': 'openAI',
+                                       'model': 'right', 'tools': []})
+    root = repository.update('local', root['id'], {'edges': [{
+        'from': root['id'], 'to': [left['id'], right['id']], 'edgeType': 'direct'}]})
+    job, _ = store.begin('local', {'text': 'Parallel graph question'}, root)
+    counts = {'root': 0, 'left': 0, 'right': 0}
+
+    async def model(profile, messages, **kwargs):
+        counts[profile.model] += 1
+        if profile.model == 'root':
+            yield 'Root setup.'
+        elif profile.model == 'left' and not any(m.get('role') == 'tool' for m in messages):
+            yield ModelToolCall('ask-child', 'ask_user_question', {
+                'questions': [{'id': 'format', 'question': 'Which output format?',
+                               'options': [{'label': 'JSON', 'value': 'json'},
+                                           {'label': 'Markdown', 'value': 'md'}]}]})
+        elif profile.model == 'left':
+            assert json.loads(messages[-1]['content']) == {'answers': {'format': 'json'}}
+            yield 'Left answered after human interrupt.'
+        else:
+            yield 'Right sibling complete.'
+
+    async def noop(text):
+        pass
+
+    opts = {'scopes': set(), 'grant_expires': None, 'stream_tools': model,
+            'stream_text': model, 'on_text': noop, 'agent': root, 'ask_user_enabled': True}
+    with pytest.raises(AgentSuspended):
+        await AgentRunner('local', job, db, store, **opts).run(
+            store.history('local', job.conversation_id))
+    action = store.pending_action('local', job.run_id)
+    assert action and action['namespace'].endswith('/graph:' + left['id'])
+    _, history, _ = store.answer_question('local', job.run_id, action['actionId'],
+                                           {'answers': {'format': 'json'}})
+    restored = AgentRunner('local', job, db, store, **opts,
+                           resume_history=history, resume_namespace=action['namespace'])
+    result = await restored.run(history)
+    assert any(m.get('content') == 'Left answered after human interrupt.' for m in result)
+    assert any(m.get('content') == 'Right sibling complete.' for m in result)
+    assert counts == {'root': 1, 'left': 2, 'right': 1}
+    get_settings.cache_clear()

@@ -18,7 +18,8 @@ from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
 
 
 @pytest.mark.asyncio
-async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_path, monkeypatch):
+@pytest.mark.parametrize('parallel', [False, True], ids=['serial', 'parallel-fanout'])
+async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_path, monkeypatch, parallel):
     pytest.importorskip('langgraph')
     playwright = pytest.importorskip('playwright.async_api')
     import uvicorn
@@ -37,8 +38,11 @@ async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_p
                                  'model': 'graph-root', 'tools': ['ask_user_question']})
     child = repo.create('local', {'name': 'Graph child', 'provider': 'openAI',
                                   'model': 'graph-child', 'tools': ['ask_user_question']})
+    sibling = repo.create('local', {'name': 'Graph parallel sibling', 'provider': 'openAI',
+                                    'model': 'graph-sibling', 'tools': []}) if parallel else None
     root = repo.update('local', root['id'], {'edges': [
-        {'from': root['id'], 'to': child['id'], 'edgeType': 'direct'}]})
+        {'from': root['id'], 'to': [child['id'], sibling['id']] if sibling else child['id'],
+         'edgeType': 'direct'}]})
     profile = lambda _provider, model=None: ProviderConfig(  # noqa: E731
         'openai', model or 'graph-root', 'http://127.0.0.1:11434/v1/chat/completions', '')
     monkeypatch.setattr(agent_runner, 'provider_config', profile)
@@ -49,6 +53,8 @@ async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_p
         seen.append((provider.model, messages))
         if provider.model == 'graph-root':
             yield 'Root prepared the graph handoff.'
+        elif provider.model == 'graph-sibling':
+            yield 'Parallel sibling completed without a question.'
         elif not any(m.get('role') == 'tool' for m in messages):
             yield ModelToolCall('graph-ask', 'ask_user_question', {'questions': [
                 {'id': 'format', 'header': 'Format', 'question': 'Which output format?',
@@ -118,7 +124,12 @@ async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_p
             assert submissions[0]['answers'] == {'format': 'markdown'}
             await page.reload(wait_until='domcontentloaded')
             await page.get_by_text('Graph child received Markdown answer.', exact=False).first.wait_for(timeout=15000)
-            assert [model for model, _ in seen] == ['graph-root', 'graph-child', 'graph-child']
+            models = [model for model, _ in seen]
+            assert models[0] == 'graph-root' and models.count('graph-child') == 2
+            assert models.count('graph-sibling') == (1 if parallel else 0)
+            if parallel:
+                await page.get_by_text('Parallel sibling completed without a question.',
+                                       exact=False).first.wait_for(timeout=12000)
             assert not errors, errors
     finally:
         if browser:

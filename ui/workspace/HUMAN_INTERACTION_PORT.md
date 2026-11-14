@@ -163,14 +163,19 @@ or additional runtime dependency:
   checkpoints. `provider_multimodal.py` encodes model-turn content transiently
   and preserves plain-string Anthropic compatibility.
 - The original unmodified React Chromium client is tested against a real
-  Python LangGraph graph: its child Agent asks a question, the page reloads,
-  the exact pending action resumes after a valid answer, and the conversation
-  remains coherent after a second reload.
+  Python LangGraph graph in both a direct serial edge and parallel fan-out:
+  its child Agent asks a question, the page reloads, the exact pending action
+  resumes after a valid answer, and the conversation remains coherent after
+  a second reload. The completed parallel sibling is not re-executed by
+  the resumed graph scheduler. Standalone Python Graph tests also verify
+  this checkpointed sibling result at the model-call level.
 
 Validation: real two-Controller SQLite claim races, stale-token model/event/
 final-result refusal, expired-lease takeover, no-checkpoint orphan behavior,
 no-checkpoint applied Steer replay, document/image owner authorization,
-transient historical media replay and native provider wire payloads.
+transient historical media replay and native provider wire payloads. Malformed
+provider-specific media metadata is bounded/ignored rather than executed or
+sent onward to an untrusted media URL.
 Focused tests of the three new lease/encoding modules have **98.0% combined
 branch coverage**, each module above the unchanged 90% gate. Full-suite and
 GitHub cross-platform CI conclusions are required at the final pinned commit.
