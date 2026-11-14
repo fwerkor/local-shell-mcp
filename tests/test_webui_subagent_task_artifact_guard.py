@@ -79,45 +79,34 @@ async def settle(host, task_id, *, timeout=4):
 
 @pytest.mark.asyncio
 async def test_graph_host_artifact_guard_reserves_child_before_creation_and_settles(host_environment, monkeypatch):
+    from local_shell_mcp.webui.child_thread_activity import ActiveChildThreads
+
     database = host_environment[0]
-    with database.connect() as db:
-        db.execute("CREATE TABLE IF NOT EXISTS active_subagent_threads "
-                   "(owner TEXT,thread_id TEXT,parent_run_id TEXT,active INTEGER, "
-                   "PRIMARY KEY(owner,thread_id))")
+    original_activate = ActiveChildThreads.activate
+    original_settle = ActiveChildThreads.settle
+    events = []
 
-    class ActiveChildThreads:
-        def __init__(self, db):
-            self.db = db
+    def checked_activate(self, owner, child, parent):
+        with self.database.connect() as db:
+            active = db.execute("SELECT r.status FROM runs r JOIN conversations c "
+                                "ON c.id=r.conversation_id WHERE r.id=? AND c.owner=?",
+                                (parent, owner)).fetchone()
+            assert active is not None and active["status"] == "running"
+            assert db.execute("SELECT 1 FROM conversations WHERE id=?", (child,)).fetchone() is None
+        events.append(('activate', child))
+        return original_activate(self, owner, child, parent)
 
-        def activate(self, owner, child, parent):
-            with self.db.connect() as db:
-                db.execute("BEGIN IMMEDIATE")
-                active = db.execute("SELECT r.status FROM runs r JOIN conversations c "
-                                    "ON c.id=r.conversation_id WHERE r.id=? AND c.owner=?",
-                                    (parent, owner)).fetchone()
-                assert active is not None and active["status"] == "running"
-                assert db.execute("SELECT 1 FROM conversations WHERE id=?", (child,)).fetchone() is None
-                db.execute("INSERT INTO active_subagent_threads VALUES(?,?,?,1)",
-                           (owner, child, parent))
+    def checked_settle(self, owner, child, parent):
+        with self.database.connect() as db:
+            task = db.execute("SELECT status FROM subagent_tasks WHERE "
+                              "child_conversation_id=? AND owner=? AND parent_run_id=?",
+                              (child, owner, parent)).fetchone()
+            assert task is not None and task["status"] == "running"
+        events.append(('settle', child))
+        return original_settle(self, owner, child, parent)
 
-        def settle(self, owner, child, parent):
-            with self.db.connect() as db:
-                # Terminal status must not be observable until the immutable
-                # child protection marker has been durably settled.
-                task = db.execute("SELECT status FROM subagent_tasks WHERE "
-                                  "child_conversation_id=? AND owner=? AND parent_run_id=?",
-                                  (child, owner, parent)).fetchone()
-                assert task is not None and task["status"] == "running"
-                db.execute("BEGIN IMMEDIATE")
-                changed = db.execute("UPDATE active_subagent_threads SET active=0 "
-                                     "WHERE owner=? AND thread_id=? AND parent_run_id=? AND active=1",
-                                     (owner, child, parent)).rowcount
-                assert changed in {0, 1}
-                return bool(changed)
-
-    module = types.ModuleType("local_shell_mcp.webui.child_thread_activity")
-    module.ActiveChildThreads = ActiveChildThreads
-    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(ActiveChildThreads, "activate", checked_activate)
+    monkeypatch.setattr(ActiveChildThreads, "settle", checked_settle)
 
     async def model(profile, history, **kwargs):
         yield "result"
@@ -130,6 +119,8 @@ async def test_graph_host_artifact_guard_reserves_child_before_creation_and_sett
                               (task["child_conversation_id"],)).fetchone()
         assert registry is not None and registry["active"] == 0
         assert registry["parent_run_id"] == task["parent_run_id"]
+        assert events == [('activate', task["child_conversation_id"]),
+                          ('settle', task["child_conversation_id"])]
         convo = db.execute("SELECT c.id FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                            "WHERE r.id=?", (task["child_run_id"],)).fetchone()
         assert convo["id"] == task["child_conversation_id"]
@@ -179,30 +170,9 @@ async def test_registered_child_remains_guarded_after_parent_cancel(host_environ
 @pytest.mark.asyncio
 async def test_repeated_background_request_cannot_start_before_registered_marker(host_environment, monkeypatch):
     """Crash between marker commit and local admission bit is fail-closed."""
+    from local_shell_mcp.webui.child_thread_activity import ActiveChildThreads
+
     database = host_environment[0]
-    with database.connect() as db:
-        db.execute("CREATE TABLE active_subagent_threads "
-                   "(owner TEXT,thread_id TEXT,parent_run_id TEXT,active INTEGER, "
-                   "PRIMARY KEY(owner,thread_id))")
-
-    class Marker:
-        def __init__(self, db):
-            self.db = db
-
-        def activate(self, owner, child, parent):
-            with self.db.connect() as db:
-                db.execute("INSERT INTO active_subagent_threads VALUES(?,?,?,1)",
-                           (owner, child, parent))
-
-        def settle(self, owner, child, parent):
-            with self.db.connect() as db:
-                return db.execute("UPDATE active_subagent_threads SET active=0 WHERE "
-                                  "owner=? AND thread_id=? AND parent_run_id=?",
-                                  (owner, child, parent)).rowcount == 1
-
-    module = types.ModuleType("local_shell_mcp.webui.child_thread_activity")
-    module.ActiveChildThreads = Marker
-    monkeypatch.setitem(sys.modules, module.__name__, module)
 
     async def model(profile, history, **kwargs):
         yield "result"
@@ -224,10 +194,8 @@ async def test_repeated_background_request_cannot_start_before_registered_marker
     assert json.loads(await host.start(invocation))["background_task_id"] == task_id
     assert host._get(task_id)["child_run_id"] is None  # fenced, not dispatched
     assert host._get(task_id)["child_registered"] == 0
-    with database.connect() as db:
-        row = host._get(task_id)
-        db.execute("INSERT INTO active_subagent_threads VALUES(?,?,?,1)",
-                   ("local", row["child_conversation_id"], row["parent_run_id"]))
+    row = host._get(task_id)
+    ActiveChildThreads(database).activate("local", row["child_conversation_id"], row["parent_run_id"])
     await host._ensure_active(task_id)
     terminal = await settle(host, task_id)
     assert terminal["status"] == "completed" and terminal["child_registered"] == 1

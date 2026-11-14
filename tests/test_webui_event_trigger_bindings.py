@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import json
-import sys
-from types import ModuleType
 
 import pytest
 
@@ -34,20 +32,11 @@ def actors(tmp_path):
 
 
 @pytest.fixture
-def stub_guard(monkeypatch):
-    module = ModuleType('local_shell_mcp.webui.child_thread_activity')
-    class ActiveChildThreads:
-        def __init__(self, db):
-            self.db = db
-        def activate(self, owner, child_id, parent_run_id):
-            with self.db.connect() as db:
-                db.execute('CREATE TABLE IF NOT EXISTS test_bound_child_activity('
-                           'owner TEXT,child_id TEXT PRIMARY KEY,parent_run_id TEXT)')
-                db.execute('INSERT OR IGNORE INTO test_bound_child_activity VALUES(?,?,?)',
-                           (owner, child_id, parent_run_id))
-    module.ActiveChildThreads = ActiveChildThreads
-    monkeypatch.setitem(sys.modules, module.__name__, module)
-    return module
+def stub_guard():
+    # Real PR352 child write-fence is integrated in this branch.
+    from local_shell_mcp.webui.child_thread_activity import ActiveChildThreads
+
+    return ActiveChildThreads
 
 
 def _register(actors, **override):
@@ -60,7 +49,9 @@ def _register(actors, **override):
 
 
 def test_missing_actual_artifact_child_guard_fails_closed_no_writable_conversation(actors, monkeypatch):
-    monkeypatch.delitem(sys.modules, 'local_shell_mcp.webui.child_thread_activity', raising=False)
+    from local_shell_mcp.webui.child_thread_activity import ActiveChildThreads
+
+    monkeypatch.setattr(ActiveChildThreads, 'reserve_for_completed_parent', None)
     db, parent, child, generation, source = actors
     with pytest.raises(RuntimeError, match='Child conversation write guard'):
         _register(actors)
@@ -83,7 +74,7 @@ def test_source_bound_direct_child_idempotency_and_parent_lineage(actors, stub_g
         lineage = json.loads(reserved['metadata'])
         assert lineage['subagentThread']['parentMessageId'] == generation.response_message_id
         assert lineage['agentEventBinding']['sourceKeyId'] == source['id']
-        marker = conn.execute('SELECT parent_run_id FROM test_bound_child_activity WHERE child_id=?',
+        marker = conn.execute('SELECT parent_run_id FROM active_subagent_threads WHERE thread_id=?',
                               (first['threadId'],)).fetchone()
         assert marker['parent_run_id'] == generation.run_id
     assert bound_child(db, 'alice', source['id'], first['id'])['conversation_id'] == first['threadId']

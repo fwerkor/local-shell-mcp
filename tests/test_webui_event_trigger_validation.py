@@ -96,7 +96,9 @@ def test_source_steer_envelope_target_validation_without_unimplemented_admission
     else:
         envelope,_ = prepare_source_event('owner',key['id'],'stable',body)
         assert envelope['target']['preempt'] is True
-        with pytest.raises(ValueError, match='Steer requires'):
+        # The source key here permits only fire. A syntactically valid Steer
+        # still must not bypass its authenticated mode policy.
+        with pytest.raises(PermissionError, match='not allowed'):
             enqueue_event(db,'owner',key['id'],'stable',body)
 
 

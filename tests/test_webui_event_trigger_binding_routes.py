@@ -1,9 +1,6 @@
 """Authenticated HTTP bound Event Actor ingress and source-protected target override."""
 from __future__ import annotations
 
-import sys
-from types import ModuleType
-
 import httpx
 import pytest
 from starlette.applications import Starlette
@@ -37,19 +34,6 @@ def setup(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
-def enable_guard(db, monkeypatch):
-    module = ModuleType('local_shell_mcp.webui.child_thread_activity')
-    class ActiveChildThreads:
-        def __init__(self, database):
-            self.db = database
-        def activate(self, owner, child_id, parent_run_id):
-            with self.db.connect() as conn:
-                conn.execute('CREATE TABLE IF NOT EXISTS test_source_guard ('
-                             'owner TEXT, child_id TEXT, parent_run_id TEXT)')
-                conn.execute('INSERT INTO test_source_guard VALUES(?,?,?)',
-                             (owner,child_id,parent_run_id))
-    module.ActiveChildThreads = ActiveChildThreads
-    monkeypatch.setitem(sys.modules, module.__name__, module)
 
 
 @pytest.mark.asyncio
@@ -63,12 +47,16 @@ async def test_binding_requires_real_child_guard_and_stable_owner_thread(setup, 
         register = {'actorId':'actor-1', 'parentConversationId':root.conversation_id,
                     'parentMessageId':root.response_message_id,
                     'target':{'agentId':child['id']}}
+        from local_shell_mcp.webui.child_thread_activity import ActiveChildThreads
+
+        original = ActiveChildThreads.reserve_for_completed_parent
+        monkeypatch.setattr(ActiveChildThreads, 'reserve_for_completed_parent', None)
         missing_guard = await client.post('/api/agents/v1/events/bindings', json=register,
                                           headers=auth)
         assert missing_guard.status_code == 503
         with db.connect() as conn:
             assert conn.execute('SELECT count(*) FROM agent_event_bindings').fetchone()[0] == 0
-        enable_guard(db, monkeypatch)
+        monkeypatch.setattr(ActiveChildThreads, 'reserve_for_completed_parent', original)
         created = await client.post('/api/agents/v1/events/bindings', json=register, headers=auth)
         assert created.status_code == 201, created.text
         binding = created.json()
