@@ -28,6 +28,13 @@ MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024
 log = logging.getLogger(__name__)
 
 
+def _upload_recovery_lock(state_dir: Path):
+    """Serialize stale-intent reclamation and the final upload commit across processes."""
+    from ..sqlite_store import SQLiteStateStore
+
+    return SQLiteStateStore(state_dir, migrate_files=False).lock("webui/attachment-upload-recovery")
+
+
 def _safe_attachment_path(owner: str, filename: str, state_dir: Path) -> Path:
     if not isinstance(filename, str) or not 1 <= len(filename) <= 200:
         raise ValueError("Invalid attachment filename")
@@ -145,6 +152,24 @@ def agent_context_messages(database, owner: str, agent: dict) -> list[dict]:
              + "\n\n".join(parts)}] if parts else []
 
 
+def with_agent_context(database, owner: str, agent: dict | None, history: list[dict]) -> list[dict]:
+    """Add the active Agent's evidence once, after its system instructions.
+
+    Graph checkpoint replay may restore these messages from SQLite. Do not
+    duplicate an already-present evidence message on a repeated invocation.
+    """
+    result = list(history)
+    if not agent:
+        return result
+    documents = agent_context_messages(database, owner, agent)
+    index = next((i for i, message in enumerate(result) if message.get("role") != "system"), len(result))
+    for document in documents:
+        if document not in result:
+            result.insert(index, document)
+            index += 1
+    return result
+
+
 async def upload_attachment(request: Request):
     from ..human_ui import _require_ui_scopes
     from ..settings import get_settings
@@ -228,8 +253,30 @@ async def publish_attachment(owner, name, content_type, chunks, state_dir, *, ex
                        (digest.hexdigest(), received, file_id))
         processed = await asyncio.to_thread(process, target, name, content_type) if process else {}
         values = {**(metadata or {}), **processed, "bytes": received, "machine": "local"}
-        with _repo().database.connect() as db:
+        # Recovery may reclaim an aged, still-running upload while its text
+        # processor works. A shared cross-process lock prevents the final
+        # publication from interleaving with that filesystem unlink.
+        with _upload_recovery_lock(state_dir), _repo().database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            intent = db.execute(
+                "SELECT owner,path,file_identity,content_sha256,content_size "
+                "FROM attachment_uploads WHERE file_id=?", (file_id,),
+            ).fetchone()
+            if (intent is None or intent["owner"] != owner or intent["path"] != str(target) or
+                intent["file_identity"] != ":".join(file_signature) or
+                intent["content_sha256"] != digest.hexdigest() or intent["content_size"] != received):
+                raise OSError("Upload intent was reclaimed or changed before publication")
+            if target.is_symlink():
+                raise OSError("Upload target is no longer a regular file")
+            # Reopen the actual bytes under the recovery lock. A stale
+            # process must never publish an attachment whose file was
+            # deleted (or externally replaced) by recovery.
+            with target.open("rb") as handle:
+                current = os.fstat(handle.fileno())
+                if (f"{current.st_dev}:{current.st_ino}" != intent["file_identity"] or
+                    current.st_size != received or
+                    hashlib.file_digest(handle, "sha256").hexdigest() != intent["content_sha256"]):
+                    raise OSError("Upload bytes changed before publication")
             db.execute(
                 "INSERT INTO attachments(id,owner,name,path,content_type,metadata) VALUES(?,?,?,?,?,?)",
                 (file_id, owner, name.replace("\\", "/").split("/")[-1], str(target), content_type,
@@ -431,7 +478,13 @@ def recover_attachment_deletions():
 
 
 def recover_attachment_uploads(database, *, grace_seconds=3600):
-    """Collect interrupted uploads, refusing deletion on an inode mismatch.
+    """Reclaim orphan uploads without racing an active publisher's final commit."""
+    with _upload_recovery_lock(database.root):
+        return _recover_attachment_uploads_locked(database, grace_seconds=grace_seconds)
+
+
+def _recover_attachment_uploads_locked(database, *, grace_seconds):
+    """Only called under the cross-process publication/recovery lock.
 
     Any upload with unknown inode stays for manual review rather than risking
     a concurrently or externally recreated file. Committed rows always win.
@@ -511,7 +564,10 @@ async def file_preview(request: Request):
 
 
 async def agent_files(request: Request):
+    from ..human_ui import _require_ui_scopes
+
     owner = _owner(request)
+    _require_ui_scopes(request, "shell:read")
     with _repo().database.connect() as db:
         agent = db.execute("SELECT config FROM agents WHERE id=? AND owner=?",
                            (request.path_params["agent_id"], owner)).fetchone()

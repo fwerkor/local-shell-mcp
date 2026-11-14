@@ -228,7 +228,10 @@ class AgentRunner:
                             child_configs=invocation.child_configs, selected_tools=invocation.selected_tools,
                             resume_history=self.resume_history, resume_namespace=self.resume_namespace,
                             partial_text=self.partial_text)
-        return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
+        from .attachments import with_agent_context
+
+        history = with_agent_context(self.database, self.owner, invocation.agent, invocation.messages)
+        return await child.run(history, recursion_limit=invocation.recursion_limit)
 
     async def _pause(self, payload, state, *, approval=False):
         import uuid
@@ -313,6 +316,9 @@ class AgentRunner:
             instructions += "\n\n" + received["instructions"]
         if instructions:
             history.insert(0, {"role": "system", "content": instructions})
+        from .attachments import with_agent_context
+
+        history = with_agent_context(self.database, self.owner, target, history)
         return ToolBatchOutput(messages, next_context=self._context(target), replace_messages=history)
 
     async def run(self, history, *, recursion_limit=None):
