@@ -534,6 +534,24 @@
       "python_lsm": "webui/semantic_index_source.py; webui/agent_runner.py",
       "status": "部分",
       "difference": "自动发现已提交且可验证的SQLite工具结果/可选intent，生成model-visible provenance；完整activity/reasoning与collector覆盖逻辑仍未实现"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/prune.ts",
+      "sha256": "88bb120616bad3e1573c42c5e2878e04f55d1b2628d6a76c756f235f481ced09",
+      "symbols": "clampCalibrationRatio / cumulativeRawSent / cumulativeProviderReported",
+      "python_lsm": "webui/context_calibration.py; webui/context_budget.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "按provider-confirmed usage计算累积token校准；跨轮sqlite恢复，校准限制0.5..5；完整原生prune/fading裁剪未移植"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/budget.ts",
+      "sha256": "6bd31bb2c9605243f6fbcd8e88e28f9378ec98862ae7cb245c0fd0914a926015",
+      "symbols": "computeToolMessageUsage / TokenBudgetBreakdown",
+      "python_lsm": "webui/context_budget.py; webui/agent_runner.py",
+      "status": "部分",
+      "difference": "只校准消息和工具结果占比，原完整TokenBudgetBreakdown工具结果分配仍未逐字段完全移植"
     }
   ],
   "runtime_dependency_lock": {
