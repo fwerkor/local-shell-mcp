@@ -480,6 +480,24 @@
       "python_lsm": "webui/subagent_wakeup.py:process_wakeups/start_wakeup_worker",
       "status": "部分",
       "difference": "单一 SQLite 持久内部触发队列，结果 claim 与 GenerationStore.begin 原子同事务，lease owner CAS and crash recovery；尚缺全体外部 Agent triggers、dead letters 管理和跨 Controller 主 generation actor 完整接管。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/backoff.ts",
+      "sha256": "38bb315638ac15f70cfeb06edafbaa49400737a9c5aa634f881239301adb9d0b",
+      "symbols": "waitingRetryAfter / WAITING_RETRY_FLOOR_MS / WAITING_RETRY_CAP_MS",
+      "python_lsm": "webui/subagent_wakeup.py:waiting_retry_seconds, _defer_pending",
+      "status": "部分",
+      "difference": "Exact pinned TS source executed via Bun differential for adaptive age-proportional 5..60s deferral; SQLite settlement triggers expedite eligible child and parent tasks. Generic global trigger idle engine remains separate."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/engine.ts",
+      "sha256": "06a222ad3219693cc9a86fd463c4c46b5394d0e390b3eabd8775f3db86a2f125",
+      "symbols": "DEFAULT_LEASE_MS, DEFAULT_MAX_ATTEMPTS, retryAt, AgentTriggerDeliveryDeferredError, AgentTriggerDeliveryEngine",
+      "python_lsm": "webui/subagent_wakeup.py:_retry_at/_dispatch_failure/process_wakeups/assert_wakeup_lease",
+      "status": "部分",
+      "difference": "Source 8-attempt 1s-5m half-jitter durable retry/dead-letter, trusted requeue new idempotency tail, per-claim CAS actor lease and inherited AgentRunner safety; global fire/steer/batch/multi-tenant delivery engine remains out of scope."
     }
   ],
   "runtime_dependency_lock": {
@@ -520,10 +538,10 @@
     },
     "reference_fixture": "tests/fixtures/librechat/graph_runtime_real_vectors.json",
     "http_recovery": "generation_routes.resume_generation + generations.accumulated_text; cooperative shutdown retains running generation; explicit abort remains terminal",
-    "known_gaps": "Full JS BaseMessage/RunStepState and hook callbacks; source Agent Trigger global queue dead-letter/retry/admin path and complete cross-controller root generation ownership; ordinary tool backgrounding; rich artifact delivery; independent Approval/AskUser integration PRs.",
+    "known_gaps": "Full JS BaseMessage/RunStepState and hook callbacks; external Agent Trigger fire/steer/batch bindings and ingress, complete app-wide global trigger queue and multi-controller root actor HA outside fenced internal child continuations; ordinary tool backgrounding, rich artifact delivery and independent Approval/AskUser integration PRs.",
     "reference_fixture_background": "tests/fixtures/librechat/subagent_task_real_reference.cjs",
     "background_host": "webui/subagent_task_host.py; Owner/child generation + lease CAS, scoped thread continuation and source schema; startup recover_subagent_tasks",
     "artifacts_integration": "Child conversation identity pre-reserved/registered with optional PR352 ActiveChildThreads.activate before GenerationStore.begin and settled after terminal; no duplicate guard table or artifact route. PR #352 must be integrated before claiming child edit protection.",
-    "subagent_completion_wakeup": "Original source pre-enqueue+256ms backoff, parent response branch resolution, shared SQLite manual vs automatic atomic one-shot result claim, root AgentRunner continue, source UX handle, restart wakeup leases. Tests: real SQLite and actual parent AgentRunner SSE. Full JS global trigger retry/dead-letter protocol and HA root actor remain partial."
+    "subagent_completion_wakeup": "Source-locked internal child continue trigger queue with pre-enqueued typed envelopes, parent branch checks, same-transaction manual/auto result claims and original AgentRunner; bounded 8-attempt 1s-5m half-jitter durable retry/dead-letter, owner-scoped trusted-only requeue as a fresh idempotency lane tail, and per-attempt CAS actor lease fenced through model tools, SSE, checkpoint and finalization. Source live branch tests and SQLite schema migrations. Other JS external inbound trigger bindings, event batching/steer/fire, complete scheduler and app-level approvals remain unported."
   }
 }

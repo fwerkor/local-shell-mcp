@@ -6,7 +6,7 @@
     "LibreChat": 1892,
     "agents": 258
   },
-  "reviewed_mapping_count": 51,
+  "reviewed_mapping_count": 53,
   "modules": [
     {
       "repository": "LibreChat",
@@ -9075,10 +9075,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/triggers/backoff.ts",
       "sha256": "38bb315638ac15f70cfeb06edafbaa49400737a9c5aa634f881239301adb9d0b",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_wakeup.py:waiting_retry_seconds, _defer_pending",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Exact pinned TS source executed via Bun differential for adaptive age-proportional 5..60s deferral; SQLite settlement triggers expedite eligible child and parent tasks. Generic global trigger idle engine remains separate."
     },
     {
       "repository": "LibreChat",
@@ -9147,10 +9147,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/triggers/engine.ts",
       "sha256": "06a222ad3219693cc9a86fd463c4c46b5394d0e390b3eabd8775f3db86a2f125",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/subagent_wakeup.py:_retry_at/_dispatch_failure/process_wakeups/assert_wakeup_lease",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Source 8-attempt 1s-5m half-jitter durable retry/dead-letter, trusted requeue new idempotency tail, per-claim CAS actor lease and inherited AgentRunner safety; global fire/steer/batch/multi-tenant delivery engine remains out of scope."
     },
     {
       "repository": "LibreChat",
