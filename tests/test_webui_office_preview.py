@@ -197,6 +197,13 @@ def test_office_synthetic_pptx_multislide_bullets_and_empty():
     assert 'image.png' not in result
 
 
+def test_office_corrupt_ole_xls_is_invalid_preview_not_unhandled_parser_exception():
+    raw = (FIXTURES / 'sample.xls').read_bytes()
+    for malformed in (raw[:64], raw[:8] + b'\0' * 4096):
+        with pytest.raises(ValueError, match='Invalid legacy XLS workbook'):
+            buffer_to_office_html(malformed, 'broken.xls', 'application/vnd.ms-excel')
+
+
 def test_office_invalid_zip_and_reject_entry_over_max(monkeypatch):
     from local_shell_mcp.webui import office_preview as preview
 

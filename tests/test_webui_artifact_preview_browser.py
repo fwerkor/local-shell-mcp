@@ -34,9 +34,9 @@ SAMPLES = [
     ("Markdown preview", "text/markdown", "# Markdown rendering check"),
     ("SVG alias preview", "image/svg", '<svg viewBox="0 0 40 20"><text y="12">SVG alias</text></svg>'),
     # These synthetic MIME types are the pinned original viewer contracts.
-    # A real Office attachment must be converted to sanitized HTML by the
-    # shared file pipeline; this browser test checks the *retained viewer*,
-    # not the still-unported binary conversion path.
+    # The native file_write binary converter is checked by the separate
+    # source-fixture and original-file-download integration tests. This
+    # inventory checks retained model-text previews and MIME bucket controls.
     ("Document preview", "application/vnd.librechat.docx-preview", "<html><body><h1>DOCX check</h1></body></html>"),
     ("Spreadsheet preview", "application/vnd.librechat.spreadsheet-preview", "<html><body><table><tr><td>Sheet check</td></tr></table></body></html>"),
     ("Presentation preview", "application/vnd.librechat.presentation-preview", "<html><body><section>Slides check</section></body></html>"),
@@ -122,14 +122,16 @@ async def test_artifact_types_preview_dependency_inventory(tmp_path, monkeypatch
                 panel = page.locator("#artifact-viewer")
                 seen = {}
                 for title, _, _ in SAMPLES:
-                    await page.get_by_role(
-                        "button", name=re.compile(re.escape(title))
-                    ).first.click()
-                    if await panel.count() == 0:
-                        await page.get_by_role(
-                            "button", name=re.compile(re.escape(title))
-                        ).first.click()
-                    await panel.wait_for(timeout=10000)
+                    # The original row is a toggle. A previously selected
+                    # artifact can already have an open panel, and relying on
+                    # panel.count() races the exit animation: clicking twice
+                    # then *closes* it. Use the original aria-expanded signal.
+                    trigger = page.locator('button[data-artifact-trigger]').filter(has_text=title).first
+                    await trigger.wait_for(timeout=20000)
+                    if await trigger.get_attribute('aria-expanded') != 'true':
+                        await trigger.click()
+                    await panel.wait_for(state='visible', timeout=15000)
+                    assert await trigger.get_attribute('aria-expanded') == 'true'
                     radio = panel.get_by_role("radio", name="Preview", exact=True)
                     if await radio.count():
                         await radio.click()

@@ -268,9 +268,18 @@ def _xlsx_html(z: ZipFile) -> str:
 
 def _xls_html(data: bytes) -> str:
     """SheetJS legacy-BIFF fallback with a small pure-Python XLS reader."""
-    import xlrd
+    from struct import error as StructError
 
-    book = xlrd.open_workbook(file_contents=data, on_demand=True)
+    import xlrd
+    from xlrd.compdoc import CompDocError
+
+    try:
+        book = xlrd.open_workbook(file_contents=data, on_demand=True)
+    except (xlrd.XLRDError, CompDocError, StructError, IndexError) as exc:
+        # Corrupt OLE/BIFF is untrusted input. Normalize parser-specific
+        # failures into the producer's optional-preview fallback so that
+        # the original binary remains downloadable.
+        raise ValueError("Invalid legacy XLS workbook") from exc
     try:
         sheets = []
         for sheet in book.sheets():
