@@ -9,6 +9,7 @@ import LoginLayout from './Layouts/Login';
 import ChatRoute from './ChatRoute';
 import LsmControl from '~/components/LSM/Control';
 import Search from './Search';
+import { OAuthError, OAuthSuccess } from '~/components/OAuth';
 import Root from './Root';
 
 const AuthLayout = () => (
@@ -33,6 +34,12 @@ const baseHref = baseEl?.getAttribute('href') || '/';
 
 export const router = createBrowserRouter(
   [
+    // Provider callbacks open in a separate tab without a workspace login
+    // cookie. These are intentionally outside AuthContextProvider: the latter
+    // redirects unauthenticated pages to /login before the user can see the
+    // completion outcome, even when Python serves the public SPA correctly.
+    { path: 'oauth/success', element: <OAuthSuccess /> },
+    { path: 'oauth/error', element: <OAuthError /> },
     {
       element: <AuthLayout />,
       errorElement: <RouteErrorBoundary />,

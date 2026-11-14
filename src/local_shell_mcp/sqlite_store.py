@@ -89,6 +89,37 @@ CREATE TABLE IF NOT EXISTS agents (
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner, updated_at DESC);
+CREATE TABLE IF NOT EXISTS action_records (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    metadata TEXT NOT NULL,
+    credentials BLOB,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_action_agent ON action_records(owner,agent_id);
+CREATE TABLE IF NOT EXISTS action_oauth_tokens (
+    action_id TEXT NOT NULL REFERENCES action_records(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    token BLOB NOT NULL,
+    expires_at INTEGER,
+    PRIMARY KEY (action_id,owner,kind)
+);
+CREATE TABLE IF NOT EXISTS action_oauth_flows (
+    state_hash TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    action_id TEXT NOT NULL REFERENCES action_records(id) ON DELETE CASCADE,
+    action_version INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_action_oauth_flows_expiry ON action_oauth_flows(expires_at);
 CREATE TABLE IF NOT EXISTS agent_versions (
     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     version INTEGER NOT NULL,

@@ -180,7 +180,7 @@ def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
     result = {}
     nullable_strings = {"name", "description", "instructions", "model"}
     strings = {"provider", "artifacts", "category", "code_environment_id", "code_workspace_id"}
-    arrays = {"tools", "skills", "agent_ids", "conversation_starters"}
+    arrays = {"tools", "actions", "skills", "agent_ids", "conversation_starters"}
     booleans = {"skills_enabled", "skill_authoring_enabled", "end_after_tools", "hide_sequential_outputs", "stateful_code_sessions"}
     enums = {"skills_scope": ("all", "selected", "none"), "memory_scope": ("user", "agent"),
              "stateful_code_environment": ("user", "agent-user", "conversation"),
