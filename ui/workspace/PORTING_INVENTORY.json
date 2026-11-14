@@ -6,7 +6,7 @@
     "LibreChat": 1892,
     "agents": 258
   },
-  "reviewed_mapping_count": 58,
+  "reviewed_mapping_count": 67,
   "modules": [
     {
       "repository": "LibreChat",
@@ -444,10 +444,10 @@
       "repository": "LibreChat",
       "path": "api/server/controllers/agents/client.js",
       "sha256": "9b2f6accf56544096aa530d5bccff4b1cc5b76651a746da2a8aee94cc20020e1",
-      "python_lsm": "webui/generations.py; generation_routes.py",
+      "python_lsm": "webui/generation_routes.py; generations.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "未移植完整AgentClient和事件actor生命周期"
+      "difference": "原版React status.resumeState、SSE sync游标、Ask User/审批刷新恢复已Chromium验证；完整event actor仍不等价。"
     },
     {
       "repository": "LibreChat",
@@ -507,10 +507,10 @@
       "repository": "LibreChat",
       "path": "api/server/controllers/agents/resume.js",
       "sha256": "9c6ae6e847aa8a7defb124022fbd23c08a2876a9c45087cafc3599778f58fa1d",
-      "python_lsm": "webui/generation_routes.py:resume_generation",
+      "python_lsm": "webui/generation_routes.py; generations.py; agent_runner.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "批审批claim、已审核证据、owner/generation checkpoint与pending tools重放已接入；完整actor/steer/子中断聚合仍缺失"
+      "difference": "原版HTTP resuming、owner/epoch/agent校验与数据库事务claim，重复同请求恢复；steer、actor、跨进程执行lease待图运行时任务。"
     },
     {
       "repository": "LibreChat",
@@ -1632,10 +1632,10 @@
       "repository": "LibreChat",
       "path": "api/server/routes/files/files.js",
       "sha256": "39e115dd8e954ddfbae24fe92a78cbd50cd258f34b7cfdeb954998514214e17b",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/attachments.py:download_react_file",
+      "status": "完成（本地文件下载路径；共享callback仍部分）",
+      "reviewed_mapping": true,
+      "difference": "源格式兼容的用户路径/文件ID双参数下载、受信任owner校验、白名单X-File-Metadata及原件二进制已实测；原版其它存储策略/异步Office转换不在此次实现范围。"
     },
     {
       "repository": "LibreChat",
@@ -7824,10 +7824,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/checkpointer.ts",
       "sha256": "63f0390a025a550ec4a572145f6db7dcb190797d181ac11d0bb707f364d75302",
-      "python_lsm": "webui/checkpoints.py; agent_runner.py",
+      "python_lsm": "webui/checkpoints.py; generations.py; agent_runner.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "统一SQLite tuple/pending-write存储、owner/generation隔离、proposal/结果/完成状态恢复已接入；完整LangChain类序列化与graph actor链未实现"
+      "difference": "持久checkpoint和同事务人工交互claim、重启repark恢复；跨进程租约、完整图checkpoint待验收。"
     },
     {
       "repository": "LibreChat",
@@ -8301,10 +8301,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/hitl/policy.ts",
       "sha256": "30ca40677e43c5d12fe539da85262bf6d335eb238836ad8705b480789e0661ce",
-      "python_lsm": "webui/nested_mcp.py",
+      "python_lsm": "webui/approval_runtime.py; agent_runner.py",
       "status": "未实现",
       "reviewed_mapping": true,
-      "difference": "当前对所有nested MCP强制approval，不是原版policy机制"
+      "difference": "原版Ask User审批默认豁免及显式ask/deny覆盖；固定24h TTL；可选checkpointer TTL配置仍未完成。"
     },
     {
       "repository": "LibreChat",
@@ -8328,10 +8328,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/hitl/resume.ts",
       "sha256": "9fb798731c45a310d3deb88407e9f74d74116c006f8fc21186686dc0aad00ec5",
-      "python_lsm": "webui/generations.py:answer_question / claim_approval; webui/tool_approval.py",
+      "python_lsm": "webui/ask_user_tools.py; tool_approval.py; approval_runtime.py; generations.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "Ask User恢复校验与原Node函数91组输入差分一致，答案按id保存与恢复；approval仍缺批次/edit/respond等原版语义；审批决策映射/校验60组原Node差分一致并接入claim；实际批次执行仍未完成"
+      "difference": "Ask User 91组和审批60组Node差分，批量edit/respond/reject执行、SQLite审查证据及恢复测试通过；完整子图仍待验收。"
     },
     {
       "repository": "LibreChat",
@@ -9084,10 +9084,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/triggers/batch.ts",
       "sha256": "ac85e3a5e115715afed56610c5ba64d224732f34e58a0e86744f0de65aec38c7",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/event_triggers.py:_batch_input",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Structured coalesced original child events sorted by source timestamps and ids; advanced remote detached evidence recovery still pending."
     },
     {
       "repository": "LibreChat",
@@ -9165,10 +9165,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/triggers/expectedAction.ts",
       "sha256": "81371ad60c1abd3717f2454773503c2f7d2c90166885f6f925de46d345c86dd4",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/event_triggers.py:matches_expected_action,_observed_action",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Host observed true tool completion evidence and original JS subset predicate; advanced remote detached evidence recovery still pending."
     },
     {
       "repository": "LibreChat",
@@ -10704,10 +10704,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/files/documents/html.ts",
       "sha256": "c0abfcc6f04a2bb2ff310489c9ffd82d2b217bb1768e75979453fbb8cb78c19f",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/office_preview.py",
+      "status": "部分：静态语义HTML已完成；CDN/LibreOffice高保真未移植",
+      "reviewed_mapping": true,
+      "difference": "使用Python标准库安全静态渲染及轻量xlrd支持BIFF.xls；真实上游6个二进制样例、XSS/ZIP上限与真实浏览器回归；不使用原版动态CDN高保真渲染。"
     },
     {
       "repository": "LibreChat",
@@ -10722,10 +10722,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/files/documents/zipSafety.ts",
       "sha256": "c137820f3b7c0d3dcb041addd8c217e2b0d430b78bc31f887e02d065ea38ec13",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/office_preview.py",
+      "status": "完成：Python ZIP actual-inflate size preflight",
+      "reviewed_mapping": true,
+      "difference": "使用Python标准库安全静态渲染及轻量xlrd支持BIFF.xls；真实上游6个二进制样例、XSS/ZIP上限与真实浏览器回归；不使用原版动态CDN高保真渲染。"
     },
     {
       "repository": "LibreChat",
@@ -12405,28 +12405,28 @@
       "repository": "LibreChat",
       "path": "packages/api/src/prompts/artifacts/components.ts",
       "sha256": "62ae18fd08c6f0507294894bc30924791345fb48f3a706944393e76fd5470d01",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "artifact_prompt_snapshot.json",
+      "status": "完成（Shadcn源码数据）",
+      "reviewed_mapping": true,
+      "difference": "47源记录、33合并后有效组件，快照包含源文件SHA-256"
     },
     {
       "repository": "LibreChat",
       "path": "packages/api/src/prompts/artifacts/generate.ts",
       "sha256": "dec5351e841dca1101ccd93aa1c15066c7ab65703e654ea9341b9b2399698033",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/artifact_prompts.py; scripts/export-librechat-artifact-prompts.py",
+      "status": "完成（Shadcn提示词生成）",
+      "reviewed_mapping": true,
+      "difference": "JS原函数嵌套dedent文本逐字节对照通过"
     },
     {
       "repository": "LibreChat",
       "path": "packages/api/src/prompts/artifacts/index.ts",
       "sha256": "94871f10b8fa868b40f8d19a8e54355091e6ee0501ec1526f474dc4a2912239a",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/artifact_prompts.py; artifact_prompt_snapshot.json",
+      "status": "完成（提示词源码差分）",
+      "reviewed_mapping": true,
+      "difference": "Node 15组逐字节对照一致，three-mode端点选择与SQLite恢复写入已接入；不代表工具回调/全量Artifacts完成"
     },
     {
       "repository": "LibreChat",
@@ -14385,10 +14385,10 @@
       "repository": "LibreChat",
       "path": "packages/data-provider/src/data-service.ts",
       "sha256": "0e43b4d25765bc3d0122f59e73884f53d184977136beda2e0ea37b65a89f059c",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/attachments.py; original retained React useArtifactDownload",
+      "status": "完成（本地文件原件路径实测）",
+      "reviewed_mapping": true,
+      "difference": "Chromium从原有tool attachment卡片读取真实SQLite DOCX原件，Blob下载完全保真；模型产生真实Office预览的转换和工具附件事件仍由共享协议PR负责。"
     },
     {
       "repository": "LibreChat",

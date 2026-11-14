@@ -624,6 +624,24 @@
       "python_lsm": "webui/office_preview.py",
       "status": "完成：Python ZIP actual-inflate size preflight",
       "difference": "使用Python标准库安全静态渲染及轻量xlrd支持BIFF.xls；真实上游6个二进制样例、XSS/ZIP上限与真实浏览器回归；不使用原版动态CDN高保真渲染。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/expectedAction.ts",
+      "sha256": "81371ad60c1abd3717f2454773503c2f7d2c90166885f6f925de46d345c86dd4",
+      "symbols": "matchesExpectedAction",
+      "python_lsm": "webui/event_triggers.py:matches_expected_action,_observed_action",
+      "status": "部分",
+      "difference": "Host observed true tool completion evidence and original JS subset predicate; advanced remote detached evidence recovery still pending."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/batch.ts",
+      "sha256": "ac85e3a5e115715afed56610c5ba64d224732f34e58a0e86744f0de65aec38c7",
+      "symbols": "createAgentTriggerBatchEnvelope",
+      "python_lsm": "webui/event_triggers.py:_batch_input",
+      "status": "部分",
+      "difference": "Structured coalesced original child events sorted by source timestamps and ids; advanced remote detached evidence recovery still pending."
     }
   ],
   "runtime_dependency_lock": {

@@ -651,3 +651,36 @@ frontend feature appears. The new Office preview's separate source-differential
 format fixtures and security tests are in `tests/test_webui_office_preview.py`,
 native runtime/owner/idempotency tests in `tests/test_webui_office_runtime.py`, and
 native-file-write-to-React replay in `test_webui_artifact_file_download_browser.py`.
+
+### 2026-11-14 — 合并 source Graph/HITL #358、Artifacts #352、Remote Event Steer/Batch/ExpectedAction
+
+已将最新 `origin/main`、原版 Graph/HITL/Steer 集成 PR #358 和源 Artifacts/Office
+PR #352 合入 PR #354 的独立 worktree（仅代码分支；不操作另两个 PR）。
+Graph 代次 ownership 与 SQLite actor lease、审批中断、原版 SSE/RunStepState、
+Tool Approval/Ask User 和真正的 Artifacts child 活动只读标记同时生效。
+外部 Event Actor 可以严格使用 *已完成* 的父 Agent assistant reply 预登记
+`ActiveChildThreads.reserve_for_completed_parent`，并保留永久不可编辑的子会话
+保护；不能把已完成父 generation 当作当前运行中的普通 Subagent。
+
+`triggers/host.ts` 的 `steer` 复用既有 `SteeringStore.enqueue`，一次性
+`clientSteerId=trigger_*` 与原本 SSE 事件；在**同一 SQLite 事务**中复核
+事件源密钥、owner、lease 和 generation CreatedAt，旧 Controller 被撤权后
+不得再修改 steering FIFO。即便入队完成后程序崩溃，重试也复用原
+Steer receipt 而非二次注入。
+
+`triggers/batch.ts` observational bound-child `continue` 支持 opt-in
+`coalesce.key`、750ms 聚合窗口、8 项最大批次与 512KiB 上限，
+按源 occurredAt、接收时间、事件 ID、delivery key 稳定排序，
+组装真实 `kind:librechat.agent_event_batch` JSON 输入，成员 receipt 由
+root terminal 同步结算；无绑定/expectedAction/steer 不能合并。
+
+`triggers/expectedAction.ts` 用 byte-pinned 原 TS `matchesExpectedAction`
+Bun 差分覆盖完整工具名、`_mcp_` 前缀、JSON 参数解析和递归 subset
+匹配。任务终态只能根据本机宿主保存的
+`on_run_step_completed.data.result.tool_call` 证据确认动作是否发生；
+仅模型文字、失败工具结果、错误参数与无效生成不作为成功证据。暂停的人审
+必须等持久审批完成后再判断。
+
+尚需进一步处理 source `background.ts` 普通工具后台化、事件源完整的
+Detached Action 证据持久重传、复杂跨机 Coalescing 操作回执与剩余
+源 Graph RunStepState 边缘消息类型。本节不代表这几项已经全部完成。

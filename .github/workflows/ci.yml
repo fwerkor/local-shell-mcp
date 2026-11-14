@@ -219,6 +219,8 @@ jobs:
             tests/test_webui_event_trigger_runtime_edges.py tests/test_webui_event_trigger_bindings.py \
             tests/test_webui_event_trigger_routes.py tests/test_webui_event_trigger_route_edges.py \
             tests/test_webui_event_trigger_binding_routes.py \
+            tests/test_webui_event_trigger_steer.py tests/test_webui_event_trigger_batch.py \
+            tests/test_webui_event_trigger_expected_action.py \
             tests/test_webui_direct_login.py tests/test_webui_provider_browser.py \
             tests/test_webui_artifacts_source.py tests/test_webui_artifact_routes.py \
             tests/test_webui_artifact_browser.py
