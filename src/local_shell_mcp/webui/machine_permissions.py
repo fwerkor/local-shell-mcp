@@ -184,6 +184,9 @@ async def default_permissions(request: Request):
             raise HTTPException(400, detail=str(exc)) from exc
         _checked(request, value)
         repository.save_setting(owner, key, value)
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
     else:
         value = _stored(repository, owner, key)
     inherited = {} if key == _GLOBAL else _stored(repository, owner, _GLOBAL)
