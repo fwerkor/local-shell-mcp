@@ -113,8 +113,8 @@ body{margin:0;padding:16px;overflow-wrap:anywhere}table{border-collapse:collapse
 th,td{border:1px solid var(--border);padding:4px 8px;white-space:pre-wrap}
 th{background:var(--shade)}.lc-table-scroll{max-width:100%;overflow-x:auto}
 .lc-banner{padding:6px 10px;background:var(--shade);border:1px solid var(--border);border-radius:5px}
-.lc-sheet-tabs{display:flex;gap:8px;margin-bottom:12px}.lc-sheet-tab-radio{position:absolute;opacity:0}
-.lc-sheet-panel{display:none}.lc-sheet-tab-radio:first-of-type:checked~.lc-sheet-panel{display:block}
+.lc-sheet-tabs{display:flex;gap:8px;margin-bottom:12px}.lc-sheet-tab-radio{position:absolute;opacity:0;pointer-events:none}
+.lc-sheet-panel{display:none}
 .lc-pptx-list{list-style:none;padding:0}.lc-pptx-slide{padding:16px;border:1px solid var(--border);margin:0 0 14px}
 .lc-pptx-slide-number{font-size:12px;opacity:.7}.lc-docx p{margin:8px 0}
 </style>"""
@@ -304,8 +304,11 @@ def _ods_html(z: ZipFile) -> str:
         name = next((value for key, value in table.attrib.items() if _local(key) == 'name'), f'Sheet{index+1}')
         rows = []
         total = 0
-        for row in table:
-            if _local(row.tag) not in {'table-row', 'table-header-rows'}:
+        # ODS row groups, headers and footer groups all contain actual
+        # table-row children. Iterate those in document order, rather than
+        # pretending table-header-rows itself contains cells.
+        for row in table.iter():
+            if _local(row.tag) != 'table-row':
                 continue
             count = int(next((v for k, v in row.attrib.items() if _local(k) == 'number-rows-repeated'), '1'))
             count = min(max(1, count), MAX_ROWS+1)
@@ -328,27 +331,74 @@ def _ods_html(z: ZipFile) -> str:
     return _sheets(sheets)
 
 
+def _ordered_presentation_slides(z: ZipFile) -> list[str]:
+    """OOXML presentation order is an sldId/rId list, not ZIP filename order."""
+    available = {
+        path for path in z.namelist()
+        if re.fullmatch(r'ppt/slides/slide[0-9]+\.xml', path)
+    }
+    manifest = 'ppt/presentation.xml'
+    relations = 'ppt/_rels/presentation.xml.rels'
+    if manifest in z.namelist() and relations in z.namelist():
+        rels = {}
+        for rel in _read_xml(z, relations):
+            if (rel.get('TargetMode') or '').lower() == 'external':
+                continue
+            if not rel.get('Type', '').endswith('/slide'):
+                continue
+            target = rel.get('Target', '')
+            if not target or ':' in target or '..' in PurePosixPath(target).parts:
+                continue
+            resolved = target.lstrip('/') if target.startswith('/') else 'ppt/' + target
+            if resolved in available:
+                rels[rel.get('Id')] = resolved
+        root = _read_xml(z, manifest)
+        slide_list = root.find('.//{*}sldIdLst')
+        if slide_list is not None:
+            ordered = []
+            for slide in slide_list:
+                path = rels.get(slide.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'))
+                if path is not None:
+                    ordered.append(path)
+            # Do not expose orphaned slides omitted from the live presentation.
+            if ordered:
+                return ordered
+    # Legacy/malformed fixtures without manifests retain deterministic fallback.
+    return sorted(available, key=lambda item: int(re.search(r'slide([0-9]+)', item)[1]))
+
+
 def _presentation_html(z: ZipFile) -> str:
-    slides = []
-    for path in z.namelist():
-        match = re.fullmatch(r'ppt/slides/slide([0-9]+)\.xml', path)
-        if match:
-            slides.append((int(match[1]), path))
+    slides = _ordered_presentation_slides(z)
     body = []
-    for number, path in sorted(slides)[:MAX_SLIDES]:
+    remaining = MAX_VISIBLE_CHARS
+    truncated = False
+    for number, path in enumerate(slides[:MAX_SLIDES], start=1):
         root = _read_xml(z, path)
         paragraphs = []
         for para in root.iter():
             if _local(para.tag) != 'p':
                 continue
             content = ''.join((node.text or '') for node in para.iter() if _local(node.tag) == 't').strip()
-            if content:
-                paragraphs.append(content[:MAX_VISIBLE_CHARS // MAX_SLIDES])
+            if not content:
+                continue
+            if remaining <= 0:
+                truncated = True
+                break
+            text = content[:remaining]
+            paragraphs.append(text)
+            remaining -= len(text)
+            if len(text) < len(content):
+                truncated = True
+                break
         title = f'<h2 class="lc-pptx-slide-title">{_escape(paragraphs[0])}</h2>' if paragraphs else ''
         bullets = '<ul class="lc-pptx-slide-body">' + ''.join(f'<li>{_escape(line)}</li>' for line in paragraphs[1:]) + '</ul>' if len(paragraphs) > 1 else ''
         if not title:
             bullets = '<p class="lc-pptx-slide-empty">(empty slide)</p>'
         body.append(f'<li class="lc-pptx-slide"><span class="lc-pptx-slide-number">Slide {number}</span>{title}{bullets}</li>')
+        if truncated:
+            break
+    if truncated or len(slides) > MAX_SLIDES:
+        body.append('<li class="lc-banner">Preview truncated. Download the file to see the rest.</li>')
     return _document('<ol class="lc-pptx-list">' + ''.join(body) + '</ol>' if body else
                      '<p class="lc-banner">This presentation contains no readable slides.</p>')
 
@@ -421,7 +471,7 @@ async def publish_office_tool_output(owner: str, run_id: str, tool_call_id: str,
     try:
         preview = await asyncio.to_thread(buffer_to_office_html, data, filename, mime_type)
         metadata = {'status': 'ready', 'text': preview, 'textFormat': 'html', 'context': 'tool_output'}
-    except (ValueError, ET.ParseError, OSError, KeyError, OverflowError):
+    except (ValueError, ET.ParseError, OSError, KeyError, OverflowError, csv.Error):
         metadata = {'status': 'failed', 'previewError': 'unsupported', 'context': 'tool_output'}
     metadata['sourceDigest'] = digest
     metadata['toolCallId'] = tool_call_id

@@ -213,3 +213,111 @@ def test_office_invalid_zip_and_reject_entry_over_max(monkeypatch):
     monkeypatch.setattr(preview, 'MAX_ENTRY_BYTES', 2)
     with pytest.raises(UnsafeOfficeArchive, match='size limit'):
         preview.buffer_to_office_html(payload, 'report.docx', DOCX_MIME)
+
+
+def test_multisheet_office_css_only_selects_the_matching_panel():
+    from local_shell_mcp.webui.office_preview import _sheets
+
+    result = _sheets([('First', [['ONE']], 1), ('Second', [['TWO']], 1)])
+    assert '.lc-sheet-tab-radio:first-of-type:checked~.lc-sheet-panel' not in result
+    assert '#lc-sheet-tab-0:checked~#lc-sheet-panel-0{display:block}' in result
+    assert '#lc-sheet-tab-1:checked~#lc-sheet-panel-1{display:block}' in result
+
+
+@pytest.mark.asyncio
+async def test_multisheet_office_preview_browser_renders_one_panel_at_a_time():
+    playwright = pytest.importorskip('playwright.async_api')
+    from local_shell_mcp.webui.office_preview import _sheets
+
+    async with playwright.async_playwright() as manager:
+        try:
+            browser = await manager.chromium.launch(headless=True)
+        except playwright.Error as error:
+            if "Executable doesn't exist" in str(error):
+                pytest.skip('Optional Chromium not installed')
+            raise
+        try:
+            page = await browser.new_page()
+            await page.set_content(_sheets([('One', [['VISIBLE_ONE']], 1),
+                                            ('Two', [['VISIBLE_TWO']], 1)]))
+            first = page.locator('#lc-sheet-panel-0')
+            second = page.locator('#lc-sheet-panel-1')
+            assert await first.is_visible()
+            assert not await second.is_visible()
+            await page.locator('label[for="lc-sheet-tab-1"]').click()
+            assert not await first.is_visible()
+            assert await second.is_visible()
+            await page.locator('label[for="lc-sheet-tab-0"]').click()
+            assert await first.is_visible()
+            assert not await second.is_visible()
+        finally:
+            await browser.close()
+
+
+def test_ods_grouped_headers_and_rows_preserve_document_order():
+    xml = ('''<office:document-content
+        xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+        xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+        xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+        <office:body><office:spreadsheet><table:table table:name="Grouped">
+          <table:table-header-rows><table:table-row>
+            <table:table-cell><text:p>HEADER_SENTINEL</text:p></table:table-cell>
+          </table:table-row></table:table-header-rows>
+          <table:table-row-group><table:table-row table:number-rows-repeated="2">
+            <table:table-cell><text:p>GROUP_SENTINEL</text:p></table:table-cell>
+          </table:table-row></table:table-row-group>
+          <table:table-row><table:table-cell>
+            <text:p>PLAIN_SENTINEL</text:p>
+          </table:table-cell></table:table-row>
+        </table:table></office:spreadsheet></office:body>
+        </office:document-content>''')
+    output = buffer_to_office_html(_archive_xml('content.xml', xml), 'grouped.ods', 'application/octet-stream')
+    assert output.count('<tr>') == 4
+    assert output.count('GROUP_SENTINEL') == 2
+    assert output.index('HEADER_SENTINEL') < output.index('GROUP_SENTINEL') < output.index('PLAIN_SENTINEL')
+
+
+def _ordered_pptx_fixture(content1: str = 'STORAGE_FIRST', content2: str = 'STORAGE_SECOND') -> bytes:
+    namespace = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+    relations = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    manifest = (f'<p:presentation xmlns:p="{namespace}" xmlns:r="{relations}">'
+                '<p:sldIdLst><p:sldId id="256" r:id="rId2"/>'
+                '<p:sldId id="257" r:id="rId1"/></p:sldIdLst></p:presentation>')
+    rels = (f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            f'<Relationship Id="rId1" Type="{relations}/slide" Target="slides/slide1.xml"/>'
+            f'<Relationship Id="rId2" Type="{relations}/slide" Target="slides/slide2.xml"/>'
+            f'<Relationship Id="evil" Type="{relations}/slide" Target="../../private.xml"/>'
+            '</Relationships>')
+    def slide(content):
+        return f'<p:sld xmlns:p="{namespace}" xmlns:a="urn:a"><a:p><a:r><a:t>{content}</a:t></a:r></a:p></p:sld>'
+    return _synthetic_xlsx({
+        'ppt/presentation.xml': manifest,
+        'ppt/_rels/presentation.xml.rels': rels,
+        'ppt/slides/slide1.xml': slide(content1),
+        'ppt/slides/slide2.xml': slide(content2),
+        'ppt/slides/slide3.xml': slide('ORPHAN_NOT_IN_PRESENTATION'),
+    })
+
+
+def test_pptx_slide_relationship_order_overrides_storage_name_and_omits_orphan():
+    result = buffer_to_office_html(_ordered_pptx_fixture(), 'deck.pptx', 'application/octet-stream')
+    assert result.index('Slide 1') < result.index('STORAGE_SECOND')
+    assert result.index('STORAGE_SECOND') < result.index('Slide 2') < result.index('STORAGE_FIRST')
+    assert 'ORPHAN_NOT_IN_PRESENTATION' not in result
+    assert result.count('class="lc-pptx-slide"') == 2
+
+
+def test_pptx_text_budget_counts_actual_content_without_silent_short_cut(monkeypatch):
+    long_title = 'A' * 450 + 'UNIQUE_END'
+    data = _ordered_pptx_fixture('short', long_title)
+    rendered = buffer_to_office_html(data, 'slides.pptx', 'application/octet-stream')
+    assert long_title in rendered
+    assert 'Preview truncated' not in rendered
+
+    from local_shell_mcp.webui import office_preview as preview
+
+    monkeypatch.setattr(preview, 'MAX_VISIBLE_CHARS', 60)
+    rendered = buffer_to_office_html(data, 'slides.pptx', 'application/octet-stream')
+    assert 'Preview truncated. Download the file to see the rest.' in rendered
+    assert 'UNIQUE_END' not in rendered
+    assert 'Slide 1' in rendered

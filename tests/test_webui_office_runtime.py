@@ -231,3 +231,32 @@ async def test_office_publisher_rejects_invalid_server_identity(tmp_path):
         await publish_office_tool_output('local', 'run', 'x'*257, 'report.docx', DOCX_MIME, b'data', **values)
     with pytest.raises(PermissionError, match='no longer active'):
         await publish_office_tool_output('local', 'run', 'call', 'report.docx', DOCX_MIME, b'data', **values)
+
+
+@pytest.mark.asyncio
+async def test_invalid_csv_field_does_not_abort_tool_output_publication(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / 'state'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    get_settings.cache_clear()
+    database = shared_database(tmp_path / 'state')
+    store = GenerationStore(database)
+    run, _ = store.begin('local', {'text': 'Export unusually long CSV field'})
+    # CPython csv.reader raises csv.Error above its default field-size cap.
+    original = b'column\n' + b'v' * 140000 + b'\n'
+    attachment = await publish_office_tool_output(
+        'local', run.run_id, 'call_csv', 'export.csv', 'text/csv', original,
+        database=database, state_dir=tmp_path / 'state',
+    )
+    assert attachment['status'] == 'failed'
+    assert attachment['previewError'] == 'unsupported'
+    with database.connect() as db:
+        row = db.execute('SELECT path FROM attachments WHERE id=?', (attachment['file_id'],)).fetchone()
+        assert Path(row['path']).read_bytes() == original
+    assert store.finish('local', run.run_id, status='complete', text='Export complete')
+    message = next(m for m in WorkspaceRepository(database).messages('local', run.conversation_id)['messages']
+                   if m['role'] == 'assistant')
+    assert message['attachments'][0]['file_id'] == attachment['file_id']
+    assert message['attachments'][0]['status'] == 'failed'
+    get_settings.cache_clear()
