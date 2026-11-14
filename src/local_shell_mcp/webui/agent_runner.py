@@ -19,6 +19,7 @@ from .agent_runtime import (
 from .agents import AgentRepository
 from .approval_runtime import (
     approval_policy_decision,
+    ask_user_approval_policy,
     build_approval_payload,
     execute_approval_batch,
     truncate_approval_result,
@@ -34,6 +35,7 @@ from .handoff import (
     is_transfer_tool,
 )
 from .providers import ModelToolCall, provider_config, selected_provider
+from .steering import SteeringStore, merged_text
 from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
 
 
@@ -47,7 +49,7 @@ class AgentRunner:
                  graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None,
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
-                 wakeup_lease=None, event_delivery_lease=None):
+on_injected=None, wakeup_lease=None, event_delivery_lease=None, actor_lease=None, recovery_steers=False):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -63,13 +65,16 @@ class AgentRunner:
         self.subagent_depth = subagent_depth
         self.wakeup_lease = wakeup_lease
         self.event_delivery_lease = event_delivery_lease
+        self.actor_lease = actor_lease
+        self.recovery_steers = recovery_steers
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
         self.resume_history, self.resume_namespace = resume_history, resume_namespace
         self.partial_text, self.approved_batch = partial_text, approved_batch
         self.repository = AgentRepository(database)
-        self.saver = SQLiteCheckpointSaver(database, owner)
+        self.saver = SQLiteCheckpointSaver(database, owner, actor_lease=actor_lease)
+        self.steers = SteeringStore(database)
         self.config = self.saver.config(generation.conversation_id, generation.run_id,
                                        checkpoint_ns=namespace, event_actor=True)
         self.active_config = self.config
@@ -78,6 +83,8 @@ class AgentRunner:
         self.route = HandoffRouting(self.graph_entry_id, self.graph_max_handoffs, self.graph_parallel)
 
     def _check_grant(self):
+        if self.actor_lease is not None:
+            self.actor_lease.assert_current()
         if self.grant_expires is not None and self.grant_expires <= time.time():
             raise RuntimeSafetyError("Authentication grant expired")
         if self.task_control_host is not None and self.task_control_id is not None:
@@ -176,7 +183,8 @@ class AgentRunner:
                         "args": call.arguments,
                     }],
                 }}
-        self.store.append(self.owner, self.generation.run_id, {"event": "on_run_step", "data": step})
+        self.store.append(self.owner, self.generation.run_id, {"event": "on_run_step", "data": step},
+                          actor_lease=self.actor_lease)
         return step
 
     async def _completed(self, call, record):
@@ -198,7 +206,7 @@ class AgentRunner:
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},
-        })
+        }, actor_lease=self.actor_lease)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -275,8 +283,8 @@ class AgentRunner:
                             background_deny=self.background_deny,
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
                             subagent_depth=invocation.remaining_depth,
-                            wakeup_lease=self.wakeup_lease,
-                            event_delivery_lease=self.event_delivery_lease)
+wakeup_lease=self.wakeup_lease, event_delivery_lease=self.event_delivery_lease,
+                            actor_lease=self.actor_lease, recovery_steers=self.recovery_steers)
         return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
 
     async def _pause(self, payload, state, *, approval=False):
@@ -290,7 +298,8 @@ class AgentRunner:
                    "createdAt": int(time.time() * 1000), "namespace": self.namespace, "payload": payload}
         self.saver.put_writes(self.active_config, [("__interrupt__", pending)], task_id="human")
         pause = self.store.pause_for_approval if approval else self.store.pause_for_question
-        if not pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text):
+        if not pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text,
+                     actor_lease=self.actor_lease):
             raise RuntimeError("Unable to save pending Agent action")
         raise AgentSuspended()
 
@@ -306,16 +315,13 @@ class AgentRunner:
         if not self.namespace or self.graph_node:
             for call in unresolved:
                 self._tool_step(call)
-        asking = [call for call in unresolved if call.name == "ask_user_question"]
-        if asking:
-            if len(calls) != 1:
-                raise ValueError("Ask User cannot run in parallel with another tool")
-            await self._pause(build_ask_user_payload(asking[0].arguments, asking[0].call_id), state)
         endpoints = _repo().setting(self.owner, "endpoints", {}) or {}
         policy = (endpoints.get("agents") or {}).get("toolApproval")
         ask = []
+        questions = []
         for call in unresolved:
-            decision = approval_policy_decision(policy, call.name)
+            selected_policy = ask_user_approval_policy(policy) if call.name == "ask_user_question" else policy
+            decision = approval_policy_decision(selected_policy, call.name)
             if decision and decision["decision"] == "deny":
                 output = "Blocked: " + decision.get("reason", "Rejected by policy")
                 record = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)}, "output": output}
@@ -323,6 +329,8 @@ class AgentRunner:
                 self.cache[replay_key(call, calls.index(call))] = record
             elif decision and decision["decision"] == "ask":
                 ask.append(call)
+            elif call.name == "ask_user_question":
+                questions.append(call)
         if ask and self.background_deny:
             # LibreChat SubagentExecutor.executeDetached: a detached child cannot
             # park the parent generation for HITL; deny the protected tools.
@@ -334,6 +342,17 @@ class AgentRunner:
                 self.cache[replay_key(requested, calls.index(requested))] = record
         elif ask:
             await self._pause(build_approval_payload(ask), state, approval=True)
+        if questions and self.background_deny:
+            for requested in questions:
+                blocked = "Blocked: Ask User requires foreground human interaction."
+                record = {"proposal": {"name": requested.name,
+                                       "args": copy.deepcopy(requested.arguments)}, "output": blocked}
+                await self._completed(requested, record)
+                self.cache[replay_key(requested, calls.index(requested))] = record
+        elif questions:
+            if len(calls) != 1:
+                raise ValueError("Ask User cannot run in parallel with another tool")
+            await self._pause(build_ask_user_payload(questions[0].arguments, questions[0].call_id), state)
         outputs = await execute_tool_batch(
             calls, lambda call: self._invoke(call, state), settled=self.cache,
             interrupting_names=frozenset({"subagent"}),
@@ -388,6 +407,25 @@ class AgentRunner:
                     self.cache[replay_key(call, index)] = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)},
                                                          "output": match["content"]}
                     self.saver.put_writes(self.active_config, [("messages", match)], task_id=call.call_id)
+        # Crash seam: the durable FIFO/event claim may have committed before
+        # the model-loop checkpoint recorded its injected HumanMessage. Repair
+        # against deterministic IDs, so retries and parallel graph reducers
+        # never create a second public steer part.
+        is_foreground = (not self.namespace or
+                         (self.graph_node and self.namespace.startswith("/graph:")))
+        if is_foreground and self.recovery_steers:
+            existing_steers = {message.get("steerId") for message in state.messages
+                               if isinstance(message, dict)}
+            for part in self.steers.applied_parts(self.owner, self.generation.run_id,
+                                                   namespace=self.namespace):
+                steer_id = part.get("steerId")
+                if not isinstance(steer_id, str) or steer_id in existing_steers:
+                    continue
+                state.messages.append({"role": "user", "content": merged_text(part),
+                                       "source": "steer", "steerId": steer_id,
+                                       "id": "steer:" + steer_id, "files": part.get("files", [])})
+                existing_steers.add(steer_id)
+                state.completed = False
         if recursion_limit is not None:
             state.context.recursion_limit = recursion_limit
         review = self.store.approved_review(self.owner, self.generation.run_id)
@@ -404,7 +442,12 @@ class AgentRunner:
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
                 cached = self.cache.get(replay_key(original, state.pending_calls.index(original)))
-                return cached["output"] if cached else await self._invoke(call, state)
+                if cached:
+                    return cached["output"]
+                if call.name == "ask_user_question":
+                    await self._pause(build_ask_user_payload(call.arguments, call.call_id), state)
+                    raise AssertionError("Suspended question should not return")
+                return await self._invoke(call, state)
 
             await execute_approval_batch(self.approved_batch, dispatch=reviewed_dispatch,
                                          on_completed=completed)
@@ -428,9 +471,56 @@ class AgentRunner:
             )
             return bool(additions)
 
+        async def inject_steers(current, boundary):
+            # A stolen Controller actor may not dequeue or publish a steer.
+            self._check_grant()
+            # Foreground graph nodes share the originating generation's user
+            # steer queue. Detached subagents have their own control channel.
+            # BEGIN IMMEDIATE drain elects one consumer in parallel fan-out.
+            if self.namespace and not (self.graph_node and self.namespace.startswith("/graph:")):
+                return False
+            applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary,
+                                        actor_lease=self.actor_lease,
+                                        recipient_namespace=self.namespace)
+            if applied and self.on_injected is not None:
+                await self.on_injected()
+            for item in applied:
+                # The graph checkpoint contains only durable owned references.
+                # Encode actual media per provider request, never persist base64.
+                current.messages.append({"role": "user", "content": merged_text(item),
+                                         "source": "steer", "steerId": item["steerId"],
+                                         "id": "steer:" + item["steerId"],
+                                         "files": item.get("files", [])})
+            return bool(applied)
+
+        async def should_seal_stream():
+            # Check even tool-only provider chunks: they produce no on_text
+            # callback, but may otherwise schedule irreversible tools.
+            self._check_grant()
+            owns_user_queue = (not self.namespace or
+                               (self.graph_node and self.namespace.startswith("/graph:")))
+            return owns_user_queue and self.steers.has_preempt(self.owner, self.generation.run_id)
+
+        async def stream_tools_with_media(profile, messages, **kwargs):
+            from ..settings import get_settings
+            from .steer_media import stamp_model_messages
+
+            prepared = await stamp_model_messages(self.database, self.owner, messages, get_settings().state_dir)
+            async for event in self.stream_tools(profile, prepared, **kwargs):
+                yield event
+
+        async def stream_text_with_media(profile, messages, **kwargs):
+            from ..settings import get_settings
+            from .steer_media import stamp_model_messages
+
+            prepared = await stamp_model_messages(self.database, self.owner, messages, get_settings().state_dir)
+            async for event in self.stream_text(profile, prepared, **kwargs):
+                yield event
+
         result = await run_agent_loop(
-            state, stream_tools=self.stream_tools, stream_text=self.stream_text,
+            state, stream_tools=stream_tools_with_media, stream_text=stream_text_with_media,
             dispatch=self._dispatch, on_text=emit, save_state=self._save,
+            on_boundary=inject_steers, on_stream_chunk=should_seal_stream,
             inject_controls=inject if self.task_control_host else None,
             should_preempt=(lambda: self.task_control_host.has_interrupt(self.task_control_id))
             if self.task_control_host and self.task_control_id else None,
@@ -438,5 +528,6 @@ class AgentRunner:
         self.graph_commands = state.graph_commands
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
-                                               review["actionId"], result, self.partial_text)
+                                               review["actionId"], result, self.partial_text,
+                                               actor_lease=self.actor_lease)
         return result

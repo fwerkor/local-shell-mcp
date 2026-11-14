@@ -141,7 +141,9 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             authorization_conversation_id=parent.authorization_conversation_id,
             background_deny=parent.background_deny,
             task_control_host=parent.task_control_host, task_control_id=parent.task_control_id,
-            subagent_depth=parent.subagent_depth,
+            subagent_depth=parent.subagent_depth, on_injected=parent.on_injected,
+            wakeup_lease=parent.wakeup_lease, actor_lease=parent.actor_lease,
+            recovery_steers=parent.recovery_steers,
         )
         child.route.restore(state.get("handoffState"))
         # The existing loop appends in place: snapshot the pre-call boundary.
@@ -221,7 +223,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             if sources:
                 graph.add_edge(sources if len(sources) > 1 else sources[0], to_node)
 
-    saver = OwnedGraphCheckpointer(parent.database, parent.owner)
+    saver = OwnedGraphCheckpointer(parent.database, parent.owner, actor_lease=parent.actor_lease)
     checkpoint_config = saver.storage.config(
         parent.generation.conversation_id, parent.generation.run_id + ":graph:" + parent.namespace,
         event_actor=True,

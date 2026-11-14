@@ -92,5 +92,3 @@ async def begin_automatic(env, *, dispatch=None):
 
     assert await process_wakeups(db, dispatch=capture) == 1
     return host, task_id, dispatched[0][0]
-
-

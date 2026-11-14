@@ -28,6 +28,9 @@ def native_settings_environment(tmp_path, monkeypatch):
 
 @pytest.fixture
 def configured_generation_routes(tmp_path, monkeypatch):
+    # FastMCP imports the settings accessor at module import. Never let a
+    # process-wide mocked accessor escape this fixture via a lazy native import.
+    import local_shell_mcp.tools  # noqa: F401
     from local_shell_mcp import settings as settings_module
 
     config = settings_module.Settings(auth_mode="oauth", state_dir=tmp_path,
@@ -147,3 +150,120 @@ async def test_generation_model_failure_is_durable_and_redacted(configured_gener
         assert terminal.status_code == 200
         assert "Model generation failed" in terminal.text
     await generation_routes.shutdown_generations()
+
+
+
+@pytest.mark.asyncio
+async def test_http_human_resume_claim_retry_and_identity_boundaries(
+    configured_generation_routes, monkeypatch,
+):
+    """Source React resumes the original action and cannot swap Agent/model."""
+
+    store = generation_routes._generation_store()
+    job, _ = store.begin("alice", {"text": "Need a human decision", "model": "test"})
+    pending = {
+        "actionId": "ask-bound", "conversationId": job.conversation_id,
+        "payload": {
+            "type": "ask_user_question", "tool_call_id": "q1",
+            "question": {"question": "Choose a format"},
+        },
+    }
+    assert store.pause_for_question("alice", job.run_id, pending, [], "")
+    started = []
+
+    async def fake_start(*args, **kwargs):
+        started.append((args, kwargs))
+
+    monkeypatch.setattr(generation_routes, "_start_task", fake_start)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=configured_generation_routes),
+                                base_url="http://test") as client:
+        url = "/api/agents/chat/resume"
+        user = {"x-owner": "alice"}
+        body = {"conversationId": job.conversation_id, "actionId": "ask-bound", "answer": "markdown"}
+        wrong_epoch = await client.post(url, json={**body, "generationCreatedAt": -1}, headers=user)
+        assert wrong_epoch.status_code == 409
+        wrong_agent = await client.post(url, json={**body, "agent_id": "substituted"}, headers=user)
+        assert wrong_agent.status_code == 409
+        wrong_model = await client.post(url, json={**body, "model": "different"}, headers=user)
+        assert wrong_model.status_code == 409
+        assert (await client.post(url, json=body, headers={"x-owner": "bob"})).status_code == 404
+        first = await client.post(url, json=body, headers=user)
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "resuming"
+        assert first.json()["generationCreatedAt"] == job.generation_created_at
+        assert store.get("alice", job.run_id).status == "running"
+        identical = await client.post(url, json=body, headers=user)
+        assert identical.status_code == 200, identical.text
+        assert identical.json()["status"] == "resuming"
+        changed = await client.post(url, json={**body, "answer": "json"}, headers=user)
+        assert changed.status_code == 400
+        assert len(started) == 2
+        assert started[0][1]["resume_history"] == started[1][1]["resume_history"]
+        assert store.get("alice", job.run_id).status == "running"
+
+
+@pytest.mark.asyncio
+async def test_http_approval_restart_claim_and_expiration_routes(
+    configured_generation_routes, monkeypatch,
+):
+    from local_shell_mcp.webui.approval_runtime import build_approval_payload
+    from local_shell_mcp.webui.providers import ModelToolCall
+
+    store = generation_routes._generation_store()
+    job, _ = store.begin("alice", {"text": "Review a native call"})
+    approval = {
+        "actionId": "approval-bound", "conversationId": job.conversation_id,
+        "payload": build_approval_payload([ModelToolCall("call-1", "plan_manage", {"action": "list"})]),
+    }
+    assert store.pause_for_approval("alice", job.run_id, approval, [], "")
+    dispatched = []
+
+    async def fake_start(*args, **kwargs):
+        dispatched.append(kwargs.get("approved_batch"))
+
+    monkeypatch.setattr(generation_routes, "_start_task", fake_start)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=configured_generation_routes),
+                                base_url="http://test") as client:
+        url = "/api/agents/chat/resume"
+        headers = {"x-owner": "alice"}
+        body = {"conversationId": job.conversation_id, "actionId": "approval-bound",
+                "decisions": [{"tool_call_id": "call-1", "decision": "reject"}]}
+        first = await client.post(url, json=body, headers=headers)
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "resuming"
+        assert len(dispatched) == 1 and dispatched[0] is not None
+        repeated = await client.post(url, json=body, headers=headers)
+        assert repeated.status_code == 200, repeated.text
+        assert len(dispatched) == 2
+        assert dispatched[0].entries == dispatched[1].entries
+        changed = await client.post(url, json={**body, "decisions": [
+            {"tool_call_id": "call-1", "decision": "approve"},
+        ]}, headers=headers)
+        assert changed.status_code == 400
+
+        expired, _ = store.begin("alice", {"text": "An expired question"})
+        stale = {"actionId": "ask-expired", "expiresAt": 1, "payload": {
+            "type": "ask_user_question", "tool_call_id": "q", "question": {"question": "Old?"}}}
+        assert store.pause_for_question("alice", expired.run_id, stale, [], "")
+        denied = await client.post(url, json={
+            "conversationId": expired.conversation_id, "actionId": "ask-expired", "answer": "yes",
+        }, headers=headers)
+        assert denied.status_code == 409
+        assert store.get("alice", expired.run_id).status == "interrupted"
+        assert store.events("alice", expired.run_id)[-1][1]["final"]
+
+
+@pytest.mark.asyncio
+async def test_controller_reclaims_claimed_action_on_restart(configured_generation_routes, monkeypatch):
+    """Startup recovery returns a claimed action to the original React card."""
+    store = generation_routes._generation_store()
+    job, _ = store.begin("alice", {"text": "Recover after restart"})
+    pending = {"actionId": "ask-restart", "payload": {
+        "type": "ask_user_question", "tool_call_id": "call-1",
+        "question": {"question": "Choose?"}}}
+    assert store.pause_for_question("alice", job.run_id, pending, [], "")
+    store.answer_question("alice", job.run_id, "ask-restart", {"answer": "yes"})
+    assert store.recover_claimed_resumes() == 1
+    assert store.recover_orphans() == 0
+    assert store.pending_action("alice", job.run_id) == pending
+    assert store.recover_claimed_resumes() == 0

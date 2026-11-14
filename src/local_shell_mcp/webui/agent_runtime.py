@@ -62,6 +62,8 @@ async def run_agent_loop(
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
     inject_controls: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
     should_preempt: Callable[[], bool] | None = None,
+    on_boundary: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
+    on_stream_chunk: Callable[[], Awaitable[bool]] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -81,10 +83,13 @@ async def run_agent_loop(
             state.messages.extend(output.messages)
             if output.next_context is not None:
                 state.context = output.next_context
+            injected = await on_boundary(state, "post_tools") if on_boundary else False
             state.pending_calls = []
             state.tool_step_started = False
             state.graph_commands = output.graph_commands
-            state.completed = bool(output.graph_commands) or (output.next_context is None and context.tool_end)
+            state.completed = bool(output.graph_commands) or (
+                output.next_context is None and context.tool_end and not injected
+            )
             if save_state is not None:
                 await save_state(state, [])
             if state.completed:
@@ -117,24 +122,39 @@ async def run_agent_loop(
                               **sampling) if context.tools else \
             stream_text(context.profile, state.messages, **sampling)
         preempted = False
-        async for item in source:
-            if isinstance(item, ModelToolCall):
-                calls.append(item)
-            elif item:
-                text_parts.append(item)
-                await on_text(item)
-            if should_preempt is not None and should_preempt():
-                preempted = True
-                break
+        try:
+            async for item in source:
+                if isinstance(item, ModelToolCall):
+                    calls.append(item)
+                elif item:
+                    text_parts.append(item)
+                    await on_text(item)
+                # Model streams may contain only tool calls. Both the durable
+                # user steer and detached-child interrupt can preempt these.
+                if ((should_preempt is not None and should_preempt()) or
+                    (on_stream_chunk is not None and await on_stream_chunk())):
+                    preempted = True
+                    break
+        finally:
+            close = getattr(source, "aclose", None)
+            if close is not None:
+                await close()
+        # A steer can arrive between final SSE chunk and tool dispatch.
+        if not preempted and ((should_preempt is not None and should_preempt()) or
+                              (on_stream_chunk is not None and await on_stream_chunk())):
+            preempted = True
         if preempted:
             state.messages.append({"role": "assistant", "content": "".join(text_parts) or None})
             state.pending_calls = []
             state.completed = False
+            if on_boundary is not None:
+                await on_boundary(state, "stream")
             if save_state is not None:
                 await save_state(state, [])
             if inject_controls is not None:
                 await inject_controls(state, "preempt")
             continue
+
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if calls:
             import json
@@ -147,6 +167,8 @@ async def run_agent_loop(
         state.messages.append(message)
         state.pending_calls = calls
         state.completed = not calls
+        if not calls and on_boundary is not None and await on_boundary(state, "terminal"):
+            state.completed = False
         if save_state is not None:
             await save_state(state, calls)
         if not calls:
@@ -154,5 +176,5 @@ async def run_agent_loop(
                 state.completed = False
                 if save_state is not None:
                     await save_state(state, [])
-                continue
-            return state.messages
+            if state.completed:
+                return state.messages

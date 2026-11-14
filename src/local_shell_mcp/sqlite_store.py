@@ -299,6 +299,16 @@ CREATE INDEX IF NOT EXISTS idx_agent_event_deliveries_lane
     ON agent_event_deliveries(owner,ordering_key,seq,status);
 CREATE INDEX IF NOT EXISTS idx_agent_event_deliveries_eligible
     ON agent_event_deliveries(status,available_at,lease_until);
+-- Fenced foreground HTTP chat generation owner; independent of detached
+-- internal subagent completion wakeup leases and native Job/Shell ownership.
+CREATE TABLE IF NOT EXISTS generation_actor_leases (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    token TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_generation_actor_leases_expiry
+    ON generation_actor_leases(expires_at);
 CREATE TABLE IF NOT EXISTS agent_durable_tasks (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,

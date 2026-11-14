@@ -144,8 +144,18 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.subagent_task_host import active_child_generations, recover_subagent_tasks
 
             generation_store = _generation_store()
-            generation_store.recover_orphans(active_child_generations(generation_store.database)
-                                             | active_event_generations(generation_store.database))
+            from .webui.generation_actor_lease import active_run_ids, resumable_run_ids
+
+            children = active_child_generations(generation_store.database) | active_event_generations(generation_store.database)
+            # A second healthy Controller may own the other live runs. Never
+            # rewrite its pending action or terminate it on startup.
+            live = children | active_run_ids(generation_store.database)
+            generation_store.recover_claimed_resumes(live)
+            # A crashed Controller cannot transfer its prior OAuth grant.
+            # Keep checkpointed sessions recoverable, but do not execute tools
+            # until an authenticated browser SSE/resume request re-attaches.
+            recoverable = resumable_run_ids(generation_store.database, excludes=live)
+            generation_store.recover_orphans(live | recoverable)
             await recover_subagent_tasks(
                 generation_store.database,
                 stream_tools=stream_model_with_tools, stream_text=stream_model,
