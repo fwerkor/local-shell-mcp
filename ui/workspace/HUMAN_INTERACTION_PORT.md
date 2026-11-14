@@ -116,11 +116,16 @@ user's new instruction before the stale old response can finish.
 The initial combined full-suite run completed **2479 passed, 4 skipped** before
 new graph-Steer regressions were added. The dedicated real LangGraph tests now
 cover both a serial steer and concurrent fan-out where one SQLite receipt is
-applied exactly once. Both dedicated tests pass; a refreshed complete suite is
-required for the later Graph actor lease update.
+applied exactly once. The next Graph lease patch is carried into each compiled
+child node; a real SQLite wakeup takeover test now proves that the old graph
+actor is fenced before the next model call.
 
 Unverified: deterministic Steer delivery across simultaneous fan-out siblings,
 true cross-process root-generation actor ownership/lease fencing, full original
 rich-media Steer encoding, exact-once provider/tool effects after a crash, and
 full graph actor event-hook parity. The merged implementation must not be
 advertised as exact full upstream parity without those tests and fixes.
+
+Local complete suite after the Graph trigger retry update: **2490 passed,
+5 skipped**. The additional graph actor lease-takeover regression was added
+after that full run and separately passed with the serial/parallel steer tests.

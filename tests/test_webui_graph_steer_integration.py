@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from wakeup_helpers import environment as environment
 
 pytest.importorskip('langgraph')
 
@@ -124,3 +125,53 @@ async def test_parallel_graph_steer_is_applied_once_without_stale_tool_dispatch(
     assert sum(m.get('content') == 'left revised' for m in result) == 1
     assert all(m.get('content') != 'obsolete-left' for m in result)
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_graph_node_fences_revoked_completion_wakeup_lease(environment, monkeypatch):
+    """A leased root graph must not lose fencing when it enters a child node."""
+    from wakeup_helpers import begin_automatic
+
+    from local_shell_mcp.webui.agent_runtime import RuntimeSafetyError
+    from local_shell_mcp.webui.subagent_task_host import shutdown_subagent_tasks
+
+    db, repo, store, _, parent, parent_run = environment
+    child = repo.create('local', {'name': 'graph-child', 'provider': 'openAI',
+                                  'model': 'graph-child', 'tools': []})
+    parent = repo.update('local', parent['id'], {'edges': [
+        {'from': parent['id'], 'to': child['id'], 'edgeType': 'direct'}]})
+    host, task_id, job = await begin_automatic(environment)
+    with db.connect() as conn:
+        token = conn.execute('SELECT lease_owner FROM subagent_wakeups WHERE task_id=?',
+                             (task_id,)).fetchone()[0]
+
+    called = []
+    revoked = False
+    original_check = AgentRunner._check_grant
+
+    def check(self):
+        nonlocal revoked
+        if self.graph_node and self.root_agent['id'] == child['id'] and not revoked:
+            with db.connect() as conn:
+                conn.execute("UPDATE subagent_wakeups SET lease_owner='second-controller' "
+                             "WHERE task_id=?", (task_id,))
+            revoked = True
+        return original_check(self)
+
+    monkeypatch.setattr(AgentRunner, '_check_grant', check)
+
+    async def model(profile, messages, **kwargs):
+        called.append(profile.model)
+        yield 'model ran'
+
+    async def noop(text):
+        pass
+
+    runner = AgentRunner('local', job, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=model, stream_text=model, on_text=noop,
+                         agent=parent, wakeup_lease=(task_id, token))
+    with pytest.raises(RuntimeSafetyError, match='lease'):
+        await runner.run(store.history('local', job.conversation_id))
+    assert called == ['parent']
+    assert revoked
+    await shutdown_subagent_tasks()

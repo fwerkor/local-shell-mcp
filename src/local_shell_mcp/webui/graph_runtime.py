@@ -142,6 +142,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             background_deny=parent.background_deny,
             task_control_host=parent.task_control_host, task_control_id=parent.task_control_id,
             subagent_depth=parent.subagent_depth, on_injected=parent.on_injected,
+            wakeup_lease=parent.wakeup_lease,
         )
         child.route.restore(state.get("handoffState"))
         # The existing loop appends in place: snapshot the pre-call boundary.
