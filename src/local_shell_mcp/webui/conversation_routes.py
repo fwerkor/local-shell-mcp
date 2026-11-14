@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 from starlette.exceptions import HTTPException
@@ -96,7 +97,7 @@ def _clone_attachment_links(db, owner: str, source_id: str, new_id: str,
     if not assistants:
         return
     links = db.execute(
-        "SELECT l.run_id,l.response_message_id,l.tool_call_id,l.file_id,r.agent_id "
+        "SELECT l.run_id,l.response_message_id,l.tool_call_id,l.file_id,r.agent_id,r.state "
         "FROM tool_attachment_links l JOIN runs r ON r.id=l.run_id "
         "JOIN attachments a ON a.id=l.file_id AND a.owner=? "
         "WHERE r.conversation_id=? AND l.response_message_id IN ("
@@ -110,12 +111,22 @@ def _clone_attachment_links(db, owner: str, source_id: str, new_id: str,
         if run_id is None:
             run_id = str(uuid.uuid4())
             runs[key] = run_id
+            original_state = json.loads(link["state"])
+            new_response_id = identities[link["response_message_id"]]
+            new_user_id = identities.get(original_state.get("userMessageId")) or next(
+                (identities[row["id"]] for row in messages if row["role"] == "user"), new_response_id,
+            )
+            # GenerationStore.latest/get must be able to decode every run,
+            # including completed provenance-only runs in cloned chats.
+            clone_state = {
+                "responseMessageId": new_response_id, "userMessageId": new_user_id,
+                "generationCreatedAt": now // 1000, "generationProtocolVersion":
+                original_state.get("generationProtocolVersion", 2),
+            }
             db.execute(
                 "INSERT INTO runs(id,conversation_id,agent_id,status,state,created_at,updated_at) "
                 "VALUES(?,?,?,'complete',?,?,?)",
-                (run_id, new_id, link["agent_id"],
-                 _json({"responseMessageId": identities[link["response_message_id"]]}),
-                 now, now),
+                (run_id, new_id, link["agent_id"], _json(clone_state), now, now),
             )
         db.execute(
             "INSERT INTO tool_attachment_links(run_id,response_message_id,tool_call_id,file_id) "

@@ -120,6 +120,14 @@ def test_duplicate_and_fork_keep_canonical_tool_links_without_reviving_deleted_f
     assert not original.exists()
     for copy in (duplicate, fork):
         assert repository.messages("alice", copy["conversationId"])["messages"][-1]["attachments"] == []
+        latest = generations.latest("alice", copy["conversationId"])
+        assert latest is not None and latest.status == "complete"
+        assert latest.response_message_id == copy["messages"][-1]["messageId"]
+        assert latest.user_message_id == copy["messages"][0]["messageId"]
+    followup, fresh = generations.begin("alice", {
+        "conversationId": duplicate["conversationId"], "text": "Continue the cloned conversation",
+    })
+    assert fresh and followup.conversation_id == duplicate["conversationId"]
 
 
 def test_duplicate_ignores_expired_files_and_cannot_copy_foreign_conversation(workspace):
