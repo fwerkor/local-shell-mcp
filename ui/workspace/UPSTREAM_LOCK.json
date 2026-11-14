@@ -552,6 +552,24 @@
       "python_lsm": "webui/context_budget.py; webui/agent_runner.py",
       "status": "部分",
       "difference": "只校准消息和工具结果占比，原完整TokenBudgetBreakdown工具结果分配仍未逐字段完全移植"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/messages/fading.ts",
+      "sha256": "fa4a417b7dad3eb78c30a27b8ca3c36b03c2f73b33d9c77a84d9df6eda65cf02",
+      "symbols": "resolveFadingTier / resolveFadingCaps / seedFadingTier",
+      "python_lsm": "webui/fading.py; fading_projection.py; agent_runner.py; generations.py",
+      "status": "部分",
+      "difference": "纯函数450条锁定TypeScript差分向量一致；provider-only工具结果/input截断、owner/model v2 tier持久化和摘要后reset已接入；完整originalToolContent消费语义和source all-step recency策略仍有差异"
+    },
+    {
+      "repository": "@librechat/agents@4.0.1",
+      "path": "src/utils/truncation.ts",
+      "sha256": "1ac67580d2171339b299eae1a4de6f19e33cf0ebf6c5e14e295b72096d0e3a70",
+      "symbols": "calculateMaxToolCallInputChars / calculateMaxToolResultChars",
+      "python_lsm": "webui/fading.py; fading_projection.py",
+      "status": "部分",
+      "difference": "两个源动态cap纯函数差分等价，Python模型视图截断标记为兼容适配，原TypeScript结构化裁剪器尚未全部移植"
     }
   ],
   "runtime_dependency_lock": {
