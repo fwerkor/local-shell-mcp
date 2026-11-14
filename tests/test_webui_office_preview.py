@@ -321,3 +321,35 @@ def test_pptx_text_budget_counts_actual_content_without_silent_short_cut(monkeyp
     assert 'Preview truncated. Download the file to see the rest.' in rendered
     assert 'UNIQUE_END' not in rendered
     assert 'Slide 1' in rendered
+
+
+def _unsupported_office_zip() -> bytes:
+    """Valid ZIP directory whose local and central compression method is 99."""
+    archive = bytearray(_archive_xml('word/document.xml', '<document/>'))
+    local_header = archive.index(b'PK\x03\x04')
+    central_header = archive.index(b'PK\x01\x02')
+    archive[local_header + 8:local_header + 10] = (99).to_bytes(2, 'little')
+    archive[central_header + 10:central_header + 12] = (99).to_bytes(2, 'little')
+    return bytes(archive)
+
+
+def test_unsupported_zip_compression_is_optional_preview_failure():
+    """ZIP compression method 99 must not leak NotImplementedError."""
+    with pytest.raises(ValueError, match='Unsupported Office ZIP'):
+        buffer_to_office_html(_unsupported_office_zip(), 'unsupported.docx', DOCX_MIME)
+
+
+def test_ods_formatted_span_tails_and_nested_inline_text_are_preserved():
+    xml = '''<office:document-content
+        xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+        xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+        xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+        <office:body><office:spreadsheet><table:table table:name="Financials">
+          <table:table-row><table:table-cell>
+            <text:p>Revenue <text:span>increased</text:span> by <text:a>25%</text:a> in 2026</text:p>
+            <text:p>and <text:span>was <text:span>audited</text:span> externally</text:span>.</text:p>
+          </table:table-cell></table:table-row>
+        </table:table></office:spreadsheet></office:body></office:document-content>'''
+    rendered = buffer_to_office_html(_archive_xml('content.xml', xml), 'financials.ods', 'application/octet-stream')
+    assert 'Revenue increased by 25% in 2026 and was audited externally.' in rendered
+    assert rendered.count('<tr>') == 1

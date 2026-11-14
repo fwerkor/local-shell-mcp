@@ -316,8 +316,9 @@ def _ods_html(z: ZipFile) -> str:
             for cell in row:
                 if _local(cell.tag) not in {'table-cell', 'covered-table-cell'}:
                     continue
-                text = ' '.join((p.text or '') + ''.join(n.text or '' for n in p if _local(n.tag) == 'span')
-                                for p in cell if _local(p.tag) == 'p').strip()
+                # itertext includes nested formatting and each element's
+                # following tail, retaining the original paragraph order.
+                text = ' '.join(''.join(p.itertext()) for p in cell if _local(p.tag) == 'p').strip()
                 if not text:
                     text = next((v for k, v in cell.attrib.items() if _local(k) in {'value', 'date-value', 'boolean-value'}), '')
                 repeat = int(next((v for k, v in cell.attrib.items() if _local(k) == 'number-columns-repeated'), '1'))
@@ -428,6 +429,10 @@ def buffer_to_office_html(data: bytes, name: str, mime_type: str) -> str | None:
             return _presentation_html(z)
     except BadZipFile as error:
         raise ValueError('Malformed Office archive') from error
+    except (NotImplementedError, RuntimeError) as error:
+        # Unsupported ZIP compression/encryption is an optional preview
+        # failure; the authorized native file_write retains its bytes.
+        raise ValueError('Unsupported Office ZIP feature') from error
 
 
 class _PreviouslyPublished(Exception):

@@ -260,3 +260,45 @@ async def test_invalid_csv_field_does_not_abort_tool_output_publication(tmp_path
     assert message['attachments'][0]['file_id'] == attachment['file_id']
     assert message['attachments'][0]['status'] == 'failed'
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_zip_compression_preserves_original_attachment_after_generation(tmp_path, monkeypatch):
+    """An unpreviewable Office ZIP must retain its download and completed run."""
+    from io import BytesIO
+    from zipfile import ZIP_DEFLATED, ZipFile
+
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / 'state'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    get_settings.cache_clear()
+    database = shared_database(tmp_path / 'state')
+    store = GenerationStore(database)
+    run, _ = store.begin('local', {'text': 'Write unsupported compressed DOCX'})
+    with BytesIO() as sink:
+        with ZipFile(sink, 'w', ZIP_DEFLATED) as z:
+            z.writestr('word/document.xml', '<document/>')
+        data = bytearray(sink.getvalue())
+    data[data.index(b'PK\x03\x04') + 8:data.index(b'PK\x03\x04') + 10] = (99).to_bytes(2, 'little')
+    data[data.index(b'PK\x01\x02') + 10:data.index(b'PK\x01\x02') + 12] = (99).to_bytes(2, 'little')
+    original = bytes(data)
+    artifact = await publish_office_tool_output(
+        'local', run.run_id, 'call_zip_method', 'compressed.docx', DOCX_MIME, original,
+        database=database, state_dir=tmp_path / 'state',
+    )
+    assert artifact['status'] == 'failed'
+    assert artifact['previewError'] == 'unsupported'
+    assert 'textFormat' not in artifact
+    with database.connect() as db:
+        row = db.execute('SELECT path FROM attachments WHERE id=?', (artifact['file_id'],)).fetchone()
+        assert Path(row['path']).read_bytes() == original
+    assert store.finish('local', run.run_id, status='complete', text='Write complete')
+    message = next(m for m in WorkspaceRepository(database).messages('local', run.conversation_id)['messages']
+                   if m['role'] == 'assistant')
+    assert message['attachments'][0]['file_id'] == artifact['file_id']
+    assert message['attachments'][0]['status'] == 'failed'
+    events = [entry['data'] for _, entry in store.events('local', run.run_id)
+              if entry.get('event') == 'attachment']
+    assert len(events) == 1 and events[0]['file_id'] == artifact['file_id']
+    get_settings.cache_clear()
