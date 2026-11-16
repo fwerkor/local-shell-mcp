@@ -18,6 +18,7 @@ from .agent_runtime import (
 )
 from .agents import AgentRepository
 from .approval_runtime import (
+    ApprovalBatch,
     approval_policy_decision,
     ask_user_approval_policy,
     build_approval_payload,
@@ -435,6 +436,26 @@ class AgentRunner:
         if review and review.get("namespace", "") == self.namespace:
             self.resume_namespace = self.namespace
             self.approved_batch = self.store.approved_batch(self.owner, self.generation.run_id)
+        if self.approved_batch is not None and self.resume_namespace == self.namespace:
+            pending_ids = {call.call_id for call in state.pending_calls}
+            remaining = tuple(entry for entry in self.approved_batch.entries
+                              if entry.call_id in pending_ids)
+            if not remaining:
+                # The persisted checkpoint already passed ToolNode and model
+                # execution resumed. Retiring the proof prevents a subsequent
+                # restart from re-running tools that are no longer pending.
+                completed_ids = {m.get('tool_call_id') for m in state.messages
+                                 if isinstance(m, dict) and m.get('role') == 'tool'}
+                expected_ids = {entry.call_id for entry in self.approved_batch.entries}
+                if not expected_ids.issubset(completed_ids):
+                    raise RuntimeSafetyError('Approved tool checkpoint is missing persisted outcomes')
+                if review:
+                    self.store.complete_approval_batch(self.owner, self.generation.run_id,
+                                                       review['actionId'], state.messages, self.partial_text)
+                self.approved_batch = None
+                review = None
+            else:
+                self.approved_batch = ApprovalBatch(remaining)
         if self.approved_batch is not None and self.resume_namespace == self.namespace:
             # LibreChat ToolNode approval can precede a browser OAuth login.
             # Resolve all Action credentials before executing *any* reviewed

@@ -663,6 +663,27 @@ class GenerationStore:
             elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
                 content_parts.append(data["part"])
         pending = state.get("pendingAction")
+        oauth_prompts = []
+        if isinstance(pending, dict) and (pending.get('payload') or {}).get('type') == 'action_oauth':
+            payload = pending['payload']
+            step_id = payload.get('step_id')
+            tool_call_id = payload.get('tool_call_id')
+            for entry in reversed(entries):
+                event = json.loads(entry['data'])
+                data = event.get('data') or {}
+                delta = data.get('delta') or {}
+                if (event.get('event') == 'on_run_step_delta' and data.get('id') == step_id
+                        and isinstance(delta.get('auth'), str) and delta['auth']
+                        and any(call.get('id') == tool_call_id for call in delta.get('tool_calls') or [])):
+                    step = steps.get(step_id) or {}
+                    oauth_prompts.append({'stepId': step_id,
+                                          'runId': step.get('runId', generation.response_message_id),
+                                          'index': step.get('index', 0),
+                                          'toolCallId': tool_call_id,
+                                          'toolName': payload.get('tool_name', ''),
+                                          'authURL': delta['auth'],
+                                          'expiresAt': delta.get('expires_at')})
+                    break
         initial = content_parts
         steering = state.get("steering") or {}
         pending_steers = steering.get("queue", []) or (steering.get("leftovers", [])
@@ -684,6 +705,7 @@ class GenerationStore:
             "sender": "Assistant",
             "model": state.get("model") or "",
             **({"pendingAction": self.client_pending_action(pending)} if pending else {}),
+            **({"pendingOAuthPrompts": oauth_prompts} if oauth_prompts else {}),
         }
         return result, max_seq
 
@@ -810,7 +832,7 @@ class GenerationStore:
             now = _now()
             # Preserve source React tool-call parts in history and final SSE,
             # rather than erasing them when the assistant text is committed.
-            tool_parts = {}
+            tool_positions = {}
             content = []
             for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
                 value = json.loads(event["data"])
@@ -819,9 +841,14 @@ class GenerationStore:
                 if kind == "on_run_step_completed":
                     result = data.get("result", {})
                     if isinstance(result.get("tool_call"), dict):
-                        tool_parts[result["id"]] = {"type": "tool_call", "tool_call": {
+                        part = {"type": "tool_call", "tool_call": {
                             **result["tool_call"], "stepId": result["id"],
                         }}
+                        if result['id'] in tool_positions:
+                            content[tool_positions[result['id']]] = part
+                        else:
+                            tool_positions[result['id']] = len(content)
+                            content.append(part)
                 elif kind == "on_message_delta":
                     delta = (data.get("delta") or {}).get("content") or {}
                     if delta.get("type") == "text" and isinstance(delta.get("text"), str) and delta["text"]:
@@ -833,7 +860,8 @@ class GenerationStore:
                     content.append(data["part"])
             if not content and text:
                 content.append({"type": "text", "text": text, "phase": "final_answer"})
-            content += list(tool_parts.values())
+            # The original chronological position of each completed tool is
+            # retained relative to subsequent STEER and model-text parts.
             # LibreChat agents/client.js emits ContentTypes.ERROR as a content
             # part. A top-level final.error alone is ignored by finalHandler.
             # Persist the same part so the error survives history reload too.

@@ -260,3 +260,21 @@ async def test_terminal_resume_replays_final_after_snapshot_watermark(active_gen
         "local", generation, resume=True)]
     assert any('"sync":true' in packet for packet in packets)
     assert any('"final":true' in packet for packet in packets)
+
+
+def test_terminal_content_preserves_completed_tool_before_later_steer_and_text(active_generation):
+    _, store, _ = active_generation
+    generation, _ = store.begin('local', {'text': 'First execute, then change direction'})
+    assert store.append('local', generation.run_id, {'event': 'on_run_step_completed', 'data': {
+        'result': {'id': 'step-tool', 'tool_call': {'id': 'call-exec', 'name': 'file_read',
+                                                  'args': {}, 'output': 'Old tool result'}}}})
+    assert store.append('local', generation.run_id, {'event': 'on_steer_applied',
+                     'data': {'part': {'type': 'steer', 'steerId': 'steer-1',
+                                       'steer': 'Now take a new direction'}}})
+    assert store.append('local', generation.run_id, {'event': 'on_message_delta',
+                     'data': {'delta': {'content': {'type': 'text', 'text': 'Updated answer'}}}})
+    snapshot, _ = store.resume_snapshot('local', generation.run_id)
+    assert [item['type'] for item in snapshot['aggregatedContent']] == ['tool_call', 'steer', 'text']
+    assert store.finish('local', generation.run_id, status='complete', text='Updated answer')
+    final = store.events('local', generation.run_id)[-1][1]['responseMessage']['content']
+    assert [item['type'] for item in final] == ['tool_call', 'steer', 'text']
