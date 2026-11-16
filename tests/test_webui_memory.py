@@ -201,3 +201,27 @@ def test_offline_tokenizer_never_downloads_and_parity(monkeypatch):
     _encoding.cache_clear()
     for value in ('hello world', '南京大学', 'a'*400, 'Multilingual: 你好, world!'):
         assert count_tokens(value) == len(reference.encode(value))
+
+
+def test_webui_profile_reflects_persisted_memory_opt_out(appdb):
+    from local_shell_mcp.webui.auth import WebSession, _frontend_user
+
+    _, repo = appdb
+    repo.save_setting('local', 'user.memories', False)
+    assert _frontend_user(WebSession('local', 'shell:read', 0))['personalization']['memories'] is False
+    repo.save_setting('local', 'user.memories', True)
+    assert _frontend_user(WebSession('local', 'shell:read', 0))['personalization']['memories'] is True
+
+
+def test_checkpoint_omits_tool_calls_covered_by_summary(db):
+    store = GenerationStore(db)
+    run, _ = store.begin('local', {'text': 'Please summarize tool work'})
+    store.append('local', run.run_id, {'event': 'on_run_step_completed', 'data': {
+        'result': {'id': 'step-1', 'tool_call': {'id': 'call-1', 'name': 'fetch',
+                                                'args': {}, 'output': 'Large result'}}}})
+    store.stage_summary('local', run.run_id, 'Summary of tool output', 10,
+                        covered_tool_call_ids=['call-1'], retained_tail=[])
+    assert store.finish('local', run.run_id, status='complete', text='Done')
+    history = store.history('local', run.conversation_id)
+    assert any('<summary>' in str(item.get('content')) for item in history)
+    assert not any('call-1' in str(item.get('tool_calls') or '') for item in history)

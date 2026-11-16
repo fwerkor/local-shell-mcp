@@ -515,7 +515,7 @@ class AgentRunner:
 
     async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
                                  prompt=None, update_prompt=None, head_count=0,
-                                 semantic_index=None, retained_tail=None):
+                                 semantic_index=None, retained_tail=None, profile=None):
         """Request the original checkpoint prompt from the selected model.
 
         A failed/partial summary is never written, and never makes the old
@@ -556,7 +556,7 @@ class AgentRunner:
         summary_messages = [*messages, instruction]
         chunks = []
         limit = max(128, min(int(max_tokens), 16384))
-        profile = self.initial_profile or self._context(self.root_agent).profile
+        profile = profile or self.initial_profile or self._context(self.root_agent).profile
         if profile.provider in {"anthropic", "google"}:
             from .provider_tool_protocols import stream_native_tools
 
@@ -577,9 +577,17 @@ class AgentRunner:
         if not summary:
             raise ValueError('Summarization produced empty output')
         count = count_tokens(build_summary_carrier_text(summary), exact=False)
+        covered_calls = set()
+        for message in messages:
+            if message.get('role') == 'assistant':
+                covered_calls.update(call['id'] for call in message.get('tool_calls') or []
+                                     if isinstance(call, dict) and isinstance(call.get('id'), str))
+            elif message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
+                covered_calls.add(message['tool_call_id'])
         self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
                                  boundary=head_count, manual=manual,
-                                 retained_tail=retained_tail)
+                                 retained_tail=retained_tail,
+                                 covered_tool_call_ids=sorted(covered_calls))
         if not self.namespace:
             import secrets
             identity = 'summary_' + secrets.token_hex(8)
@@ -713,7 +721,7 @@ class AgentRunner:
                     max_tokens=options.get('maxSummaryTokens', 2048),
                     prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
                     semantic_index=state.context.compaction_semantic_index,
-                    retained_tail=tail)
+                    retained_tail=tail, profile=state.context.profile)
                 # Keep stable instructions and current summary, then the exact
                 # retained recent turns. Original messages stay in SQLite.
                 plain_system = [message for message in system if not (

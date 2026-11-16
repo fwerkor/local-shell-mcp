@@ -385,6 +385,11 @@ async def start_generation(request: Request):
     try:
         if isinstance(payload.get('text'), str):
             validate_message_submission(payload['text'], filters)
+        # History prefers structured content parts to the top-level text.
+        # Enforce the same submission policy before the run is admitted.
+        for part in payload.get('content') if isinstance(payload.get('content'), list) else []:
+            if isinstance(part, dict) and part.get('type') == 'text' and isinstance(part.get('text'), str):
+                validate_message_submission(part['text'], filters)
         validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
         params = (agent or {}).get('model_parameters') or payload.get('model_parameters')
         if isinstance(params, dict):

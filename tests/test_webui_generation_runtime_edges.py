@@ -217,3 +217,29 @@ async def test_agent_without_machine_access_still_has_session_tools(active_gener
     )
     assert store.latest("local", generation.conversation_id).status == "complete"
     assert store.events("local", generation.run_id)[-1][1]["responseMessage"]["text"] == "Plain chat works."
+
+
+@pytest.mark.asyncio
+async def test_structured_content_must_pass_submission_policy_before_admission(active_generation, monkeypatch):
+    import httpx
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    from local_shell_mcp.webui import memory_protection
+
+    db, _, _ = active_generation
+    monkeypatch.setattr(generation_routes, '_database', lambda: db)
+    monkeypatch.setattr(generation_routes, '_owner', lambda request: 'local')
+    monkeypatch.setattr(memory_protection, 'configured_filters', lambda repo, owner: {
+        'messages': {'pii': {'action': 'block', 'fields': ['content_part'],
+                             'starterPatterns': ['bearer_header']}}})
+    app = Starlette(routes=[Route('/chat', generation_routes.start_generation, methods=['POST'])])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as client:
+        response = await client.post('/chat', json={
+            'text': 'safe title', 'model': 'example',
+            'content': [{'type': 'text', 'text': 'Bearer secret-token'}]})
+    assert response.status_code == 400
+    assert response.json()['error'] == 'content_filter_block'
+    with db.connect() as conn:
+        assert conn.execute('SELECT count(*) FROM runs').fetchone()[0] == 0

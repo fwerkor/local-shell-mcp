@@ -669,7 +669,8 @@ class GenerationStore:
 
     def stage_summary(self, owner: str, run_id: str, summary_text: str, token_count: int,
                       *, boundary: int = 0, manual: bool = False,
-                      retained_tail: list[dict] | None = None) -> None:
+                      retained_tail: list[dict] | None = None,
+                      covered_tool_call_ids: list[str] | None = None) -> None:
         """Atomic candidate checkpoint in the *existing run state*, no deletion.
 
         The final assistant content and terminal run status commit together in
@@ -690,7 +691,8 @@ class GenerationStore:
             state['summaryCheckpoint'] = {'type': 'summary', 'content': [{'type': 'text', 'text': summary_text}],
                 'boundary': {'messageIndex': boundary}, 'tokenCount': token_count,
                 **({'initiatedBy': 'user'} if manual else {}),
-                **({'retainedTail': retained_tail} if retained_tail is not None else {})}
+                **({'retainedTail': retained_tail} if retained_tail is not None else {}),
+                **({'coveredToolCallIds': covered_tool_call_ids} if covered_tool_call_ids is not None else {})}
             db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?', (_json(state), _now(), run_id))
 
     def manual_compaction(self, owner: str, run_id: str) -> bool:
@@ -837,6 +839,11 @@ class GenerationStore:
             run_state = json.loads(row['state'])
             staged = run_state.get('summaryCheckpoint')
             from .compaction import is_usable_summary_part, mark_compaction_outcome
+
+            if is_usable_summary_part(staged):
+                covered = set(staged.get('coveredToolCallIds') or [])
+                tool_parts = {key: part for key, part in tool_parts.items()
+                              if part['tool_call'].get('id') not in covered}
             content = ([dict(staged)] if is_usable_summary_part(staged) else []) + (
                 ([{"type": "text", "text": text, "phase": "final_answer"}] if text else [])
                 + list(tool_parts.values())
