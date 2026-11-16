@@ -217,3 +217,46 @@ async def test_agent_without_machine_access_still_has_session_tools(active_gener
     )
     assert store.latest("local", generation.conversation_id).status == "complete"
     assert store.events("local", generation.run_id)[-1][1]["responseMessage"]["text"] == "Plain chat works."
+
+@pytest.mark.asyncio
+async def test_resume_after_steer_uses_latest_message_creation_step(active_generation, monkeypatch):
+    database, store, profile = active_generation
+    generation, _ = store.begin("local", {"text": "Question"})
+    old_step = "step_" + generation.run_id
+    steer_step = old_step + "_after_steer_2"
+    for index, ident in enumerate((old_step, steer_step)):
+        store.append("local", generation.run_id, {"event": "on_run_step", "data": {
+            "type": "message_creation", "id": ident, "index": index * 2, "created_at": 1234,
+        }})
+    monkeypatch.setattr(generation_routes, "_generation_store", lambda: store)
+    monkeypatch.setattr(generation_routes, "_database", lambda: database)
+
+    class FakeRunner:
+        def __init__(self, *args, on_text, **kwargs):
+            self.on_text = on_text
+            self.partial_text = "resumed"
+
+        async def run(self, history):
+            assert history == [{"role": "user", "content": "Question"}]
+            await self.on_text("resumed")
+
+    monkeypatch.setattr(agent_runner, "AgentRunner", FakeRunner)
+    await generation_routes._run_model("local", generation, profile,
+                                      resume_history=[{"role": "user", "content": "Question"}])
+    events = [event for _, event in store.events("local", generation.run_id)]
+    assert any(event.get("event") == "on_message_delta" and event["data"]["id"] == steer_step
+               for event in events)
+    assert any(event.get("event") == "on_run_step_closed" and event["data"]["index"] == 2
+               for event in events)
+
+
+@pytest.mark.asyncio
+async def test_terminal_resume_replays_final_after_snapshot_watermark(active_generation, monkeypatch):
+    _, store, _ = active_generation
+    generation, _ = store.begin("local", {"text": "What happened?"})
+    assert store.finish("local", generation.run_id, status="complete", text="Done")
+    monkeypatch.setattr(generation_routes, "_generation_store", lambda: store)
+    packets = [packet.decode() async for packet in generation_routes._events(
+        "local", generation, resume=True)]
+    assert any('"sync":true' in packet for packet in packets)
+    assert any('"final":true' in packet for packet in packets)

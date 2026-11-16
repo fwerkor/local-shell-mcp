@@ -749,7 +749,22 @@ class GenerationStore:
                                         if collected:
                                             chronological.append({"role": "assistant", "content": "".join(collected)})
                                             collected = []
-                                        chronological.append({"role": "user", "content": merged_text(part),
+                                        steer_content = merged_text(part)
+                                        descriptors = []
+                                        for file in part.get('files') or []:
+                                            if not isinstance(file, dict) or not isinstance(file.get('file_id'), str):
+                                                continue
+                                            attachment = db.execute(
+                                                "SELECT id,name,path FROM attachments WHERE id=? AND owner=?",
+                                                (file['file_id'], owner),
+                                            ).fetchone()
+                                            descriptors.append({"file_id": file['file_id'], "machine": "local",
+                                                **({"filename": attachment['name'], "path": attachment['path']}
+                                                   if attachment else {"unavailable": True})})
+                                        if descriptors:
+                                            steer_content += ("\n\nController attachments (use authorized LSM file tools):\n"
+                                                              + _json(descriptors))
+                                        chronological.append({"role": "user", "content": steer_content,
                                                               "source": "steer"})
                                 if collected:
                                     chronological.append({"role": "assistant", "content": "".join(collected)})

@@ -253,6 +253,9 @@ class SteeringStore:
                         return {"removed": True, "replayed": True}
                     if receipt["state"] == "leftover":
                         receipt["state"] = "cancelled"
+                        steers = previous_state.get("steering") or {}
+                        steers["leftovers"] = [item for item in steers.get("leftovers", [])
+                                               if item.get("steerId") != sid]
                         db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                                    (_json(previous_state), _now(), previous["id"]))
                         return {"removed": True, "replayed": True}
@@ -300,6 +303,8 @@ class SteeringStore:
                     return {"removed": True, "replayed": True}
                 if receipt and receipt["item"]["steerId"] == sid and receipt["state"] == "leftover":
                     receipt["state"] = "cancelled"
+                    steer["leftovers"] = [item for item in steer.get("leftovers", [])
+                                          if item.get("steerId") != sid]
                     db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                                (_json(state), _now(), row["id"]))
                     return {"removed": True, "replayed": True}
@@ -342,6 +347,11 @@ class SteeringStore:
                 if kind == "on_steer_applied":
                     index += 1
                     previous_was_text = False
+                elif kind == "on_run_step_completed":
+                    result = (event.get("data") or {}).get("result") or {}
+                    if isinstance(result.get("tool_call"), dict):
+                        index += 1
+                        previous_was_text = False
                 elif kind == "on_message_delta":
                     content = ((event.get("data") or {}).get("delta") or {}).get("content") or {}
                     if content.get("type") == "text" and content.get("text"):

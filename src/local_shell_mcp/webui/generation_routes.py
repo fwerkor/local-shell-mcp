@@ -98,6 +98,21 @@ async def _run_model(
     step_id = "step_" + generation.run_id
     step_index = 0
     now_ms = int(time.time() * 1000)
+    if resume_history is not None:
+        # A human continuation must append into the last text step, which may
+        # have been advanced past a STEER part before suspension.
+        with _database().connect() as db:
+            prior = db.execute(
+                "SELECT data FROM generation_events WHERE run_id=? "
+                "AND json_extract(data,'$.event')='on_run_step' ORDER BY seq DESC LIMIT 1",
+                (generation.run_id,),
+            ).fetchone()
+        if prior:
+            saved = json.loads(prior['data']).get('data') or {}
+            if saved.get('type') == 'message_creation' and isinstance(saved.get('id'), str):
+                step_id = saved['id']
+                step_index = saved.get('index', 0)
+                now_ms = saved.get('created_at', now_ms)
     try:
         from .agent_runner import AgentRunner
         from .agent_runtime import AgentSuspended
