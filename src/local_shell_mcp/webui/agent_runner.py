@@ -645,7 +645,7 @@ class AgentRunner:
             # LibreChat ToolNode approval can precede a browser OAuth login.
             # Resolve all Action credentials before executing *any* reviewed
             # sibling; pending review proof remains in SQLite across login.
-            reviewed_calls = [entry.tool_call() for entry in self.approved_batch.entries
+            reviewed_calls = [entry.tool_call() for entry in getattr(self.approved_batch, "entries", ())
                               if entry.decision["type"] in {"approve", "edit"} and
                               not any(call.call_id == entry.call_id and
                                       replay_key(call, index) in self.cache
