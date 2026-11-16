@@ -278,4 +278,5 @@ def test_assembled_context_inspects_provider_bound_tool_call_arguments():
     fragments = model_message_fragments(messages)
     assert any('Bearer secret-token' in item.text for item in fragments)
     assert any(item.text == 'safe' for item in fragments)
-    assert inspect_content(fragments, _policy('messages', starters=['bearer_header'])) is not None
+    with pytest.raises(ContentFilterBlocked):
+        inspect_content(fragments, _policy('messages'))
