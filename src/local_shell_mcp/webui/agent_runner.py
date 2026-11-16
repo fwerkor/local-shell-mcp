@@ -181,8 +181,8 @@ class AgentRunner:
         # The completed tool step, its file links, and the attachment SSE
         # events are persisted atomically. OAuth dispatch is independently
         # settled once the completion has been recorded.
-        from .tool_attachments import controller_tool_file_ids
         from .action_spec import is_action_tool
+        from .tool_attachments import controller_tool_file_ids
 
         identities = controller_tool_file_ids(output)
         if identities:
