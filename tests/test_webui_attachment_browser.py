@@ -49,7 +49,7 @@ async def test_original_react_browser_upload_then_click_remove_file(tmp_path, mo
             errors = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             await page.goto(origin + "/c/new", wait_until="domcontentloaded")
-            await page.get_by_text("attachment-test-model").first.wait_for(timeout=15000)
+            await page.locator('input[type="file"]').first.wait_for(state="attached", timeout=30000)
             async with page.expect_response(lambda response: response.request.method == "POST"
                                             and response.url.endswith("/api/files")) as event:
                 await page.locator('input[type="file"]').first.set_input_files({
