@@ -209,6 +209,15 @@ def _csv_html(data: bytes) -> str:
                    source_truncated=len(text) > input_limit)
 
 
+def _docx_blocks(node: ET.Element):
+    for child in node:
+        kind = _local(child.tag)
+        if kind in {'p', 'tbl'}:
+            yield child
+        elif kind in {'sdt', 'sdtContent', 'customXml', 'ins'}:
+            yield from _docx_blocks(child)
+
+
 def _docx_html(z: ZipFile) -> str:
     root = _read_xml(z, "word/document.xml")
     body = root.find('.//{*}body')
@@ -216,7 +225,7 @@ def _docx_html(z: ZipFile) -> str:
         return _document('<article class="lc-docx"></article>')
     lines = []
     consumed = 0
-    for child in body:
+    for child in _docx_blocks(body):
         if consumed >= MAX_VISIBLE_CHARS:
             lines.append('<div class="lc-banner">Preview truncated. Download the file to see the rest.</div>')
             break
@@ -235,6 +244,44 @@ def _docx_html(z: ZipFile) -> str:
     return _document('<article class="lc-docx">' + "".join(lines) + '</article>')
 
 
+def _xlsx_date_styles(z: ZipFile) -> set[int]:
+    if 'xl/styles.xml' not in z.namelist():
+        return set()
+    root = _read_xml(z, 'xl/styles.xml')
+    formats = {int(fmt.get('numFmtId')): fmt.get('formatCode', '')
+               for fmt in root.findall('./{*}numFmts/{*}numFmt')
+               if str(fmt.get('numFmtId', '')).isdigit()}
+    styles = root.find('./{*}cellXfs')
+    if styles is None:
+        return set()
+    builtins = set(range(14, 23)) | set(range(27, 37)) | {45, 46, 47} | set(range(50, 59))
+    result = set()
+    for index, style in enumerate(styles):
+        code = int(style.get('numFmtId', '0'))
+        fmt = formats.get(code, '')
+        # Strip quoted literals, escapes, and bracketed color/locale markers.
+        fmt = re.sub(r'"[^"]*"|\\.|\[[^\]]*\]', '', fmt).lower()
+        if code in builtins or (code in formats and bool(re.search(r'[ymdhs]', fmt))):
+            result.add(index)
+    return result
+
+
+def _excel_date(raw: str, epoch1904: bool) -> str:
+    from datetime import datetime, timedelta
+
+    value = float(raw)
+    if not (-100000 < value < 3000000):
+        return raw
+    if epoch1904:
+        base = datetime(1904, 1, 1)
+    else:
+        base = datetime(1899, 12, 31)
+        if value >= 60:
+            value -= 1  # Excel 1900 leap-year compatibility bug
+    rendered = base + timedelta(days=value)
+    return rendered.date().isoformat() if value.is_integer() else rendered.isoformat(sep=' ', timespec='seconds')
+
+
 def _xlsx_html(z: ZipFile) -> str:
     names = set(z.namelist())
     ns_main = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
@@ -243,6 +290,9 @@ def _xlsx_html(z: ZipFile) -> str:
         strings = _read_xml(z, 'xl/sharedStrings.xml')
         shared = [_text(si) for si in strings.findall(f'./{ns_main}si')]
     workbook = _read_xml(z, 'xl/workbook.xml')
+    epoch1904 = (workbook.find('./{*}workbookPr') is not None and
+                 workbook.find('./{*}workbookPr').get('date1904') in {'1', 'true'})
+    date_styles = _xlsx_date_styles(z)
     rels = {}
     if 'xl/_rels/workbook.xml.rels' in names:
         for rel in _read_xml(z, 'xl/_rels/workbook.xml.rels'):
@@ -291,6 +341,13 @@ def _xlsx_html(z: ZipFile) -> str:
                                 value = ''
                         else:
                             value = raw
+                            style_index = cell.get('s', '0')
+                            if (kind in {'', 'n'} and style_index.isdigit() and
+                                    int(style_index) in date_styles and raw):
+                                try:
+                                    value = _excel_date(raw, epoch1904)
+                                except (ValueError, OverflowError):
+                                    value = raw
                     cells[column] = value
                 if cells:
                     rows.append([cells.get(i, '') for i in range(min(MAX_COLUMNS, max(cells) + 1))])
