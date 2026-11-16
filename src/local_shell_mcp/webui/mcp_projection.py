@@ -125,10 +125,8 @@ def project_artifact_messages(messages: list[dict], provider: str, max_chars=HAR
             if provider == "anthropic":
                 current = _Accumulator(max_chars)
                 base = item.get("content", "")
-                if base == "":
-                    current.blocks.append({"type": "text", "text": ""})
-                    current.has_content = True
-                else:
+                # Anthropic rejects empty text blocks in tool_result content.
+                if base:
                     current.append(base)
                 current.append(artifact["content"])
                 clone["content"] = current.blocks

@@ -13,7 +13,13 @@ import secrets
 from collections.abc import AsyncIterator
 
 from .approval_runtime import truncate_approval_result
-from .providers import ModelThought, ModelToolCall, ProviderConfig, _data_frames
+from .providers import (
+    ModelThought,
+    ModelToolCall,
+    ProviderConfig,
+    _anthropic_omits_sampling_parameters,
+    _data_frames,
+)
 
 
 def _content_blocks(blocks: list[dict], provider: str) -> list[dict]:
@@ -156,7 +162,8 @@ def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], st
 
 
 async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, tools: list[dict],
-                              max_tokens: int, temperature: float | None) -> AsyncIterator[str | ModelToolCall | ModelThought]:
+                              max_tokens: int, temperature: float | None,
+                              top_p: float | None = None) -> AsyncIterator[str | ModelToolCall | ModelThought]:
     import httpx
 
     history, instructions = native_messages(messages, config.provider)
@@ -168,8 +175,11 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
                            "input_schema": t["function"]["parameters"]} for t in tools]}
         if instructions:
             body["system"] = instructions
-        if temperature is not None:
-            body["temperature"] = temperature
+        if not _anthropic_omits_sampling_parameters(config.model):
+            if temperature is not None:
+                body["temperature"] = temperature
+            if top_p is not None:
+                body["top_p"] = top_p
     elif config.provider == "google":
         headers["x-goog-api-key"] = config.token
         body = {"contents": history, "generationConfig": {"maxOutputTokens": max_tokens},
@@ -180,6 +190,8 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
             body["systemInstruction"] = {"parts": [{"text": instructions}]}
         if temperature is not None:
             body["generationConfig"]["temperature"] = temperature
+        if top_p is not None:
+            body["generationConfig"]["topP"] = top_p
     else:
         raise ValueError("Unsupported model provider")
     pending: dict[int, dict] = {}
