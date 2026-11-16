@@ -181,7 +181,8 @@ def test_source_global_custom_pattern_budget_fails_closed_for_active_source():
 
 def test_too_many_inspection_fragments_fail_closed():
     fragments = [ContentFragment('message', 'content_part', 'not matching') for _ in range(4098)]
-    assert isinstance(inspect_content(fragments, _policy('messages')), ContentFilterBlocked)
+    with pytest.raises(ContentFilterBlocked):
+        inspect_content(fragments, _policy('messages'))
 
 
 def test_bounded_policy_rejects_empty_invalid_fields_and_configuration():
