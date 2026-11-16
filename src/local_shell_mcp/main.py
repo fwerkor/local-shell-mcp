@@ -143,6 +143,9 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             store = _generation_store()
             store.recover_claimed_resumes()
             store.recover_orphans()
+            from .webui.attachments import recover_attachment_deletions
+
+            recover_attachment_deletions()
         recovery_task = None
         if enabled:
             from .webui.durable_tasks import serve
