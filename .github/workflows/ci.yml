@@ -224,6 +224,10 @@ jobs:
             tests/test_webui_background_tools.py tests/test_webui_event_detached_lifecycle.py \
             tests/test_webui_event_detached_recovery.py tests/test_webui_detached_source_oracle.py \
             tests/test_webui_graph_callbacks.py \
+            tests/test_webui_agent_runner_dispatch_edges.py \
+            tests/test_webui_agent_runner_resume_edges.py \
+            tests/test_webui_event_child_guard_edges.py \
+            tests/test_webui_event_detached_claim_edges.py \
             tests/test_webui_direct_login.py tests/test_webui_provider_browser.py \
             tests/test_webui_artifacts_source.py tests/test_webui_artifact_routes.py \
             tests/test_webui_artifact_browser.py

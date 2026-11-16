@@ -712,3 +712,13 @@ Detached Action 证据持久重传、复杂跨机 Coalescing 操作回执与剩�
    传递；路由提示仅添加一次。真实 Graph + 独立 SQL 读取的 SSE/历史测试覆盖。
 
 所有源文件 SHA-256 保存在 `UPSTREAM_LOCK.json`。相关新测试已并入 CI 选择清单。
+
+
+#### Source graph Actor 分支覆盖核验
+
+源 Graph/HITL 审批和断点恢复进一步覆盖：批准、拒绝、后台禁止人工交互、
+Ask User 批次限制、LangGraph 交接、可信 checkpoint 重放、过期 Agent、
+审批批次续接、Steer 去重、子任务控制的提交和确认。
+Artifacts 完成态父会话注册及 Detached Action 的原子 CAS 重试、撤权、未知
+启动结果另有针对性测试。项目要求全量覆盖率≥95%、逐模块≥90%，
+使用同一个完整测试样本加增量源分支样本验证；CI 再次独立复核。
