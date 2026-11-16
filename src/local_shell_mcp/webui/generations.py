@@ -842,23 +842,38 @@ class GenerationStore:
                     # Keep this existing text-only history boundary; rich/tool
                     # message reconstruction is handled separately.
                     parts = json.loads(row["content"])
+                    appended_segments = False
                     if isinstance(parts, list):
-                        texts = [part["text"] for part in parts if isinstance(part, dict)
-                                 and part.get("type") == "text" and isinstance(part.get("text"), str)]
-                        if texts:
-                            content = "".join(texts)
-                        if row["role"] == "assistant":
-                            # Upstream formatAgentMessages replays STEER parts
-                            # as user instructions, not as assistant prose.
+                        if row['role'] == 'assistant' and any(
+                            isinstance(part, dict) and part.get('type') == 'steer'
+                            and isinstance(part.get('steer'), str) for part in parts
+                        ):
                             from .steering import merged_text
 
-                            for part in reversed(parts):
-                                if (isinstance(part, dict) and part.get("type") == "steer"
-                                    and isinstance(part.get("steer"), str)):
-                                    result.append({"role": "user", "content": merged_text(part),
-                                                   "source": "steer", "steerId": part.get("steerId"),
-                                                   "id": "steer:" + str(part.get("steerId")),
-                                                   "files": part.get("files", [])})
+                            segments = []
+                            pending_text = []
+                            for part in parts:
+                                if not isinstance(part, dict):
+                                    continue
+                                if part.get('type') == 'text' and isinstance(part.get('text'), str):
+                                    pending_text.append(part['text'])
+                                elif part.get('type') == 'steer' and isinstance(part.get('steer'), str):
+                                    if pending_text:
+                                        segments.append({'role': 'assistant', 'content': ''.join(pending_text)})
+                                        pending_text = []
+                                    segments.append({'role': 'user', 'content': merged_text(part),
+                                                     'source': 'steer', 'steerId': part.get('steerId'),
+                                                     'id': 'steer:' + str(part.get('steerId')),
+                                                     'files': part.get('files', [])})
+                            if pending_text:
+                                segments.append({'role': 'assistant', 'content': ''.join(pending_text)})
+                            result.extend(reversed(segments))
+                            appended_segments = True
+                        else:
+                            texts = [part['text'] for part in parts if isinstance(part, dict)
+                                     and part.get('type') == 'text' and isinstance(part.get('text'), str)]
+                            if texts:
+                                content = ''.join(texts)
                     files = json.loads(row["metadata"]).get("files", [])
                     if row["role"] == "user" and files:
                         descriptors = []
@@ -869,7 +884,8 @@ class GenerationStore:
                                 **({"filename": attachment["name"], "path": attachment["path"]}
                                    if attachment else {"unavailable": True})})
                         content += "\n\nController attachments (use authorized LSM file tools):\n" + _json(descriptors)
-                    result.append({"role": row["role"], "content": content})
+                    if not appended_segments:
+                        result.append({"role": row["role"], "content": content})
                 if len(result) >= max(1, min(max_messages, 100)):
                     break
                 message_id = row["parent_id"]

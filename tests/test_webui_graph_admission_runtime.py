@@ -204,3 +204,26 @@ def test_idempotent_context_prefix_preserves_system_instructions_and_rejects_mis
     assert once[0] == history[0] and once[-1] == history[1]
     assert "deduplicated document" in once[1]["content"]
     assert with_agent_context(database, "foreign-owner", child, history) == history
+
+
+def test_saved_steer_history_interleaves_assistant_replies_in_chronological_order(runtime):
+    import json
+
+    _, store, _ = runtime
+    run, _ = store.begin('local', {'text': 'Initial request'})
+    assert store.finish('local', run.run_id, status='complete', text='final')
+    with store.database.connect() as db:
+        db.execute('UPDATE messages SET content=? WHERE id=?',
+                   (json.dumps([
+                       {'type': 'text', 'text': 'Before correction'},
+                       {'type': 'steer', 'steer': 'Correct assumption', 'steerId': 's1'},
+                       {'type': 'text', 'text': 'First corrected answer'},
+                       {'type': 'steer', 'steer': 'Use less detail', 'steerId': 's2'},
+                       {'type': 'text', 'text': 'Final answer'},
+                   ]), run.response_message_id))
+    history = store.history('local', run.conversation_id)
+    assert [(part['role'], part['content']) for part in history[1:]] == [
+        ('assistant', 'Before correction'), ('user', 'Correct assumption'),
+        ('assistant', 'First corrected answer'), ('user', 'Use less detail'),
+        ('assistant', 'Final answer'),
+    ]

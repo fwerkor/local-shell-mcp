@@ -297,6 +297,10 @@ def _contained(actual: Any, subset: Any) -> bool:
         return isinstance(actual, dict) and all(
             key in actual and _contained(actual[key], value) for key, value in subset.items()
         )
+    if (type(actual) in (int, float) and type(subset) in (int, float)):
+        # JavaScript JSON numeric values have one Number type. bool remains
+        # a distinct JSON primitive despite being an int subclass in Python.
+        return actual == subset
     return type(actual) is type(subset) and actual == subset
 
 

@@ -124,6 +124,10 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                 incoming.append(_route_prompt(_limit_prompt(prompt)))
         elif state.get("agentMessages"):
             incoming = copy.deepcopy(state["agentMessages"])
+        # Every activation receives only its own Agent instructions. The
+        # shared graph input may retain the root's system prompt across
+        # direct supersteps and fan-in, which must not leak to other members.
+        incoming = [msg for msg in incoming if msg.get("role") != "system"]
         instructions = member.get("instructions") or ""
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})

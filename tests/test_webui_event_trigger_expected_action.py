@@ -151,3 +151,12 @@ def test_original_expected_action_matcher_exact_bun_source_differential():
                          capture_output=True,check=True,timeout=20)
     expected=json.loads(proc.stdout)
     assert [matches_expected_action(evidence,action) for evidence,action in cases]==expected
+
+
+def test_expected_action_accepts_numeric_json_equivalence_but_not_boolean():
+    evidence = {'toolName': 'shell', 'arguments': {'count': 1.0}}
+    expected = {'toolName': 'shell', 'argumentSubset': {'count': 1}}
+    assert matches_expected_action(evidence, expected)
+    assert matches_expected_action({'toolName': 'shell', 'arguments': {'count': 1}},
+                                   {'toolName': 'shell', 'argumentSubset': {'count': 1.0}})
+    assert not matches_expected_action({'toolName': 'shell', 'arguments': {'count': True}}, expected)
