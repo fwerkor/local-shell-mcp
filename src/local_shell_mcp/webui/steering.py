@@ -389,4 +389,6 @@ class SteeringStore:
             if receipt:
                 receipt["state"] = "leftover"
         steer["queue"] = []
+        if leftover:
+            steer["leftovers"] = leftover
         return leftover

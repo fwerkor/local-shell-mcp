@@ -50,6 +50,10 @@ MANAGED_JOB_STORE_RETRY_ATTEMPTS = 2
 MANAGED_DEFERRED_UPDATE_VERSION = 1
 MANAGED_DEFERRED_APPLIED_KEY = "managed_deferred_update_ids"
 TERMINAL_STATUSES = {"succeeded", "failed", "exited", "stopped", "lost"}
+# Tmux can briefly stop listing a finished session while its runner is
+# publishing the atomic completion receipt. Do not permanently classify
+# that short handoff as a lost job.
+_COMPLETION_RECEIPT_GRACE_S = 2.0
 _JOB_STORE_THREAD_LOCK = threading.RLock()
 _ACTIVE_JOB_OPERATIONS: set[str] = set()
 _MANAGED_DEFERRED_SEQUENCE = itertools.count()
@@ -1064,6 +1068,16 @@ def _refresh_job_status(
         return job
 
     if session_id in active_sessions:
+        return job
+    # A runner may be exiting just as tmux removes its session; the atomic
+    # status-file rename can become observable slightly later. Poll briefly
+    # before declaring a genuine missing receipt. Only real native/tmux starts
+    # receive the grace period; fabricated or legacy jobs stay fail-closed.
+    started = job.get("last_started_at")
+    backend = str(job.get("backend") or "")
+    if (
+        backend == "native" or backend.startswith("tmux-")
+    ) and type(started) in (int, float) and 0 <= updated - started < _COMPLETION_RECEIPT_GRACE_S:
         return job
     _audit_missing_completion_receipt(job)
     job.update(

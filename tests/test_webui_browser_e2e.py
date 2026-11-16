@@ -77,7 +77,14 @@ async def test_real_react_chat_uses_native_python_streaming_and_sqlite(tmp_path,
             errors: list[str] = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             await page.goto(f"http://127.0.0.1:{port}/c/new", wait_until="domcontentloaded")
-            await page.get_by_text("mock-test-model").first.wait_for(timeout=15_000)
+            # The retained React selector deliberately starts with no model
+            # selected. Pick the configured model through the actual UI; an
+            # implicit default would bypass the model selection contract.
+            selector = page.get_by_test_id("model-selector-button")
+            await selector.click(timeout=15_000)
+            await page.locator("#model-search").fill("mock-test-model")
+            await page.get_by_text("mock-test-model", exact=True).first.click()
+            await selector.get_by_text("mock-test-model", exact=True).wait_for(timeout=15_000)
             if with_attachment:
                 async with page.expect_response(lambda response: response.request.method == "POST" and
                                                 response.url.endswith("/api/files")) as uploaded:

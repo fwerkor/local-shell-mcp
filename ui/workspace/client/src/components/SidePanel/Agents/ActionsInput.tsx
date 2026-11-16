@@ -32,7 +32,6 @@ import { ActionsTable, ActionsTableSkeleton, columns } from './ActionsTable';
 import ActionCallback from '~/components/SidePanel/Builder/ActionCallback';
 import { useUpdateAgentAction } from '~/data-provider';
 import { useLocalize } from '~/hooks';
-import { logger } from '~/utils';
 
 const debouncedValidation = debounce(
   (input: string, callback: (result: ValidationResult) => void) => {
@@ -129,7 +128,6 @@ export default function ActionsInput({
   });
 
   const saveAction = handleSubmit((authFormData) => {
-    logger.log('actions', 'saving action', authFormData);
     const currentAgentId = agent_id ?? '';
     if (!currentAgentId) {
       // alert user?
