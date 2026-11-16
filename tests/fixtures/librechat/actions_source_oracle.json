@@ -1,0 +1,861 @@
+{
+  "source": "LibreChat v0.8.8 e8f3be08623663d4ad7f7241e693c94469b63bb0",
+  "hashes": {
+    "ui/workspace/packages/data-provider/src/actions.ts": "da6afdd466233065f8643237ff78050090877bd8c64d4a1e780c4619082711ed",
+    "ui/workspace/packages/data-provider/src/agentToolOptions.ts": "54bbf1869273866e512544fea626b1d88a9521f6983bdac000b85b4aa1d34e02",
+    "ui/workspace/packages/data-provider/src/types/tools.ts": "697deeb1bb105e2597003e7ebca3b1f5bdfdf949ca3590c0ac4bccf1bd7574eb"
+  },
+  "outputs": [
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/hello": {
+            "get": {
+              "operationId": "hello",
+              "summary": "Hello world"
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "hello",
+            "description": "Hello world",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          }
+        }
+      ],
+      "builders": {
+        "hello": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/hello",
+          "method": "get",
+          "operation": "hello",
+          "isConsequential": false,
+          "contentType": "",
+          "parameterLocations": {}
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/users/{id}": {
+            "get": {
+              "operationId": "getUser",
+              "description": "Get user",
+              "parameters": [
+                {
+                  "name": "id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "name": "page",
+                  "in": "query",
+                  "schema": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                {
+                  "name": "X-Region",
+                  "in": "header",
+                  "schema": {
+                    "type": "string",
+                    "enum": [
+                      "us",
+                      "eu"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "getUser",
+            "description": "Get user",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "page": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "X-Region": {
+                  "type": "string",
+                  "enum": [
+                    "us",
+                    "eu"
+                  ]
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          }
+        }
+      ],
+      "builders": {
+        "getUser": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/users/{id}",
+          "method": "get",
+          "operation": "getUser",
+          "isConsequential": false,
+          "contentType": "",
+          "parameterLocations": {
+            "id": "path",
+            "page": "query",
+            "X-Region": "header"
+          }
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/users": {
+            "post": {
+              "operationId": "createUser",
+              "summary": "Create user",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "firstName": {
+                          "type": "string"
+                        },
+                        "age": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "firstName"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "createUser",
+            "description": "Create user",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "firstName": {
+                  "type": "string"
+                },
+                "age": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "firstName"
+              ]
+            }
+          }
+        }
+      ],
+      "builders": {
+        "createUser": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/users",
+          "method": "post",
+          "operation": "createUser",
+          "isConsequential": false,
+          "contentType": "application/json",
+          "parameterLocations": {
+            "firstName": "body",
+            "age": "body"
+          }
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/products": {
+            "get": {
+              "operationId": "listProducts",
+              "summary": "Products"
+            }
+          },
+          "/products/{sku}": {
+            "patch": {
+              "operationId": "updateProduct",
+              "parameters": [
+                {
+                  "name": "sku",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "quantity": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "quantity"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/products-new": {
+            "delete": {
+              "operationId": "deleteProducts"
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "listProducts",
+            "description": "Products",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "updateProduct",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "sku",
+                "quantity"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "deleteProducts",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          }
+        }
+      ],
+      "builders": {
+        "listProducts": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/products",
+          "method": "get",
+          "operation": "listProducts",
+          "isConsequential": false,
+          "contentType": "",
+          "parameterLocations": {}
+        },
+        "updateProduct": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/products/{sku}",
+          "method": "patch",
+          "operation": "updateProduct",
+          "isConsequential": false,
+          "contentType": "application/json",
+          "parameterLocations": {
+            "sku": "path",
+            "quantity": "body"
+          }
+        },
+        "deleteProducts": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/products-new",
+          "method": "delete",
+          "operation": "deleteProducts",
+          "isConsequential": false,
+          "contentType": "",
+          "parameterLocations": {}
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/with-hyphen/{thing}": {
+            "get": {
+              "summary": "No provided ID",
+              "x-strict": true,
+              "x-openai-isConsequential": true,
+              "parameters": [
+                {
+                  "name": "thing",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_with-hyphenthing",
+            "description": "No provided ID",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "thing": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "thing"
+              ],
+              "additionalProperties": false
+            },
+            "strict": true
+          }
+        }
+      ],
+      "builders": {
+        "get_with-hyphenthing": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/with-hyphen/{thing}",
+          "method": "get",
+          "operation": "get_with-hyphenthing",
+          "isConsequential": true,
+          "contentType": "",
+          "parameterLocations": {
+            "thing": "path"
+          }
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/ref": {
+            "put": {
+              "operationId": "putReference",
+              "parameters": [
+                {
+                  "$ref": "#/components/parameters/RefId"
+                }
+              ],
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/RefBody"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "components": {
+          "parameters": {
+            "RefId": {
+              "name": "id",
+              "in": "query",
+              "schema": {
+                "$ref": "#/components/schemas/RefId"
+              }
+            }
+          },
+          "schemas": {
+            "RefId": {
+              "type": "string",
+              "pattern": "^[a-z]+$"
+            },
+            "RefBody": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled"
+              ]
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "putReference",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z]+$"
+                },
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled"
+              ]
+            }
+          }
+        }
+      ],
+      "builders": {
+        "putReference": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/ref",
+          "method": "put",
+          "operation": "putReference",
+          "isConsequential": false,
+          "contentType": "application/json",
+          "parameterLocations": {
+            "id": "query",
+            "enabled": "body"
+          }
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/empty": {
+            "get": {
+              "operationId": "empty"
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "empty",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          }
+        }
+      ],
+      "builders": {
+        "empty": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/empty",
+          "method": "get",
+          "operation": "empty",
+          "isConsequential": false,
+          "contentType": "",
+          "parameterLocations": {}
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/option": {
+            "options": {
+              "operationId": "options"
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "options",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          }
+        }
+      ],
+      "builders": {
+        "options": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/option",
+          "method": "options",
+          "operation": "options",
+          "isConsequential": false,
+          "contentType": "",
+          "parameterLocations": {}
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/health": {
+            "get": {
+              "operationId": "health",
+              "x-strict": false,
+              "parameters": [
+                {
+                  "name": "verbose",
+                  "in": "query",
+                  "schema": {
+                    "type": "boolean"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "health",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "verbose": {
+                  "type": "boolean"
+                }
+              },
+              "required": []
+            }
+          }
+        }
+      ],
+      "builders": {
+        "health": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/health",
+          "method": "get",
+          "operation": "health",
+          "isConsequential": false,
+          "contentType": "",
+          "parameterLocations": {
+            "verbose": "query"
+          }
+        }
+      }
+    },
+    {
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://api.example.org/v1"
+          }
+        ],
+        "info": {
+          "title": "Action Example",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/legacy": {
+            "get": {
+              "operationId": "legacy",
+              "parameters": [
+                {
+                  "name": "a",
+                  "in": "notset",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "functions": [
+        {
+          "type": "function",
+          "function": {
+            "name": "legacy",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "a": {
+                  "type": "string"
+                }
+              },
+              "required": []
+            }
+          }
+        }
+      ],
+      "builders": {
+        "legacy": {
+          "domain": "https://api.example.org/v1",
+          "basePath": "/legacy",
+          "method": "get",
+          "operation": "legacy",
+          "isConsequential": false,
+          "contentType": "",
+          "parameterLocations": {
+            "a": "query"
+          }
+        }
+      }
+    }
+  ],
+  "tool_vectors": [
+    {
+      "name": "get_action_swapi---tech",
+      "isAction": true,
+      "normalized": "get_action_swapi_tech"
+    },
+    {
+      "name": "get_foo---bar_action_swapi---tech",
+      "isAction": true,
+      "normalized": "get_foo---bar_action_swapi_tech"
+    },
+    {
+      "name": "get_action_data---x_mcp_srv",
+      "isAction": false,
+      "normalized": "get_action_data---x_mcp_srv"
+    },
+    {
+      "name": "tool_mcp_foo",
+      "isAction": false,
+      "normalized": "tool_mcp_foo"
+    },
+    {
+      "name": "prefix_mcp_x_action_a---b",
+      "isAction": true,
+      "normalized": "prefix_mcp_x_action_a_b"
+    },
+    {
+      "name": "simple_action_local---io",
+      "isAction": true,
+      "normalized": "simple_action_local_io"
+    },
+    {
+      "name": "get_action_mcp_docs",
+      "isAction": false,
+      "normalized": "get_action_mcp_docs"
+    },
+    {
+      "name": "get_mcp_docs_action_c---d",
+      "isAction": true,
+      "normalized": "get_mcp_docs_action_c_d"
+    },
+    {
+      "name": "get_action_foo_action_bar---baz",
+      "isAction": true,
+      "normalized": "get_action_foo_action_bar_baz"
+    },
+    {
+      "name": "ab___action_foo_mcp_srv",
+      "isAction": false,
+      "normalized": "ab___action_foo_mcp_srv"
+    }
+  ],
+  "domains": [
+    {
+      "domain": "https://api.example.org",
+      "server": "https://api.example.org/v1",
+      "isValid": true
+    },
+    {
+      "domain": "api.example.org",
+      "server": "https://api.example.org/v1",
+      "isValid": true
+    },
+    {
+      "domain": "http://api.example.org",
+      "server": "https://api.example.org/v1",
+      "isValid": false
+    },
+    {
+      "domain": "https://api.example.org:443",
+      "server": "https://api.example.org/v1",
+      "isValid": true
+    },
+    {
+      "domain": "https://api.example.org:8443",
+      "server": "https://api.example.org/v1",
+      "isValid": false
+    },
+    {
+      "domain": "https://example.org",
+      "server": "https://api.example.org/v1",
+      "isValid": false
+    },
+    {
+      "domain": "http://127.0.0.1",
+      "server": "http://127.0.0.1:8900",
+      "isValid": true
+    },
+    {
+      "domain": "127.0.0.1",
+      "server": "http://127.0.0.1:8900",
+      "isValid": true
+    },
+    {
+      "domain": "http://localhost",
+      "server": "http://localhost:8080",
+      "isValid": true
+    },
+    {
+      "domain": "https://api.example.org",
+      "server": "ftp://api.example.org",
+      "isValid": false
+    }
+  ]
+}

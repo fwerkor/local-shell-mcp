@@ -98,6 +98,11 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                         direct_destinations[src].add(dest)
 
     async def node(agent_id: str, state: MultiAgentState):
+        from langgraph.config import get_config
+
+        activation_id = (get_config().get("configurable") or {}).get("__pregel_task_id")
+        if not isinstance(activation_id, str) or not activation_id:
+            raise RuntimeError("LangGraph task activation is missing a durable identity")
         parent._check_grant()
         member = parent.repository.get(parent.owner, agent_id)
         if member is None:
@@ -120,8 +125,10 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             incoming.insert(0, {"role": "system", "content": instructions})
 
         async def emit(delta: str) -> None:
-            # All nodes use one event stream and the existing generation actor.
+            # Pause/restart snapshots must retain the generation-wide prefix,
+            # including streamed text from earlier graph activations.
             parent.partial_text += delta
+            child.partial_text = parent.partial_text
             await parent.on_text(delta)
 
         child = AgentRunner(
@@ -131,7 +138,10 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             on_text=emit, agent=member, profile=parent.initial_profile if agent_id == source_id else None,
             parameters=parent.initial_parameters,
             ask_user_enabled=parent.ask_user_enabled, mcp_enabled=parent.mcp_enabled,
-            namespace=parent.namespace + "/graph:" + agent_id,
+            # LangGraph assigns a durable task UUID per node activation.
+            # Revisiting A after A -> B -> A must not load A's old terminal
+            # node checkpoint; a restart of this activation uses the same ID.
+            namespace=parent.namespace + "/graph:" + agent_id + ":" + activation_id,
             child_configs=parent.child_configs, selected_tools=parent.selected_tools if agent_id == source_id else None,
             resume_history=parent.resume_history, resume_namespace=parent.resume_namespace,
             partial_text=parent.partial_text, approved_batch=parent.approved_batch,
