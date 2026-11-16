@@ -208,6 +208,145 @@ class GenerationStore:
                        (run_id, _json({"event": "on_pending_action", "data": pending})))
             return True
 
+    def pause_for_oauth(self, owner: str, run_id: str, pending: dict,
+                        history: list[dict], partial_text: str, auth_delta: dict) -> bool:
+        """Park a model-selected OAuth tool without any live Python waiter.
+
+        The original React sign-in delta and the durable interrupt are written
+        together. A crash can never show a login link without a resumable run.
+        """
+        payload = pending.get("payload", {})
+        action_id, call_id = payload.get("action_id"), payload.get("tool_call_id")
+        version = payload.get("action_version")
+        if (payload.get("type") != "action_oauth" or not isinstance(action_id, str)
+                or not isinstance(call_id, str) or type(version) is not int):
+            raise ValueError("Invalid Action OAuth interrupt")
+        if len(_json(history).encode("utf-8")) > 512 * 1024 or len(_json(auth_delta).encode("utf-8")) > 256 * 1024:
+            raise ValueError("Action OAuth continuation too large")
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                return False
+            flow = db.execute(
+                "SELECT 1 FROM action_oauth_flows WHERE run_id=? AND owner=? AND action_id=? "
+                "AND call_id=? AND action_version=? AND expires_at>=?",
+                (run_id, owner, action_id, call_id, version, _now() // 1_000_000),
+            ).fetchone()
+            if flow is None:
+                raise ValueError("OAuth authorization attempt expired before checkpoint")
+            state = json.loads(row["state"])
+            if state.get("pendingAction") is not None:
+                raise ValueError("Generation already has a pending human action")
+            state["pendingAction"] = pending
+            state["resumeHistory"] = history
+            state["partialText"] = partial_text
+            db.execute("UPDATE runs SET state=?,status='requires_action',updated_at=? WHERE id=?",
+                       (_json(state), _now(), run_id))
+            # OAuth is presented by the retained React ToolCall component;
+            # do not inject the Ask User/Approval pending-action UI here.
+            db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(auth_delta)))
+            return True
+
+    def claim_oauth(self, owner: str, run_id: str, action_id: str, call_id: str,
+                    version: int, *, lone_call: bool = True) -> tuple[Generation, list[dict], str] | None:
+        """Claim a finished browser login, retaining proof across restart.
+
+        'claimed' can be replayed after a crash because HTTP has not started.
+        'dispatching' cannot be replayed without proof of the remote result.
+        """
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='requires_action'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                return None
+            state = json.loads(row["state"])
+            pending = state.get("pendingAction")
+            payload = pending.get("payload", {}) if isinstance(pending, dict) else {}
+            if (payload.get("type") != "action_oauth" or payload.get("action_id") != action_id
+                    or payload.get("tool_call_id") != call_id or payload.get("action_version") != version):
+                return None
+            history = state.get("resumeHistory")
+            if not isinstance(history, list):
+                raise ValueError("Missing OAuth model checkpoint continuation")
+            state["oauthResume"] = {"stage": "claimed", "action_id": action_id,
+                                    "tool_call_id": call_id, "action_version": version,
+                                    "lone_call": lone_call, "pendingAction": pending}
+            state.pop("pendingAction")
+            db.execute("UPDATE runs SET state=?,status='running',updated_at=? WHERE id=?",
+                       (_json(state), _now(), run_id))
+            # Clear the sign-in button using the retained React delta shape.
+            # The prior URL remains in the immutable SSE log for audit/replay.
+            step_id = payload.get("step_id")
+            if isinstance(step_id, str):
+                db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json({
+                    "event": "on_run_step_delta", "data": {"id": step_id, "delta": {
+                        "type": "tool_calls", "tool_calls": [{"id": call_id,
+                            "name": payload.get("tool_name", ""), "args": ""}],
+                        "auth": "", "expires_at": None,
+                    }},
+                })))
+            return self._run({**dict(row), "status": "running"}), history, state.get("partialText", "")
+
+    def oauth_dispatch(self, owner: str, run_id: str, call_id: str, stage: str) -> None:
+        """Fence OAuth replay before HTTP, after checkpointed output and after batching."""
+        if stage not in {"dispatching", "completed", "cleared"}:
+            raise ValueError("Invalid OAuth replay stage")
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise PermissionError("OAuth run no longer active")
+            state = json.loads(row["state"])
+            marker = state.get("oauthResume")
+            if marker is None:
+                return
+            if marker.get("tool_call_id") != call_id:
+                return
+            previous = marker.get("stage")
+            if stage == "dispatching" and previous != "claimed":
+                raise PermissionError("OAuth Action was already dispatched")
+            if stage == "completed" and previous != "dispatching":
+                raise PermissionError("OAuth Action HTTP completion has no dispatch record")
+            if stage == "cleared" and previous not in {"completed", "claimed"}:
+                raise PermissionError("OAuth Action cannot clear unverified dispatch")
+            if stage == "cleared":
+                state.pop("oauthResume", None)
+                state.pop("resumeHistory", None)
+                state.pop("partialText", None)
+            else:
+                marker["stage"] = stage
+            db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?", (_json(state), _now(), run_id))
+
+    def clear_oauth_checkpoint(self, owner: str, run_id: str) -> bool:
+        """Drop the replay fence after the post-tool graph checkpoint commits."""
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                return False
+            state = json.loads(row["state"])
+            marker = state.get("oauthResume")
+            if not isinstance(marker, dict) or marker.get("stage") not in {"claimed", "completed"}:
+                return False
+            state.pop("oauthResume")
+            state.pop("resumeHistory", None)
+            state.pop("partialText", None)
+            db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?", (_json(state), _now(), run_id))
+            return True
+
     def answer_question(self, owner: str, run_id: str, action_id: str,
                         answer: dict | str) -> tuple[Generation, list[dict], str]:
         from .ask_user_tools import resolve_ask_user_question_resume
@@ -480,11 +619,58 @@ class GenerationStore:
         active = active_run_ids or set()
         with self.database.connect() as db:
             rows = db.execute(
-                "SELECT r.id,c.owner FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "SELECT r.id,r.conversation_id,c.owner FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.status='running'",
             ).fetchall()
         recovered = 0
         for row in rows:
-            if row["id"] not in active and self.finish(row["owner"], row["id"], status="interrupted"):
+            if row["id"] in active:
+                continue
+            with self.database.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute("SELECT state,status FROM runs WHERE id=?", (row["id"],)).fetchone()
+                if current is not None and current["status"] == "running":
+                    state = json.loads(current["state"])
+                    resume = state.get("oauthResume")
+                    # 'claimed': login completed but remote HTTP was never sent.
+                    # 'completed': the HTTP result has already been durably saved
+                    # by the checkpoint saver, so replay uses that result.
+                    if (isinstance(resume, dict) and resume.get("stage") in {"claimed", "completed"}
+                            and resume.get("lone_call") is True
+                            and isinstance(resume.get("pendingAction"), dict)):
+                        pending = resume["pendingAction"]
+                        if resume["stage"] == "completed":
+                            from .checkpoints import SQLiteCheckpointSaver
+
+                            saver = SQLiteCheckpointSaver(self.database, row["owner"])
+                            checkpoint = saver.get_tuple(saver.config(
+                                row["conversation_id"], row["id"],
+                                checkpoint_ns=pending.get("namespace", ""), event_actor=True,
+                            ))
+                            snapshot = (checkpoint or {}).get("checkpoint", {}).get("channel_values", {})
+                            calls = snapshot.get("pending_calls")
+                            # A completed HTTP request is replayable only when
+                            # the graph has its tool result in durable writes
+                            # or has already advanced past that tool node.
+                            has_result = db.execute(
+                                "SELECT 1 FROM generation_events WHERE run_id=? AND "
+                                "json_extract(data,'$.event')='on_run_step_completed' AND "
+                                "json_extract(data,'$.data.result.tool_call.id')=? LIMIT 1",
+                                (row["id"], resume["tool_call_id"]),
+                            ).fetchone()
+                            replay_safe = checkpoint is not None and has_result is not None and isinstance(calls, list)
+                            if replay_safe and calls == []:
+                                pending = {**pending, "payload": {**pending["payload"],
+                                           "checkpoint_completed": True}}
+                        else:
+                            replay_safe = True
+                        if replay_safe:
+                            state["pendingAction"] = pending
+                            state.pop("oauthResume")
+                            db.execute("UPDATE runs SET state=?,status='requires_action',updated_at=? WHERE id=?",
+                                       (_json(state), _now(), row["id"]))
+                            recovered += 1
+                            continue
+            if self.finish(row["owner"], row["id"], status="interrupted"):
                 recovered += 1
         return recovered
