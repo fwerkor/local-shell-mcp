@@ -263,3 +263,19 @@ def test_model_parameter_source_aliases_wrappers_and_unknown_request_fields():
     assert validate_model_parameters({'noise': 'private_123'}, config) is None
     with pytest.raises(ContentFilterBlocked):
         validate_model_parameters({'model_parameters': {'noise': 'private_123'}}, config)
+
+
+def test_assembled_context_inspects_provider_bound_tool_call_arguments():
+    messages = [
+        {'role': 'assistant', 'content': None, 'tool_calls': [
+            {'id': 'call-1', 'function': {'name': 'fetch', 'arguments': '{"authorization":"Bearer secret-token"}'}}
+        ]},
+        {'role': 'assistant', 'content': None, 'tool_calls': [
+            {'id': 'call-2', 'function': {'name': 'fetch', 'arguments': {'nested': ['safe']}}}
+        ]},
+        {'role': 'user', 'content': 'safe', 'tool_calls': [None, {'function': 'invalid'}]},
+    ]
+    fragments = model_message_fragments(messages)
+    assert any('Bearer secret-token' in item.text for item in fragments)
+    assert any(item.text == 'safe' for item in fragments)
+    assert inspect_content(fragments, _policy('messages', starters=['bearer_header'])) is not None
