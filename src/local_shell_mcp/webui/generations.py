@@ -740,6 +740,7 @@ class GenerationStore:
                     text = row['text'] or ''
                     row_messages: list[dict] = []
                     if isinstance(parts, list):
+                        represented_tool_calls: set[str] = set()
                         summary = find_checkpoint_summary_part(parts) if role == 'assistant' else None
                         if summary is not None:
                             stop_at_checkpoint = True
@@ -751,9 +752,15 @@ class GenerationStore:
                             # history before stopping ancestral traversal.
                             retained = summary.get('retainedTail')
                             if isinstance(retained, list):
-                                row_messages.extend(message for message in retained
-                                                    if isinstance(message, dict)
-                                                    and message.get('role') in {'user', 'assistant', 'tool'})
+                                retained = [message for message in retained if isinstance(message, dict)
+                                            and message.get('role') in {'user', 'assistant', 'tool'}]
+                                for message in retained:
+                                    if message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
+                                        represented_tool_calls.add(message['tool_call_id'])
+                                    for call in message.get('tool_calls') or []:
+                                        if isinstance(call, dict) and isinstance(call.get('id'), str):
+                                            represented_tool_calls.add(call['id'])
+                                row_messages.extend(retained)
                         text_parts = [part['text'] for part in parts if isinstance(part, dict)
                                       and part.get('type') == 'text' and isinstance(part.get('text'), str)]
                         text = ''.join(text_parts) if text_parts else ('' if stop_at_checkpoint else text)
@@ -764,7 +771,8 @@ class GenerationStore:
                         results = []
                         for call in tool_parts:
                             ident, name = call.get('id'), call.get('name')
-                            if not isinstance(ident, str) or not isinstance(name, str) or 'output' not in call:
+                            if (not isinstance(ident, str) or not isinstance(name, str) or
+                                    'output' not in call or ident in represented_tool_calls):
                                 continue
                             calls.append({'id': ident, 'type': 'function', 'function': {
                                 'name': name, 'arguments': _json(call.get('args', {}))}})

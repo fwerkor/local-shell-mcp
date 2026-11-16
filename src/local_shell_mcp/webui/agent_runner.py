@@ -688,7 +688,7 @@ class AgentRunner:
                                       reserve_ratio=config.get('reserveRatio', 0.05),
                                       calibration_ratio=calibration.ratio)
             self._update_fading_tier(state, budget, calibration, config, int(max_raw))
-            if config.get('enabled') is False:
+            if config.get('enabled') is False or (budget.remaining_context_tokens > 0 and not isinstance(config.get('trigger'), dict)):
                 return
             if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
                 return

@@ -98,7 +98,12 @@ def test_snapshot_failed_write_keeps_run_state_and_event_log_unchanged(setup):
 
 
 @pytest.mark.asyncio
-async def test_context_usage_event_visible_on_native_http_sse_after_restart(setup, monkeypatch):
+async def test_context_usage_event_visible_on_native_http_sse_after_restart(setup, monkeypatch, tmp_path):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'none')
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    get_settings.cache_clear()
     db, store, job = setup
     snapshot = _snapshot(job)
     store.record_context_usage('alice', job.run_id, snapshot)
@@ -119,6 +124,7 @@ async def test_context_usage_event_visible_on_native_http_sse_after_restart(setu
                                      params={'after': 1})
         assert next_page.status_code == 200
         assert 'on_context_usage' in next_page.text
+    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
