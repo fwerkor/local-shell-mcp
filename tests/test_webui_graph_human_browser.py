@@ -106,7 +106,7 @@ async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_p
             await page.get_by_role('button', name='Markdown', exact=True).first.wait_for(timeout=20000)
             status = (await (await page.request.get(
                 f'http://127.0.0.1:{port}/api/agents/chat/status/{cid}')).json())
-            assert status['pendingAction']['namespace'].endswith('/graph:' + child['id'])
+            assert ('/graph:' + child['id'] + ':') in status['pendingAction']['namespace']
             await page.reload(wait_until='domcontentloaded')
             await page.get_by_role('button', name='Markdown', exact=True).first.wait_for(timeout=12000)
             await page.get_by_role('button', name='Markdown', exact=True).first.click()

@@ -261,7 +261,7 @@ async def test_parallel_graph_sibling_ask_user_resumes_without_rerunning_complet
         await AgentRunner('local', job, db, store, **opts).run(
             store.history('local', job.conversation_id))
     action = store.pending_action('local', job.run_id)
-    assert action and action['namespace'].endswith('/graph:' + left['id'])
+    assert action and ('/graph:' + left['id'] + ':') in action['namespace']
     _, history, _ = store.answer_question('local', job.run_id, action['actionId'],
                                            {'answers': {'format': 'json'}})
     restored = AgentRunner('local', job, db, store, **opts,
@@ -378,7 +378,7 @@ async def test_parallel_graph_sibling_tool_review_keeps_completed_sibling(tmp_pa
         await AgentRunner('local', job, db, store, **options).run(
             store.history('local', job.conversation_id))
     action = store.pending_action('local', job.run_id)
-    assert action and action['namespace'].endswith('/graph:' + left['id'])
+    assert action and ('/graph:' + left['id'] + ':') in action['namespace']
     assert action['payload']['type'] == 'tool_approval'
     generation, history, partial, batch = store.claim_approval('local', job.run_id, action['actionId'],
                                                                 [{'tool_call_id': 'review-plan',
