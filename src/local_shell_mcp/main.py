@@ -144,6 +144,12 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.subagent_task_host import active_child_generations, recover_subagent_tasks
 
             generation_store = _generation_store()
+            from .webui.background_tools import recover_background_tools
+
+            # Ordinary tool executions may have irreversible effects. An
+            # expired Controller ownership lease is outcome-uncertain; never
+            # silently invoke the same native tool twice after a restart.
+            recover_background_tools(generation_store.database)
             from .webui.generation_actor_lease import active_run_ids, resumable_run_ids
 
             children = active_child_generations(generation_store.database) | active_event_generations(generation_store.database)
@@ -171,9 +177,11 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
                 yield
             finally:
                 if enabled:
+                    from .webui.background_tools import shutdown_background_tools
                     from .webui.event_triggers import shutdown_event_workers
                     from .webui.generation_routes import shutdown_generations
 
+                    await shutdown_background_tools()
                     await shutdown_event_workers()
                     await shutdown_generations()
                 if recovery_task is not None:

@@ -731,6 +731,26 @@ class GenerationStore:
                     content.append(data["part"])
             if not content and text:
                 content.append({"type": "text", "text": text, "phase": "final_answer"})
+            # The source ON_RUN_STEP_CLOSED event is the authoritative status
+            # and duration even after reconnect; never infer a stop from the
+            # absence of a live streaming task or the event's unstable index.
+            for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq",
+                                    (run_id,)):
+                value = json.loads(event["data"])
+                if value.get("event") != "on_run_step_closed":
+                    continue
+                closed = value.get("data") or {}
+                part = tool_parts.get(closed.get("id"))
+                if not part or closed.get("status") not in {"completed", "failed", "cancelled"}:
+                    continue
+                tool = part["tool_call"]
+                tool["runStepStatus"] = closed["status"]
+                opened_at, closed_at = closed.get("created_at"), closed.get("closed_at")
+                if (type(closed_at) in (int, float) and closed_at > 0 and
+                    (type(opened_at) not in (int, float) or opened_at <= closed_at)):
+                    tool["runStepClosedAt"] = closed_at
+                    if type(opened_at) in (int, float):
+                        tool["runStepDurationMs"] = closed_at - opened_at
             content += list(tool_parts.values())
             # LibreChat agents/client.js emits ContentTypes.ERROR as a content
             # part. A top-level final.error alone is ignored by finalHandler.

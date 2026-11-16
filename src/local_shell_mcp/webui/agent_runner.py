@@ -115,6 +115,7 @@ class AgentRunner:
                                  scopes=set(self.scopes), expires=self.grant_expires)
         tools = [tool for tool in native if unrestricted or tool["function"]["name"] in selected
                  or tool["function"]["name"] in {"session_manage", "plan_manage"}]
+        native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
                       if unrestricted or tool["function"]["name"] in selected]
@@ -134,6 +135,14 @@ class AgentRunner:
             tools += check_background_task_tools()
         if self.graph_definition:
             tools += handoff_tools(self.owner, self.graph_definition, self.repository, source_agent_id=identity)
+        if not self.background_deny:
+            from .background_tools import inject_tools
+
+            tools, background_names = inject_tools(tools, agent, native_names=native_names)
+            if background_names and not any(t["function"]["name"] == "check_background_task" for t in tools):
+                from .subagent_task_host import check_background_task_tools
+
+                tools += check_background_task_tools()
         override = (agent or {}).get("recursion_limit")
         limit = override if type(override) in (int, float) and override > 0 else 50
         return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
@@ -227,9 +236,10 @@ class AgentRunner:
                                                 database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
+        end_at = int(time.time() * 1000)
         self.store.append(self.owner, self.generation.run_id, {
             "event": "on_run_step_completed", "data": {"result": {
-                "id": step["id"], "index": step["index"], "completed_at": int(time.time() * 1000),
+                "id": step["id"], "index": step["index"], "completed_at": end_at,
                 "type": "tool_call", "tool_call": {
                     "id": call.call_id, "name": call.name,
                     "args": self._visible_tool_args(call),
@@ -237,6 +247,28 @@ class AgentRunner:
                 },
             }},
         }, actor_lease=self.actor_lease)
+        # Source agents@4.0.1 Graph.closeRunStep: terminal closure is an
+        # independent event. First close wins and survives SSE reconnect and
+        # durable final history, including native tool denial/error paths.
+        with self.database.connect() as db:
+            previous = db.execute(
+                "SELECT 1 FROM generation_events WHERE run_id=? AND "
+                "json_extract(data,'$.event')='on_run_step_closed' AND "
+                "json_extract(data,'$.data.id')=? LIMIT 1",
+                (self.generation.run_id, step["id"]),
+            ).fetchone()
+        if previous is None:
+            failed = isinstance(output, str) and (
+                output.startswith("Tool failed (") or output.startswith("Blocked: ")
+            )
+            self.store.append(self.owner, self.generation.run_id, {
+                "event": "on_run_step_closed", "data": {
+                    "id": step["id"], "index": step["index"], "type": "tool_calls",
+                    "runId": step["runId"],
+                    "status": "failed" if failed else "completed",
+                    "closed_at": end_at, "created_at": step["created_at"],
+                },
+            }, actor_lease=self.actor_lease)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -246,15 +278,61 @@ class AgentRunner:
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
         if call.name == "check_background_task":
+            from .background_tools import check_tool_task
             from .subagent_task_host import SQLiteSubagentTaskHost
 
             host = SQLiteSubagentTaskHost(
                 self.database, self.owner, self.authorization_conversation_id,
                 stream_tools=self.stream_tools, stream_text=self.stream_text,
             )
-            return await host.check(call.arguments, tool_call_id=call.call_id,
-                                    parent_run_id=self.generation.run_id,
-                                    parent_agent_id=(state.context.agent or {}).get("id", "default"))
+            task_id = call.arguments.get("background_task_id")
+            action = call.arguments.get("action") or "poll"
+            if isinstance(task_id, str) and task_id.startswith("tooltask_"):
+                return json.dumps(check_tool_task(self.database, self.owner,
+                                                  self.authorization_conversation_id, task_id, action),
+                                  ensure_ascii=False)
+            child = await host.check(call.arguments, tool_call_id=call.call_id,
+                                     parent_run_id=self.generation.run_id,
+                                     parent_agent_id=(state.context.agent or {}).get("id", "default"))
+            if not task_id and action == "poll":
+                from .background_tools import check_tool_task
+
+                decoded = json.loads(child)
+                decoded["tasks"].extend(check_tool_task(
+                    self.database, self.owner, self.authorization_conversation_id, None))
+                decoded["outstanding"] = sum(task["status"] == "running" for task in decoded["tasks"])
+                return json.dumps(decoded, ensure_ascii=False)
+            return child
+        if "run_in_background" in call.arguments and call.name not in {"subagent", "check_background_task"}:
+            from .background_tools import eligible, start_tool_task
+            from .lsm_tool_registry import call_tool as invoke_native
+
+            shown = next((tool for tool in state.context.tools
+                          if tool["function"]["name"] == call.name), None)
+            params = (shown or {}).get("function", {}).get("parameters", {})
+            if not eligible(call.name) or "run_in_background" not in params.get("properties", {}):
+                raise RuntimeSafetyError("run_in_background was not enabled for this tool")
+            args = {key: value for key, value in call.arguments.items() if key != "run_in_background"}
+            native_call = ModelToolCall(call.call_id, call.name, args, call.provider_data)
+            if call.arguments["run_in_background"] is True:
+                if self.background_deny:
+                    raise RuntimeSafetyError("Background execution is disabled in this child context")
+
+                async def detached_dispatch(c, scopes, expires, authorization):
+                    return await invoke_native(self.owner, self.generation.conversation_id, c,
+                                               granted_scopes=set(scopes), grant_expires=expires,
+                                               run_id=self.generation.run_id,
+                                               authorization_conversation_id=authorization)
+
+                return await start_tool_task(self.database, self.owner,
+                                             self.generation.conversation_id,
+                                             self.authorization_conversation_id,
+                                             self.generation.run_id, native_call,
+                                             scopes=frozenset(self.scopes),
+                                             grant_expires=self.grant_expires,
+                                             dispatch=detached_dispatch,
+                                             event_delivery_lease=self.event_delivery_lease)
+            call = native_call
         if call.name == "subagent":
             from .subagent_task_host import SQLiteSubagentTaskHost
 
@@ -313,7 +391,8 @@ class AgentRunner:
                             background_deny=self.background_deny,
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
                             subagent_depth=invocation.remaining_depth,
-wakeup_lease=self.wakeup_lease, event_delivery_lease=self.event_delivery_lease,
+                            wakeup_lease=self.wakeup_lease,
+                            event_delivery_lease=self.event_delivery_lease,
                             actor_lease=self.actor_lease, recovery_steers=self.recovery_steers)
         return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
 

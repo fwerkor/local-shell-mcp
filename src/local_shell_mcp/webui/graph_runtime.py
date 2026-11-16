@@ -119,10 +119,26 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})
 
+        # Source callbacks.js visibility applies to both SSE and the final
+        # persisted assistant text. Keep intermediate messages in graph state,
+        # but do not leak hidden sequential nodes via live deltas or reloads.
+        hide_intermediate = (root.get("hide_sequential_outputs") is True and
+                             root.get("resultAgentId") is not None and
+                             agent_id != root["resultAgentId"] and
+                             not topology.routing_parallel)
+        if hide_intermediate and not state.get("agentMessages"):
+            parent.store.append(parent.owner, parent.generation.run_id, {
+                "event": "on_agent_update", "data": {
+                    "runId": parent.generation.response_message_id,
+                    "message": f"{member.get('name') or 'Agent'} is thinking...",
+                },
+            }, actor_lease=parent.actor_lease)
+
         async def emit(delta: str) -> None:
             # All nodes use one event stream and the existing generation actor.
-            parent.partial_text += delta
-            await parent.on_text(delta)
+            if not hide_intermediate:
+                parent.partial_text += delta
+                await parent.on_text(delta)
 
         child = AgentRunner(
             parent.owner, parent.generation, parent.database, parent.store,
@@ -142,7 +158,9 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             background_deny=parent.background_deny,
             task_control_host=parent.task_control_host, task_control_id=parent.task_control_id,
             subagent_depth=parent.subagent_depth, on_injected=parent.on_injected,
-            wakeup_lease=parent.wakeup_lease, actor_lease=parent.actor_lease,
+            wakeup_lease=parent.wakeup_lease,
+            event_delivery_lease=parent.event_delivery_lease,
+            actor_lease=parent.actor_lease,
             recovery_steers=parent.recovery_steers,
         )
         child.route.restore(state.get("handoffState"))

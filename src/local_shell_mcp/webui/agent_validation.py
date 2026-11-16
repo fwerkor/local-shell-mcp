@@ -178,10 +178,11 @@ def clean_subagents(value: Any, *, max_subagents: int = 10) -> dict:
 def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
     obj = _require(payload, dict, "Agent configuration")
     result = {}
-    nullable_strings = {"name", "description", "instructions", "model"}
+    nullable_strings = {"name", "description", "instructions", "model",
+                        "entryAgentId", "resultAgentId"}
     strings = {"provider", "artifacts", "category", "code_environment_id", "code_workspace_id"}
-    arrays = {"tools", "skills", "agent_ids", "conversation_starters"}
-    booleans = {"skills_enabled", "skill_authoring_enabled", "end_after_tools", "hide_sequential_outputs", "stateful_code_sessions"}
+    arrays = {"tools", "skills", "agent_ids", "graphAgentIds", "conversation_starters"}
+    booleans = {"skills_enabled", "skill_authoring_enabled", "end_after_tools", "hide_sequential_outputs", "stateful_code_sessions", "run_in_background"}
     enums = {"skills_scope": ("all", "selected", "none"), "memory_scope": ("user", "agent"),
              "stateful_code_environment": ("user", "agent-user", "conversation"),
              "repositoryInstructions": ("prefer", "defer", "off")}
@@ -202,6 +203,11 @@ def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
     for key in ("code_environment_id", "code_workspace_id"):
         if key in result and result[key] is not None and not (key == "code_workspace_id" and result[key] == "") and not _ID.fullmatch(result[key]):
             raise ValueError("Invalid " + key)
+    if "maxHandoffs" in obj:
+        limit = obj["maxHandoffs"]
+        if type(limit) is not int or not 0 <= limit <= 2**53 - 1:
+            raise ValueError("maxHandoffs must be a nonnegative safe integer")
+        result["maxHandoffs"] = limit
     if "recursion_limit" in obj:
         number = obj["recursion_limit"]
         if type(number) not in (int, float) or not math.isfinite(number):

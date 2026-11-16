@@ -318,10 +318,94 @@ def _observed_action(db: Any, run_id: str, expected: dict) -> bool:
         if isinstance(output, str) and (output.startswith("Tool failed (") or
                                          output.startswith("Blocked: ")):
             continue
+        if isinstance(output, str):
+            with contextlib.suppress(ValueError, TypeError):
+                receipt = json.loads(output)
+                if isinstance(receipt, dict) and (
+                    isinstance(receipt.get("background_task_id"), str) or receipt.get("ok") is False
+                ):
+                    # Neither an acknowledged background *launch* nor a native
+                    # explicit failure is a completed expectedAction.
+                    continue
         if matches_expected_action({"toolName": tool.get("name"),
                                     "arguments": tool.get("args")}, expected):
             return True
     return False
+
+
+def _detached_proven(db: Any, envelope: dict) -> bool:
+    """Source detachedAction.ts internal wake can only originate from a proven host result."""
+    from .detached_event_actions import (
+        _EVENT_SOURCE,
+        _EVENT_TYPE,
+        parse_completion_projection,
+        parse_terminal_evidence,
+    )
+
+    event = envelope.get("event", {})
+    source = event.get("source", {})
+    if event.get("type") != _EVENT_TYPE or source != {"id": _EVENT_SOURCE, "type": "internal"}:
+        return False
+    projection = parse_completion_projection(event.get("payload"))
+    if projection is None:
+        return False
+    owner = envelope["principal"]["userId"]
+    action = db.execute(
+        "SELECT a.evidence,a.idempotency_key,a.task_id,a.status,d.envelope "
+        "FROM agent_event_detached_actions a JOIN agent_event_deliveries d "
+        "ON d.id=a.delivery_id WHERE a.delivery_id=? AND a.owner=? AND a.task_id=?",
+        (projection["invocationId"], owner, projection["taskId"]),
+    ).fetchone()
+    if action is None or action["status"] != "succeeded" or not action["evidence"]:
+        return False
+    evidence = parse_terminal_evidence(json.loads(action["evidence"]))
+    original = json.loads(action["envelope"])
+    return bool(
+        evidence and evidence["status"] == "succeeded" and
+        evidence["idempotencyKey"] == action["idempotency_key"] == projection["idempotencyKey"] and
+        evidence["generationCreatedAt"] == projection["generationCreatedAt"] and
+        original["target"] == envelope["target"] and
+        original["expectedAction"] == envelope.get("expectedAction") and
+        projection["wakeGenerationCreatedAt"] >= 0
+    )
+
+
+def _queue_detached_completion(db: Any, original: Any, envelope: dict,
+                               action: Any, now: int) -> str:
+    """Atomic original source internal completion event, ordered after its actor."""
+    from .detached_event_actions import (
+        _EVENT_SOURCE,
+        _EVENT_TYPE,
+        _INPUT,
+        parse_terminal_evidence,
+    )
+
+    evidence = parse_terminal_evidence(json.loads(action["evidence"]))
+    if evidence is None or evidence["status"] != "succeeded":
+        raise PermissionError("Detached action has no authoritative successful terminal evidence")
+    continuation = {**envelope, "requestId": str(uuid.uuid4()),
+                    "deliveryId": "detached_completion:" + action["task_id"],
+                    "receivedAt": now,
+                    "input": _INPUT,
+                    "event": {"id": action["task_id"], "type": _EVENT_TYPE,
+                              "occurredAt": evidence["observedAt"],
+                              "source": {"id": _EVENT_SOURCE, "type": "internal"},
+                              "payload": {"version": 1, "invocationId": original["id"],
+                                          "generationCreatedAt": evidence["generationCreatedAt"],
+                                          "wakeGenerationCreatedAt": evidence["generationCreatedAt"],
+                                          "taskId": action["task_id"],
+                                          "idempotencyKey": action["idempotency_key"]}}}
+    delivery_id = delivery_key(continuation)
+    stable = dict(continuation)
+    stable.pop("requestId")
+    stable.pop("receivedAt")
+    db.execute("INSERT OR IGNORE INTO agent_event_deliveries "
+               "(id,owner,source_key_id,fingerprint,envelope,mode,ordering_key,status,"
+               "available_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'pending',?,?,?)",
+               (delivery_id, original["owner"], original["source_key_id"],
+                _digest([stable, None]), _json(continuation), "continue",
+                original["ordering_key"], now, now, now))
+    return delivery_id
 
 
 _COALESCE_WINDOW_MS = 750
@@ -567,9 +651,12 @@ def assert_event_lease(database: Any, owner: str, run_id: str,
 
     delivery_id, token = lease
     with database.connect() as db:
-        valid = db.execute("SELECT 1 FROM agent_event_deliveries WHERE id=? AND owner=? "
-                           "AND run_id=? AND status='leased' AND lease_owner=? AND lease_until>?",
-                           (delivery_id, owner, run_id, token, _now())).fetchone()
+        valid = db.execute("SELECT 1 FROM agent_event_deliveries d JOIN agent_event_source_keys k "
+                           "ON k.id=d.source_key_id AND k.owner=d.owner WHERE d.id=? AND d.owner=? "
+                           "AND d.run_id=? AND d.status='leased' AND d.lease_owner=? "
+                           "AND d.lease_until>? AND k.revoked_at IS NULL "
+                           "AND (k.expires_at IS NULL OR k.expires_at>?)",
+                           (delivery_id, owner, run_id, token, _now(), _now())).fetchone()
     if valid is None:
         raise RuntimeSafetyError("Remote Agent Trigger actor lease was revoked")
 
@@ -651,27 +738,61 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
             "WHERE root.id=agent_event_deliveries.batch_root_id AND root.status='dead')",
             (now,),
         )
+        from .detached_event_actions import recover_expired
+
+        recover_expired(db, now)
         terminal_rows = db.execute(
-            "SELECT d.id,d.run_id,d.envelope,r.status AS run_status FROM agent_event_deliveries d "
+            "SELECT d.*,r.status AS run_status FROM agent_event_deliveries d "
             "JOIN runs r ON r.id=d.run_id WHERE d.status='leased' AND d.run_id IS NOT NULL "
             "AND r.status IN ('complete','error','aborted','interrupted','requires_action')",
         ).fetchall()
         for terminal in terminal_rows:
-            expected = json.loads(terminal["envelope"]).get("expectedAction")
-            if expected is not None and terminal["run_status"] == "requires_action":
-                continue  # Durable human approval must complete before proof.
-            if expected is not None and (
-                terminal["run_status"] != "complete" or
-                not _observed_action(db, terminal["run_id"], expected)
-            ):
+            envelope = json.loads(terminal["envelope"])
+            if not _source_valid(db, terminal, now):
                 db.execute("UPDATE agent_event_deliveries SET status='dead',error_code=?,"
                            "error_type='PermissionError',lease_owner=NULL,lease_until=NULL,updated_at=? "
                            "WHERE id=? AND status='leased'",
-                           ("EXPECTED_ACTION_NOT_OBSERVED", now, terminal["id"]))
+                           ("SOURCE_REVOKED", now, terminal["id"]))
+                continue
+            expected = envelope.get("expectedAction")
+            if expected is not None and terminal["run_status"] == "requires_action":
+                continue  # Durable human approval must complete before proof.
+            code = None
+            continuation_id = None
+            if expected is not None:
+                if terminal["run_status"] != "complete":
+                    code = "EXPECTED_ACTION_RUN_FAILED"
+                elif _detached_proven(db, envelope) or _observed_action(db, terminal["run_id"], expected):
+                    pass
+                else:
+                    action = db.execute("SELECT * FROM agent_event_detached_actions "
+                                        "WHERE delivery_id=?", (terminal["id"],)).fetchone()
+                    if action is None:
+                        code = "EXPECTED_ACTION_NOT_OBSERVED"
+                    elif action["status"] in {"reserved", "running"}:
+                        # An admitted host task has no terminal proof yet. Keep
+                        # the source lane fenced, but never relaunch its run.
+                        continue
+                    elif action["status"] == "succeeded":
+                        try:
+                            continuation_id = _queue_detached_completion(db, terminal, envelope, action, now)
+                        except (ValueError, KeyError, PermissionError):
+                            code = "EXPECTED_ACTION_INVALID_TERMINAL_PROOF"
+                    elif action["status"] == "launch_indeterminate":
+                        code = "DETACHED_ACTION_LAUNCH_INDETERMINATE"
+                    else:
+                        code = "EXPECTED_ACTION_DETACHED_FAILED"
+            if code:
+                db.execute("UPDATE agent_event_deliveries SET status='dead',error_code=?,"
+                           "error_type='PermissionError',lease_owner=NULL,lease_until=NULL,updated_at=? "
+                           "WHERE id=? AND status='leased'", (code, now, terminal["id"]))
             else:
                 db.execute("UPDATE agent_event_deliveries SET status='succeeded',"
-                           "lease_owner=NULL,lease_until=NULL,updated_at=? "
-                           "WHERE id=? AND status='leased'", (now, terminal["id"]))
+                           "lease_owner=NULL,lease_until=NULL,updated_at=?,"
+                           "result=coalesce(?,result) WHERE id=? AND status='leased'",
+                           (now, _json({"mode": "continue", "status": "detached_completed",
+                                        "completionEvent": continuation_id}) if continuation_id else None,
+                            terminal["id"]))
         db.execute(
             "UPDATE agent_event_deliveries SET status='succeeded',"
             "result=(SELECT root.result FROM agent_event_deliveries root "
@@ -687,7 +808,9 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
             "((d.status='pending' AND d.available_at<=?) "
             "OR (d.status='leased' AND d.lease_until<=? AND NOT EXISTS("
             "SELECT 1 FROM runs paused WHERE paused.id=d.run_id "
-            "AND paused.status='requires_action' AND instr(d.envelope,'expectedAction')>0))) "
+            "AND paused.status='requires_action' AND instr(d.envelope,'expectedAction')>0) "
+            "AND NOT EXISTS(SELECT 1 FROM agent_event_detached_actions a "
+            "WHERE a.delivery_id=d.id AND a.status IN ('reserved','running')))) "
             "AND NOT EXISTS(SELECT 1 FROM agent_event_deliveries ahead "
             "WHERE ahead.owner=d.owner AND ahead.ordering_key=d.ordering_key "
             "AND ahead.seq<d.seq AND ahead.batch_root_id IS NULL "
@@ -705,6 +828,9 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
             if row["status"] == "pending" and row["available_at"] > now:
                 continue
             if row["status"] == "leased" and row["lease_until"] > now:
+                continue
+            if db.execute("SELECT 1 FROM agent_event_detached_actions WHERE delivery_id=? "
+                          "AND status IN ('reserved','running')", (row["id"],)).fetchone():
                 continue
             ahead = db.execute("SELECT 1 FROM agent_event_deliveries WHERE owner=? "
                                "AND ordering_key=? AND seq<? AND batch_root_id IS NULL "
@@ -891,17 +1017,10 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
                               (_now() + _LEASE_MS, _now(), key, token, _now())).rowcount == 0:
                     _OWNED.pop(key, None)
             continue
+        # Source detached-action expectedAction may still be running after the
+        # root generation finishes. The trusted terminal sweep above is the
+        # ONLY owner of success/failure and internal completion enqueue.
         _OWNED.pop(key, None)
-        with database.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT status,run_id,owner,lease_owner,result FROM "
-                             "agent_event_deliveries WHERE id=?", (key,)).fetchone()
-            if row and row["status"] == "leased" and row["lease_owner"] == token:
-                generation = store.get(row["owner"], run_id)
-                if generation and generation.status in {"complete", "error", "interrupted", "aborted", "requires_action"}:
-                    db.execute("UPDATE agent_event_deliveries SET status='succeeded',"
-                               "lease_owner=NULL,lease_until=NULL,updated_at=? WHERE id=?",
-                               (_now(), key))
     return completed
 
 

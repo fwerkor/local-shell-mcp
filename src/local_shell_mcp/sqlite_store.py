@@ -325,6 +325,54 @@ CREATE TABLE IF NOT EXISTS generation_actor_leases (
 );
 CREATE INDEX IF NOT EXISTS idx_generation_actor_leases_expiry
     ON generation_actor_leases(expires_at);
+-- Host-owned ordinary background calls are process-local (source background.ts).
+-- A restart never silently retries an irreversible tool. The one-shot result,
+-- unknown outcome and parent-auth lineage remain durable for honest polling.
+-- Original LibreChat event-actor detached action: one immutable action per
+-- bound-child delivery, persisted in the SAME transaction as the native task.
+-- A lost launch acknowledgement is indeterminate and must not re-execute.
+CREATE TABLE IF NOT EXISTS agent_event_detached_actions (
+    delivery_id TEXT PRIMARY KEY REFERENCES agent_event_deliveries(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL UNIQUE,
+    tool_name TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    argument_hash TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN
+       ('reserved','running','launch_indeterminate','succeeded','failed','cancelled')),
+    evidence TEXT,
+    recovery_after INTEGER NOT NULL,
+    observed_at INTEGER,
+    continuation_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_detached_tasks
+    ON agent_event_detached_actions(owner,task_id,status);
+CREATE TABLE IF NOT EXISTS agent_background_tools (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    authorization_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_tool_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    argument_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('running','completed','error','cancelled','uncertain')),
+    result TEXT,
+    error_type TEXT,
+    claimed INTEGER NOT NULL DEFAULT 0,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    lease_owner TEXT,
+    lease_until INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,conversation_id,parent_run_id,parent_tool_call_id)
+);
+CREATE INDEX IF NOT EXISTS idx_background_tool_scope
+  ON agent_background_tools(owner,authorization_conversation_id,created_at);
 CREATE TABLE IF NOT EXISTS agent_durable_tasks (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
