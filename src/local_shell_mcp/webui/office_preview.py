@@ -225,22 +225,44 @@ def _docx_html(z: ZipFile) -> str:
         return _document('<article class="lc-docx"></article>')
     lines = []
     consumed = 0
+    clipped = False
     for child in _docx_blocks(body):
         if consumed >= MAX_VISIBLE_CHARS:
-            lines.append('<div class="lc-banner">Preview truncated. Download the file to see the rest.</div>')
+            clipped = True
             break
         kind = _local(child.tag)
         if kind == "p":
-            value = _docx_text(child)[:max(0, MAX_VISIBLE_CHARS - consumed)]
+            entire = _docx_text(child)
+            remaining = MAX_VISIBLE_CHARS - consumed
+            if len(entire) > remaining:
+                clipped = True
+            value = entire[:remaining]
             consumed += len(value)
             lines.append(f'<p>{_escape(value)}</p>')
         elif kind == "tbl":
             rows = []
-            for tr in child.findall('./{*}tr')[:MAX_ROWS]:
-                rows.append([_docx_text(tc) for tc in tr.findall('./{*}tc')])
-            rendered = _table(rows)
-            consumed += sum(len(v) for row in rows for v in row)
-            lines.append('<div class="lc-table-scroll">' + rendered + '</div>')
+            all_rows = child.findall('./{*}tr')
+            if len(all_rows) > MAX_ROWS:
+                clipped = True
+            for tr in all_rows[:MAX_ROWS]:
+                cells = [_docx_text(tc) for tc in tr.findall('./{*}tc')]
+                if len(cells) > MAX_COLUMNS:
+                    clipped = True
+                remaining = max(0, MAX_VISIBLE_CHARS - consumed)
+                bounded = []
+                for cell in cells[:MAX_COLUMNS]:
+                    if len(cell) > remaining:
+                        clipped = True
+                    bounded.append(cell[:remaining])
+                    consumed += len(bounded[-1])
+                    remaining = max(0, MAX_VISIBLE_CHARS - consumed)
+                rows.append(bounded)
+                if not remaining:
+                    clipped = True
+                    break
+            lines.append('<div class="lc-table-scroll">' + _table(rows) + '</div>')
+    if clipped:
+        lines.append('<div class="lc-banner">Preview truncated. Download the file to see the rest.</div>')
     return _document('<article class="lc-docx">' + "".join(lines) + '</article>')
 
 
@@ -374,6 +396,7 @@ def _xls_html(data: bytes) -> str:
 
     import xlrd
     from xlrd.compdoc import CompDocError
+    from xlrd.xldate import xldate_as_datetime
 
     try:
         book = xlrd.open_workbook(file_contents=data, on_demand=True)
@@ -390,8 +413,16 @@ def _xls_html(data: bytes) -> str:
                 values = []
                 for j in range(min(sheet.ncols, MAX_COLUMNS)):
                     item = sheet.cell_value(i, j)
-                    values.append(str(int(item)) if isinstance(item, float) and item.is_integer()
-                                  else str(item) if item is not None else '')
+                    if sheet.cell_type(i, j) == xlrd.XL_CELL_DATE:
+                        try:
+                            date = xldate_as_datetime(item, book.datemode)
+                            values.append(date.date().isoformat() if not (date.hour or date.minute or date.second)
+                                          else date.isoformat(sep=' ', timespec='seconds'))
+                        except (TypeError, ValueError, OverflowError, xlrd.XLDateError):
+                            values.append(str(item))
+                    else:
+                        values.append(str(int(item)) if isinstance(item, float) and item.is_integer()
+                                      else str(item) if item is not None else '')
                 rows.append(values)
             sheets.append((sheet.name, rows, sheet.nrows))
         return _sheets(sheets)

@@ -373,3 +373,39 @@ def test_xlsx_date_and_elapsed_duration_formats_are_distinct():
     html = buffer_to_office_html(workbook, 'dates.xlsx', 'application/octet-stream')
     assert '2024-01-01' in html and '36:00:00' in html
     assert '1900-01-01' not in html
+
+
+def test_docx_one_oversized_block_warns_about_truncation():
+    body = ('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>' + 'x' * 180000 + 'CONCLUSION'
+            + '</w:t></w:r></w:p></w:body></w:document>')
+    rendered = buffer_to_office_html(_archive_xml('word/document.xml', body), 'long.docx', DOCX_MIME)
+    assert 'Preview truncated' in rendered
+    assert 'CONCLUSION' not in rendered
+
+
+def test_legacy_xls_date_cell_uses_datemode(monkeypatch):
+    import xlrd
+
+    from local_shell_mcp.webui.office_preview import _xls_html
+
+    class FakeSheet:
+        name, nrows, ncols = 'Dates', 1, 1
+
+        def cell_value(self, i, j):
+            return 45292.0
+
+        def cell_type(self, i, j):
+            return xlrd.XL_CELL_DATE
+
+    class FakeBook:
+        datemode = 0
+
+        def sheets(self):
+            return [FakeSheet()]
+
+        def release_resources(self):
+            pass
+
+    monkeypatch.setattr(xlrd, 'open_workbook', lambda **kwargs: FakeBook())
+    assert '2024-01-01' in _xls_html(b'fake-biff')
