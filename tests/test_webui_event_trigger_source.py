@@ -18,7 +18,7 @@ _LOCK = _ROOT.parent / 'ui/workspace/UPSTREAM_LOCK.json'
 
 
 def test_exact_original_trigger_envelope_idempotency_and_fields():
-    modules = json.loads(_LOCK.read_text())['modules']
+    modules = json.loads(_LOCK.read_text(encoding="utf-8"))['modules']
     originals = [
         ('packages/api/src/agents/triggers/envelope.ts', _ORIGINAL / 'triggers/envelope.ts'),
         ('packages/api/src/agents/json.ts', _ORIGINAL / 'json.ts'),

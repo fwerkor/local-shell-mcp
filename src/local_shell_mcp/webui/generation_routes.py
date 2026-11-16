@@ -223,11 +223,11 @@ approved_batch=approved_batch, on_injected=on_injected,
                     actor_lease=actor_lease)
     except asyncio.CancelledError:
         if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
-            try:
-                check_wakeup_lease()
-            except Exception:
-                raise  # The actor lost its token: leave checkpoint for new owner.
-        if asyncio.current_task() not in _SHUTDOWN_TASKS:
+            check_wakeup_lease()
+        current = repo.get(owner, generation.run_id)
+        pending = repo.pending_action(owner, generation.run_id) if current and current.status == "requires_action" else None
+        if (asyncio.current_task() not in _SHUTDOWN_TASKS and
+                not (pending and pending.get("payload", {}).get("type") == "action_oauth")):
             repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts),
                         actor_lease=actor_lease)
         raise
@@ -262,20 +262,32 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       approved_batch=None, resume_namespace: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
                       wakeup_lease: tuple[str, str] | None = None,
-event_delivery_lease: tuple[str, str] | None = None,
-                                            recovery_steers: bool = False) -> None:
+                      event_delivery_lease: tuple[str, str] | None = None,
+                      recovery_steers: bool = False,
+                      oauth_claim: tuple[str, str, int, bool] | None = None) -> bool:
     from .generation_actor_lease import ActorLease
 
+    previous = _TASKS.get(generation.run_id)
+    if oauth_claim is not None and previous is not None and not previous.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(previous), timeout=5)
+        except TimeoutError:
+            return False
     async with _TASK_GUARD:
         _prune_stale_task_handles()
         existing = _TASKS.get(generation.run_id)
         if existing and not existing.done():
-            return
+            return False
+        if oauth_claim is not None:
+            action_id, call_id, version, lone_call = oauth_claim
+            claimed = _generation_store().claim_oauth(owner, generation.run_id, action_id, call_id,
+                                                      version, lone_call=lone_call)
+            if claimed is None:
+                return False
+            generation, resume_history, partial_text = claimed
         actor_lease = ActorLease.claim(_database(), owner, generation.run_id)
         if actor_lease is None:
-            # A different Controller currently owns this generation. Never
-            # launch a second model/tool executor against the same run.
-            return
+            return False
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
                        instructions=agent_instructions(agent, profile.provider, artifacts_mode),
@@ -291,6 +303,129 @@ event_delivery_lease: tuple[str, str] | None = None,
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task
+        return True
+
+
+async def _resume_ready_oauth(owner: str, generation: Generation,
+                              scopes: set[str], expiry: int | None,
+                              *, action_id: str | None = None,
+                              call_id: str | None = None,
+                              version: int | None = None) -> bool:
+    """Resume only a saved, authorized Action after a fresh LSM grant.
+
+    An OAuth IdP callback has no bearer token and is not itself a machine
+    grant. The browser's current authenticated connection supplies the scopes
+    for any follow-on LSM tools; no scopes or bearer tokens are persisted.
+    """
+    if generation.status != "requires_action":
+        return False
+    store = _generation_store()
+    pending = store.pending_action(owner, generation.run_id)
+    if not isinstance(pending, dict):
+        return False
+    payload = pending.get("payload") or {}
+    if payload.get("type") != "action_oauth":
+        return False
+    aid, cid, rev = payload.get("action_id"), payload.get("tool_call_id"), payload.get("action_version")
+    if (not isinstance(aid, str) or not isinstance(cid, str) or type(rev) is not int
+            or action_id is not None and action_id != aid
+            or call_id is not None and call_id != cid
+            or version is not None and version != rev):
+        return False
+    from .action_oauth import access_token
+    from .actions import ActionRepository
+    from .checkpoints import SQLiteCheckpointSaver
+    from .machine_permissions import require_machine_scope, resolve_access
+    from .routes import _repo
+
+    database = _database()
+    with database.connect() as conn:
+        row = conn.execute("SELECT state,agent_id FROM runs WHERE id=?", (generation.run_id,)).fetchone()
+    if row is None or not row["agent_id"]:
+        return False
+    state = json.loads(row["state"])
+    agent = AgentRepository(database).get(owner, row["agent_id"])
+    if agent is None:
+        return False
+    record = ActionRepository(database).get_for_tool(owner, agent["id"], payload.get("tool_name"))
+    if record is None or record[2]["action_id"] != aid or record[2]["action_version"] != rev:
+        return False
+    # Reattaching after a restart requires a checkpoint with the exact model
+    # tool ID; never ask the model again merely to reconstruct the proposal.
+    saver = SQLiteCheckpointSaver(database, owner)
+    checkpoint = saver.get_tuple(saver.config(generation.conversation_id, generation.run_id,
+                                              checkpoint_ns=pending.get("namespace", ""), event_actor=True))
+    if checkpoint is None:
+        return False
+    calls = checkpoint["checkpoint"]["channel_values"].get("pending_calls") or []
+    if not any(call.get("call_id") == cid and call.get("name") == payload.get("tool_name") for call in calls):
+        # Recovery after a post-tool checkpoint is safe when the completed
+        # Action's output was persisted and the saved graph has advanced.
+        if calls != [] or payload.get("checkpoint_completed") is not True:
+            return False
+        with database.connect() as conn:
+            persisted = conn.execute(
+                "SELECT 1 FROM generation_events WHERE run_id=? AND "
+                "json_extract(data,'$.event')='on_run_step_completed' AND "
+                "json_extract(data,'$.data.result.tool_call.id')=? LIMIT 1",
+                (generation.run_id, cid),
+            ).fetchone()
+        if not persisted:
+            return False
+    # Revalidate current LSM machine grants before even contacting an IdP
+    # refresh endpoint or rotating an expired browser authorization state.
+    policy = resolve_access(owner, generation.conversation_id)
+    for machine, level in policy.items():
+        if level in {"read", "write"}:
+            require_machine_scope(scopes, machine, level, expires=expiry)
+    repo = ActionRepository(database)
+    if not await access_token(repo, owner, aid):
+        from .action_oauth import begin_flow
+
+        # A changed public origin or revoked IdP allowlist must not turn
+        # an otherwise healthy status/SSE endpoint into a 500.
+        with contextlib.suppress(ValueError, PermissionError):
+            begin_flow(repo, owner, aid, generation.run_id, cid,
+                       reissue={"tool_name": payload["tool_name"]})
+        return False
+    profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
+    flags = _repo().setting(owner, "conversation.permissions." + generation.conversation_id, {}) or {}
+    started = await _start_task(owner, generation, profile, agent,
+                      native_file_tools=any(level in {"read", "write"} for level in policy.values()),
+                      write_tools=any(level == "write" for level in policy.values()),
+                      ask_user_enabled=bool(state.get("askUserEnabled")),
+                      mcp_enabled=isinstance(flags, dict) and flags.get("mcp") is True,
+                      resume_namespace=pending.get("namespace", ""), granted_scopes=frozenset(scopes),
+                      grant_expires=expiry, oauth_claim=(aid, cid, rev,
+                          len(calls) == 1 or payload.get("checkpoint_completed") is True))
+    return bool(started)
+
+
+async def resume_oauth_callback(owner: str, run_id: str, action_id: str,
+                                call_id: str, version: int, request: Request) -> bool:
+    """The provider popup may reuse an active LSM web session, never OAuth CSRF as scope."""
+    from ..settings import get_settings
+    from .auth import COOKIE, _store
+
+    generation = _generation_store().get(owner, run_id)
+    if generation is None:
+        return False
+    if get_settings().auth_mode == "none":
+        from ..oauth import ALL_OAUTH_SCOPES
+
+        scopes, expiry = set(ALL_OAUTH_SCOPES), None
+    else:
+        session = _store().session(request.cookies.get(COOKIE, ""))
+        if session is None or session.owner != owner:
+            return False
+        scopes, expiry = set(session.scopes.split()), session.grant_until
+    try:
+        return await _resume_ready_oauth(owner, generation, scopes, expiry,
+                                         action_id=action_id, call_id=call_id, version=version)
+    except (KeyError, ValueError, PermissionError):
+        # The token is saved, but execution must await another authenticated
+        # browser attachment with sufficient current machine permissions.
+        return False
 
 
 async def start_generation(request: Request):
@@ -407,6 +542,11 @@ async def stream_generation(request: Request):
                 raise HTTPException(409, detail="Generation superseded by newer run")
         except ValueError as exc:
             raise HTTPException(400, detail="Invalid generation identity") from exc
+    try:
+        scopes, expiry = _request_grant(request)
+        await _resume_ready_oauth(owner, generation, scopes, expiry)
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
     cursor = request.headers.get("last-event-id") or request.query_params.get("after")
     try:
         after = max(0, int(cursor)) if cursor else 0
@@ -427,6 +567,12 @@ async def generation_status(request: Request):
     if generation is None:
         return JSONResponse({"active": False, "generationProtocolVersion": protocol},
                             headers=_generator_headers(protocol))
+    try:
+        scopes, expiry = _request_grant(request)
+        if await _resume_ready_oauth(owner, generation, scopes, expiry):
+            generation = _generation_store().get(owner, generation.run_id) or generation
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
     active = generation.status in {"running", "requires_action"}
     store = _generation_store()
     pending = store.client_pending_action(store.pending_action(owner, generation.run_id))
@@ -538,10 +684,12 @@ async def abort_generation(request: Request):
     pending_steers = SteeringStore(_database()).pending(owner, generation.run_id)
     cancel_run(owner, generation.run_id)
     task = _TASKS.get(generation.run_id)
+    # Explicit user abort wins over a concurrently parked OAuth/approval step.
+    # The terminal transaction precedes cancellation so a crash cannot make
+    # this run accidentally resumable after the user revoked consent.
+    store.finish(owner, generation.run_id, status="aborted")
     if task and not task.done():
         task.cancel()
-    else:
-        store.finish(owner, generation.run_id, status="aborted")
     return JSONResponse({"success": True, "generationProtocolVersion": protocol,
                          **({"pendingSteers": pending_steers} if pending_steers else {})},
                         headers=_generator_headers(protocol))
@@ -617,6 +765,13 @@ async def resume_generation(request: Request):
     protocol = request_protocol(request, payload, stored_version=generation.protocol_version)
     action_id = payload.get("actionId")
     if action_id is None:
+        if generation.status == "requires_action":
+            try:
+                scopes, expiry = _request_grant(request)
+                if await _resume_ready_oauth(owner, generation, scopes, expiry):
+                    generation = _generation_store().get(owner, generation.run_id) or generation
+            except PermissionError as exc:
+                raise HTTPException(403, detail=str(exc)) from exc
         if generation.status != "running":
             raise HTTPException(409, detail="Generation cannot be resumed")
         expected = payload.get("generationCreatedAt")

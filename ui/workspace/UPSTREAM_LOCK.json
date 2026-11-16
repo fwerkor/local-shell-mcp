@@ -36,27 +36,27 @@
       "path": "api/server/controllers/agents/resume.js",
       "sha256": "9c6ae6e847aa8a7defb124022fbd23c08a2876a9c45087cafc3599778f58fa1d",
       "symbols": "resume / checkpoint ownership CAS",
-      "python_lsm": "webui/generation_routes.py; generations.py; agent_runner.py",
+      "python_lsm": "webui/generation_routes.py; generations.py; agent_runner.py; webui/generation_routes.py:resume_generation",
       "status": "部分",
-      "difference": "原版HTTP resuming、owner/epoch/agent校验与数据库事务claim，重复同请求恢复；steer、actor、跨进程执行lease待图运行时任务。"
+      "difference": "原版HTTP resuming、owner/epoch/agent校验与数据库事务claim，重复同请求恢复；steer、actor、跨进程执行lease待图运行时任务。; 批审批claim、已审核证据、owner/generation checkpoint与pending tools重放已接入；完整actor/steer/子中断聚合仍缺失"
     },
     {
       "repository": "LibreChat",
       "path": "api/server/controllers/agents/callbacks.js",
       "sha256": "99e1d6905ec8aa7f9f1599712d2947b9ce4329f1017216813e60d85b15b47a44",
-      "symbols": "on_run_step,on_run_step_completed,on_run_step_closed,on_agent_update",
-      "python_lsm": "webui/agent_runner.py:_completed;webui/graph_runtime.py:run_multi_agent_graph",
+      "symbols": "on_run_step,on_run_step_completed,on_run_step_closed,on_agent_update; Agent execution events",
+      "python_lsm": "webui/agent_runner.py:_completed;webui/graph_runtime.py:run_multi_agent_graph; webui/generation_routes.py:_run_model",
       "status": "关键Graph回调已验证",
-      "difference": "Close-once RunStep status/duration survives reconnect; multi-node graph tool call callbacks; hide sequential output and trusted actor lease; full non-Graph rich media/citation callbacks remain distinct"
+      "difference": "Close-once RunStep status/duration survives reconnect; multi-node graph tool call callbacks; hide sequential output and trusted actor lease; full non-Graph rich media/citation callbacks remain distinct; 工具name/args/completion/result字段对齐React并持久化；完整callbacks、子运行progress和actor生命周期未全部移植"
     },
     {
       "repository": "LibreChat",
       "path": "api/server/controllers/agents/client.js",
       "sha256": "9b2f6accf56544096aa530d5bccff4b1cc5b76651a746da2a8aee94cc20020e1",
       "symbols": "AgentClient / history / run lifecycle",
-      "python_lsm": "webui/generation_routes.py; generations.py",
+      "python_lsm": "webui/generation_routes.py; generations.py; webui/generations.py; generation_routes.py",
       "status": "部分",
-      "difference": "原版React status.resumeState、SSE sync游标、Ask User/审批刷新恢复已Chromium验证；完整event actor仍不等价。"
+      "difference": "原版React status.resumeState、SSE sync游标、Ask User/审批刷新恢复已Chromium验证；完整event actor仍不等价。; 未移植完整AgentClient和事件actor生命周期"
     },
     {
       "repository": "LibreChat",
@@ -108,9 +108,9 @@
       "path": "packages/api/src/agents/run.ts",
       "sha256": "5e29fb16cad50fe6a770f9ab4fa45af9b492342d8c11d866eaf3c1f4bce6192f",
       "symbols": "createRun / buildSubagentConfigs / buildAgentInput",
-      "python_lsm": "webui/subagents.py:build_subagent_configs; graph_runtime.py; agent_runner.py; generation_routes.py",
+      "python_lsm": "webui/subagents.py:build_subagent_configs; graph_runtime.py; agent_runner.py; generation_routes.py; webui/delegation.py; generation_routes.py",
       "status": "部分（团队图配置路径）",
-      "difference": "从源buildSubagentConfigs解析graph team进StateGraph，复用LSM工具/审批链；prebuiltGraphInputs/原全部createRun callbacks与背景child store尚不等价。"
+      "difference": "从源buildSubagentConfigs解析graph team进StateGraph，复用LSM工具/审批链；prebuiltGraphInputs/原全部createRun callbacks与背景child store尚不等价。; delegate_agent/handoff_agent与原版graph/Command/子图不等价"
     },
     {
       "repository": "LibreChat",
@@ -126,9 +126,9 @@
       "path": "packages/api/src/agents/hitl/resume.ts",
       "sha256": "9fb798731c45a310d3deb88407e9f74d74116c006f8fc21186686dc0aad00ec5",
       "symbols": "resolveAskUserQuestionResume / mapToolApprovalResolutions",
-      "python_lsm": "webui/ask_user_tools.py; tool_approval.py; approval_runtime.py; generations.py",
+      "python_lsm": "webui/ask_user_tools.py; tool_approval.py; approval_runtime.py; generations.py; webui/generations.py:answer_question / claim_approval; webui/tool_approval.py",
       "status": "部分",
-      "difference": "Ask User 91组和审批60组Node差分，批量edit/respond/reject执行、SQLite审查证据及恢复测试通过；完整子图仍待验收。"
+      "difference": "Ask User 91组和审批60组Node差分，批量edit/respond/reject执行、SQLite审查证据及恢复测试通过；完整子图仍待验收。; Ask User恢复校验与原Node函数91组输入差分一致，答案按id保存与恢复；approval仍缺批次/edit/respond等原版语义；审批决策映射/校验60组原Node差分一致并接入claim；实际批次执行仍未完成"
     },
     {
       "repository": "LibreChat",
@@ -144,18 +144,18 @@
       "path": "packages/api/src/agents/hitl/policy.ts",
       "sha256": "30ca40677e43c5d12fe539da85262bf6d335eb238836ad8705b480789e0661ce",
       "symbols": "approval rules / deny-ask-allow / policy hashing",
-      "python_lsm": "webui/approval_runtime.py; agent_runner.py",
+      "python_lsm": "webui/approval_runtime.py; agent_runner.py; webui/nested_mcp.py",
       "status": "未实现",
-      "difference": "原版Ask User审批默认豁免及显式ask/deny覆盖；固定24h TTL；可选checkpointer TTL配置仍未完成。"
+      "difference": "原版Ask User审批默认豁免及显式ask/deny覆盖；固定24h TTL；可选checkpointer TTL配置仍未完成。; 当前对所有nested MCP强制approval，不是原版policy机制"
     },
     {
       "repository": "LibreChat",
       "path": "packages/api/src/agents/checkpointer.ts",
       "sha256": "63f0390a025a550ec4a572145f6db7dcb190797d181ac11d0bb707f364d75302",
       "symbols": "durable checkpointer",
-      "python_lsm": "webui/checkpoints.py; generations.py; agent_runner.py",
+      "python_lsm": "webui/checkpoints.py; generations.py; agent_runner.py; webui/checkpoints.py; agent_runner.py",
       "status": "部分",
-      "difference": "持久checkpoint和同事务人工交互claim、重启repark恢复；跨进程租约、完整图checkpoint待验收。"
+      "difference": "持久checkpoint和同事务人工交互claim、重启repark恢复；跨进程租约、完整图checkpoint待验收。; 统一SQLite tuple/pending-write存储、owner/generation隔离、proposal/结果/完成状态恢复已接入；完整LangChain类序列化与graph actor链未实现"
     },
     {
       "repository": "LibreChat",
@@ -242,10 +242,10 @@
       "repository": "LibreChat",
       "path": "packages/data-provider/src/runSteps.ts",
       "sha256": "a3b441835fd01728a330858e0e46739f110164c026a8787898ada8ef8447c340",
-      "symbols": "getRunStepCloseMetadata,getRunStepDurationMs",
-      "python_lsm": "webui/agent_runner.py:_completed;webui/generations.py:finish",
+      "symbols": "getRunStepCloseMetadata,getRunStepDurationMs; execution event types",
+      "python_lsm": "webui/agent_runner.py:_completed;webui/generations.py:finish; ui/workspace/packages/data-provider/src/runSteps.ts; generation_routes.py",
       "status": "回调已验证",
-      "difference": "Graph RunStepClosed emitted once, status/host timestamps and raw duration persist to final SSE and history"
+      "difference": "Graph RunStepClosed emitted once, status/host timestamps and raw duration persist to final SSE and history; 共享前端类型复用；后端事件仅子集"
     },
     {
       "repository": "LibreChat",
@@ -270,36 +270,36 @@
       "path": "src/graphs/Graph.ts",
       "sha256": "6b86604cdc1eb48873217561697f2e31538aea8ade1c8c78f76da6f31c5ceaae",
       "symbols": "agent graph / tools / checkpoint",
-      "python_lsm": "webui/agent_runtime.py; agent_runner.py; graph_runtime.py; graph_checkpoint.py",
+      "python_lsm": "webui/agent_runtime.py; agent_runner.py; graph_runtime.py; graph_checkpoint.py; webui/agent_runtime.py; agent_runner.py",
       "status": "部分（多节点执行验证）",
-      "difference": "AgentRunner工具循环沿用LSM权限/审计/超时与审批，StateGraph处理节点与superstep、SQLite保存图级及节点级checkpoint。原RunStepState/完整LangChain BaseMessage协议与结构化工具回调仍未完全等价。"
+      "difference": "AgentRunner工具循环沿用LSM权限/审计/超时与审批，StateGraph处理节点与superstep、SQLite保存图级及节点级checkpoint。原RunStepState/完整LangChain BaseMessage协议与结构化工具回调仍未完全等价。; 标准model/tools节点循环与checkpoint游标已接入；summary节点、完整reducers/actor事件与breaker仍不完整"
     },
     {
       "repository": "agents",
       "path": "src/graphs/MultiAgentGraph.ts",
       "sha256": "f1f76b86d07833f6635d27eb77d599361c1be7487317ee2cdd54ff5c16e09a55",
       "symbols": "multi-agent routing / commands",
-      "python_lsm": "webui/graph_topology.py; graph_runtime.py; graph_checkpoint.py; agent_runner.py; handoff.py",
+      "python_lsm": "webui/graph_topology.py; graph_runtime.py; graph_checkpoint.py; agent_runner.py; handoff.py; webui/handoff.py; agent_runner.py",
       "status": "部分（真实StateGraph运行时）",
-      "difference": "官方Python LangGraph 1.0.10执行多入口、直接/并行、Command/Send及join/barrier；源JS 1.4.8真实消息类/并行轨迹差分一致。后台子线程及全部回调/运行指标尚待移植。"
+      "difference": "官方Python LangGraph 1.0.10执行多入口、直接/并行、Command/Send及join/barrier；源JS 1.4.8真实消息类/并行轨迹差分一致。后台子线程及全部回调/运行指标尚待移植。; 原生transfer工具与单目标Agent切换已接入；parallel Send、direct-edge fanout/fanin尚未完整集成"
     },
     {
       "repository": "agents",
       "path": "src/graphs/handoff.ts",
       "sha256": "0c9b395137b86f4fc6e217284445fd821582808b0f42d497017328e75754d173",
       "symbols": "HandoffRouting / mergeHandoffState",
-      "python_lsm": "webui/handoff.py; graph_runtime.py; agent_runner.py",
+      "python_lsm": "webui/handoff.py; graph_runtime.py; agent_runner.py; webui/handoff.py; agent_runner.py",
       "status": "部分（并行Send已验证）",
-      "difference": "Command.PARENT/Send与并行路由/单目标/独占直接边在原Python LangGraph运行，HandoffRouting/merge reducer源差分已覆盖。后台/线程生命周期仍未完成。"
+      "difference": "Command.PARENT/Send与并行路由/单目标/独占直接边在原Python LangGraph运行，HandoffRouting/merge reducer源差分已覆盖。后台/线程生命周期仍未完成。; 路由预算/transition幂等/状态已源码差分验证并接入单目标切换；全图并行调度仍待完成"
     },
     {
       "repository": "agents",
       "path": "src/tools/SubagentTool.ts",
       "sha256": "b8bb7584c42a92af212b479e753e0f5aeae5c5e9961eb218bf1145a8bf1b5621",
-      "symbols": "SubagentToolSchema / run_in_background / subagent_thread_id",
-      "python_lsm": "webui/subagents.py; webui/subagent_task_host.py",
+      "symbols": "SubagentToolSchema / run_in_background / subagent_thread_id; buildSubagentToolParams / createSubagentToolDefinition",
+      "python_lsm": "webui/subagents.py; webui/subagent_task_host.py; webui/subagents.py; agent_runner.py",
       "status": "部分",
-      "difference": "Source-gated original schema remains unmodified; host enables real backend, SQLite threads can continue across runs. No alternate tool names."
+      "difference": "Source-gated original schema remains unmodified; host enables real backend, SQLite threads can continue across runs. No alternate tool names.; 原生subagent schema、可选配置、隔离上下文和共享原生工具执行已接入；graph团队、后台/线程宿主与完整子运行事件仍缺失"
     },
     {
       "repository": "agents",
@@ -651,6 +651,96 @@
       "python_lsm": "webui/detached_event_actions.py:reserve,mark_running,settle,recover_expired;webui/event_triggers.py:_queue_detached_completion,_detached_proven",
       "status": "关键持久路径已验证",
       "difference": "Host-owned native tool reserved atomically with trusted Event Actor lease; terminal proof persisted and matched against original TS Bun parser; internal continuation once, unknown launch dead-letter no automatic reexecution"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/routes/agents/actions.js",
+      "sha256": "2fedc40ce8b0b7eafd870158b26d4272dd698248a92c3c13a94a9ef69de8db09",
+      "symbols": "REST GET/POST/DELETE Action",
+      "python_lsm": "webui/action_routes.py; actions.py",
+      "status": "部分",
+      "difference": "保留原响应[Agent,Action]和租户范围；OAuth路由单独未移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/routes/actions.js",
+      "sha256": "6b066402488d9fd07225cbe3d8ddbb7c17d69850d9ba5ba4742fd18eb8040ba1",
+      "symbols": "OAuth bind/callback/token exchange",
+      "python_lsm": "webui/action_routes.py",
+      "status": "阻塞",
+      "difference": "原版Action OAuth bind、callback、token refresh、session与SSE login提示尚未移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/services/ActionService.js",
+      "sha256": "c61bad1668d06bd47b103ec5cf81df61b7c31d0ae7960054de81b686cc0ca041",
+      "symbols": "domainParser/createActionTool/Action registration",
+      "python_lsm": "webui/action_spec.py; actions.py; action_runtime.py; agent_runner.py",
+      "status": "部分",
+      "difference": "原工具名后缀、运行时选择/调用与HTTP请求约束已移植；OAuth调用仍阻塞"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/actions.ts",
+      "sha256": "da6afdd466233065f8643237ff78050090877bd8c64d4a1e780c4619082711ed",
+      "symbols": "validateAndParseOpenAPISpec/openapiToFunction/ActionRequest/validateActionDomain",
+      "python_lsm": "webui/action_spec.py; action_runtime.py",
+      "status": "部分",
+      "difference": "10组原TypeScript OpenAPI生成器及10组域校验/真实HTTP测试已对照；保留更严密SSRF/输入限制"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/actions/credentials.ts",
+      "sha256": "60c695b36ea5131d26366fca50f80df249b377eea91b9aaf54018df89271b628",
+      "symbols": "mergeActionMetadataForUpdate/credential refresh",
+      "python_lsm": "webui/actions.py",
+      "status": "部分",
+      "difference": "定向凭据刷新、敏感字段脱敏与SQLite加密；OAuth client信息已加密但授权交互阻塞"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/actions/update.ts",
+      "sha256": "f40a7e3018d93ca279fe6a85a6c6831e482d33ad2ecac7294fd4e542edc97dea",
+      "symbols": "planAgentActionUpdate/retarget/delete tokens",
+      "python_lsm": "webui/actions.py",
+      "status": "部分",
+      "difference": "单Agent绑定与工具列表增删改，owner检查及密钥轮换；OAuth token缓存流程未验收"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/actions/tools.ts",
+      "sha256": "75cd2220c9403c077ca1782df2f139ad9ca7583b7cd4105abc06c32cbbcd5bbf",
+      "symbols": "mergeAgentActionTools",
+      "python_lsm": "webui/actions.py",
+      "status": "部分",
+      "difference": "不删除同域不同operationId工具、旧域变更清理/无关工具保留"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/agentToolOptions.ts",
+      "sha256": "54bbf1869273866e512544fea626b1d88a9521f6983bdac000b85b4aa1d34e02",
+      "symbols": "normalizeActionToolName",
+      "python_lsm": "webui/action_spec.py",
+      "status": "完成",
+      "difference": "10组原TS函数的真实执行差分一致"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/types/tools.ts",
+      "sha256": "697deeb1bb105e2597003e7ebca3b1f5bdfdf949ca3590c0ac4bccf1bd7574eb",
+      "symbols": "isActionTool/actionDelimiter/actionDomainSeparator",
+      "python_lsm": "webui/action_spec.py",
+      "status": "完成",
+      "difference": "10组原TS函数的真实执行差分一致"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "client/src/components/SidePanel/Agents/ActionsInput.tsx",
+      "sha256": "8e5b52a856808188f22787889d06463d470bb36bc0a42d5f6edcee99375e6b50",
+      "symbols": "Actions Builder schema and API calls",
+      "python_lsm": "ui/workspace/client/src/components/SidePanel/Agents/ActionsInput.tsx",
+      "status": "部分",
+      "difference": "保留原React组件，仅去掉凭据日志；待浏览器全链路验收"
     }
   ],
   "runtime_dependency_lock": {

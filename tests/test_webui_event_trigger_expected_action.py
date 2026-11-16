@@ -124,7 +124,7 @@ def test_expected_actions_cannot_be_attached_to_fire_or_coalesced(environment):
 def test_original_expected_action_matcher_exact_bun_source_differential():
     original=Path(__file__).parent/'fixtures/librechat/original_agent_triggers'
     path='packages/api/src/agents/triggers/expectedAction.ts'
-    info=json.loads((Path(__file__).parent.parent/'ui/workspace/UPSTREAM_LOCK.json').read_text())
+    info=json.loads((Path(__file__).parent.parent/'ui/workspace/UPSTREAM_LOCK.json').read_text(encoding="utf-8"))
     lock=next(i for i in info['modules'] if i['repository']=='LibreChat' and i['path']==path)
     assert hashlib.sha256((original/'triggers/expectedAction.ts').read_bytes()).hexdigest()==lock['sha256']
     bun=shutil.which('bun')

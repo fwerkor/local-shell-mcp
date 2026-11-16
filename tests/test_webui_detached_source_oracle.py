@@ -62,7 +62,7 @@ def cases():
 
 def test_original_detached_action_source_parsers_are_byte_locked_and_match_bun(cases):
     root = Path(__file__).parent / 'fixtures/librechat/original_agent_triggers'
-    manifest = json.loads((Path(__file__).parent.parent/'ui/workspace/UPSTREAM_LOCK.json').read_text())
+    manifest = json.loads((Path(__file__).parent.parent/'ui/workspace/UPSTREAM_LOCK.json').read_text(encoding="utf-8"))
     name = 'packages/api/src/agents/triggers/detachedAction.ts'
     record = next(item for item in manifest['modules']
                   if item['repository'] == 'LibreChat' and item['path'] == name)
