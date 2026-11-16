@@ -19,7 +19,7 @@ _LOCK = _ROOT.parent / "ui/workspace/UPSTREAM_LOCK.json"
 
 
 def test_original_lc_source_retry_matches_python_sqlite_delivery_deferral():
-    upstream = next(item for item in json.loads(_LOCK.read_text())["modules"]
+    upstream = next(item for item in json.loads(_LOCK.read_text(encoding="utf-8"))["modules"]
                     if item["repository"] == "LibreChat" and item["path"] ==
                     "packages/api/src/agents/triggers/backoff.ts")
     assert hashlib.sha256(_SRC.read_bytes()).hexdigest() == upstream["sha256"]
