@@ -127,6 +127,9 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
         instructions = member.get("instructions") or ""
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})
+        from .attachments import with_agent_context
+
+        incoming = with_agent_context(parent.database, parent.owner, member, incoming)
 
         # Source callbacks.js visibility applies to both SSE and the final
         # persisted assistant text. Keep intermediate messages in graph state,

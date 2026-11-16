@@ -167,6 +167,9 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
                 stream_tools=stream_model_with_tools, stream_text=stream_model,
             )
             await start_event_worker(generation_store.database)
+            from .webui.attachments import recover_attachment_deletions
+
+            recover_attachment_deletions()
         recovery_task = None
         if enabled:
             from .webui.durable_tasks import serve

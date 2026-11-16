@@ -254,7 +254,7 @@ class AgentRunner:
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
         end_at = int(time.time() * 1000)
-        self.store.append(self.owner, self.generation.run_id, {
+        event = {
             "event": "on_run_step_completed", "data": {"result": {
                 "id": step["id"], "index": step["index"], "completed_at": end_at,
                 "type": "tool_call", "tool_call": {
@@ -263,7 +263,19 @@ class AgentRunner:
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},
-        }, actor_lease=self.actor_lease)
+        }
+        # Persist completed tool evidence and Controller file links atomically.
+        from .tool_attachments import controller_tool_file_ids
+
+        identities = controller_tool_file_ids(output)
+        if identities:
+            self.store.append_tool_completion(
+                self.owner, self.generation.run_id, event, call.call_id, identities,
+                actor_lease=self.actor_lease,
+            )
+        else:
+            self.store.append(self.owner, self.generation.run_id, event,
+                              actor_lease=self.actor_lease)
         # Source agents@4.0.1 Graph.closeRunStep: terminal closure is an
         # independent event. First close wins and survives SSE reconnect and
         # durable final history, including native tool denial/error paths.
@@ -287,7 +299,15 @@ class AgentRunner:
                 },
             }, actor_lease=self.actor_lease)
         from .action_spec import is_action_tool
+        from .tool_attachments import controller_tool_file_ids
 
+        identities = controller_tool_file_ids(output)
+        if identities:
+            self.store.append_tool_completion(
+                self.owner, self.generation.run_id, event, call.call_id, identities,
+            )
+        else:
+            self.store.append(self.owner, self.generation.run_id, event)
         if is_action_tool(call.name):
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
 
@@ -452,7 +472,11 @@ class AgentRunner:
                             wakeup_lease=self.wakeup_lease,
                             event_delivery_lease=self.event_delivery_lease,
                             actor_lease=self.actor_lease, recovery_steers=self.recovery_steers)
-        return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
+        from .attachments import with_agent_context
+
+        history = with_agent_context(self.database, self.owner, invocation.agent,
+                                     invocation.messages)
+        return await child.run(history, recursion_limit=invocation.recursion_limit)
 
     async def _prepare_oauth(self, calls, state):
         """Durably suspend *before* launching side-effecting sibling tools.
