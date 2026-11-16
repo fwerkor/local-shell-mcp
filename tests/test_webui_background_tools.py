@@ -375,3 +375,28 @@ async def test_shutdown_marks_ongoing_nonidempotent_native_effect_uncertain(envi
     receipt = check_tool_task(db, 'owner', generation.conversation_id, identity)
     assert receipt['status'] == 'uncertain'
     assert receipt['error'] == 'INTERRUPTED_UNKNOWN_RESULT'
+
+
+def test_persisted_background_result_claim_replays_exact_original_only_to_same_tool_call(environment):
+    db, _, generation = environment
+    now = int(time.time() * 1000)
+    identity = 'tooltask_claim_replay'
+    with db.connect() as conn:
+        conn.execute('INSERT INTO agent_background_tools('
+                     'id,owner,conversation_id,authorization_conversation_id,parent_run_id,'
+                     'parent_tool_call_id,tool_name,argument_hash,status,result,created_at,updated_at) '
+                     'VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                     (identity, 'owner', generation.conversation_id, generation.conversation_id,
+                      generation.run_id, 'original-call', 'run_shell', 'hash',
+                      'completed', 'durable result', now-500, now))
+    kwargs = {'claimant_run_id': generation.run_id, 'claimant_call_id': 'poll-call-one'}
+    first = check_tool_task(db, 'owner', generation.conversation_id, identity, **kwargs)
+    assert first['result'] == 'durable result' and first['result_claimed']
+    assert check_tool_task(db, 'owner', generation.conversation_id, identity, **kwargs) == first
+    different_call = check_tool_task(db, 'owner', generation.conversation_id, identity,
+                                     claimant_run_id=generation.run_id, claimant_call_id='poll-call-two')
+    assert 'result' not in different_call
+    with db.connect() as conn:
+        claim = conn.execute('SELECT claimant_run_id,claimant_call_id FROM agent_background_tool_claims '
+                             'WHERE task_id=?', (identity,)).fetchone()
+        assert tuple(claim) == (generation.run_id, 'poll-call-one')

@@ -20,6 +20,7 @@ class MultiAgentState(TypedDict, total=False):
     agentMessages: Annotated[list[dict], agent_messages_reducer]
     subagentResult: dict | None
     manualSummary: str | None
+    initialInputCount: int
     handoffState: Annotated[dict | None, merge_handoff_state]
 
 
@@ -194,6 +195,27 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                     transfer = transfer_messages[-1]
                     if transfer.get("role") == "tool":
                         update["messages"].append(transfer)
+            # Combined parallel transfers store tool acknowledgments inside
+            # Send.args, not the top-level Command.update. Publish each tool
+            # result once so downstream fan-in sees answered tool calls.
+            seen_tools = {m.get('tool_call_id') for m in [*state['messages'], *update['messages']]
+                          if isinstance(m, dict) and m.get('role') == 'tool'}
+            for command in child.graph_commands:
+                destinations = command.get('goto')
+                for destination in destinations if isinstance(destinations, list) else [destinations]:
+                    if not isinstance(destination, dict) or destination.get('lg_name') != 'Send':
+                        continue
+                    args = destination.get('args') or {}
+                    for message in args.get('messages') or []:
+                        if not isinstance(message, dict) or message.get('role') != 'tool':
+                            continue
+                        identity = message.get('tool_call_id')
+                        if not isinstance(identity, str) or identity in seen_tools:
+                            continue
+                        seen_tools.add(identity)
+                        tool_result = copy.deepcopy(message)
+                        tool_result.setdefault('id', 'handoff_result:' + identity)
+                        update['messages'].append(tool_result)
             goto = _as_goto(child.graph_commands, Send=Send)
             if len(goto) == 1 and not isinstance(goto[0], Send):
                 return Command(update=update, goto=goto[0])
@@ -231,14 +253,15 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                 if not isinstance(_prompt, str):
                     raise ValueError("Persisted direct-edge prompt must be a string")
                 use_results = "{results}" in _prompt
+                source_count = state.get('initialInputCount', initial_count)
                 rendered = _prompt.replace("{results}", _limit_prompt(
-                    "\n".join(_content(message) for message in state["messages"][initial_count:])))
+                    "\n".join(_content(message) for message in state["messages"][source_count:])))
                 if not rendered:
                     return {}
                 prompt_msg = _route_prompt(_limit_prompt(rendered))
                 if _exclude is True or (use_results and _exclude is not False):
                     return {"messages": [prompt_msg], "agentMessages":
-                            messages_state_reducer(state["messages"][:initial_count], [prompt_msg])}
+                            messages_state_reducer(state["messages"][:source_count], [prompt_msg])}
                 return {"messages": [prompt_msg]}
 
             graph.add_node(to_node, fan_in)
@@ -261,6 +284,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
         initial = None  # Replay pending work; never re-run a completed model step.
     else:
         initial = {"messages": source_history, "agentMessages": [],
+                   "initialInputCount": initial_count,
                    "handoffState": HandoffRouting(topology.default_agent_id, root.get("maxHandoffs"),
                                                    topology.routing_parallel).snapshot()}
     limit = recursion_limit or root.get("recursion_limit") or 50

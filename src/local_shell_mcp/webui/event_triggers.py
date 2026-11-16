@@ -752,6 +752,18 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
         from .detached_event_actions import recover_expired
 
         recover_expired(db, now)
+        # Source revocation/expiry must settle admitted runs even if the
+        # model actor has not yet reached a terminal checkpoint. Merely
+        # transferring an execution lease does not revoke the source.
+        for active in db.execute("SELECT * FROM agent_event_deliveries "
+                                 "WHERE status='leased' AND run_id IS NOT NULL").fetchall():
+            if not _source_valid(db, active, now):
+                store.finish(active['owner'], active['run_id'], status='interrupted',
+                             error='Agent event source authorization expired or was revoked',
+                             _connection=db)
+                db.execute("UPDATE agent_event_deliveries SET status='dead',error_code='SOURCE_REVOKED',"
+                           "error_type='PermissionError',lease_owner=NULL,lease_until=NULL,updated_at=? "
+                           "WHERE id=? AND status='leased'", (now, active['id']))
         terminal_rows = db.execute(
             "SELECT d.*,r.status AS run_status FROM agent_event_deliveries d "
             "JOIN runs r ON r.id=d.run_id WHERE d.status='leased' AND d.run_id IS NOT NULL "
@@ -766,9 +778,9 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
                            ("SOURCE_REVOKED", now, terminal["id"]))
                 continue
             expected = envelope.get("expectedAction")
-            if expected is not None and terminal["run_status"] == "requires_action":
-                continue  # Durable human approval must complete before proof.
-            code = None
+            if terminal["run_status"] == "requires_action":
+                continue  # A human decision must complete before acknowledging any delivery.
+            code = "GENERATION_FAILED" if terminal["run_status"] != "complete" else None
             continuation_id = None
             if expected is not None:
                 if terminal["run_status"] != "complete":
@@ -819,7 +831,7 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
             "((d.status='pending' AND d.available_at<=?) "
             "OR (d.status='leased' AND d.lease_until<=? AND NOT EXISTS("
             "SELECT 1 FROM runs paused WHERE paused.id=d.run_id "
-            "AND paused.status='requires_action' AND instr(d.envelope,'expectedAction')>0) "
+            "AND paused.status='requires_action') "
             "AND NOT EXISTS(SELECT 1 FROM agent_event_detached_actions a "
             "WHERE a.delivery_id=d.id AND a.status IN ('reserved','running')))) "
             "AND NOT EXISTS(SELECT 1 FROM agent_event_deliveries ahead "
@@ -840,6 +852,9 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
                 continue
             if row["status"] == "leased" and row["lease_until"] > now:
                 continue
+            if row['run_id'] and db.execute("SELECT 1 FROM runs WHERE id=? AND status='requires_action'",
+                                           (row['run_id'],)).fetchone():
+                continue
             if db.execute("SELECT 1 FROM agent_event_detached_actions WHERE delivery_id=? "
                           "AND status IN ('reserved','running')", (row["id"],)).fetchone():
                 continue
@@ -850,6 +865,10 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
             if ahead is not None:
                 continue
             if not _source_valid(db, row, now):
+                if row['run_id']:
+                    store.finish(row['owner'], row['run_id'], status='interrupted',
+                                 error='Agent event source authorization expired or was revoked',
+                                 _connection=db)
                 db.execute("UPDATE agent_event_deliveries SET status='dead',error_code=?,"
                            "error_type=?,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE id=?",
                            ("SOURCE_REVOKED", "PermissionError", now, row["id"]))

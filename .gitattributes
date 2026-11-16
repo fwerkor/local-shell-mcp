@@ -5,3 +5,8 @@ ui/workspace/** linguist-vendored whitespace=-blank-at-eol
 # Source-oracle hashes must not change with checkout platform defaults.
 tests/fixtures/librechat/*.cjs text eol=lf
 tests/fixtures/librechat/*.json text eol=lf
+
+# Original-source parity fixtures are SHA-pinned; Windows must not rewrite their bytes.
+tests/fixtures/librechat/*.ts text eol=lf
+tests/fixtures/librechat/*.tsx text eol=lf
+tests/fixtures/librechat/*.mjs text eol=lf

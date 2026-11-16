@@ -310,7 +310,9 @@ class AgentRunner:
             action = call.arguments.get("action") or "poll"
             if isinstance(task_id, str) and task_id.startswith("tooltask_"):
                 return json.dumps(check_tool_task(self.database, self.owner,
-                                                  self.authorization_conversation_id, task_id, action),
+                                                  self.authorization_conversation_id, task_id, action,
+                                                  claimant_run_id=self.generation.run_id,
+                                                  claimant_call_id=call.call_id),
                                   ensure_ascii=False)
             child = await host.check(call.arguments, tool_call_id=call.call_id,
                                      parent_run_id=self.generation.run_id,

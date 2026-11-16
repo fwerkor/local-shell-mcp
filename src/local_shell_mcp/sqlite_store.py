@@ -404,6 +404,15 @@ CREATE TABLE IF NOT EXISTS agent_background_tools (
 );
 CREATE INDEX IF NOT EXISTS idx_background_tool_scope
   ON agent_background_tools(owner,authorization_conversation_id,created_at);
+-- Replay an acknowledged poll only to the same authenticated Agent tool call.
+-- An independent tool call cannot claim an already consumed result.
+CREATE TABLE IF NOT EXISTS agent_background_tool_claims (
+    task_id TEXT PRIMARY KEY REFERENCES agent_background_tools(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    claimant_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    claimant_call_id TEXT NOT NULL,
+    response TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS agent_durable_tasks (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,

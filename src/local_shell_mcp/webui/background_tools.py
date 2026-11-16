@@ -240,7 +240,9 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
 
 
 def check_tool_task(database: Any, owner: str, authorization_conversation_id: str,
-                    identity: str | None, action: str = 'poll') -> dict | list[dict]:
+                    identity: str | None, action: str = 'poll', *,
+                    claimant_run_id: str | None = None,
+                    claimant_call_id: str | None = None) -> dict | list[dict]:
     if identity is not None and (not isinstance(identity, str) or not identity.startswith('tooltask_')):
         return {'status': 'not_found'}
     recover_background_tools(database)
@@ -276,8 +278,23 @@ def check_tool_task(database: Any, owner: str, authorization_conversation_id: st
         if row['status'] == 'completed' and not row['claimed']:
             db.execute('UPDATE agent_background_tools SET claimed=1,updated_at=? WHERE id=? AND claimed=0',
                        (_now(), identity))
-            return {**_payload(row, result=row['result'] or ''),
-                    'result_claimed': True, 'result_available': False}
+            result = {**_payload(row, result=row['result'] or ''),
+                      'result_claimed': True, 'result_available': False}
+            if claimant_run_id and claimant_call_id:
+                # Both are derived from the authenticated AgentRunner, never
+                # from the model's tool arguments. Persist the returned DTO
+                # atomically with the consumption fence.
+                db.execute('INSERT INTO agent_background_tool_claims('
+                           'task_id,owner,claimant_run_id,claimant_call_id,response) VALUES(?,?,?,?,?)',
+                           (identity, owner, claimant_run_id, claimant_call_id,
+                            json.dumps(result, ensure_ascii=False, separators=(',', ':'))))
+            return result
+        if row['status'] == 'completed' and row['claimed'] and claimant_run_id and claimant_call_id:
+            replay = db.execute('SELECT response FROM agent_background_tool_claims '
+                                'WHERE task_id=? AND owner=? AND claimant_run_id=? AND claimant_call_id=?',
+                                (identity, owner, claimant_run_id, claimant_call_id)).fetchone()
+            if replay is not None:
+                return json.loads(replay['response'])
         return _payload(row)
 
 
