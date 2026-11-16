@@ -217,3 +217,28 @@ async def test_agent_without_machine_access_still_has_session_tools(active_gener
     )
     assert store.latest("local", generation.conversation_id).status == "complete"
     assert store.events("local", generation.run_id)[-1][1]["responseMessage"]["text"] == "Plain chat works."
+
+
+@pytest.mark.asyncio
+async def test_handoff_without_system_prompt_retains_final_model_steps(active_generation, monkeypatch):
+    database, store, profile = active_generation
+    generation, _ = store.begin('local', {'text': 'Original request'})
+
+    class HandoffRunner:
+        def __init__(self, *args, **kwargs):
+            self.partial_text = 'Specialist answered'
+
+        async def run(self, original):
+            assert original[0]['role'] == 'system'
+            return [
+                {'role': 'user', 'content': 'Original request'},
+                {'role': 'assistant', 'content': 'Specialist answered'},
+            ]
+
+    monkeypatch.setattr(agent_runner, 'AgentRunner', HandoffRunner)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(generation_routes, '_database', lambda: database)
+    await generation_routes._run_model('local', generation, profile, instructions='Source only')
+    assert store.get('local', generation.run_id).status == 'complete'
+    recovered = store.history('local', generation.conversation_id)
+    assert any(item.get('content') == 'Specialist answered' for item in recovered)
