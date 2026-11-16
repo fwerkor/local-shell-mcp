@@ -129,6 +129,7 @@ async def test_native_file_write_tool_success_auto_publishes_verified_office_out
     # are stubbed because this isolated test does not start a model graph.
     runner = AgentRunner.__new__(AgentRunner)
     runner.owner, runner.generation, runner.database, runner.store = ('local', generation, database, store)
+    runner.actor_lease = None  # Isolated callback fixture intentionally skips constructor/actor acquisition.
     runner.namespace = ''
     runner.active_config = {'configurable': {'checkpoint_id': 'test'}}
     class _Saver:
