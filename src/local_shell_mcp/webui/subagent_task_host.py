@@ -254,6 +254,17 @@ class SQLiteSubagentTaskHost:
                     if thread is None:
                         return _json({"status": "rejected", "tool": "subagent", "message":
                                       "The requested subagent thread is unavailable in this parent scope. Start a new subagent thread or choose one created by this parent for the same subagent type."})
+                    active = db.execute(
+                        "SELECT 1 FROM subagent_tasks WHERE owner=? AND parent_conversation_id=? "
+                        "AND thread_id=? AND status='running' LIMIT 1",
+                        (self.owner, self.conversation_id, thread_id),
+                    ).fetchone()
+                    if active is not None:
+                        # An active persistent child owns this exact thread.
+                        # Return a tool-level refusal rather than poisoning the
+                        # parent generation with a downstream integrity error.
+                        return _json({"status": "rejected", "tool": "subagent", "message":
+                                      "This subagent thread is busy with another running task."})
                     prior_messages = json.loads(thread["messages"])
                 task_id = "subtask_" + secrets.token_hex(16)
                 reserved_child_id = str(uuid.uuid4())
@@ -832,9 +843,20 @@ def active_child_generations(database: Any) -> set[str]:
     with database.connect() as db:
         rows = db.execute("SELECT child_run_id FROM subagent_tasks "
                           "WHERE status='running' AND child_run_id IS NOT NULL").fetchall()
+        # Generation.begin() commits the reserved conversation and its
+        # clientRequestId before the task's child_run_id update. Recover the
+        # orphan-window run by its durable reserved identity as well.
+        reserved = db.execute(
+            "SELECT r.id AS child_run_id FROM subagent_tasks t "
+            "JOIN conversations c ON c.id=t.child_conversation_id AND c.owner=t.owner "
+            "JOIN runs r ON r.conversation_id=c.id "
+            "WHERE t.status='running' AND r.status IN ('running','requires_action')"
+        ).fetchall()
         wakeup_runs = db.execute("SELECT run_id FROM subagent_wakeups "
                                  "WHERE status='dispatched' AND run_id IS NOT NULL").fetchall()
-    return {row["child_run_id"] for row in rows} | {row["run_id"] for row in wakeup_runs}
+    return ({row["child_run_id"] for row in rows} |
+            {row["child_run_id"] for row in reserved} |
+            {row["run_id"] for row in wakeup_runs})
 
 
 async def recover_subagent_tasks(database: Any, *, stream_tools: Callable, stream_text: Callable) -> int:

@@ -122,6 +122,8 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                 incoming.append(_route_prompt(_limit_prompt(prompt)))
         elif state.get("agentMessages"):
             incoming = copy.deepcopy(state["agentMessages"])
+        # Remove root/previous member system messages from shared graph input.
+        incoming = [message for message in incoming if message.get('role') != 'system']
         instructions = member.get("instructions") or ""
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})
