@@ -336,10 +336,34 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
     if row is None or not row["agent_id"]:
         return False
     state = json.loads(row["state"])
-    agent = AgentRepository(database).get(owner, row["agent_id"])
+    agents = AgentRepository(database)
+    agent = agents.get(owner, row["agent_id"])
     if agent is None:
         return False
-    record = ActionRepository(database).get_for_tool(owner, agent["id"], payload.get("tool_name"))
+    # The root graph owns the conversation, but the originating member owns
+    # the Action binding and its OAuth credentials. Authenticate the member
+    # against the admitted graph topology and the durable task namespace.
+    action_agent = agent
+    namespace = pending.get("namespace", "")
+    if not isinstance(namespace, str):
+        return False
+    import re
+
+    identities = re.findall(r"(?:^|/)graph:([^/:]+):[^/]+", namespace)
+    if identities:
+        from .graph_topology import admit_agent_graph
+
+        try:
+            topology = admit_agent_graph(owner, agent, agents)
+        except (ValueError, PermissionError):
+            return False
+        member_id = identities[-1]
+        if topology is None or member_id not in (topology.reachable_agent_ids or topology.agent_ids):
+            return False
+        action_agent = agents.get(owner, member_id)
+        if action_agent is None:
+            return False
+    record = ActionRepository(database).get_for_tool(owner, action_agent["id"], payload.get("tool_name"))
     if record is None or record[2]["action_id"] != aid or record[2]["action_version"] != rev:
         return False
     # Reattaching after a restart requires a checkpoint with the exact model

@@ -355,16 +355,20 @@ class SQLiteSubagentTaskHost:
                 # before our admission bit. The exact authenticated marker is
                 # durable and may now outlive the parent run.
                 if self._child_activity() is None:
-                    return
-                registered = db.execute(
-                    "SELECT 1 FROM active_subagent_threads WHERE owner=? AND thread_id=? "
-                    "AND parent_run_id=?", (self.owner, row["child_conversation_id"],
-                                              row["parent_run_id"]),
-                ).fetchone()
-                if registered is None:
-                    return
-                db.execute("UPDATE subagent_tasks SET child_registered=1 WHERE id=?",
-                           (task_id,))
+                    # Deployments without the optional child guard still own
+                    # the exact persisted task identity; do not strand a
+                    # durable intent with child_registered=0 indefinitely.
+                    db.execute("UPDATE subagent_tasks SET child_registered=1 WHERE id=?", (task_id,))
+                else:
+                    registered = db.execute(
+                        "SELECT 1 FROM active_subagent_threads WHERE owner=? AND thread_id=? "
+                        "AND parent_run_id=?", (self.owner, row["child_conversation_id"],
+                                                  row["parent_run_id"]),
+                    ).fetchone()
+                    if registered is None:
+                        return
+                    db.execute("UPDATE subagent_tasks SET child_registered=1 WHERE id=?",
+                               (task_id,))
             if row["cancel_requested"] and (row["lease_owner"] is None or row["lease_until"] is None
                                               or row["lease_until"] <= now):
                 if not pre_cancel:
@@ -529,11 +533,14 @@ class SQLiteSubagentTaskHost:
                                    "lease_owner=NULL,lease_until=NULL WHERE id=?",
                                    (final_text, now, task_id))
                         disposition = "complete"
-            # Never finish a shared child generation if a different Controller
-            # stole this task's lease after its last model/tool safety check.
-            if disposition:
-                store.finish(self.owner, child_generation.run_id, status=disposition,
-                             text=final_text if disposition == "complete" else "")
+                    # Task terminal result, child generation terminal record and
+                    # SSE final event commit atomically under the same lease.
+                    # A crash can no longer expose a completed task with an
+                    # indefinitely running child generation.
+                    if disposition:
+                        store.finish(self.owner, child_generation.run_id, status=disposition,
+                                     text=final_text if disposition == "complete" else "",
+                                     _connection=db)
         except asyncio.CancelledError:
             # Complete only a parent-requested cancel. A cooperative Controller
             # shutdown retains the active child marker and resumable checkpoint.
@@ -542,34 +549,34 @@ class SQLiteSubagentTaskHost:
                                                 lease_token=token)
             # Cooperative Controller shutdown only releases the execution lease;
             # a parent-driven cancel stores the requested terminal disposition.
-            cancelled_by_parent = False
             with self.db.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 task = self._row(db, task_id)
                 if task and task["status"] == "running" and task["lease_owner"] == token:
                     if task["cancel_requested"] and current and current["cancel_requested"]:
-                        cancelled_by_parent = True
                         db.execute("UPDATE subagent_tasks SET status='cancelled',error=?,updated_at=?, "
                                    "lease_owner=NULL,lease_until=NULL WHERE id=?",
                                    ("Detached subagent task cancelled by its parent.", _now(), task_id))
+                        if child_generation:
+                            store.finish(self.owner, child_generation.run_id,
+                                         status="aborted", _connection=db)
                     else:
                         db.execute("UPDATE subagent_tasks SET lease_owner=NULL,lease_until=NULL "
                                    "WHERE id=?", (task_id,))
-            if cancelled_by_parent and child_generation:
-                store.finish(self.owner, child_generation.run_id, status="aborted")
             raise
         except Exception as exc:
             log.warning("Detached Subagent %s failed: %s", task_id, type(exc).__name__)
             self._settle_child_registration(task_id, before_terminal=True, lease_token=token)
             with self.db.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
                 changed = db.execute("UPDATE subagent_tasks SET status='error',error=?,updated_at=?,"
                                      "lease_owner=NULL,lease_until=NULL WHERE id=? "
                                      "AND status='running' AND lease_owner=?",
                                      ("Detached subagent task failed (" + type(exc).__name__ + ")",
                                       _now(), task_id, token)).rowcount
-            if child_generation and changed:
-                store.finish(self.owner, child_generation.run_id, status="error",
-                             error="Detached subagent task failed")
+                if child_generation and changed:
+                    store.finish(self.owner, child_generation.run_id, status="error",
+                                 error="Detached subagent task failed", _connection=db)
         finally:
             if heartbeat:
                 heartbeat.cancel()
@@ -837,7 +844,24 @@ async def recover_subagent_tasks(database: Any, *, stream_tools: Callable, strea
     do not steal them early. Retry at lease expiry, using the same AgentRunner
     and shared generation task executor as a freshly admitted child.
     """
+    # Repair any terminal task/active child generated by an older Controller
+    # that crashed between the two commits. Never launch the child a second time.
     with database.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        from .generations import GenerationStore
+
+        terminal = db.execute(
+            "SELECT t.owner,t.child_run_id,t.status,t.result,t.error FROM subagent_tasks t "
+            "JOIN runs r ON r.id=t.child_run_id WHERE t.status IN ('completed','cancelled','error') "
+            "AND r.status IN ('running','requires_action')"
+        ).fetchall()
+        store = GenerationStore(database)
+        for prior in terminal:
+            result_status = {'completed': 'complete', 'cancelled': 'aborted', 'error': 'error'}[prior['status']]
+            store.finish(prior['owner'], prior['child_run_id'], status=result_status,
+                         text=prior['result'] or '' if result_status == 'complete' else '',
+                         error=prior['error'] if result_status == 'error' else None,
+                         _connection=db)
         rows = db.execute("SELECT owner,parent_conversation_id,id,lease_until FROM subagent_tasks "
                           "WHERE status='running' ORDER BY created_at").fetchall()
     # The same Controller lifespan owns both the child lease recovery and
