@@ -143,6 +143,11 @@ class AgentRunner:
         )
         self.configs[identity] = configs
         tools += subagent_tools(configs)
+        if agent is not None:
+            from .actions import ActionRepository
+            tools += ActionRepository(self.database).tool_schemas(
+                self.owner, agent, selected_tools=selected
+            )
         if self.root_agent:
             tools += handoff_tools(self.owner, self.root_agent, self.repository, source_agent_id=identity)
         override = (agent or {}).get("recursion_limit")
@@ -169,6 +174,10 @@ class AgentRunner:
             "v": 1, "id": identity, "channel_values": self._snapshot(state),
             "channel_versions": {"messages": state.step}, "versions_seen": {},
         }, {"source": "loop", "step": state.step})
+        if not calls:
+            # Finish the durable OAuth replay fence only *after* the graph's
+            # post-tool checkpoint has safely left the pending-call edge.
+            self.store.clear_oauth_checkpoint(self.owner, self.generation.run_id)
 
     def _tool_step(self, call):
         checkpoint = self.active_config["configurable"].get("checkpoint_id", "")
@@ -205,6 +214,10 @@ class AgentRunner:
                 "role": "tool", "tool_call_id": call.call_id, "content": output,
             })], task_id=call.call_id)
         if self.namespace:
+            from .action_spec import is_action_tool
+
+            if is_action_tool(call.name):
+                self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
             return
         step = self._tool_step(call)
         preview = output if isinstance(output, str) else "Agent control transferred"
@@ -219,6 +232,10 @@ class AgentRunner:
                 },
             }},
         })
+        from .action_spec import is_action_tool
+
+        if is_action_tool(call.name):
+            self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -257,6 +274,31 @@ class AgentRunner:
             return build_handoff_command(edge, current["id"], current.get("name") or current["id"],
                                          call.name, call.arguments, call.call_id, state.messages)
         try:
+            from .action_spec import is_action_tool
+            if is_action_tool(call.name):
+                from .action_runtime import invoke_action
+                current_id = (state.context.agent or {}).get("id")
+                if not current_id:
+                    raise RuntimeSafetyError("Action execution requires a saved Agent")
+                from .action_oauth import access_token
+                from .actions import ActionRepository
+
+                action_repo = ActionRepository(self.database)
+                record = action_repo.get_for_tool(self.owner, current_id, call.name)
+                if record is None:
+                    raise RuntimeSafetyError("Action is not bound to this Agent")
+                meta, _, operation = record
+                oauth_token = None
+                if meta.get("auth", {}).get("type") == "oauth":
+                    oauth_token = await access_token(action_repo, self.owner, operation["action_id"])
+                    if not oauth_token:
+                        raise RuntimeSafetyError("OAuth Action authorization was revoked before dispatch")
+                    # The claim-to-HTTP boundary is a one-way replay fence.
+                    # A crash during external execution cannot safely resend
+                    # a potentially consequential request.
+                    self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "dispatching")
+                return await invoke_action(self.owner, current_id, call.name, call.arguments, self.database,
+                                           oauth_token=oauth_token, expected_version=operation["action_version"])
             if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
                 return await discover(self.owner, self.generation.conversation_id, set(self.scopes), call)
             if call.name == "mcp_tool_call":
@@ -285,7 +327,47 @@ class AgentRunner:
                             partial_text=self.partial_text)
         return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
 
-    async def _pause(self, payload, state, *, approval=False):
+    async def _prepare_oauth(self, calls, state):
+        """Durably suspend *before* launching side-effecting sibling tools.
+
+        The pinned LibreChat model tool call remains in the existing checkpoint;
+        the original React tool card consumes the OAuth sign-in delta. The
+        Controller may now exit without a long-lived authorization waiter.
+        """
+        from .action_oauth import access_token, begin_flow
+        from .action_spec import is_action_tool
+        from .actions import ActionRepository
+
+        current_id = (state.context.agent or {}).get("id")
+        if not current_id:
+            return
+        repo = ActionRepository(self.database)
+        for call in calls:
+            if not is_action_tool(call.name):
+                continue
+            record = repo.get_for_tool(self.owner, current_id, call.name)
+            if record is None:
+                raise RuntimeSafetyError("Action is not bound to this Agent")
+            metadata, _, operation = record
+            if metadata.get("auth", {}).get("type") != "oauth":
+                continue
+            if await access_token(repo, self.owner, operation["action_id"]):
+                continue
+            url, _ = begin_flow(repo, self.owner, operation["action_id"],
+                                self.generation.run_id, call.call_id)
+            step = self._tool_step(call)
+            auth_delta = {"event": "on_run_step_delta", "data": {
+                "id": step["id"], "delta": {"type": "tool_calls", "tool_calls": [
+                    {"id": call.call_id, "name": call.name, "args": ""}],
+                    "auth": url, "expires_at": int(time.time() * 1000) + 600_000},
+            }}
+            await self._pause({"type": "action_oauth", "action_id": operation["action_id"],
+                               "action_version": operation["action_version"],
+                               "tool_call_id": call.call_id, "tool_name": call.name,
+                               "step_id": step["id"]},
+                              state, oauth_delta=auth_delta)
+
+    async def _pause(self, payload, state, *, approval=False, oauth_delta=None):
         import uuid
 
         pending = {"actionId": "action_" + uuid.uuid4().hex,
@@ -295,8 +377,13 @@ class AgentRunner:
                    "responseMessageId": self.generation.response_message_id,
                    "createdAt": int(time.time() * 1000), "namespace": self.namespace, "payload": payload}
         self.saver.put_writes(self.active_config, [("__interrupt__", pending)], task_id="human")
-        pause = self.store.pause_for_approval if approval else self.store.pause_for_question
-        if not pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text):
+        if oauth_delta is not None:
+            saved = self.store.pause_for_oauth(self.owner, self.generation.run_id, pending,
+                                               state.messages, self.partial_text, oauth_delta)
+        else:
+            pause = self.store.pause_for_approval if approval else self.store.pause_for_question
+            saved = pause(self.owner, self.generation.run_id, pending, state.messages, self.partial_text)
+        if not saved:
             raise RuntimeError("Unable to save pending Agent action")
         raise AgentSuspended()
 
@@ -383,6 +470,9 @@ class AgentRunner:
                 ask.append(call)
         if ask:
             await self._pause(build_approval_payload(ask), state, approval=True)
+        await self._prepare_oauth(
+            [call for call in unresolved if replay_key(call, calls.index(call)) not in self.cache], state,
+        )
         outputs = await execute_tool_batch(
             calls, lambda call: self._filtered_invoke(call, state), settled=self.cache,
             interrupting_names=frozenset({"subagent"}),
@@ -425,7 +515,7 @@ class AgentRunner:
 
     async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
                                  prompt=None, update_prompt=None, head_count=0,
-                                 semantic_index=None):
+                                 semantic_index=None, retained_tail=None):
         """Request the original checkpoint prompt from the selected model.
 
         A failed/partial summary is never written, and never makes the old
@@ -466,8 +556,15 @@ class AgentRunner:
         summary_messages = [*messages, instruction]
         chunks = []
         limit = max(128, min(int(max_tokens), 16384))
-        async for value in self.stream_text(self.initial_profile or
-                self._context(self.root_agent).profile, summary_messages, max_tokens=limit):
+        profile = self.initial_profile or self._context(self.root_agent).profile
+        if profile.provider == "google":
+            from .provider_tool_protocols import stream_native_tools
+
+            response = stream_native_tools(profile, summary_messages, tools=[],
+                                           max_tokens=limit, temperature=None)
+        else:
+            response = self.stream_text(profile, summary_messages, max_tokens=limit)
+        async for value in response:
             if isinstance(value, str):
                 chunks.append(value)
             elif isinstance(value, ModelUsage):
@@ -481,7 +578,8 @@ class AgentRunner:
             raise ValueError('Summarization produced empty output')
         count = count_tokens(build_summary_carrier_text(summary), exact=False)
         self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
-                                 boundary=head_count, manual=manual)
+                                 boundary=head_count, manual=manual,
+                                 retained_tail=retained_tail)
         if not self.namespace:
             import secrets
             identity = 'summary_' + secrets.token_hex(8)
@@ -590,7 +688,7 @@ class AgentRunner:
                                       reserve_ratio=config.get('reserveRatio', 0.05),
                                       calibration_ratio=calibration.ratio)
             self._update_fading_tier(state, budget, calibration, config, int(max_raw))
-            if config.get('enabled') is False or budget.remaining_context_tokens > 0:
+            if config.get('enabled') is False:
                 return
             if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
                 return
@@ -614,7 +712,8 @@ class AgentRunner:
                     [*system, *head], head_count=len(head),
                     max_tokens=options.get('maxSummaryTokens', 2048),
                     prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
-                    semantic_index=state.context.compaction_semantic_index)
+                    semantic_index=state.context.compaction_semantic_index,
+                    retained_tail=tail)
                 # Keep stable instructions and current summary, then the exact
                 # retained recent turns. Original messages stay in SQLite.
                 plain_system = [message for message in system if not (
@@ -664,6 +763,11 @@ class AgentRunner:
         if isinstance(config, dict) and config.get('enabled') is False:
             raise ValueError('Compaction is disabled for this deployment')
         config = config if isinstance(config, dict) else {}
+        from .content_filters import inspect_content, model_message_fragments
+
+        if inspect_content(model_message_fragments(history),
+                           configured_filters(WorkspaceRepository(self.database), self.owner)) is not None:
+            raise RuntimeSafetyError('Assembled model context was blocked by content protection')
         non_system = [message for message in history if message.get('role') != 'system']
         if not non_system:
             raise ValueError('Nothing to compact')
@@ -727,6 +831,16 @@ class AgentRunner:
             self.resume_namespace = self.namespace
             self.approved_batch = self.store.approved_batch(self.owner, self.generation.run_id)
         if self.approved_batch is not None and self.resume_namespace == self.namespace:
+            # LibreChat ToolNode approval can precede a browser OAuth login.
+            # Resolve all Action credentials before executing *any* reviewed
+            # sibling; pending review proof remains in SQLite across login.
+            reviewed_calls = [entry.tool_call() for entry in self.approved_batch.entries
+                              if entry.decision["type"] in {"approve", "edit"} and
+                              not any(call.call_id == entry.call_id and
+                                      replay_key(call, index) in self.cache
+                                      for index, call in enumerate(state.pending_calls))]
+            await self._prepare_oauth(reviewed_calls, state)
+
             async def completed(result):
                 original = next(call for call in state.pending_calls if call.call_id == result.call.call_id)
                 record = {"proposal": {"name": original.name, "args": copy.deepcopy(original.arguments)}, "output": result.raw_content if result.raw_content is not None else result.content}

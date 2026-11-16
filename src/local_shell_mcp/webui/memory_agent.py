@@ -81,7 +81,7 @@ def _memory_window(history: list[dict], *, window_size: int, max_tokens: int) ->
     if len(dialog) > window_size:
         for index in range(len(dialog) - window_size, -1, -1):
             if dialog[index].get('role') == 'user':
-                dialog = dialog[index:index + window_size]
+                dialog = dialog[index:]
                 break
         else:
             dialog = dialog[-window_size:]

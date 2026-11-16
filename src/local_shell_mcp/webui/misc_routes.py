@@ -89,7 +89,7 @@ async def role(request: Request):
             "AGENTS": {"USE": True, "CREATE": True, "SHARE": False, "SHARE_PUBLIC": False},
             "MCP_SERVERS": {"USE": True, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
             "PROMPTS": {"USE": False, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
-            "MEMORIES": {"USE": has_memory, "CREATE": has_memory, "UPDATE": has_memory, "READ": has_memory, "OPT_OUT": has_memory},
+            "MEMORIES": {"USE": has_memory, "CREATE": has_memory, "UPDATE": has_memory, "READ": has_memory, "OPT_OUT": True},
         },
     })
 

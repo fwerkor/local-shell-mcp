@@ -7,6 +7,19 @@ export default function OAuthSuccess() {
   const [searchParams] = useSearchParams();
   const [secondsLeft, setSecondsLeft] = useState(3);
   const serverName = searchParams.get('serverName');
+  const actionId = searchParams.get('actionId');
+
+  useEffect(() => {
+    if (!actionId || typeof BroadcastChannel === 'undefined') {
+      return;
+    }
+    // The provider popup has no opener (`noopener` is required on mobile).
+    // Broadcast only the public Action identifier: the original chat tab will
+    // reattach through its *own* authenticated generation-control endpoint.
+    const channel = new BroadcastChannel('lsm-action-oauth');
+    channel.postMessage({ type: 'action_oauth_complete', actionId });
+    channel.close();
+  }, [actionId]);
 
   useEffect(() => {
     const countdown = setInterval(() => {
