@@ -557,7 +557,7 @@ class AgentRunner:
         chunks = []
         limit = max(128, min(int(max_tokens), 16384))
         profile = self.initial_profile or self._context(self.root_agent).profile
-        if profile.provider == "google":
+        if profile.provider in {"anthropic", "google"}:
             from .provider_tool_protocols import stream_native_tools
 
             response = stream_native_tools(profile, summary_messages, tools=[],

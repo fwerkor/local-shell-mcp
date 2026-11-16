@@ -259,10 +259,23 @@ def model_message_fragments(messages: list[dict]) -> list[ContentFragment]:
         if role not in ('user', 'assistant', 'system', 'tool'):
             continue
         content = message.get('content')
-        if not isinstance(content, str):
-            continue
         provenance = {'user': 'user', 'assistant': 'model', 'system': 'system', 'tool': 'tool'}[role]
-        fragments.append(ContentFragment('assembled_context', 'assembled_context', content, provenance))
+        if isinstance(content, str):
+            fragments.append(ContentFragment('assembled_context', 'assembled_context', content, provenance))
+        for call in message.get('tool_calls') or []:
+            if not isinstance(call, dict):
+                continue
+            # Provider transports send function name and arguments even when
+            # assistant.content is null; inspect exactly that request surface.
+            function = call.get('function') or {}
+            if not isinstance(function, dict):
+                continue
+            try:
+                words = _nested_strings({'name': function.get('name'), 'arguments': function.get('arguments')})
+            except ValueError:
+                words = ['x' * (_MAX_FIELD_CHARS + 1)]
+            fragments.extend(ContentFragment('assembled_context', 'assembled_context', word, provenance)
+                             for word in words)
     return fragments
 
 
