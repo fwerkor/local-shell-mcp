@@ -17,37 +17,43 @@ from .routes import _body, _owner, _repo
 
 
 def _endpoint_models() -> dict[str, list[str]]:
-    from .provider_profiles import profile
+    from .provider_profiles import all_profiles
     from .providers import provider_config
 
     available: dict[str, list[str]] = {}
-    for kind, label in (("openAI", "openAI"), ("anthropic", "anthropic"), ("google", "google")):
+    for value in all_profiles():
+        label = value.get("name") or ("openAI" if value["provider"] == "openai" else value["provider"])
         try:
-            config = provider_config(kind)
+            provider_config(label)
         except ValueError:
             continue
-        available[label] = profile(config.provider)["models"]
+        available[label] = value["models"]
     return available
 
 
 def _endpoint_info() -> dict:
+    from .provider_profiles import all_profiles
+
     configs = _endpoint_models()
-    # The Agent backend is available even when the operator has not configured
-    # a provider; model generation returns a scoped, actionable config error.
     result: dict = {
         "agents": {
-            "order": 0,
-            "type": "agents",
-            "name": "Agents",
-            "modelDisplayLabel": "Agent",
-            "allowedProviders": sorted(configs),
-            "maxSubagents": 0,
+            "order": 0, "type": "agents", "name": "Agents",
+            "modelDisplayLabel": "Agent", "allowedProviders": list(configs),
+            "maxSubagents": 10,
+            "capabilities": ["tools", "subagents", "chain", "ask_user_question", "end_after_tools"],
             "availableTools": [],
         },
     }
-    for index, name in enumerate(configs, start=1):
+    for index, value in enumerate(all_profiles(), start=1):
+        name = value.get("name") or ("openAI" if value["provider"] == "openai" else value["provider"])
+        if name not in configs:
+            continue
+        # The native LibreChat endpointSchema uses OpenAI-compatible transport
+        # for a custom name unless provider='anthropic'. LSM additionally has
+        # an explicit Google native channel, never a generic custom client.
+        endpoint_type = ("openAI" if value["provider"] == "openai" else value["provider"])
         result[name] = {
-            "order": index, "type": name, "name": name,
+            "order": index, "type": endpoint_type, "name": name,
             "modelDisplayLabel": "Model", "userProvide": False,
         }
     return result
@@ -190,7 +196,7 @@ def config_routes() -> list[Route]:
     from .provider_profiles import provider_profiles
 
     return [
-        Route("/api/lsm/providers", provider_profiles, methods=["GET", "PUT"]),
+        Route("/api/lsm/providers", provider_profiles, methods=["GET", "PUT", "DELETE"]),
         Route("/api/config", startup_config, methods=["GET"]),
         Route("/api/endpoints", endpoint_configs, methods=["GET"]),
         Route("/api/endpoints/token-config", token_configs, methods=["GET"]),

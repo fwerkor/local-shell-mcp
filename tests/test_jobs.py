@@ -689,6 +689,32 @@ async def test_managed_job_failure_and_launch_cleanup(tmp_path, monkeypatch):
         f"{failed['job_id']}-attempt-1.log"
     ]
 
+def test_runner_completion_receipt_handoff_grace_and_expiry(tmp_path):
+    from local_shell_mcp.jobs import _refresh_job_status
+
+    receipt = tmp_path / "completed.json"
+    base = {
+        "job_id": "recent-native-job", "status": "running",
+        "session_id": "gone", "backend": "tmux-system",
+        "last_started_at": 100.0, "status_path": str(receipt),
+    }
+    # A missing tmux session is not necessarily a lost run when its runner
+    # could still be publishing the completion receipt.
+    early = _refresh_job_status(base.copy(), set(), now=100.1)
+    assert early["status"] == "running" and early.get("exit_code") is None
+    receipt.write_text(json.dumps({"exit_code": 0, "completed_at": 100.2}))
+    settled = _refresh_job_status(early, set(), now=100.3)
+    assert settled["status"] == "succeeded" and settled["exit_code"] == 0
+    receipt.unlink()
+    genuinely_lost = _refresh_job_status(base.copy(), set(), now=103.0)
+    assert genuinely_lost["status"] == "lost"
+    assert genuinely_lost["exit_code"] is None
+    # A synthetic backend with no trustworthy session lifecycle never gets
+    # an unconditional delay before missing-receipt detection.
+    synthetic = _refresh_job_status({**base, "backend": "fake"}, set(), now=100.1)
+    assert synthetic["status"] == "lost"
+
+
 @pytest.mark.asyncio
 async def test_job_list_marks_missing_running_session_lost(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))

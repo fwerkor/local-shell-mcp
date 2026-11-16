@@ -1151,7 +1151,7 @@ async def test_worker_stream_download_cancellation_kills_curl(tmp_path, monkeypa
 
         def communicate(self, timeout=None):
             del timeout
-            assert killed.wait(2)
+            assert killed.wait(10)
             self.returncode = -9
             return b"", b"cancelled"
 
@@ -1171,7 +1171,15 @@ async def test_worker_stream_download_cancellation_kills_curl(tmp_path, monkeypa
             60,
         )
     )
-    assert await asyncio.to_thread(started.wait, 2)
+    # Do not occupy another executor thread merely to wait for startup:
+    # on saturated Windows CI executors this can starve the worker under test.
+    for _ in range(100):
+        if started.is_set():
+            break
+        if task.done():
+            await task  # Expose the actual startup error instead of timing out.
+        await asyncio.sleep(0.1)
+    assert started.is_set()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
