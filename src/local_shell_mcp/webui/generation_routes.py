@@ -81,6 +81,35 @@ def _generator_headers(protocol_version: int = 2) -> dict[str, str]:
     }
 
 
+def _recovered_terminal_steps(store, owner: str, run_id: str, visible_text: str) -> list[dict] | None:
+    """Keep safely streamed assistant text after a durable tool checkpoint.
+
+    A provider abort has no completed model checkpoint for its unfinished answer,
+    but that answer has already been displayed and must remain in model history.
+    Do not resurrect unmatched tool calls from an interrupted model turn.
+    """
+    steps = store.checkpoint_model_steps(owner, run_id)
+    if steps is None:
+        return None
+    from copy import deepcopy
+
+    recovered = deepcopy(steps)
+    prior_text = ''.join(step['content'] for step in recovered
+                         if step.get('role') == 'assistant' and isinstance(step.get('content'), str))
+    if visible_text and visible_text.startswith(prior_text):
+        remaining = visible_text[len(prior_text):]
+    elif visible_text and visible_text != prior_text:
+        remaining = visible_text
+    else:
+        remaining = ''
+    if remaining:
+        if recovered and recovered[-1].get('role') == 'assistant' and isinstance(recovered[-1].get('content'), str):
+            recovered[-1]['content'] += remaining
+        else:
+            recovered.append({'role': 'assistant', 'content': remaining})
+    return recovered
+
+
 async def _run_model(
     owner: str, generation: Generation, profile: ProviderConfig,
     *, instructions: str = "", parameters: dict | None = None,
@@ -182,14 +211,16 @@ async def _run_model(
         pending = repo.pending_action(owner, generation.run_id) if current and current.status == "requires_action" else None
         if not (pending and pending.get("payload", {}).get("type") == "action_oauth"):
             repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts),
-                        model_steps=repo.checkpoint_model_steps(owner, generation.run_id))
+                        model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
+                                                             "".join(text_parts)))
         raise
     except Exception as exc:
         # Do not put provider tokens, request metadata or secrets in response.
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
                     error=f"Model generation failed ({type(exc).__name__})",
-                    model_steps=repo.checkpoint_model_steps(owner, generation.run_id))
+                    model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
+                                                             "".join(text_parts)))
     finally:
         async with _TASK_GUARD:
             _TASKS.pop(generation.run_id, None)
