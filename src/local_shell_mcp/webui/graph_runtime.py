@@ -112,7 +112,8 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
         incoming = copy.deepcopy(state.get("agentMessages") or current)
         reception = receive_handoff(current, agent_id)
         if reception is not None:
-            incoming = reception["filteredMessages"]
+            incoming = [message for message in reception["filteredMessages"]
+                        if message.get("role") != "system"]
             prompt = reception.get("instructions")
             if prompt:
                 if incoming and incoming[-1].get("role") == "tool":
@@ -124,6 +125,9 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
         instructions = member.get("instructions") or ""
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})
+        from .attachments import with_agent_context
+
+        incoming = with_agent_context(parent.database, parent.owner, member, incoming)
 
         async def emit(delta: str) -> None:
             # Pause/restart snapshots must retain the generation-wide prefix,
