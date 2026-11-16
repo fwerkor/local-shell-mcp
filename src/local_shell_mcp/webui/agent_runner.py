@@ -197,7 +197,7 @@ class AgentRunner:
                                                 database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
-        self.store.append(self.owner, self.generation.run_id, {
+        event = {
             "event": "on_run_step_completed", "data": {"result": {
                 "id": step["id"], "index": step["index"], "completed_at": int(time.time() * 1000),
                 "type": "tool_call", "tool_call": {
@@ -206,9 +206,20 @@ class AgentRunner:
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},
-        })
+        }
+        # The completed tool step, its file links, and the attachment SSE
+        # events are persisted atomically. OAuth dispatch is independently
+        # settled once the completion has been recorded.
         from .action_spec import is_action_tool
+        from .tool_attachments import controller_tool_file_ids
 
+        identities = controller_tool_file_ids(output)
+        if identities:
+            self.store.append_tool_completion(
+                self.owner, self.generation.run_id, event, call.call_id, identities,
+            )
+        else:
+            self.store.append(self.owner, self.generation.run_id, event)
         if is_action_tool(call.name):
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
 
@@ -288,7 +299,10 @@ class AgentRunner:
                             child_configs=invocation.child_configs, selected_tools=invocation.selected_tools,
                             resume_history=self.resume_history, resume_namespace=self.resume_namespace,
                             partial_text=self.partial_text)
-        return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
+        from .attachments import with_agent_context
+
+        history = with_agent_context(self.database, self.owner, invocation.agent, invocation.messages)
+        return await child.run(history, recursion_limit=invocation.recursion_limit)
 
     async def _prepare_oauth(self, calls, state):
         """Durably suspend *before* launching side-effecting sibling tools.
@@ -421,6 +435,9 @@ class AgentRunner:
             instructions += "\n\n" + received["instructions"]
         if instructions:
             history.insert(0, {"role": "system", "content": instructions})
+        from .attachments import with_agent_context
+
+        history = with_agent_context(self.database, self.owner, target, history)
         return ToolBatchOutput(messages, next_context=self._context(target), replace_messages=history)
 
     async def run(self, history, *, recursion_limit=None):
