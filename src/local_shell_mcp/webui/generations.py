@@ -229,7 +229,20 @@ class GenerationStore:
         if (payload.get("type") != "action_oauth" or not isinstance(action_id, str)
                 or not isinstance(call_id, str) or type(version) is not int):
             raise ValueError("Invalid Action OAuth interrupt")
-        if len(_json(history).encode("utf-8")) > 512 * 1024 or len(_json(auth_delta).encode("utf-8")) > 256 * 1024:
+        # Canonical tool messages may retain identical content/raw_result for
+        # exact audit replay. The provider-facing context budget counts such
+        # bytes once; also bound the physical checkpoint to 1 MiB.
+        budget_history = []
+        for message in history:
+            if (isinstance(message, dict) and message.get("role") == "tool" and
+                    message.get("raw_result") == message.get("content")):
+                budget_history.append({key: value for key, value in message.items()
+                                       if key != "raw_result"})
+            else:
+                budget_history.append(message)
+        if (len(_json(budget_history).encode("utf-8")) > 512 * 1024 or
+                len(_json(history).encode("utf-8")) > 1024 * 1024 or
+                len(_json(auth_delta).encode("utf-8")) > 256 * 1024):
             raise ValueError("Action OAuth continuation too large")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
