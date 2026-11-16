@@ -611,7 +611,8 @@ async def publish_office_tool_output(owner: str, run_id: str, tool_call_id: str,
     digest = hashlib.sha256(data).hexdigest()
     try:
         preview = await asyncio.to_thread(buffer_to_office_html, data, filename, mime_type)
-        metadata = {'status': 'ready', 'text': preview, 'textFormat': 'html', 'context': 'tool_output'}
+        metadata = {'status': 'ready', 'text': preview, 'textFormat': 'html',
+                    'trustedOfficeRenderer': 'escaped-office-v1', 'context': 'tool_output'}
     except (ValueError, ET.ParseError, OSError, KeyError, OverflowError, csv.Error):
         metadata = {'status': 'failed', 'previewError': 'unsupported', 'context': 'tool_output'}
     metadata['sourceDigest'] = digest
@@ -647,6 +648,10 @@ async def publish_office_tool_output(owner: str, run_id: str, tool_call_id: str,
         message_id = state.get('responseMessageId')
         if not isinstance(message_id, str) or not message_id:
             raise ValueError('Missing trusted response message identity')
+        db.execute(
+            'INSERT INTO tool_attachment_links(run_id,response_message_id,tool_call_id,file_id) '
+            'VALUES(?,?,?,?)', (run_id, message_id, tool_call_id, file_id),
+        )
         descriptor = {**file_record(attachment_row), 'messageId': message_id,
                       'toolCallId': tool_call_id, 'conversationId': row['conversation_id']}
         db.execute('INSERT INTO generation_events(run_id,data) VALUES(?,?)',
