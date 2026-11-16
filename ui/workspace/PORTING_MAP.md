@@ -684,3 +684,31 @@ Bun 差分覆盖完整工具名、`_mcp_` 前缀、JSON 参数解析和递归 su
 尚需进一步处理 source `background.ts` 普通工具后台化、事件源完整的
 Detached Action 证据持久重传、复杂跨机 Coalescing 操作回执与剩余
 源 Graph RunStepState 边缘消息类型。本节不代表这几项已经全部完成。
+
+### PR #354 — Graph、普通工具后台化与 Detached Action 终态续接补齐（2026-11-16）
+
+本节为当前三个明确缺口的源码对照和验证界限；不表示其余 LibreChat 全模块都已移植。
+
+1. `packages/api/src/agents/background.ts`：可配置原生工具 `run_in_background` 参数、原
+   LSM tool registry + machine ACL + OAuth scope 审计执行、同会话 10 并发/同 owner 40 并发、
+   单次可认领 SQLite 结果，`check_background_task` 与 Subagent 任务统一入口、
+   跨进程取消意图及租约检测。进程重启后的不可确认工具结果为 `uncertain`，绝不自动重跑
+   可能已发生副作用的调用。原版对非对象工具/内置控制/文件/图像/MCP request-scoped
+   资源排除；已通过真实 AgentRunner→native call_tool→任务认领/取消的回归。
+2. `packages/api/src/agents/triggers/detachedAction.ts`：一个绑定 `continue` 投递最多拥有
+   一个匹配 `expectedAction` 的后台工具，在同一 SQLite 事务登记工具与行动证据；
+   `mark_running`、原始宿主终态证据（结果/错误按源长度上限）、进程失联的
+   `launch_indeterminate`、恢复后完整验证、原式一次性内部
+   `librechat.event_actor.detached_completion` 续接投递均已接通。工具启动回执、
+   模型声称与 `ok:false` 都不能冒充成功；取消/撤销来源后不能生成续接。原始
+   `detachedAction.ts` 纯解析函数使用 Bun 直接转译锁定源码片段差分测试，
+   UTF-16 字符串长度、JSON 安全整数、字段边界逐一验证。
+3. `@librechat/agents Graph.ts`、`api/server/controllers/agents/callbacks.js`、
+   `packages/data-provider/src/runSteps.ts`：Graph 原版 `entryAgentId`、`resultAgentId`、
+   `graphAgentIds`、`maxHandoffs` 被 Agent SQLite 配置正确保留；串行隐含输出不会
+   再进入最终回复或 live SSE；图成员工具调用持久化 `on_run_step`、
+   `on_run_step_completed` 和原版 `on_run_step_closed`（终态、可信时间戳与持续时长），
+   刷新后可按 stepId 恢复。外部事件来源的执行租约沿所有 LangGraph 节点
+   传递；路由提示仅添加一次。真实 Graph + 独立 SQL 读取的 SSE/历史测试覆盖。
+
+所有源文件 SHA-256 保存在 `UPSTREAM_LOCK.json`。相关新测试已并入 CI 选择清单。

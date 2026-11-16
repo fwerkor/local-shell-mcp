@@ -44,10 +44,10 @@
       "repository": "LibreChat",
       "path": "api/server/controllers/agents/callbacks.js",
       "sha256": "99e1d6905ec8aa7f9f1599712d2947b9ce4329f1017216813e60d85b15b47a44",
-      "symbols": "Agent execution events",
-      "python_lsm": "webui/generation_routes.py:_run_model",
-      "status": "部分",
-      "difference": "工具name/args/completion/result字段对齐React并持久化；完整callbacks、子运行progress和actor生命周期未全部移植"
+      "symbols": "on_run_step,on_run_step_completed,on_run_step_closed,on_agent_update",
+      "python_lsm": "webui/agent_runner.py:_completed;webui/graph_runtime.py:run_multi_agent_graph",
+      "status": "关键Graph回调已验证",
+      "difference": "Close-once RunStep status/duration survives reconnect; multi-node graph tool call callbacks; hide sequential output and trusted actor lease; full non-Graph rich media/citation callbacks remain distinct"
     },
     {
       "repository": "LibreChat",
@@ -242,10 +242,10 @@
       "repository": "LibreChat",
       "path": "packages/data-provider/src/runSteps.ts",
       "sha256": "a3b441835fd01728a330858e0e46739f110164c026a8787898ada8ef8447c340",
-      "symbols": "execution event types",
-      "python_lsm": "ui/workspace/packages/data-provider/src/runSteps.ts; generation_routes.py",
-      "status": "部分",
-      "difference": "共享前端类型复用；后端事件仅子集"
+      "symbols": "getRunStepCloseMetadata,getRunStepDurationMs",
+      "python_lsm": "webui/agent_runner.py:_completed;webui/generations.py:finish",
+      "status": "回调已验证",
+      "difference": "Graph RunStepClosed emitted once, status/host timestamps and raw duration persist to final SSE and history"
     },
     {
       "repository": "LibreChat",
@@ -431,10 +431,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/background.ts",
       "sha256": "ed8f894225a10c39e3dfb63c31798a6a1deb91c020d5a342f16b69cebc0a7436",
-      "symbols": "registerBackgroundTaskTool / runCheckBackgroundTask / controls",
-      "python_lsm": "webui/subagent_task_host.py; webui/subagent_wakeup.py; webui/agent_runner.py",
-      "status": "部分",
-      "difference": "Source check_background_task name/args, poll/list/control, manual vs auto wakeup atomic claim; ordinary-tool backgrounding and rich artifact delivery remain unported."
+      "symbols": "applyBackgroundToolCalls,checkBackgroundTask,background tool host",
+      "python_lsm": "webui/background_tools.py:start_tool_task,check_tool_task,inject_tools",
+      "status": "核心功能已验证",
+      "difference": "Native audited LSM tool dispatch; per-option opt-in schema; 10/40 concurrency, scoped SQLite CAS result poll/cancel, lease expiry/revoke and no re-execute after uncertain launch; 23+ E2Es"
     },
     {
       "repository": "LibreChat",
@@ -642,6 +642,15 @@
       "python_lsm": "webui/event_triggers.py:_batch_input",
       "status": "部分",
       "difference": "Structured coalesced original child events sorted by source timestamps and ids; advanced remote detached evidence recovery still pending."
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/triggers/detachedAction.ts",
+      "sha256": "376c53ba6622fc515d8de90da455070336f1ac9a48aff42c1ca4123339f54317",
+      "symbols": "parseAgentEventDetachedTerminalEvidence,parseAgentEventActorDetachedCompletion,createAgentEventDetachedResumeHandler",
+      "python_lsm": "webui/detached_event_actions.py:reserve,mark_running,settle,recover_expired;webui/event_triggers.py:_queue_detached_completion,_detached_proven",
+      "status": "关键持久路径已验证",
+      "difference": "Host-owned native tool reserved atomically with trusted Event Actor lease; terminal proof persisted and matched against original TS Bun parser; internal continuation once, unknown launch dead-letter no automatic reexecution"
     }
   ],
   "runtime_dependency_lock": {
