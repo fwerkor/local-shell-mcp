@@ -95,6 +95,17 @@ def revoke_source_key(database: Any, owner: str, key_id: str) -> bool:
                              "WHERE id=? AND owner=? AND revoked_at IS NULL",
                              (now, key_id, owner)).rowcount
         if updated:
+            admitted = db.execute(
+                "SELECT DISTINCT run_id FROM agent_event_deliveries "
+                "WHERE owner=? AND source_key_id=? AND status IN ('pending','leased') "
+                "AND run_id IS NOT NULL AND mode!='steer'", (owner, key_id),
+            ).fetchall()
+            from .generations import GenerationStore
+
+            store = GenerationStore(database)
+            for record in admitted:
+                store.finish(owner, record['run_id'], status='interrupted',
+                             error='Agent event source was revoked', _connection=db)
             # The credential is the trusted owner of *all* already admitted
             # event actors, not just future ingress. Revoke in the same
             # transaction so another Controller cannot renew a leased actor.

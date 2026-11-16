@@ -342,6 +342,36 @@ class SQLiteSubagentTaskHost:
                            and preliminary["grant_expires"] <= time.time())
         if preliminary and preliminary["status"] == "running" and (pre_cancel or pre_expired):
             self._settle_child_registration(task_id, before_terminal=True)
+            if not preliminary["child_registered"]:
+                with self.db.connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    db.execute("UPDATE subagent_tasks SET status=?,error=?,updated_at=? "
+                               "WHERE id=? AND status='running' AND child_registered=0",
+                               (("cancelled" if pre_cancel else "error"),
+                                "Detached task cancelled" if pre_cancel else "Authentication grant expired",
+                                _now(), task_id))
+                return
+        if (preliminary and preliminary["status"] == "running" and not preliminary["child_registered"]
+                and now - preliminary["created_at"] >= 2000):
+            # Grace protects an in-flight first caller from a concurrent
+            # idempotent second caller, while still admitting crash recovery.
+            # Crash between task intent and authenticated child registration.
+            # Re-admit the exact persisted child/parent identity; activate is
+            # idempotent for the same owner and parent and rejects foreign IDs.
+            activity = self._child_activity()
+            if activity is not None and preliminary["child_conversation_id"]:
+                try:
+                    activity.activate(self.owner, preliminary["child_conversation_id"],
+                                      preliminary["parent_run_id"])
+                except (ValueError, PermissionError):
+                    with self.db.connect() as db:
+                        db.execute("UPDATE subagent_tasks SET status='error',error=?,updated_at=? "
+                                   "WHERE id=? AND status='running' AND child_registered=0",
+                                   ("Child-thread registration no longer authorized", _now(), task_id))
+                    return
+                with self.db.connect() as db:
+                    db.execute("UPDATE subagent_tasks SET child_registered=1 WHERE id=? "
+                               "AND status='running' AND child_registered=0", (task_id,))
         terminal = False
         claimed = 0
         lease = ""

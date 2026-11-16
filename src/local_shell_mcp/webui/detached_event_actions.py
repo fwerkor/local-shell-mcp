@@ -167,7 +167,10 @@ def settle(db: Any, task_id: str, owner: str, status: str,
                 "taskId": task_id, "idempotencyKey": row["idempotency_key"],
                 "status": outcome, "observedAt": at}
     if outcome == "succeeded":
-        evidence["result"] = (result or "")[:32768]
+        # JS evidence fields are limited in UTF-16 code units, not codepoints.
+        # Decode with ignore so we never end a value with half a surrogate pair.
+        evidence["result"] = (result or "").encode("utf-16-le", errors="surrogatepass")[:65536].decode(
+            "utf-16-le", errors="ignore")
     else:
         evidence["error"] = (error or "Detached action failed")[:2048]
     if parse_terminal_evidence(evidence) is None:

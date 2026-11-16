@@ -20,6 +20,7 @@ from .providers import ModelToolCall
 
 log = logging.getLogger(__name__)
 _TOOL_TASKS: dict[str, asyncio.Task] = {}
+_LOCAL_TASK_IDENTITIES: set[str] = set()
 _LEASE_OWNER = secrets.token_hex(16)
 _LEASE_MS = 30_000
 _HEARTBEAT_SECONDS = 5
@@ -100,6 +101,9 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
         [owner, conversation_id, run_id, call.call_id], separators=(',', ':')).encode()).hexdigest()
     now = _now()
     first = False
+    # The initial restart sweep may predate expiry of old process-local
+    # leases. Reconcile them again before computing running quotas.
+    recover_background_tools(database)
     with database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         parent = db.execute('SELECT r.id FROM runs r JOIN conversations c ON c.id=r.conversation_id '
@@ -144,6 +148,11 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
             first = True
         row = db.execute('SELECT * FROM agent_background_tools WHERE id=?', (identity,)).fetchone()
     if first:
+        # Retain identity after the coroutine exits on revoked lease. Polling
+        # must distinguish a lost *local* lease from an orphan of old process.
+        if len(_LOCAL_TASK_IDENTITIES) > 10000:
+            _LOCAL_TASK_IDENTITIES.clear()
+        _LOCAL_TASK_IDENTITIES.add(identity)
         async def execute():
             parent = asyncio.current_task()
 
@@ -234,6 +243,7 @@ def check_tool_task(database: Any, owner: str, authorization_conversation_id: st
                     identity: str | None, action: str = 'poll') -> dict | list[dict]:
     if identity is not None and (not isinstance(identity, str) or not identity.startswith('tooltask_')):
         return {'status': 'not_found'}
+    recover_background_tools(database)
     with database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         if identity is None:
@@ -275,11 +285,20 @@ def recover_background_tools(database: Any) -> int:
     """On startup, mark unknown process-local side effects uncertain, never replay."""
     with database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        result = db.execute('UPDATE agent_background_tools SET status="uncertain",'
-                            'error_type="PROCESS_RESTART_UNKNOWN_RESULT",updated_at=? '
-                            'WHERE status="running" AND (lease_until IS NULL OR lease_until<=?)',
-                            (_now(), _now()))
-        return result.rowcount
+        expired = db.execute('SELECT id,lease_owner FROM agent_background_tools '
+                             'WHERE status="running" AND (lease_until IS NULL OR lease_until<=?)',
+                             (_now(),)).fetchall()
+        changed = 0
+        for row in expired:
+            # An active local task lost its lease to another controller;
+            # abandoned tasks from a previous process have no local executor.
+            error = ('LEASE_EXPIRED_UNKNOWN_RESULT'
+                     if row['id'] in _LOCAL_TASK_IDENTITIES or row['lease_owner'] == _LEASE_OWNER
+                     else 'PROCESS_RESTART_UNKNOWN_RESULT')
+            changed += db.execute('UPDATE agent_background_tools SET status="uncertain",'
+                                  'error_type=?,updated_at=? WHERE id=? AND status="running"',
+                                  (error, _now(), row['id'])).rowcount
+        return changed
 
 
 async def shutdown_background_tools() -> None:

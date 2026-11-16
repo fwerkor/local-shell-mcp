@@ -472,6 +472,8 @@ async def publish_office_tool_output(owner: str, run_id: str, tool_call_id: str,
     bucket = office_html_bucket(filename, mime_type)
     if bucket is None:
         raise ValueError('Not an Office preview artifact')
+    # Storage stores only the basename. Dedup needs the persisted identity.
+    filename = PurePosixPath(filename.replace("\\", "/")).name
     digest = hashlib.sha256(data).hexdigest()
     try:
         preview = await asyncio.to_thread(buffer_to_office_html, data, filename, mime_type)

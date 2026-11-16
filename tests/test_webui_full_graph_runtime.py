@@ -201,7 +201,7 @@ async def test_graph_ask_user_pause_and_new_process_resume_uses_same_generation(
     with pytest.raises(AgentSuspended):
         await obj.run(store.history("local", job.conversation_id))
     pending = store.pending_action("local", job.run_id)
-    assert pending["payload"] is not None and pending["namespace"].endswith("/graph:" + parent["id"])
+    assert pending["payload"] is not None and ("/graph:" + parent["id"] + ":") in pending["namespace"]
     _, history, _ = store.answer_question("local", job.run_id, pending["actionId"],
                                           {"answers": {"format": "Markdown"}})
     resumed = AgentRunner("local", job, database, store, scopes=set(), grant_expires=None,
@@ -303,7 +303,7 @@ async def test_graph_tool_approval_reuses_same_pause_claim_and_executor(context,
         "openai", "parent", "https://source-test.invalid", ""),
         parent_agent=parent, granted_scopes=frozenset({"shell:read", "shell:write"}))
     pending = store.pending_action("local", generation.run_id)
-    assert pending["namespace"].endswith("/graph:" + parent["id"])
+    assert ("/graph:" + parent["id"] + ":") in pending["namespace"]
     assert not (tmp_path / "approved.txt").exists()
     app = Starlette(routes=generation_routes.generation_routes())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:

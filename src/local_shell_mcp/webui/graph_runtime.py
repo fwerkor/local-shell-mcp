@@ -91,6 +91,8 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
     direct_destinations = {ident: set() for ident in member_ids}
     for edge in topology.edges:
         for src in endpoints(edge, "from"):
+            if src not in members:
+                continue
             for dest in endpoints(edge, "to"):
                 if dest in members:
                     destinations[src].add(dest)
@@ -98,6 +100,11 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                         direct_destinations[src].add(dest)
 
     async def node(agent_id: str, state: MultiAgentState):
+        from langgraph.config import get_config
+
+        activation_id = (get_config().get("configurable") or {}).get("__pregel_task_id")
+        if not isinstance(activation_id, str) or not activation_id:
+            raise RuntimeError("LangGraph task activation is missing a durable identity")
         parent._check_grant()
         member = parent.repository.get(parent.owner, agent_id)
         if member is None:
@@ -106,7 +113,8 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
         incoming = copy.deepcopy(state.get("agentMessages") or current)
         reception = receive_handoff(current, agent_id)
         if reception is not None:
-            incoming = reception["filteredMessages"]
+            incoming = [message for message in reception["filteredMessages"]
+                        if message.get("role") != "system"]
             prompt = reception.get("instructions")
             if prompt:
                 if incoming and incoming[-1].get("role") == "tool":
@@ -138,6 +146,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             # All nodes use one event stream and the existing generation actor.
             if not hide_intermediate:
                 parent.partial_text += delta
+                child.partial_text = parent.partial_text
                 await parent.on_text(delta)
 
         child = AgentRunner(
@@ -147,7 +156,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             on_text=emit, agent=member, profile=parent.initial_profile if agent_id == source_id else None,
             parameters=parent.initial_parameters,
             ask_user_enabled=parent.ask_user_enabled, mcp_enabled=parent.mcp_enabled,
-            namespace=parent.namespace + "/graph:" + agent_id,
+            namespace=parent.namespace + "/graph:" + agent_id + ":" + activation_id,
             child_configs=parent.child_configs, selected_tools=parent.selected_tools if agent_id == source_id else None,
             resume_history=parent.resume_history, resume_namespace=parent.resume_namespace,
             partial_text=parent.partial_text, approved_batch=parent.approved_batch,
@@ -235,7 +244,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             graph.add_node(to_node, fan_in)
             graph.add_edge(to_node, target)
         for edge in edges:
-            sources = endpoints(edge, "from")
+            sources = [source for source in endpoints(edge, "from") if source in members]
             if not prompted:
                 sources = [source for source in sources if source not in handoff_sources]
             if sources:

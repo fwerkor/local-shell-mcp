@@ -82,6 +82,7 @@ class AgentRunner:
         self.active_config = self.config
         self.cache = {}
         self.configs = {}
+        self._injected_background_names: dict[str, frozenset[str]] = {}
         self.route = HandoffRouting(self.graph_entry_id, self.graph_max_handoffs, self.graph_parallel)
 
     def _check_grant(self):
@@ -141,10 +142,12 @@ class AgentRunner:
             )
         if self.graph_definition:
             tools += handoff_tools(self.owner, self.graph_definition, self.repository, source_agent_id=identity)
+        background_names = frozenset()
         if not self.background_deny:
             from .background_tools import inject_tools
 
             tools, background_names = inject_tools(tools, agent, native_names=native_names)
+            self._injected_background_names[identity] = background_names
             if background_names and not any(t["function"]["name"] == "check_background_task" for t in tools):
                 from .subagent_task_host import check_background_task_tools
 
@@ -329,7 +332,9 @@ class AgentRunner:
                 decoded["outstanding"] = sum(task["status"] == "running" for task in decoded["tasks"])
                 return json.dumps(decoded, ensure_ascii=False)
             return child
-        if "run_in_background" in call.arguments and call.name not in {"subagent", "check_background_task"}:
+        if ("run_in_background" in call.arguments and
+                call.name in self._injected_background_names.get(
+                    (state.context.agent or {}).get("id") or "default", frozenset())):
             from .background_tools import eligible, start_tool_task
             from .lsm_tool_registry import call_tool as invoke_native
 
