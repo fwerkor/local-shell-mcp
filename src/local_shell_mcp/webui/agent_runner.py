@@ -207,7 +207,7 @@ class AgentRunner:
         step = self._tool_step(call)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
-        self.store.append(self.owner, self.generation.run_id, {
+        event = {
             "event": "on_run_step_completed", "data": {"result": {
                 "id": step["id"], "index": step["index"], "completed_at": int(time.time() * 1000),
                 "type": "tool_call", "tool_call": {
@@ -215,9 +215,20 @@ class AgentRunner:
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},
-        }, actor_lease=self.actor_lease)
+        }
+        # Persist the completion evidence with its Controller file links.
         from .action_spec import is_action_tool
+        from .tool_attachments import controller_tool_file_ids
 
+        identities = controller_tool_file_ids(output)
+        if identities:
+            self.store.append_tool_completion(
+                self.owner, self.generation.run_id, event, call.call_id, identities,
+                actor_lease=self.actor_lease,
+            )
+        else:
+            self.store.append(self.owner, self.generation.run_id, event,
+                              actor_lease=self.actor_lease)
         if is_action_tool(call.name):
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
 
@@ -323,7 +334,11 @@ class AgentRunner:
                             subagent_depth=invocation.remaining_depth,
                             wakeup_lease=self.wakeup_lease, actor_lease=self.actor_lease,
                             recovery_steers=self.recovery_steers)
-        return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
+        from .attachments import with_agent_context
+
+        history = with_agent_context(self.database, self.owner, invocation.agent,
+                                     invocation.messages)
+        return await child.run(history, recursion_limit=invocation.recursion_limit)
 
     async def _prepare_oauth(self, calls, state):
         """Durably suspend *before* launching side-effecting sibling tools.
