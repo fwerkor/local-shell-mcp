@@ -353,3 +353,23 @@ def test_ods_formatted_span_tails_and_nested_inline_text_are_preserved():
     rendered = buffer_to_office_html(_archive_xml('content.xml', xml), 'financials.ods', 'application/octet-stream')
     assert 'Revenue increased by 25% in 2026 and was audited externally.' in rendered
     assert rendered.count('<tr>') == 1
+
+
+def test_xlsx_date_and_elapsed_duration_formats_are_distinct():
+    from local_shell_mcp.webui.office_preview import _excel_date, _excel_duration
+
+    assert _excel_date('45292', False) == '2024-01-01'
+    assert _excel_duration('1.5') == '36:00:00'
+    workbook = _synthetic_xlsx({
+        'xl/workbook.xml': '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                           '<sheets><sheet name="Dates" sheetId="1"/></sheets></workbook>',
+        'xl/styles.xml': '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                         '<cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="14"/>'
+                         '<xf numFmtId="46"/></cellXfs></styleSheet>',
+        'xl/worksheets/sheet1.xml': '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                                    '<sheetData><row r="1"><c r="A1" s="1"><v>45292</v></c>'
+                                    '<c r="B1" s="2"><v>1.5</v></c></row></sheetData></worksheet>',
+    })
+    html = buffer_to_office_html(workbook, 'dates.xlsx', 'application/octet-stream')
+    assert '2024-01-01' in html and '36:00:00' in html
+    assert '1900-01-01' not in html

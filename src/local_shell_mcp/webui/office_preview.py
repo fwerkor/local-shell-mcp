@@ -244,26 +244,35 @@ def _docx_html(z: ZipFile) -> str:
     return _document('<article class="lc-docx">' + "".join(lines) + '</article>')
 
 
-def _xlsx_date_styles(z: ZipFile) -> set[int]:
+def _xlsx_date_styles(z: ZipFile) -> tuple[set[int], set[int]]:
     if 'xl/styles.xml' not in z.namelist():
-        return set()
+        return set(), set()
     root = _read_xml(z, 'xl/styles.xml')
     formats = {int(fmt.get('numFmtId')): fmt.get('formatCode', '')
                for fmt in root.findall('./{*}numFmts/{*}numFmt')
                if str(fmt.get('numFmtId', '')).isdigit()}
     styles = root.find('./{*}cellXfs')
     if styles is None:
-        return set()
-    builtins = set(range(14, 23)) | set(range(27, 37)) | {45, 46, 47} | set(range(50, 59))
-    result = set()
+        return set(), set()
+    builtins = set(range(14, 23)) | set(range(27, 37)) | set(range(50, 59))
+    result, durations = set(), set()
     for index, style in enumerate(styles):
         code = int(style.get('numFmtId', '0'))
         fmt = formats.get(code, '')
         # Strip quoted literals, escapes, and bracketed color/locale markers.
         fmt = re.sub(r'"[^"]*"|\\.|\[[^\]]*\]', '', fmt).lower()
-        if code in builtins or (code in formats and bool(re.search(r'[ymdhs]', fmt))):
+        if code in {45, 46, 47} or re.search(r'\[(?:h+|m+|s+)\]', formats.get(code, '').lower()):
+            durations.add(index)
+        elif code in builtins or (code in formats and bool(re.search(r'[ymdhs]', fmt))):
             result.add(index)
-    return result
+    return result, durations
+
+
+def _excel_duration(raw: str) -> str:
+    total = round(abs(float(raw)) * 86400)
+    hours, remaining = divmod(total, 3600)
+    minutes, seconds = divmod(remaining, 60)
+    return f"{'-' if float(raw) < 0 else ''}{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def _excel_date(raw: str, epoch1904: bool) -> str:
@@ -292,7 +301,7 @@ def _xlsx_html(z: ZipFile) -> str:
     workbook = _read_xml(z, 'xl/workbook.xml')
     epoch1904 = (workbook.find('./{*}workbookPr') is not None and
                  workbook.find('./{*}workbookPr').get('date1904') in {'1', 'true'})
-    date_styles = _xlsx_date_styles(z)
+    date_styles, duration_styles = _xlsx_date_styles(z)
     rels = {}
     if 'xl/_rels/workbook.xml.rels' in names:
         for rel in _read_xml(z, 'xl/_rels/workbook.xml.rels'):
@@ -342,10 +351,12 @@ def _xlsx_html(z: ZipFile) -> str:
                         else:
                             value = raw
                             style_index = cell.get('s', '0')
-                            if (kind in {'', 'n'} and style_index.isdigit() and
-                                    int(style_index) in date_styles and raw):
+                            if kind in {'', 'n'} and style_index.isdigit() and raw:
                                 try:
-                                    value = _excel_date(raw, epoch1904)
+                                    if int(style_index) in duration_styles:
+                                        value = _excel_duration(raw)
+                                    elif int(style_index) in date_styles:
+                                        value = _excel_date(raw, epoch1904)
                                 except (ValueError, OverflowError):
                                     value = raw
                     cells[column] = value
