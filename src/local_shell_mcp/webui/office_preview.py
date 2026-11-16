@@ -14,6 +14,7 @@ import html
 import io
 import re
 import xml.etree.ElementTree as ET
+import zlib
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
@@ -88,8 +89,13 @@ def _read_xml(archive: ZipFile, path: str) -> ET.Element:
     if info.file_size > MAX_ENTRY_BYTES:
         raise UnsafeOfficeArchive("Office XML entry size limit exceeded")
     source = archive.read(path)
-    if b"<!DOCTYPE" in source.upper() or b"<!ENTITY" in source.upper():
-        raise UnsafeOfficeArchive("Office XML must not contain a DTD")
+    # XML supports UTF-16/UTF-32 and accepts entity declarations in those
+    # encodings. Check all byte lanes, not just the UTF-8 byte representation.
+    for stride in (1, 2, 4):
+        for lane in range(stride):
+            probe = source[lane::stride].upper()
+            if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe:
+                raise UnsafeOfficeArchive("Office XML must not contain a DTD")
     return ET.fromstring(source)
 
 
@@ -99,6 +105,24 @@ def _local(tag: str) -> str:
 
 def _text(node: ET.Element) -> str:
     return "".join(child.text or "" for child in node.iter() if _local(child.tag) in {"t", "v"})
+
+
+def _docx_text(node: ET.Element) -> str:
+    def paragraph(para: ET.Element) -> str:
+        fragments = []
+        for part in para.iter():
+            tag = _local(part.tag)
+            if tag == "t":
+                fragments.append(part.text or "")
+            elif tag == "tab":
+                fragments.append("\t")
+            elif tag in {"br", "cr"}:
+                fragments.append("\n")
+        return "".join(fragments)
+
+    if _local(node.tag) == "p":
+        return paragraph(node)
+    return "\n".join(paragraph(part) for part in node.iter() if _local(part.tag) == "p")
 
 
 def _escape(value: str) -> str:
@@ -149,7 +173,7 @@ def _table(rows):
                                             + '</tr>' for row in _bounded_rows(rows)) + '</tbody></table>'
 
 
-def _sheets(sheets):
+def _sheets(sheets, *, source_truncated: bool = False):
     if not sheets:
         return _document('<p class="lc-banner">This workbook contains no sheets.</p>')
     css = "".join(f'#lc-sheet-tab-{i}:checked~#lc-sheet-panel-{i}' + '{display:block}'
@@ -162,8 +186,16 @@ def _sheets(sheets):
     panels = ''
     for i, (_, rows, total) in enumerate(sheets):
         visible = list(_bounded_rows(rows))
+        clipped = source_truncated or total > len(visible) or len(rows) > len(visible)
+        if not clipped:
+            for original, rendered in zip(rows, visible, strict=False):
+                if len(original) != len(rendered) or any(
+                    str(value or "") != shown for value, shown in zip(original, rendered, strict=False)
+                ):
+                    clipped = True
+                    break
         banner = (f'<div class="lc-banner">Showing first {len(visible):,} of {total:,} rows. '
-                  'Download the file to see the rest.</div>') if total > len(visible) else ''
+                  'Preview truncated; download the file to see the rest.</div>') if clipped else ''
         panels += f'<section class="lc-sheet-panel" id="lc-sheet-panel-{i}">{banner}' \
                   f'<div class="lc-table-scroll">{_table(visible)}</div></section>'
     return _document(radios + tabs + panels, '<style>' + css + '</style>')
@@ -171,8 +203,10 @@ def _sheets(sheets):
 
 def _csv_html(data: bytes) -> str:
     text = data.decode("utf-8-sig", errors="replace")
-    rows = list(_bounded_rows(list(csv.reader(io.StringIO(text[:MAX_VISIBLE_CHARS * 2])))))
-    return _sheets([("CSV", rows, max(0, text.count("\n") + bool(text and not text.endswith("\n"))))])
+    input_limit = MAX_VISIBLE_CHARS * 2
+    rows = list(csv.reader(io.StringIO(text[:input_limit])))
+    return _sheets([("CSV", rows, max(0, text.count("\n") + bool(text and not text.endswith("\n"))))],
+                   source_truncated=len(text) > input_limit)
 
 
 def _docx_html(z: ZipFile) -> str:
@@ -188,13 +222,13 @@ def _docx_html(z: ZipFile) -> str:
             break
         kind = _local(child.tag)
         if kind == "p":
-            value = _text(child)[:max(0, MAX_VISIBLE_CHARS - consumed)]
+            value = _docx_text(child)[:max(0, MAX_VISIBLE_CHARS - consumed)]
             consumed += len(value)
             lines.append(f'<p>{_escape(value)}</p>')
         elif kind == "tbl":
             rows = []
             for tr in child.findall('./{*}tr')[:MAX_ROWS]:
-                rows.append([_text(tc) for tc in tr.findall('./{*}tc')])
+                rows.append([_docx_text(tc) for tc in tr.findall('./{*}tc')])
             rendered = _table(rows)
             consumed += sum(len(v) for row in rows for v in row)
             lines.append('<div class="lc-table-scroll">' + rendered + '</div>')
@@ -427,7 +461,7 @@ def buffer_to_office_html(data: bytes, name: str, mime_type: str) -> str | None:
             if bucket == 'spreadsheet':
                 return _ods_html(z) if 'content.xml' in z.namelist() else _xlsx_html(z)
             return _presentation_html(z)
-    except BadZipFile as error:
+    except (BadZipFile, zlib.error, EOFError) as error:
         raise ValueError('Malformed Office archive') from error
     except (NotImplementedError, RuntimeError) as error:
         # Unsupported ZIP compression/encryption is an optional preview
@@ -472,6 +506,9 @@ async def publish_office_tool_output(owner: str, run_id: str, tool_call_id: str,
     bucket = office_html_bucket(filename, mime_type)
     if bucket is None:
         raise ValueError('Not an Office preview artifact')
+    # Attachment storage strips directories; deduplication must use the same
+    # canonical filename as the committed attachment event.
+    filename = PurePosixPath(filename.replace("\\", "/")).name
     digest = hashlib.sha256(data).hexdigest()
     try:
         preview = await asyncio.to_thread(buffer_to_office_html, data, filename, mime_type)
