@@ -297,7 +297,15 @@ class AgentRunner:
             if not task_id and action == "poll":
                 from .background_tools import check_tool_task
 
-                decoded = json.loads(child)
+                try:
+                    decoded = json.loads(child)
+                except (TypeError, ValueError):
+                    # Existing hosted task controllers may return a plain-text
+                    # observation rather than the original JSON task list.
+                    # Do not erase a valid result while merging ordinary tools.
+                    return child
+                if not isinstance(decoded, dict) or not isinstance(decoded.get("tasks"), list):
+                    return child
                 decoded["tasks"].extend(check_tool_task(
                     self.database, self.owner, self.authorization_conversation_id, None))
                 decoded["outstanding"] = sum(task["status"] == "running" for task in decoded["tasks"])
