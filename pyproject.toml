@@ -39,6 +39,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+attachments = ["pypdf>=5.0,<7", "python-docx>=1.1,<2"]
 browser = ["playwright>=1.44.0"]
 dev = [
   "coverage[toml]>=7.8.0",

@@ -105,6 +105,10 @@ async def _run_model(
         )
         if instructions and resume_history is None:
             history.insert(0, {"role": "system", "content": instructions})
+        if parent_agent is not None and resume_history is None:
+            from .attachments import with_agent_context
+
+            history = with_agent_context(_database(), owner, parent_agent, history)
         if resume_history is None:
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step", "data": {
