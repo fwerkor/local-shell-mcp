@@ -125,6 +125,16 @@ class AgentRunner:
             # post-tool checkpoint has safely left the pending-call edge.
             self.store.clear_oauth_checkpoint(self.owner, self.generation.run_id)
 
+    @staticmethod
+    def _visible_tool_args(call):
+        """Bound SSE argument previews; persisted/native arguments remain complete."""
+        args = call.arguments
+        raw = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+        if len(raw.encode("utf-8")) <= 16 * 1024:
+            return args
+        return {"_truncated": True, "preview": raw.encode("utf-8")[:8192].decode(
+            "utf-8", errors="ignore"), "note": "Full arguments retained for execution"}
+
     def _tool_step(self, call):
         checkpoint = self.active_config["configurable"].get("checkpoint_id", "")
         identity = "step_" + hashlib.sha256(
@@ -147,7 +157,7 @@ class AgentRunner:
                 "created_at": int(time.time() * 1000), "stepDetails": {
                     "type": "tool_calls", "tool_calls": [{
                         "id": call.call_id, "type": "tool_call", "name": call.name,
-                        "args": call.arguments,
+                        "args": self._visible_tool_args(call),
                     }],
                 }}
         self.store.append(self.owner, self.generation.run_id, {"event": "on_run_step", "data": step})
@@ -195,7 +205,7 @@ class AgentRunner:
             "event": "on_run_step_completed", "data": {"result": {
                 "id": step["id"], "index": step["index"], "completed_at": int(time.time() * 1000),
                 "type": "tool_call", "tool_call": {
-                    "id": call.call_id, "name": call.name, "args": call.arguments,
+                    "id": call.call_id, "name": call.name, "args": self._visible_tool_args(call),
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},
