@@ -768,6 +768,18 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     from .machine_permissions import require_machine_scope, resolve_access
     from .routes import _repo
 
+    # Detached tasks have their own durable executor/lease and no foreground
+    # grant. A browser reconnect must never create a second actor for the same
+    # child run, including when that executor is on another Controller process.
+    with _database().connect() as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                      "AND name='subagent_tasks'").fetchone():
+            detached = db.execute(
+                "SELECT 1 FROM subagent_tasks WHERE owner=? AND child_run_id=? LIMIT 1",
+                (owner, generation.run_id),
+            ).fetchone()
+            if detached is not None:
+                raise HTTPException(409, detail="Detached subagent runs require task-host recovery")
     current = _TASKS.get(generation.run_id)
     if current is not None and not current.done():
         return
