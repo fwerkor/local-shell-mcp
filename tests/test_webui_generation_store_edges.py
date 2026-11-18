@@ -124,3 +124,22 @@ def test_tool_approval_validation_and_exactly_once_claim(current_run):
         store.claim_approval("alice", job.run_id, "approval-1", [
             {"decision": "reject", "tool_call_id": "call-42"},
         ])
+
+
+@pytest.mark.parametrize(('payload', 'error'), [
+    ({'text': 'task', 'conversationId': 123}, 'Invalid conversation id'),
+    ({'text': 'task', 'clientRequestId': ''}, 'Invalid client request id'),
+    ({'text': 'task', 'clientRequestId': 'x' * 161}, 'Invalid client request id'),
+    ({'text': 'task', 'projectId': []}, 'Invalid project id'),
+    ({'text': 'task', 'projectId': 'missing-project'}, 'Project not found'),
+    ({'text': 'task', 'conversationId': 'no-such-conversation'}, 'Conversation not found'),
+    ({'text': 'task', 'text2': None, 'projectId': None}, None),
+])
+def test_generation_creation_validates_boundaries_before_writing(current_run, payload, error):
+    _, store, _ = current_run
+    if error is None:
+        result, fresh = store.begin('alice', payload)
+        assert fresh and result.status == 'running'
+        return
+    with pytest.raises((ValueError, KeyError), match=error):
+        store.begin('alice', payload)
