@@ -439,10 +439,11 @@ class SQLiteStateStore:
                 if os.name == "nt":
                     import msvcrt
 
-                    handle.seek(0)
-                    if handle.read(1) == b"":
-                        handle.write(b"0")
-                        handle.flush()
+                    # Never read or write the lock byte *before* acquiring it.
+                    # On Windows, concurrent msvcrt.locking() holders cause
+                    # even a one-byte read to raise PermissionError (EACCES).
+                    # LockFile permits a byte range beyond EOF, so a newly
+                    # created, empty lock file needs no initialization.
                     handle.seek(0)
                     msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
                 else:
