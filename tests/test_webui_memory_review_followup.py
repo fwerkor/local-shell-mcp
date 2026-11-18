@@ -83,3 +83,28 @@ async def test_memory_system_prompt_does_not_duplicate_user_in_canonical_steps(t
     with db.connect() as conn:
         state = json.loads(conn.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()['state'])
     assert all(msg.get('role') != 'user' for msg in state['modelSteps'])
+
+
+@pytest.mark.asyncio
+async def test_joined_multimodal_text_is_checked_before_run_creation(tmp_path, monkeypatch):
+    import httpx
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    from local_shell_mcp.webui import generation_routes, memory_protection
+
+    db = SQLiteDatabase(tmp_path / 'joined')
+    monkeypatch.setattr(generation_routes, '_database', lambda: db)
+    monkeypatch.setattr(generation_routes, '_owner', lambda request: 'local')
+    monkeypatch.setattr(memory_protection, 'configured_filters', lambda repo, owner: {
+        'messages': {'pii': {'action': 'block', 'fields': ['content_part'],
+                             'starterPatterns': [], 'customPatterns': [
+                                 {'id': 'joined', 'label': 'joined pattern', 'regex': 'XJOINZ'}]}}})
+    app = Starlette(routes=[Route('/chat', generation_routes.start_generation, methods=['POST'])])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        response = await client.post('/chat', json={'text': 'normal', 'model': 'mock', 'content': [
+            {'type': 'text', 'text': 'XJO'}, {'type': 'text', 'text': 'INZ'}]})
+    assert response.status_code == 400
+    assert response.json()['error'] == 'content_filter_block'
+    with db.connect() as conn:
+        assert conn.execute('SELECT count(*) FROM runs').fetchone()[0] == 0
