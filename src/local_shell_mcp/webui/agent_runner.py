@@ -294,6 +294,8 @@ class AgentRunner:
                 if meta.get("auth", {}).get("type") == "oauth":
                     oauth_token = await access_token(action_repo, self.owner, operation["action_id"])
                     if not oauth_token:
+                        if self.background_deny:
+                            return "Blocked: OAuth Action requires foreground human authorization."
                         raise RuntimeSafetyError("OAuth Action authorization was revoked before dispatch")
                     # The claim-to-HTTP boundary is a one-way replay fence.
                     # A crash during external execution cannot safely resend
@@ -365,6 +367,10 @@ class AgentRunner:
             if metadata.get("auth", {}).get("type") != "oauth":
                 continue
             if await access_token(repo, self.owner, operation["action_id"]):
+                continue
+            if self.background_deny:
+                # Detached tasks must never park on a hidden OAuth redirect.
+                # _invoke returns a blocked tool result for this call instead.
                 continue
             url, _ = begin_flow(repo, self.owner, operation["action_id"],
                                 self.generation.run_id, call.call_id)
