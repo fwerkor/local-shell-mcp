@@ -7,8 +7,6 @@ Agent action; mcp_manage is never presented to the model.
 
 from __future__ import annotations
 
-import json
-
 from .lsm_tool_registry import _invoke_registered, registered_definitions
 from .providers import ModelToolCall
 
@@ -52,8 +50,6 @@ async def approved_call(owner: str, conversation_id: str, scopes: set[str], call
     if (not isinstance(qualified, str) or ":" not in qualified or len(qualified) > 256 or
         not isinstance(arguments.get("arguments", {}), dict)):
         raise ValueError("Invalid qualified external MCP tool name or arguments")
-    if len(json.dumps(arguments, ensure_ascii=False)) > 8192:
-        raise ValueError("External MCP tool input is too large")
     # This function is only reached after the immutable SQLite action ID and
     # the user's explicit approve decision have been validated by resume.
     return await _invoke_registered(owner, conversation_id, "mcp_tool_call", arguments, scopes=scopes)

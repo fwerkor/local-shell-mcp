@@ -278,3 +278,59 @@ def test_terminal_content_preserves_completed_tool_before_later_steer_and_text(a
     assert store.finish('local', generation.run_id, status='complete', text='Updated answer')
     final = store.events('local', generation.run_id)[-1][1]['responseMessage']['content']
     assert [item['type'] for item in final] == ['tool_call', 'steer', 'text']
+
+
+@pytest.mark.asyncio
+async def test_handoff_without_system_prompt_retains_final_model_steps(active_generation, monkeypatch):
+    database, store, profile = active_generation
+    generation, _ = store.begin('local', {'text': 'Original request'})
+
+    class HandoffRunner:
+        def __init__(self, *args, **kwargs):
+            self.partial_text = 'Specialist answered'
+
+        async def run(self, original):
+            assert original[0]['role'] == 'system'
+            return [
+                {'role': 'user', 'content': 'Original request'},
+                {'role': 'assistant', 'content': 'Specialist answered'},
+            ]
+
+    monkeypatch.setattr(agent_runner, 'AgentRunner', HandoffRunner)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(generation_routes, '_database', lambda: database)
+    await generation_routes._run_model('local', generation, profile, instructions='Source only')
+    assert store.get('local', generation.run_id).status == 'complete'
+    recovered = store.history('local', generation.conversation_id)
+    assert any(item.get('content') == 'Specialist answered' for item in recovered)
+
+
+def test_aborted_checkpoint_replay_retains_streamed_answer_after_completed_tool(active_generation, monkeypatch):
+    from local_shell_mcp.webui.generation_routes import _recovered_terminal_steps
+
+    _, store, _ = active_generation
+    generation, _ = store.begin('local', {'text': 'Explain what the tool found'})
+    prior = [{'role': 'assistant', 'content': '', 'tool_calls': [
+        {'id': 'tool-a', 'type': 'function', 'function': {'name': 'file_read', 'arguments': '{}'}}]},
+        {'role': 'tool', 'tool_call_id': 'tool-a', 'name': 'file_read', 'content': 'Important fact'}]
+    monkeypatch.setattr(store, 'checkpoint_model_steps', lambda owner, run_id: prior)
+    text = 'Partial explanation already displayed.'
+    steps = _recovered_terminal_steps(store, 'local', generation.run_id, text)
+    assert steps[-1] == {'role': 'assistant', 'content': text}
+    assert steps[:2] == prior
+    assert store.finish('local', generation.run_id, status='aborted', text=text, model_steps=steps)
+    replay = store.history('local', generation.conversation_id)
+    assert replay[-1] == {'role': 'assistant', 'content': text}
+    assert any(item.get('role') == 'tool' and item.get('content') == 'Important fact' for item in replay)
+    assert [part['role'] for part in replay].count('tool') == 1
+
+
+def test_aborted_checkpoint_replay_does_not_duplicate_already_saved_assistant_prefix():
+    from local_shell_mcp.webui.generation_routes import _recovered_terminal_steps
+
+    class StubStore:
+        def checkpoint_model_steps(self, owner, run_id):
+            return [{'role': 'assistant', 'content': 'Partial'}]
+
+    assert _recovered_terminal_steps(StubStore(), 'owner', 'run', 'Partial answer') == [
+        {'role': 'assistant', 'content': 'Partial answer'}]

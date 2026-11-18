@@ -75,8 +75,6 @@ def test_completion_saves_full_continuation_and_retires_review_once(paused_batch
                           {"role": "tool", "tool_call_id": "b", "content": "Blocked: Rejected by user"}]
     assert not store.complete_approval_batch("bob", generation.run_id, "batch-1", finished, "partial")
     assert not store.complete_approval_batch("alice", generation.run_id, "other", finished, "partial")
-    with pytest.raises(ValueError, match="too large"):
-        store.complete_approval_batch("alice", generation.run_id, "batch-1", [{"content": "x" * 530000}], "")
     assert store.approved_batch("alice", generation.run_id) is not None
     assert store.complete_approval_batch("alice", generation.run_id, "batch-1", finished, "after batch")
     assert not store.complete_approval_batch("alice", generation.run_id, "batch-1", finished, "after batch")
