@@ -887,6 +887,42 @@ class GenerationStore:
                             # This response may have a short unsummarized tail
                             # after the saved text boundary.
                             group = [prefix, *recent]
+                            previous = db.execute(
+                                "SELECT state FROM runs WHERE conversation_id=? "
+                                "AND json_extract(state,'$.responseMessageId')=? "
+                                "ORDER BY created_at DESC LIMIT 1",
+                                (conversation_id, row['id']),
+                            ).fetchone()
+                            state = json.loads(previous['state']) if previous else {}
+                            steps = state.get('modelSteps')
+                            if isinstance(steps, list):
+                                # Summary coverage is cumulative across
+                                # checkpoints. Only new canonical tool exchanges
+                                # belong after the summary, never the already
+                                # summarized or retained-tail exchanges.
+                                covered = set(summary.get('coveredToolCallIds') or [])
+                                retained_calls = {call.get('id') for message in recent
+                                    for call in (message.get('tool_calls') or []) if isinstance(call, dict)}
+                                retained_results = {message.get('tool_call_id') for message in recent
+                                                    if message.get('role') == 'tool'}
+                                new_calls: set[str] = set()
+                                for message in steps:
+                                    if not isinstance(message, dict):
+                                        continue
+                                    role = message.get('role')
+                                    if role == 'assistant' and isinstance(message.get('tool_calls'), list):
+                                        calls = [call for call in message['tool_calls']
+                                                 if isinstance(call, dict) and isinstance(call.get('id'), str)
+                                                 and call['id'] not in covered and call['id'] not in retained_calls]
+                                        if calls:
+                                            new_calls.update(call['id'] for call in calls)
+                                            group.append({**message, 'content': None, 'tool_calls': calls})
+                                    elif role == 'tool' and isinstance(message.get('tool_call_id'), str):
+                                        ident = message['tool_call_id']
+                                        if (ident not in covered and ident not in retained_results
+                                                and ident in (new_calls | retained_calls)):
+                                            group.append(message)
+                                            retained_results.add(ident)
                             if text:
                                 group.append({'role': 'assistant', 'content': text})
                             groups.append(group)
