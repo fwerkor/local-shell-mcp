@@ -1,0 +1,358 @@
+{
+  "commit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+  "source": "api/app/clients/prompts/formatMessages.js",
+  "sha256": "88f8a1b77d6171c9e180c942d6f59775c7e2c6103b3c4d75cb8b74622eff02ad",
+  "dependency": "@langchain/core@1.2.8",
+  "vectors": [
+    {
+      "name": "multi_step_steer_signatures",
+      "input": [
+        {
+          "role": "assistant",
+          "metadata": {
+            "thoughtSignatures": {
+              "one": "sig-one",
+              "two": "sig-two"
+            }
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "First",
+              "tool_call_ids": [
+                "one"
+              ]
+            },
+            {
+              "type": "tool_call",
+              "tool_call": {
+                "id": "one",
+                "name": "file_read",
+                "args": "{\"path\":\"a\"}",
+                "output": "result A"
+              }
+            },
+            {
+              "type": "steer",
+              "steer": "Use B"
+            },
+            {
+              "type": "text",
+              "text": "Second",
+              "tool_call_ids": [
+                "two"
+              ]
+            },
+            {
+              "type": "tool_call",
+              "tool_call": {
+                "id": "two",
+                "name": "file_read",
+                "args": "{\"path\":\"b\"}",
+                "output": "result B"
+              }
+            },
+            {
+              "type": "text",
+              "text": "Finished"
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "role": "assistant",
+          "content": "First",
+          "tool_calls": [
+            {
+              "id": "one",
+              "name": "file_read",
+              "args": {
+                "path": "a"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "signatures": [
+              "sig-one"
+            ]
+          }
+        },
+        {
+          "role": "tool",
+          "content": "result A",
+          "tool_call_id": "one",
+          "name": "file_read"
+        },
+        {
+          "role": "user",
+          "content": "Use B",
+          "additional_kwargs": {
+            "source": "steer"
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Second",
+          "tool_calls": [
+            {
+              "id": "two",
+              "name": "file_read",
+              "args": {
+                "path": "b"
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "signatures": [
+              "sig-two"
+            ]
+          }
+        },
+        {
+          "role": "tool",
+          "content": "result B",
+          "tool_call_id": "two",
+          "name": "file_read"
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Finished"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "parallel_tools",
+      "input": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Calling both",
+              "tool_call_ids": [
+                "one",
+                "two"
+              ]
+            },
+            {
+              "type": "tool_call",
+              "tool_call": {
+                "id": "one",
+                "name": "a",
+                "args": "{}",
+                "output": "A"
+              }
+            },
+            {
+              "type": "tool_call",
+              "tool_call": {
+                "id": "two",
+                "name": "b",
+                "args": "{}",
+                "output": "B"
+              }
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "role": "assistant",
+          "content": "Calling both",
+          "tool_calls": [
+            {
+              "id": "one",
+              "name": "a",
+              "args": {}
+            },
+            {
+              "id": "two",
+              "name": "b",
+              "args": {}
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "A",
+          "tool_call_id": "one",
+          "name": "a"
+        },
+        {
+          "role": "tool",
+          "content": "B",
+          "tool_call_id": "two",
+          "name": "b"
+        }
+      ]
+    },
+    {
+      "name": "rich_image_steer",
+      "input": [
+        {
+          "role": "user",
+          "image_urls": [
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,AA=="
+              }
+            }
+          ],
+          "text": ""
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Preview"
+            },
+            {
+              "type": "steer",
+              "steer": "Photo detail",
+              "media": [
+                {
+                  "type": "text",
+                  "text": "inspect"
+                },
+                {
+                  "type": "image_url",
+                  "image_url": {
+                    "url": "data:image/png;base64,AA=="
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "Final"
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,AA=="
+              }
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": "Preview"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "inspect"
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,AA=="
+              }
+            }
+          ],
+          "additional_kwargs": {
+            "source": "steer"
+          }
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Final"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "user_empty",
+      "input": [
+        {
+          "role": "user",
+          "text": ""
+        },
+        {
+          "role": "user",
+          "content": "",
+          "files": [
+            {
+              "file_id": "a"
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "(no text)"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "(no text)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "assistant_multimodal_and_reasoning",
+      "input": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Hello"
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,AA=="
+              }
+            },
+            {
+              "type": "think",
+              "text": "Private thought"
+            },
+            {
+              "type": "text",
+              "text": "World"
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "role": "assistant",
+          "content": "Hello\nWorld"
+        }
+      ]
+    }
+  ]
+}

@@ -41,13 +41,13 @@ async def test_openai_fragmented_function_call_stream(monkeypatch):
     assert result == ["Checking ", ModelToolCall("call_0", "file_list", {"path": "."})]
     body = json.loads(sent[0].content)
     assert body["tools"] == tools
-    assert body["parallel_tool_calls"] is False
+    assert body["parallel_tool_calls"] is True
     assert "authorization" not in sent[0].headers
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("frames,message", [
-    (['data: {"choices":[{"delta":{"tool_calls":[{"index":5,"id":"a"}]}}]}'], "index"),
+    (['data: {"choices":[{"delta":{"tool_calls":[{"index":-1,"id":"a"}]}}]}'], "index"),
     (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"file_list","arguments":"{broken"}}]}}]}'], "JSON"),
     (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"file_list","arguments":"[1,2]"}}]}}]}'], "object"),
     (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"file_list","arguments":"{}"}}]}}]}'], "Incomplete"),
