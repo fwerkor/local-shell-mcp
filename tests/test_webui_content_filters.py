@@ -185,6 +185,11 @@ def test_too_many_inspection_fragments_fail_closed():
         inspect_content(fragments, _policy('messages'))
 
 
+def test_audit_only_policy_does_not_block_when_fragment_limit_is_exceeded():
+    fragments = [ContentFragment('message', 'content_part', 'benign') for _ in range(4098)]
+    assert inspect_content(fragments, _policy('messages', action='audit')) is None
+
+
 def test_bounded_policy_rejects_empty_invalid_fields_and_configuration():
     for fields in ([], [None], [2], [True], ['x' * 257], 'content_part'):
         policy = _policy('messages', fields=fields)

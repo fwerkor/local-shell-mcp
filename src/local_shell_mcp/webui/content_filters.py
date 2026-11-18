@@ -126,9 +126,11 @@ def inspect_content(fragments: Iterable[ContentFragment], filters: dict | None,
         if index > _MAX_ITEMS:
             # Never ignore a later protected fragment after bounded traversal.
             protected = next((record for record in snapshots
-                              if _policies(filters, record.source)), None)
+                              if (_policies(filters, record.source) or {}).get('action') != 'audit'
+                              and _policies(filters, record.source)), None)
             if protected is None and isinstance(fragment, ContentFragment):
-                protected = fragment if _policies(filters, fragment.source) else None
+                policy = _policies(filters, fragment.source)
+                protected = fragment if policy and policy.get('action') != 'audit' else None
             if protected is not None:
                 raise ContentFilterBlocked(protected.source, protected.field)
             break

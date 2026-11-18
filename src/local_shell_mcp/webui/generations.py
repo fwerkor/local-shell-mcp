@@ -804,6 +804,7 @@ class GenerationStore:
                         summary = find_checkpoint_summary_part(parts) if role == 'assistant' else None
                         if summary is not None:
                             stop_at_checkpoint = True
+                            covered_by_summary = set(summary.get('coveredToolCallIds') or [])
                             parts = parts[parts.index(summary):]
                             row_messages.append({'role': 'system',
                                                  'content': build_summary_carrier_text(get_summary_part_text(summary))})
@@ -832,7 +833,8 @@ class GenerationStore:
                         for call in tool_parts:
                             ident, name = call.get('id'), call.get('name')
                             if (not isinstance(ident, str) or not isinstance(name, str) or
-                                    'output' not in call or ident in represented_tool_calls):
+                                    'output' not in call or ident in represented_tool_calls or
+                                    (stop_at_checkpoint and ident in covered_by_summary)):
                                 continue
                             calls.append({'id': ident, 'type': 'function', 'function': {
                                 'name': name, 'arguments': _json(call.get('args', {}))}})
@@ -898,10 +900,9 @@ class GenerationStore:
             staged = run_state.get('summaryCheckpoint')
             from .compaction import is_usable_summary_part, mark_compaction_outcome
 
-            if is_usable_summary_part(staged):
-                covered = set(staged.get('coveredToolCallIds') or [])
-                tool_parts = {key: part for key, part in tool_parts.items()
-                              if part['tool_call'].get('id') not in covered}
+            # A summary checkpoint trims only the subsequent provider model
+            # projection. The saved Assistant DTO is the user's audit trail,
+            # including tool results that were visible before compaction.
             content = ([dict(staged)] if is_usable_summary_part(staged) else []) + (
                 ([{"type": "text", "text": text, "phase": "final_answer"}] if text else [])
                 + list(tool_parts.values())

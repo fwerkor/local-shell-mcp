@@ -46,7 +46,7 @@ from .memory import (
     tool_definitions,
 )
 from .memory_protection import configured_filters
-from .providers import ModelToolCall, ModelUsage, provider_config, selected_provider
+from .providers import ModelFinish, ModelToolCall, ModelUsage, provider_config, selected_provider
 from .semantic_index import (
     render_compaction_semantic_index,
     snapshot_compaction_semantic_index,
@@ -572,15 +572,18 @@ class AgentRunner:
         instruction = {'role': 'user', 'content': effective}
         summary_messages = [*messages, instruction]
         chunks = []
+        finish_reason = None
         limit = max(128, min(int(max_tokens), 16384))
         profile = profile or self.initial_profile or self._context(self.root_agent).profile
         if profile.provider in {"anthropic", "google"}:
             from .provider_tool_protocols import stream_native_tools
 
             response = stream_native_tools(profile, summary_messages, tools=[],
-                                           max_tokens=limit, temperature=None)
+                                           max_tokens=limit, temperature=None,
+                                           emit_finish_reason=True)
         else:
-            response = self.stream_text(profile, summary_messages, max_tokens=limit)
+            response = self.stream_text(profile, summary_messages, max_tokens=limit,
+                                        emit_finish_reason=True)
         async for value in response:
             if isinstance(value, str):
                 chunks.append(value)
@@ -588,11 +591,21 @@ class AgentRunner:
                 # A summarizer's provider metadata must never be inserted into
                 # user-visible checkpoint text or mistaken for a tool call.
                 continue
+            elif isinstance(value, ModelFinish):
+                finish_reason = value.reason.lower()
             else:
                 raise ValueError('Summary provider returned a tool call instead of text')
         summary = ''.join(chunks).strip()
         if not summary:
             raise ValueError('Summarization produced empty output')
+        if finish_reason in {'length', 'max_tokens', 'max_tokens_reached', 'max_output_tokens',
+                             'max_output_tokens_reached'}:
+            raise ValueError('Summary response was truncated by the provider output limit')
+        # Some OpenAI-compatible endpoints omit finish_reason entirely. For
+        # them, refuse near-limit output instead of committing a partial
+        # checkpoint whose source conversation would become unreachable.
+        if finish_reason in {None, 'unknown'} and count_tokens(summary, exact=False) >= limit * 0.85:
+            raise ValueError('Summary completion is unverified near output token limit')
         count = count_tokens(build_summary_carrier_text(summary), exact=False)
         covered_calls = set()
         for message in messages:

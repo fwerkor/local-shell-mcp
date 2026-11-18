@@ -126,6 +126,13 @@ def _anthropic_omits_sampling_parameters(model: str) -> bool:
 
 
 @dataclass(frozen=True)
+class ModelFinish:
+    """Provider-reported stop reason, emitted only to explicit summary callers."""
+    provider: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class ModelUsage:
     """Confirmed provider token counts, never a local token estimate."""
     provider: str
@@ -181,7 +188,8 @@ async def stream_model(
     max_tokens: int = 2048,
     temperature: float | None = None,
     top_p: float | None = None,
-) -> AsyncIterator[str | ModelUsage]:
+    emit_finish_reason: bool = False,
+) -> AsyncIterator[str | ModelUsage | ModelFinish]:
     """Stream user-visible answer text without buffering the provider response."""
     import httpx
 
@@ -226,6 +234,7 @@ async def stream_model(
         raise ValueError("Unsupported model provider")
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     usage_snapshot = None
+    finish_reason = None
     async with (
         httpx.AsyncClient(timeout=timeout) as http,
         http.stream("POST", config.url, json=body, headers=headers) as response,
@@ -243,6 +252,8 @@ async def stream_model(
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "openai":
                 for choice in event.get("choices", []):
+                    if isinstance(choice.get('finish_reason'), str):
+                        finish_reason = choice['finish_reason']
                     content = choice.get("delta", {}).get("content")
                     if isinstance(content, str) and content:
                         yield content
@@ -251,12 +262,18 @@ async def stream_model(
                             if isinstance(part, dict) and isinstance(part.get("text"), str):
                                 yield part["text"]
             elif config.provider == "anthropic":
+                if event.get('type') == 'message_delta':
+                    reason = (event.get('delta') or {}).get('stop_reason')
+                    if isinstance(reason, str):
+                        finish_reason = reason
                 if event.get("type") == "content_block_delta":
                     text = event.get("delta", {}).get("text")
                     if isinstance(text, str) and text:
                         yield text
             else:
                 for candidate in event.get("candidates", []):
+                    if isinstance(candidate.get('finishReason'), str):
+                        finish_reason = candidate['finishReason']
                     for part in (candidate.get("content") or {}).get("parts", []):
                         text = part.get("text")
                         if isinstance(text, str) and text:
@@ -264,6 +281,8 @@ async def stream_model(
 
     if usage_snapshot is not None:
         yield usage_snapshot
+    if emit_finish_reason:
+        yield ModelFinish(config.provider, finish_reason or 'unknown')
 
 
 @dataclass(frozen=True)

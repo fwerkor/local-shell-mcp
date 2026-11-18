@@ -1,4 +1,5 @@
 """Source-protocol Memory integration/transaction/offline regression cases."""
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -225,3 +226,11 @@ def test_checkpoint_omits_tool_calls_covered_by_summary(db):
     history = store.history('local', run.conversation_id)
     assert any('<summary>' in str(item.get('content')) for item in history)
     assert not any('call-1' in str(item.get('tool_calls') or '') for item in history)
+    # The provider replay has compacted the call, but the persisted assistant
+    # response still contains the original tool result for audit and reload.
+    with db.connect() as connection:
+        saved = connection.execute('SELECT content FROM messages WHERE id=?',
+                                   (run.response_message_id,)).fetchone()
+    parts = json.loads(saved['content'])
+    assert any(part.get('type') == 'tool_call' and
+               part['tool_call'].get('id') == 'call-1' for part in parts)

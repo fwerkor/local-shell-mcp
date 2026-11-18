@@ -14,6 +14,7 @@ from local_shell_mcp.webui.context_calibration import TokenCalibration, clamp_ca
 from local_shell_mcp.webui.generations import GenerationStore
 from local_shell_mcp.webui.provider_tool_protocols import stream_native_tools
 from local_shell_mcp.webui.providers import (
+    ModelFinish,
     ModelToolCall,
     ModelUsage,
     ProviderConfig,
@@ -321,3 +322,24 @@ async def test_calibration_storage_failure_does_not_abort_model_answer(tmp_path,
         [{'role': 'user', 'content': 'Hello'}]), stream_tools=stream, stream_text=stream,
         dispatch=lambda *a: None, on_text=emit, on_model_usage=runner._observe_model_usage)
     assert result[-1]['content'] == 'Successful answer.'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('finish', ['length', 'max_tokens', 'MAX_TOKENS', 'max_output_tokens'])
+async def test_summary_refuses_provider_truncation(tmp_path, finish):
+    db = SQLiteDatabase(tmp_path / 'state')
+    run, _ = GenerationStore(db).begin('alice', {'text': 'Summarize'})
+    profile = ProviderConfig('openai', 'model', 'https://provider.test', '')
+
+    async def fake_stream(*args, **kwargs):
+        assert kwargs['emit_finish_reason'] is True
+        yield 'Summary of previous conversation'
+        yield ModelFinish('openai', finish)
+
+    async def noop(_):
+        pass
+
+    runner = AgentRunner('alice', run, db, GenerationStore(db), scopes=set(), grant_expires=None,
+                         stream_tools=fake_stream, stream_text=fake_stream, on_text=noop, profile=profile)
+    with pytest.raises(ValueError, match='truncated'):
+        await runner._summarize_history([{'role': 'user', 'content': 'Important old context'}])
