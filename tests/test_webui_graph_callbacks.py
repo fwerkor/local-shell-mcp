@@ -174,6 +174,9 @@ async def test_foreground_subagent_graph_tool_callback_keeps_parent_sse_private(
         namespace='/subagent:team-call/graph:researcher:activation',
         graph_node=True,
     )
+    # A foreground subagent's private checkpoint exists in a real run.
+    # This focused callback test isolates persistence of the *parent* SSE.
+    child.saver.put_writes = lambda *args, **kwargs: None
     call = ModelToolCall('private-child-tool', 'run_shell', {'command': 'secret subagent args'})
     await child._completed(call, {'output': 'private intermediate result'})
     visible = [entry for _, entry in store.events('alice', generation.run_id)]
