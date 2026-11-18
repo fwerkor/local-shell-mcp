@@ -285,3 +285,35 @@ async def test_steer_http_requires_current_machine_grants_and_agent_ownership(co
             "text": "Do something", "clientSteerId": "new-attempt",
         })
         assert denied.status_code == 403 and denied.json()["code"] == "FORBIDDEN"
+
+
+def test_applied_steer_is_replayed_after_crash_before_checkpoint_without_duplicates(context):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    generations, steering, job, _ = context
+    first = _enqueue(steering, job, 'recovery-1', 'Use the new direction')
+    second = _enqueue(steering, job, 'recovery-2', 'Use the new direction')
+    assert len(steering.drain('local', job.run_id, boundary='terminal')) == 2
+    assert first['steerId'] != second['steerId']
+    reopened = SQLiteDatabase(steering.database.root)
+    profile = ProviderConfig('openai', 'fake', 'https://example.invalid', '')
+
+    async def fake_stream(*args, **kwargs):
+        yield 'model response'
+
+    async def noop(_):
+        return None
+
+    runner = AgentRunner('local', job, reopened, GenerationStore(reopened),
+                         scopes=set(), grant_expires=None, stream_tools=fake_stream,
+                         stream_text=fake_stream, on_text=noop, profile=profile)
+    # The graph checkpoint predates drain(), while the durable run-state
+    # receipt already says applied. The instruction must still reach the model.
+    state = AgentLoopState(AgentContext(profile, []), [{'role': 'user', 'content': 'original'}])
+    runner._reconcile_drained_steers(state)
+    assert [m['content'] for m in state.messages if m.get('source') == 'steer'] == [
+        'Use the new direction', 'Use the new direction']
+    runner._reconcile_drained_steers(state)
+    assert len([m for m in state.messages if m.get('source') == 'steer']) == 2

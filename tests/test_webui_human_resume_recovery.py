@@ -172,3 +172,28 @@ def test_source_client_pending_projection_hides_server_replay_secrets(tmp_path):
     assert visible["interruptId"] == "safe-identity"
     event = store.events("alice", generation.run_id)[-1][1]
     assert event["data"] == visible
+
+@pytest.mark.parametrize("cleanup", ["checkpoint", "oauth_dispatch"])
+def test_oauth_cleanup_retains_claimed_approval_resume_history(tmp_path, cleanup):
+    root, store, run = store_and_run(tmp_path)
+    db = store.database
+    pending = approval_pause(run)
+    history = [{"role": "user", "content": "Authorize a reviewed action"}]
+    decisions = [{"tool_call_id": "a", "decision": "approve"},
+                 {"tool_call_id": "b", "decision": "reject"}]
+    assert store.pause_for_approval("alice", run.run_id, pending, history, "pre-OAuth text")
+    store.claim_approval("alice", run.run_id, pending["actionId"], decisions)
+    with db.connect() as conn:
+        saved = json.loads(conn.execute("SELECT state FROM runs WHERE id=?", (run.run_id,)).fetchone()["state"])
+        saved["oauthResume"] = {"tool_call_id": "a", "stage": "completed"}
+        conn.execute("UPDATE runs SET state=? WHERE id=?", (json.dumps(saved), run.run_id))
+    if cleanup == "checkpoint":
+        assert store.clear_oauth_checkpoint("alice", run.run_id)
+    else:
+        store.oauth_dispatch("alice", run.run_id, "a", "cleared")
+    reopened = GenerationStore(SQLiteDatabase(root))
+    assert reopened.recover_claimed_resumes() == 1
+    _, replay, partial, batch, namespace = reopened.restart_claimed_resume(
+        "alice", run.run_id, pending["actionId"], {"decisions": decisions})
+    assert replay == history and partial == "pre-OAuth text"
+    assert batch is not None and namespace == ""

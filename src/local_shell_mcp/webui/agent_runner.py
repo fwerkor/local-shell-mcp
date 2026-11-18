@@ -421,6 +421,48 @@ class AgentRunner:
         history = with_agent_context(self.database, self.owner, target, history)
         return ToolBatchOutput(messages, next_context=self._context(target), replace_messages=history)
 
+    @staticmethod
+    def _steer_message(item):
+        content = merged_text(item)
+        if item.get("files"):
+            content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
+                item["files"], ensure_ascii=False,
+            )
+        return {"role": "user", "content": content, "source": "steer"}
+
+    def _reconcile_drained_steers(self, state):
+        """Recover durable applied steers not yet included in a model checkpoint.
+
+        drain() records an applied receipt before the graph snapshot. A crash
+        in that window must not silently lose the accepted user instruction.
+        Compare occurrence counts, not merely text equality: two identical
+        steers are distinct accepted messages.
+        """
+        if self.namespace:
+            return
+        from collections import Counter
+
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'",
+                (self.generation.run_id, self.owner),
+            ).fetchone()
+        if row is None:
+            return
+        parts = json.loads(row["state"]).get("steerParts") or []
+        persisted = Counter(m.get("content") for m in state.messages
+                            if isinstance(m, dict) and m.get("source") == "steer"
+                            and isinstance(m.get("content"), str))
+        required = Counter()
+        for part in parts:
+            if not isinstance(part, dict) or not isinstance(part.get("steer"), str):
+                continue
+            message = self._steer_message(part)
+            required[message["content"]] += 1
+            if required[message["content"]] > persisted[message["content"]]:
+                state.messages.append(message)
+
     async def run(self, history, *, recursion_limit=None):
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
@@ -447,6 +489,7 @@ class AgentRunner:
                     self.cache[replay_key(call, index)] = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)},
                                                          "output": match["content"]}
                     self.saver.put_writes(self.active_config, [("messages", match)], task_id=call.call_id)
+        self._reconcile_drained_steers(state)
         if recursion_limit is not None:
             state.context.recursion_limit = recursion_limit
         review = self.store.approved_review(self.owner, self.generation.run_id)
@@ -516,14 +559,7 @@ class AgentRunner:
             if applied and self.on_injected is not None:
                 await self.on_injected()
             for item in applied:
-                content = merged_text(item)
-                if item.get("files"):
-                    # Retain validated upload refs for native tools; the model
-                    # cannot claim multimodal inline encoding from this path.
-                    content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
-                        item["files"], ensure_ascii=False,
-                    )
-                loop_state.messages.append({"role": "user", "content": content, "source": "steer"})
+                loop_state.messages.append(self._steer_message(item))
             return bool(applied)
 
         async def should_seal_stream():

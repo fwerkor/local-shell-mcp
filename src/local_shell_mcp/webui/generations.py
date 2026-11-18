@@ -353,8 +353,12 @@ class GenerationStore:
                 raise PermissionError("OAuth Action cannot clear unverified dispatch")
             if stage == "cleared":
                 state.pop("oauthResume", None)
-                state.pop("resumeHistory", None)
-                state.pop("partialText", None)
+                # A human resume claim may still need this exact approved
+                # continuation after a crash. OAuth's tool replay fence and
+                # human approval replay evidence have different lifetimes.
+                if not isinstance(state.get("resumeClaim"), dict):
+                    state.pop("resumeHistory", None)
+                    state.pop("partialText", None)
             else:
                 marker["stage"] = stage
             db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?", (_json(state), _now(), run_id))
@@ -374,8 +378,9 @@ class GenerationStore:
             if not isinstance(marker, dict) or marker.get("stage") not in {"claimed", "completed"}:
                 return False
             state.pop("oauthResume")
-            state.pop("resumeHistory", None)
-            state.pop("partialText", None)
+            if not isinstance(state.get("resumeClaim"), dict):
+                state.pop("resumeHistory", None)
+                state.pop("partialText", None)
             db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?", (_json(state), _now(), run_id))
             return True
 
