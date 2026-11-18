@@ -783,10 +783,11 @@ class GenerationStore:
             # Persist the same part so the error survives history reload too.
             if status in {"error", "interrupted"}:
                 content.append({"type": "error", "error": error or "Generation failed"})
-            from .tool_attachments import response_attachments
+            from .tool_attachments import response_attachments, visible_response_attachments
 
-            attachments = response_attachments(db, owner, [generation.response_message_id])[
+            verified = response_attachments(db, owner, [generation.response_message_id])[
                 generation.response_message_id]
+            attachments = visible_response_attachments(verified, attachments)
             response_message = {
                 "messageId": generation.response_message_id,
                 "conversationId": generation.conversation_id,

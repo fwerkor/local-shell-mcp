@@ -10,11 +10,13 @@ from local_shell_mcp.settings import get_settings
 from local_shell_mcp.sqlite_store import shared_database
 from local_shell_mcp.webui import agent_runner, generation_routes
 from local_shell_mcp.webui.agent_runner import AgentRunner
+from local_shell_mcp.webui.attachments import _safe_attachment_path
 from local_shell_mcp.webui.conversation_routes import _clone
 from local_shell_mcp.webui.generations import GenerationStore
 from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
 from local_shell_mcp.webui.routes import _repo
 from local_shell_mcp.webui.storage import WorkspaceRepository
+from local_shell_mcp.webui.tool_attachments import link_tool_attachment, update_attachment_preview
 
 
 @pytest.fixture
@@ -108,10 +110,20 @@ def test_ui_resource_attachment_is_delivered_and_reloaded(web_store):
 def test_single_native_attachment_record_updates_without_duplication(web_store):
     store = web_store
     run, _ = store.begin("local", {"text": "Export"})
-    attachment = {"file_id": "file-1", "type": "file", "messageId": run.response_message_id,
-                  "toolCallId": "tool-1", "conversationId": run.conversation_id, "status": "pending"}
-    store.append("local", run.run_id, {"event": "attachment", "data": attachment})
-    store.append("local", run.run_id, {"event": "attachment", "data": {**attachment, "status": "ready", "text": "ready"}})
+    # Canonical file attachments must be owned Controller blobs, linked to a
+    # recorded tool call. An arbitrary SSE event cannot invent a file.
+    path = _safe_attachment_path("local", "report.txt", store.database.root)
+    path.write_text("ready", encoding="utf-8")
+    with store.database.connect() as connection:
+        connection.execute(
+            "INSERT INTO attachments(id,owner,name,path,content_type,metadata) VALUES(?,?,?,?,?,?)",
+            ("file-1", "local", "report.txt", str(path), "text/plain", '{"status":"pending"}'),
+        )
+    store.append("local", run.run_id, {"event": "on_run_step", "data": {
+        "stepDetails": {"type": "tool_calls", "tool_calls": [
+            {"id": "tool-1", "name": "file_write", "args": {}}]}}})
+    link_tool_attachment(store.database, "local", run.run_id, "tool-1", "file-1")
+    update_attachment_preview(store.database, "local", "file-1", "ready", text="ready")
     ui = {"type": "ui_resources", "toolCallId": "tool-2", "messageId": run.response_message_id,
           "conversationId": run.conversation_id, "ui_resources": [{"resourceId": "r2", "uri": "ui://a"}]}
     store.append("local", run.run_id, {"event": "attachment", "data": ui})

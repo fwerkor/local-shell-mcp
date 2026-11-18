@@ -211,7 +211,7 @@ def _clone(owner: str, values: dict, *, only_to_message: str | None = None) -> d
             )
         _clone_attachment_links(db, owner, cid, new_cid, messages, ids, now)
         response = repo._convo(db.execute("SELECT * FROM conversations WHERE id=?", (new_cid,)).fetchone())
-        from .tool_attachments import response_attachments
+        from .tool_attachments import response_attachments, visible_response_attachments
 
         cloned_rows = db.execute(
             "SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at,id", (new_cid,)
@@ -221,7 +221,8 @@ def _clone(owner: str, values: dict, *, only_to_message: str | None = None) -> d
         for row in cloned_rows:
             message = repo._message(row)
             if row["role"] == "assistant" and (row["id"] in live or "attachments" in message):
-                message["attachments"] = live.get(row["id"], [])
+                message["attachments"] = visible_response_attachments(
+                    live.get(row["id"], []), message.get("attachments"))
             response["messages"].append(message)
     return response
 
