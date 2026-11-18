@@ -264,6 +264,26 @@ def model_message_fragments(messages: list[dict]) -> list[ContentFragment]:
         provenance = {'user': 'user', 'assistant': 'model', 'system': 'system', 'tool': 'tool'}[role]
         if isinstance(content, str):
             fragments.append(ContentFragment('assembled_context', 'assembled_context', content, provenance))
+        elif isinstance(content, list):
+            # Multimodal content is sent to the provider as text/image parts.
+            # Text alongside an image must pass the same assembled-context
+            # protection as a scalar message. Avoid inspecting opaque image
+            # bytes or user-controlled URLs as if they were prose.
+            if len(content) > _MAX_NODES:
+                fragments.append(ContentFragment('assembled_context', 'assembled_context',
+                                                 'x' * (_MAX_FIELD_CHARS + 1), provenance))
+            else:
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    if part.get('type') in {'text', 'input_text'}:
+                        text = part.get('text')
+                        if isinstance(text, str):
+                            fragments.append(ContentFragment('assembled_context', 'assembled_context',
+                                                             text, provenance))
+                        elif text is not None:
+                            fragments.append(ContentFragment('assembled_context', 'assembled_context',
+                                                             'x' * (_MAX_FIELD_CHARS + 1), provenance))
         # Provider-bound history may carry private reasoning independently of
         # assistant.content. The OpenAI transport forwards these fields, so
         # assembled-context protection must inspect them as well.
