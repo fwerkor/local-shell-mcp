@@ -83,9 +83,14 @@ async def test_auto_memory_uses_real_sse_provider_and_replays_attachment(tmp_pat
         attachments = [event['data'] for _, event in store.events('local', generation.run_id)
                        if event.get('event') == 'attachment']
         assert len(attachments) == 1
-        assert attachments[0]['toolCallId'] == 'call-real'
+        assert 'toolCallId' not in attachments[0]  # no inline tool-call card for background Memory
         assert attachments[0]['memory']['type'] == 'update'
         assert store.finish('local', generation.run_id, status='complete', text='Saved')
+        messages = WorkspaceRepository(SQLiteDatabase(db.root)).messages(
+            'local', generation.conversation_id)['messages']
+        assistant = next(item for item in messages if item['role'] == 'assistant')
+        assert assistant['attachments'][0]['memory']['type'] == 'update'
+        assert 'toolCallId' not in assistant['attachments'][0]
     finally:
         server.should_exit = True
         await task
