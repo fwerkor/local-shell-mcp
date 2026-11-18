@@ -47,6 +47,30 @@ class GenerationConflict(Exception):
         super().__init__("Conversation already has an active generation")
 
 
+def _rewind_uncheckpointed_text(parts: list[dict], saved: str) -> None:
+    """Remove incomplete provider text after the last durable human checkpoint.
+
+    Preserve the placement of tool calls and steers; only assistant text is
+    provisional while a model stream is in flight. The exact checkpointed
+    prefix is retained even when it spans several independent text parts.
+    """
+    if not isinstance(saved, str):
+        raise ValueError('Invalid checkpoint text prefix')
+    remaining = len(saved)
+    retained = []
+    for part in parts:
+        if part.get('type') != 'text':
+            retained.append(part)
+            continue
+        if remaining <= 0:
+            continue
+        piece = part['text'][:remaining]
+        if piece:
+            retained.append({**part, 'text': piece})
+        remaining -= len(piece)
+    parts[:] = retained
+
+
 class GenerationStore:
     def __init__(self, database: Any):
         self.database = database
@@ -347,6 +371,19 @@ class GenerationStore:
             previous = marker.get("stage")
             if stage == "dispatching" and previous != "claimed":
                 raise PermissionError("OAuth Action was already dispatched")
+            if stage == "completed" and previous == "completed":
+                # A resumed, already-authorized approval may replay the cached
+                # ToolNode result after a crash. Re-acknowledging that result is
+                # safe ONLY if the authoritative host completion survived in
+                # the same run; the HTTP dispatch fence stays closed.
+                recorded = db.execute(
+                    "SELECT 1 FROM generation_events WHERE run_id=? AND "
+                    "json_extract(data,'$.event')='on_run_step_completed' AND "
+                    "json_extract(data,'$.data.result.tool_call.id')=? LIMIT 1",
+                    (run_id, call_id),
+                ).fetchone()
+                if recorded is not None:
+                    return
             if stage == "completed" and previous != "dispatching":
                 raise PermissionError("OAuth Action HTTP completion has no dispatch record")
             if stage == "cleared" and previous not in {"completed", "claimed"}:
@@ -547,6 +584,12 @@ class GenerationStore:
                 state["pendingAction"] = pending
                 db.execute("UPDATE runs SET state=?,status='requires_action',updated_at=? WHERE id=?",
                            (_json(state), _now(), row["id"]))
+                # A crashed provider may have emitted SSE text after the saved
+                # ToolNode/human checkpoint, without any resumable state. Mark
+                # the exact text prefix to reproject on reconnect and finish.
+                db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
+                           (row['id'], _json({'event': 'on_content_rewind', 'data': {
+                               'preserveText': state.get('partialText', '')}})))
                 db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                            (row["id"], _json({"event": "on_pending_action",
                                                "data": self.client_pending_action(pending)})))
@@ -701,6 +744,7 @@ class GenerationStore:
             max_seq = entries[-1]["seq"] if entries else 0
         steps = {}
         content_parts: list[dict] = []
+        tool_slot_by_step: dict[str, int] = {}
         for entry in entries:
             item = json.loads(entry["data"])
             event, data = item.get("event"), item.get("data") or {}
@@ -713,8 +757,18 @@ class GenerationStore:
                 result = data.get("result") or {}
                 tool_call = result.get("tool_call")
                 if isinstance(tool_call, dict):
-                    content_parts.append({"type": "tool_call", "tool_call": {
-                        **tool_call, "stepId": result.get("id")}})
+                    step_id = result.get('id')
+                    part = {'type': 'tool_call', 'tool_call': {
+                        **tool_call, 'stepId': step_id}}
+                    if isinstance(step_id, str) and step_id in tool_slot_by_step:
+                        # Crash recovery can replay the same cached completion.
+                        # React updates by step ID, so the snapshot must update
+                        # that slot instead of adding another content element.
+                        content_parts[tool_slot_by_step[step_id]] = part
+                    else:
+                        if isinstance(step_id, str):
+                            tool_slot_by_step[step_id] = len(content_parts)
+                        content_parts.append(part)
             elif event == "on_message_delta":
                 content = (data.get("delta") or {}).get("content") or {}
                 if content.get("type") == "text" and isinstance(content.get("text"), str) and content["text"]:
@@ -725,6 +779,8 @@ class GenerationStore:
                                               "phase": "final_answer"})
             elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
                 content_parts.append(data["part"])
+            elif event == 'on_content_rewind':
+                _rewind_uncheckpointed_text(content_parts, data.get('preserveText', ''))
         pending = state.get("pendingAction")
         oauth_prompts = []
         if isinstance(pending, dict) and (pending.get('payload') or {}).get('type') == 'action_oauth':
@@ -921,6 +977,8 @@ class GenerationStore:
                             content.append({"type": "text", "text": delta["text"], "phase": "final_answer"})
                 elif kind == "on_steer_applied" and isinstance(data.get("part"), dict):
                     content.append(data["part"])
+                elif kind == 'on_content_rewind':
+                    _rewind_uncheckpointed_text(content, data.get('preserveText', ''))
             if not content and text:
                 content.append({"type": "text", "text": text, "phase": "final_answer"})
             # The original chronological position of each completed tool is

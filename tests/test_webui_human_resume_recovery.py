@@ -197,3 +197,76 @@ def test_oauth_cleanup_retains_claimed_approval_resume_history(tmp_path, cleanup
         "alice", run.run_id, pending["actionId"], {"decisions": decisions})
     assert replay == history and partial == "pre-OAuth text"
     assert batch is not None and namespace == ""
+
+
+def test_claimed_approval_replays_completed_oauth_result_without_second_dispatch(tmp_path):
+    root, store, run = store_and_run(tmp_path)
+    pending = approval_pause(run)
+    decision = [{'tool_call_id': 'a', 'decision': 'approve'},
+                {'tool_call_id': 'b', 'decision': 'reject'}]
+    assert store.pause_for_approval('alice', run.run_id, pending, [], '')
+    store.claim_approval('alice', run.run_id, pending['actionId'], decision)
+    db = store.database
+    with db.connect() as conn:
+        saved = json.loads(conn.execute('SELECT state FROM runs WHERE id=?',
+                                        (run.run_id,)).fetchone()['state'])
+        saved['oauthResume'] = {'stage': 'completed', 'tool_call_id': 'a',
+                                'action_id': 'action-a', 'action_version': 1}
+        conn.execute('UPDATE runs SET state=? WHERE id=?', (json.dumps(saved), run.run_id))
+    with pytest.raises(PermissionError, match='no dispatch record'):
+        store.oauth_dispatch('alice', run.run_id, 'a', 'completed')
+    store.append('alice', run.run_id, {'event': 'on_run_step_completed', 'data': {
+        'result': {'id': 'tool-a', 'type': 'tool_call',
+                   'tool_call': {'id': 'a', 'name': 'oauth_action', 'output': 'cached success'}}}})
+    reopened = GenerationStore(SQLiteDatabase(root))
+    assert reopened.recover_claimed_resumes() == 1
+    reopened.restart_claimed_resume('alice', run.run_id, pending['actionId'], {'decisions': decision})
+    # Replayed cached ToolNode completion is idempotent and cannot reopen HTTP.
+    reopened.oauth_dispatch('alice', run.run_id, 'a', 'completed')
+    with pytest.raises(PermissionError, match='already dispatched'):
+        reopened.oauth_dispatch('alice', run.run_id, 'a', 'dispatching')
+    assert reopened.clear_oauth_checkpoint('alice', run.run_id)
+
+
+def test_resume_snapshot_replayed_tool_completion_updates_same_step_slot(tmp_path):
+    _, store, run = store_and_run(tmp_path)
+    original = {'event': 'on_run_step_completed', 'data': {'result': {
+        'id': 'step-one', 'type': 'tool_call',
+        'tool_call': {'id': 'call-one', 'name': 'file_read', 'args': {}, 'output': 'old result'}}}}
+    store.append('alice', run.run_id, original)
+    store.append('alice', run.run_id, {'event': 'on_steer_applied', 'data': {
+        'part': {'type': 'steer', 'steerId': 'steer-one', 'steer': 'Explain now'}}})
+    replay = json.loads(json.dumps(original))
+    replay['data']['result']['tool_call']['output'] = 'new cached presentation'
+    store.append('alice', run.run_id, replay)
+    snapshot, _ = store.resume_snapshot('alice', run.run_id)
+    slots = snapshot['aggregatedContent']
+    assert len([slot for slot in slots if slot.get('type') == 'tool_call']) == 1
+    assert slots[0]['tool_call']['stepId'] == 'step-one'
+    assert slots[0]['tool_call']['output'] == 'new cached presentation'
+    assert slots[1]['type'] == 'steer'
+
+
+def test_recover_human_claim_removes_abandoned_stream_text_before_new_continuation(tmp_path):
+    root, store, job = store_and_run(tmp_path)
+    # Only the first text segment was checkpointed at the human boundary.
+    store.append('alice', job.run_id, {'event': 'on_message_delta',
+        'data': {'delta': {'content': {'type': 'text', 'text': 'Confirmed prefix. '}}}})
+    pause = question_pause(job)
+    assert store.pause_for_question('alice', job.run_id, pause, [], 'Confirmed prefix. ')
+    store.answer_question('alice', job.run_id, pause['actionId'], {'answer': 'markdown'})
+    store.append('alice', job.run_id, {'event': 'on_message_delta',
+        'data': {'delta': {'content': {'type': 'text', 'text': 'Abandoned uncheckpointed text.'}}}})
+    restarted = GenerationStore(SQLiteDatabase(root))
+    assert restarted.recover_claimed_resumes() == 1
+    snapshot, _ = restarted.resume_snapshot('alice', job.run_id)
+    assert ''.join(p['text'] for p in snapshot['aggregatedContent'] if p['type'] == 'text') == 'Confirmed prefix. '
+    restarted.restart_claimed_resume('alice', job.run_id, pause['actionId'], {'answer': 'markdown'})
+    restarted.append('alice', job.run_id, {'event': 'on_message_delta',
+        'data': {'delta': {'content': {'type': 'text', 'text': 'Recovered continuation.'}}}})
+    assert restarted.finish('alice', job.run_id, status='complete',
+                             text='Confirmed prefix. Recovered continuation.')
+    terminal = restarted.events('alice', job.run_id)[-1][1]['responseMessage']
+    assert ''.join(p['text'] for p in terminal['content'] if p['type'] == 'text') == (
+        'Confirmed prefix. Recovered continuation.')
+    assert 'Abandoned' not in json.dumps(terminal)
