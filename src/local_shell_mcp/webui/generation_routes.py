@@ -540,6 +540,25 @@ async def _events(owner: str, generation: Generation, after: int = 0,
             "sync": True, "resumeState": snapshot, "pendingEvents": [],
             "generationProtocolVersion": generation.protocol_version,
         }, ensure_ascii=False, separators=(",", ":")) + "\n\n").encode()
+        # The React resumeState projection restores text/tool cards, while
+        # attachmentHandler consumes independent SSE attachment events. A
+        # disconnected browser has none of these attachments in memory.
+        # Reproject owner-bound attachments at the captured watermark before
+        # live replay; leave the sequence cursor unchanged to avoid rollback.
+        cursor = 0
+        while cursor < watermark:
+            batch = store.events(owner, generation.run_id, cursor)
+            if not batch:
+                break
+            for seq, item in batch:
+                if seq > watermark:
+                    break
+                if item.get('event') == 'attachment' and isinstance(item.get('data'), dict):
+                    yield ('data: ' + json.dumps(item, ensure_ascii=False,
+                           separators=(',', ':')) + '\n\n').encode()
+                cursor = seq
+            if cursor >= watermark:
+                break
         # The sync snapshot does not signal terminal completion to React.
         # Re-send a final event already included in the cursor watermark.
         if watermark > after:

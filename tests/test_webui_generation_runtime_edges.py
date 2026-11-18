@@ -334,3 +334,26 @@ def test_aborted_checkpoint_replay_does_not_duplicate_already_saved_assistant_pr
 
     assert _recovered_terminal_steps(StubStore(), 'owner', 'run', 'Partial answer') == [
         {'role': 'assistant', 'content': 'Partial answer'}]
+
+
+@pytest.mark.asyncio
+async def test_resume_replays_attachments_consumed_outside_aggregated_content(active_generation, monkeypatch):
+    _, store, _ = active_generation
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    generation, _ = store.begin('local', {'text': 'Create a resource'})
+    store.append('local', generation.run_id, {'event': 'on_message_delta',
+        'data': {'id': 'step', 'delta': {'content': {'type': 'text', 'text': 'Prepared'}}}})
+    attachment = {'type': 'ui_resources', 'messageId': generation.response_message_id,
+                  'toolCallId': 'tool-1', 'ui_resources': [{'resourceId': 'resource-1'}]}
+    store.append('local', generation.run_id, {'event': 'attachment', 'data': attachment})
+    store.append('local', generation.run_id, {'event': 'on_pending_action',
+        'data': {'actionId': 'ask-1'}})
+    emitted = []
+    stream = generation_routes._events('local', generation, resume=True)
+    for _ in range(2):
+        emitted.append((await anext(stream)).decode())
+    await stream.aclose()
+    decoded = [json.loads(packet.partition('data: ')[2].split('\n\n', 1)[0]) for packet in emitted]
+    assert decoded[0]['sync'] is True
+    assert decoded[1] == {'event': 'attachment', 'data': attachment}
+    assert decoded[0]['resumeState']['aggregatedContent'][0]['text'] == 'Prepared'
