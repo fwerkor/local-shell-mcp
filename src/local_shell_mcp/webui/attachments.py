@@ -331,7 +331,11 @@ def _public_attachment_metadata(metadata):
     """Never surface unsanitized legacy HTML as a trusted office preview."""
     public_metadata = {key: value for key, value in metadata.items()
                        if key != "extracted_text"}
-    if public_metadata.get("textFormat") == "html":
+    # This marker is written only by the internal static Office renderer,
+    # whose document content is escaped before publication. Legacy arbitrary
+    # HTML preview metadata must continue to fail closed.
+    trusted_office = public_metadata.pop("officeRenderer", None) == "static-escaped-v1"
+    if public_metadata.get("textFormat") == "html" and not trusted_office:
         public_metadata.pop("text", None)
         public_metadata.pop("textFormat", None)
         public_metadata["status"] = "failed"

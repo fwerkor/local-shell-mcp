@@ -299,15 +299,7 @@ class AgentRunner:
                 },
             }, actor_lease=self.actor_lease)
         from .action_spec import is_action_tool
-        from .tool_attachments import controller_tool_file_ids
 
-        identities = controller_tool_file_ids(output)
-        if identities:
-            self.store.append_tool_completion(
-                self.owner, self.generation.run_id, event, call.call_id, identities,
-            )
-        else:
-            self.store.append(self.owner, self.generation.run_id, event)
         if is_action_tool(call.name):
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
 
