@@ -169,3 +169,20 @@ async def test_nested_graph_subagent_tool_results_are_not_published_to_parent(tm
     recorded = store.events('owner', run.run_id)
     assert any(item.get('event') == 'on_run_step_completed' for _, item in recorded)
     assert 'PRIVATE CHILD FINDING' not in str(recorded)
+
+
+def test_active_step_lookup_reads_all_event_pages_after_steer(tmp_path):
+    store = GenerationStore(SQLiteDatabase(tmp_path / 'state'))
+    run, _ = store.begin('owner', {'text': 'long streaming answer'})
+    store.append('owner', run.run_id, {'event': 'on_run_step', 'data': {
+        'id': 'first', 'type': 'message_creation', 'index': 0, 'created_at': 100}})
+    for _ in range(205):
+        store.append('owner', run.run_id, {'event': 'on_message_delta', 'data': {
+            'id': 'first', 'delta': {'content': {'type': 'text', 'text': '.'}}}})
+    store.append('owner', run.run_id, {'event': 'on_run_step_closed', 'data': {'id': 'first'}})
+    store.append('owner', run.run_id, {'event': 'on_steer_applied', 'data': {
+        'index': 1, 'part': {'type': 'steer', 'steer': 'new instruction'}}})
+    store.append('owner', run.run_id, {'event': 'on_run_step', 'data': {
+        'id': 'second', 'type': 'message_creation', 'index': 2, 'created_at': 200}})
+    assert generation_routes._last_open_message_step(store, 'owner', run.run_id) == (
+        'second', 2, 200)

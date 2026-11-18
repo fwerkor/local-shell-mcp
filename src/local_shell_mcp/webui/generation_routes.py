@@ -107,7 +107,19 @@ def _last_open_message_step(store: GenerationStore, owner: str, run_id: str):
     opened: dict[str, dict] = {}
     order: list[str] = []
     closed: set[str] = set()
-    for _, event in store.events(owner, run_id):
+    def replay_events():
+        cursor = 0
+        while True:
+            page = store.events(owner, run_id, cursor, limit=200)
+            if not page:
+                return
+            for _, event in page:
+                yield event
+            cursor = page[-1][0]
+            if len(page) < 200:
+                return
+
+    for event in replay_events():
         data = event.get('data') or {}
         if event.get('event') == 'on_run_step' and data.get('type') == 'message_creation':
             identifier = data.get('id')
