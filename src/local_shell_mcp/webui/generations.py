@@ -569,7 +569,9 @@ class GenerationStore:
         active = active_run_ids or set()
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            rows = db.execute("SELECT r.id,r.state FROM runs r WHERE r.status='running'").fetchall()
+            rows = db.execute("SELECT r.id,r.state,r.conversation_id,c.owner FROM runs r "
+                              "JOIN conversations c ON c.id=r.conversation_id "
+                              "WHERE r.status='running'").fetchall()
             recovered = 0
             for row in rows:
                 if row["id"] in active:
@@ -584,12 +586,31 @@ class GenerationStore:
                 state["pendingAction"] = pending
                 db.execute("UPDATE runs SET state=?,status='requires_action',updated_at=? WHERE id=?",
                            (_json(state), _now(), row["id"]))
-                # A crashed provider may have emitted SSE text after the saved
-                # ToolNode/human checkpoint, without any resumable state. Mark
-                # the exact text prefix to reproject on reconnect and finish.
+                # Rewind to the text prefix in the *latest durable model
+                # checkpoint*, not the older human-pause state. A continuation
+                # can complete more model/tool turns before crashing, and those
+                # saved turns must remain visible on reconnect.
+                preserved = state.get('partialText', '')
+                namespace = pending.get('namespace', '')
+                checkpoint_ns = row['id'] + ('|' + namespace if namespace else '')
+                latest = None
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                              "AND name='agent_checkpoints'").fetchone():
+                    latest = db.execute(
+                        "SELECT checkpoint FROM agent_checkpoints WHERE owner=? "
+                        "AND thread_id=? AND checkpoint_ns=? AND checkpoint IS NOT NULL "
+                        "AND expires_at>? ORDER BY checkpoint_id DESC LIMIT 1",
+                        (row['owner'], row['conversation_id'], checkpoint_ns, time.time()),
+                    ).fetchone()
+                if latest is not None:
+                    saved = json.loads(latest['checkpoint']).get('channel_values') or {}
+                    checkpoint_text = saved.get('partial_text')
+                    if (isinstance(preserved, str) and isinstance(checkpoint_text, str)
+                            and checkpoint_text.startswith(preserved)):
+                        preserved = checkpoint_text
                 db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                            (row['id'], _json({'event': 'on_content_rewind', 'data': {
-                               'preserveText': state.get('partialText', '')}})))
+                               'preserveText': preserved}})))
                 db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                            (row["id"], _json({"event": "on_pending_action",
                                                "data": self.client_pending_action(pending)})))

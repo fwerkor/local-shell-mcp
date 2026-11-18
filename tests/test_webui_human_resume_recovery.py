@@ -270,3 +270,37 @@ def test_recover_human_claim_removes_abandoned_stream_text_before_new_continuati
     assert ''.join(p['text'] for p in terminal['content'] if p['type'] == 'text') == (
         'Confirmed prefix. Recovered continuation.')
     assert 'Abandoned' not in json.dumps(terminal)
+
+
+def test_crashed_human_resume_rewind_retains_newer_confirmed_checkpoint_text(tmp_path):
+    from local_shell_mcp.webui.checkpoints import SQLiteCheckpointSaver
+
+    root, store, job = store_and_run(tmp_path)
+    store.append('alice', job.run_id, {'event': 'on_message_delta',
+        'data': {'delta': {'content': {'type': 'text', 'text': 'Before question. '}}}})
+    pause = question_pause(job)
+    assert store.pause_for_question('alice', job.run_id, pause, [], 'Before question. ')
+    store.answer_question('alice', job.run_id, pause['actionId'], {'answer': 'markdown'})
+    store.append('alice', job.run_id, {'event': 'on_message_delta',
+        'data': {'delta': {'content': {'type': 'text', 'text': 'Committed next turn. '}}}})
+    saver = SQLiteCheckpointSaver(store.database, 'alice')
+    saver.put(saver.config(job.conversation_id, job.run_id, event_actor=True),
+              {'v': 1, 'id': '0000000000000001',
+               'channel_values': {'partial_text': 'Before question. Committed next turn.'},
+               'channel_versions': {}, 'versions_seen': {}},
+              {'source': 'loop', 'step': 1})
+    store.append('alice', job.run_id, {'event': 'on_message_delta',
+        'data': {'delta': {'content': {'type': 'text', 'text': ' Abandoned partial.'}}}})
+    reopened = GenerationStore(SQLiteDatabase(root))
+    assert reopened.recover_claimed_resumes() == 1
+    snapshot, _ = reopened.resume_snapshot('alice', job.run_id)
+    assert ''.join(p['text'] for p in snapshot['aggregatedContent'] if p['type'] == 'text') == (
+        'Before question. Committed next turn.')
+    reopened.restart_claimed_resume('alice', job.run_id, pause['actionId'], {'answer': 'markdown'})
+    reopened.append('alice', job.run_id, {'event': 'on_message_delta',
+        'data': {'delta': {'content': {'type': 'text', 'text': ' Final answer.'}}}})
+    assert reopened.finish('alice', job.run_id, status='complete',
+        text='Before question. Committed next turn. Final answer.')
+    result = reopened.events('alice', job.run_id)[-1][1]['responseMessage']
+    assert ''.join(p['text'] for p in result['content'] if p['type'] == 'text') == (
+        'Before question. Committed next turn. Final answer.')
