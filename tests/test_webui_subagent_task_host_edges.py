@@ -764,3 +764,25 @@ async def test_child_guard_settlement_rejects_wrong_lease_and_unregistered_task(
     monkeypatch.setattr(host, '_child_activity', lambda: None)
     host._settle_child_registration(task, before_terminal=True, lease_token='real-lease')
     assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_child_thread_continuations_return_structured_busy_rejection(host_environment):
+    ready, release = asyncio.Event(), asyncio.Event()
+
+    async def model(profile, history, **kwargs):
+        ready.set()
+        await release.wait()
+        yield 'Child work finished'
+
+    host, original = await start_task(host_environment, model, call_id='original')
+    assert original['status'] == 'running'
+    await asyncio.wait_for(ready.wait(), 10)
+    _, rejected = await start_task(host_environment, model, call_id='parallel-continuation',
+                                  thread_id=original['subagent_thread_id'])
+    assert rejected['status'] == 'rejected'
+    assert 'already running' in rejected['message']
+    assert len(host.list()) == 1
+    release.set()
+    await settle(host, original['background_task_id'])
+    await shutdown_subagent_tasks()

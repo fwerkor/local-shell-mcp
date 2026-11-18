@@ -254,6 +254,16 @@ class SQLiteSubagentTaskHost:
                     if thread is None:
                         return _json({"status": "rejected", "tool": "subagent", "message":
                                       "The requested subagent thread is unavailable in this parent scope. Start a new subagent thread or choose one created by this parent for the same subagent type."})
+                    # BEGIN IMMEDIATE serializes all launches: reject a busy
+                    # continuation before the partial unique live-thread index
+                    # can raise IntegrityError and abort the parent model run.
+                    busy = db.execute(
+                        "SELECT 1 FROM subagent_tasks WHERE owner=? AND thread_id=? "
+                        "AND status='running' LIMIT 1", (self.owner, thread_id),
+                    ).fetchone()
+                    if busy:
+                        return _json({"status": "rejected", "tool": "subagent", "message":
+                                      "This subagent thread is already running. Wait for its current task to finish."})
                     prior_messages = json.loads(thread["messages"])
                 task_id = "subtask_" + secrets.token_hex(16)
                 reserved_child_id = str(uuid.uuid4())

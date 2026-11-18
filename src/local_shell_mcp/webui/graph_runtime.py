@@ -166,13 +166,17 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                 child.partial_text = parent.partial_text
                 await parent.on_text(delta)
 
+        from .ask_user_tools import ask_user_requested
+
+        foreground_member = not parent.background_deny and '/subagent:' not in parent.namespace
         child = AgentRunner(
             parent.owner, parent.generation, parent.database, parent.store,
             scopes=parent.scopes, grant_expires=parent.grant_expires,
             stream_tools=parent.stream_tools, stream_text=parent.stream_text,
             on_text=emit, agent=member, profile=parent.initial_profile if agent_id == source_id else None,
             parameters=parent.initial_parameters,
-            ask_user_enabled=parent.ask_user_enabled, mcp_enabled=parent.mcp_enabled,
+            ask_user_enabled=foreground_member and ask_user_requested(member, {}),
+            mcp_enabled=parent.mcp_enabled,
             namespace=parent.namespace + "/graph:" + agent_id + ":" + activation_id,
             child_configs=parent.child_configs, selected_tools=parent.selected_tools if agent_id == source_id else None,
             resume_history=parent.resume_history, resume_namespace=parent.resume_namespace,
