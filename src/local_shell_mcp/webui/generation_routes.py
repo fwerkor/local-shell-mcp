@@ -348,10 +348,27 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
     if row is None or not row["agent_id"]:
         return False
     state = json.loads(row["state"])
-    agent = AgentRepository(database).get(owner, row["agent_id"])
+    repository = AgentRepository(database)
+    agent = repository.get(owner, row["agent_id"])
     if agent is None:
         return False
-    record = ActionRepository(database).get_for_tool(owner, agent["id"], payload.get("tool_name"))
+    action_agent = agent
+    namespace = pending.get('namespace', '')
+    if isinstance(namespace, str) and '/graph:' in namespace:
+        # A paused graph node owns the Action binding while the generation's
+        # root agent_id remains unchanged. Validate graph membership against
+        # the owner's current topology, not a client-supplied agent identifier.
+        from .graph_topology import admit_agent_graph
+
+        member = namespace.rsplit('/graph:', 1)[-1].split(':', 1)[0]
+        topology = admit_agent_graph(owner, agent, repository)
+        reachable = (topology.reachable_agent_ids or topology.agent_ids) if topology else ()
+        if member not in reachable:
+            return False
+        action_agent = repository.get(owner, member)
+        if action_agent is None:
+            return False
+    record = ActionRepository(database).get_for_tool(owner, action_agent["id"], payload.get("tool_name"))
     if record is None or record[2]["action_id"] != aid or record[2]["action_version"] != rev:
         return False
     # Reattaching after a restart requires a checkpoint with the exact model

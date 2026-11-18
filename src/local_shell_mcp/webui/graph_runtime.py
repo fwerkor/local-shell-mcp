@@ -85,6 +85,11 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             raise PermissionError("Agent graph member is not owned by the current principal")
         members[ident] = member
     source_history = messages_state_reducer([], copy.deepcopy(history))
+    # The originating HTTP request may override its Agent's artifact mode.
+    # _run_model already constructed the complete root instructions, including
+    # this ephemeral override; preserve that system content at root activation.
+    source_system = [m.get('content') for m in source_history
+                     if m.get('role') == 'system' and isinstance(m.get('content'), str)]
     initial_count = len(source_history)
     graph = StateGraph(MultiAgentState)
     handoff_sources = topology.handoff_sources
@@ -128,7 +133,11 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
         # shared graph input may retain the root's system prompt across
         # direct supersteps and fan-in, which must not leak to other members.
         incoming = [msg for msg in incoming if msg.get("role") != "system"]
-        instructions = member.get("instructions") or ""
+        from .artifact_prompts import agent_instructions
+        from .providers import selected_provider
+
+        instructions = ("\n\n".join(source_system) if agent_id == source_id and source_system
+                        else agent_instructions(member, selected_provider({}, member)))
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})
         from .attachments import with_agent_context
