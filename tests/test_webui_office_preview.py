@@ -409,3 +409,27 @@ def test_legacy_xls_date_cell_uses_datemode(monkeypatch):
 
     monkeypatch.setattr(xlrd, 'open_workbook', lambda **kwargs: FakeBook())
     assert '2024-01-01' in _xls_html(b'fake-biff')
+
+
+def test_xlsx_clock_styles_do_not_invent_calendar_epoch():
+    from local_shell_mcp.webui.office_preview import _excel_clock
+
+    assert _excel_clock('0.5') == '12:00'
+    assert _excel_clock('1') == '00:00'
+    assert _excel_clock('1.75', seconds=True) == '18:00:00'
+    workbook = _synthetic_xlsx({
+        'xl/workbook.xml': '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                           '<sheets><sheet name="Clocks" sheetId="1"/></sheets></workbook>',
+        'xl/styles.xml': '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                         '<numFmts count="1"><numFmt numFmtId="165" formatCode="h:mm:ss"/></numFmts>'
+                         '<cellXfs count="4"><xf numFmtId="0"/><xf numFmtId="20"/>'
+                         '<xf numFmtId="21"/><xf numFmtId="165"/></cellXfs></styleSheet>',
+        'xl/worksheets/sheet1.xml': '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                                    '<sheetData><row r="1"><c r="A1" s="1"><v>0.5</v></c>'
+                                    '<c r="B1" s="2"><v>1</v></c>'
+                                    '<c r="C1" s="3"><v>1.75</v></c>'
+                                    '</row></sheetData></worksheet>',
+    })
+    rendered = buffer_to_office_html(workbook, 'clocks.xlsx', 'application/octet-stream')
+    assert '12:00' in rendered and '00:00:00' in rendered and '18:00:00' in rendered
+    assert '1899-12-' not in rendered and '1900-01-' not in rendered

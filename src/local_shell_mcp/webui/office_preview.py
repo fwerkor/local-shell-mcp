@@ -266,18 +266,18 @@ def _docx_html(z: ZipFile) -> str:
     return _document('<article class="lc-docx">' + "".join(lines) + '</article>')
 
 
-def _xlsx_date_styles(z: ZipFile) -> tuple[set[int], set[int]]:
+def _xlsx_date_styles(z: ZipFile) -> tuple[set[int], set[int], dict[int, bool]]:
     if 'xl/styles.xml' not in z.namelist():
-        return set(), set()
+        return set(), set(), {}
     root = _read_xml(z, 'xl/styles.xml')
     formats = {int(fmt.get('numFmtId')): fmt.get('formatCode', '')
                for fmt in root.findall('./{*}numFmts/{*}numFmt')
                if str(fmt.get('numFmtId', '')).isdigit()}
     styles = root.find('./{*}cellXfs')
     if styles is None:
-        return set(), set()
+        return set(), set(), {}
     builtins = set(range(14, 23)) | set(range(27, 37)) | set(range(50, 59))
-    result, durations = set(), set()
+    result, durations, clocks = set(), set(), {}
     for index, style in enumerate(styles):
         code = int(style.get('numFmtId', '0'))
         fmt = formats.get(code, '')
@@ -285,9 +285,25 @@ def _xlsx_date_styles(z: ZipFile) -> tuple[set[int], set[int]]:
         fmt = re.sub(r'"[^"]*"|\\.|\[[^\]]*\]', '', fmt).lower()
         if code in {45, 46, 47} or re.search(r'\[(?:h+|m+|s+)\]', formats.get(code, '').lower()):
             durations.add(index)
+        elif code in {18, 19, 20, 21} or (
+                code in formats and bool(re.search(r'[hs]', fmt))
+                and not bool(re.search(r'[yd]', fmt))):
+            # A clock-time is a fraction of a day, not a calendar date.
+            # Built-ins 18-21 and custom h:mm / h:mm:ss have no epoch.
+            clocks[index] = code in {19, 21} or 's' in fmt
         elif code in builtins or (code in formats and bool(re.search(r'[ymdhs]', fmt))):
             result.add(index)
-    return result, durations
+    return result, durations, clocks
+
+
+def _excel_clock(raw: str, *, seconds: bool = False) -> str:
+    value = float(raw)
+    if not (0 <= value < 3_000_000):
+        return raw
+    total = round((value % 1) * 86_400)
+    hour, remain = divmod(total % 86_400, 3600)
+    minute, second = divmod(remain, 60)
+    return f'{hour:02d}:{minute:02d}:{second:02d}' if seconds else f'{hour:02d}:{minute:02d}'
 
 
 def _excel_duration(raw: str) -> str:
@@ -323,7 +339,7 @@ def _xlsx_html(z: ZipFile) -> str:
     workbook = _read_xml(z, 'xl/workbook.xml')
     epoch1904 = (workbook.find('./{*}workbookPr') is not None and
                  workbook.find('./{*}workbookPr').get('date1904') in {'1', 'true'})
-    date_styles, duration_styles = _xlsx_date_styles(z)
+    date_styles, duration_styles, clock_styles = _xlsx_date_styles(z)
     rels = {}
     if 'xl/_rels/workbook.xml.rels' in names:
         for rel in _read_xml(z, 'xl/_rels/workbook.xml.rels'):
@@ -377,6 +393,8 @@ def _xlsx_html(z: ZipFile) -> str:
                                 try:
                                     if int(style_index) in duration_styles:
                                         value = _excel_duration(raw)
+                                    elif int(style_index) in clock_styles:
+                                        value = _excel_clock(raw, seconds=clock_styles[int(style_index)])
                                     elif int(style_index) in date_styles:
                                         value = _excel_date(raw, epoch1904)
                                 except (ValueError, OverflowError):
