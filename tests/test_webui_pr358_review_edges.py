@@ -136,3 +136,36 @@ async def test_foreground_reattach_refuses_detached_child(monkeypatch):
     with pytest.raises(HTTPException) as caught:
         await generation_routes._reattach_running_actor(None, 'owner', run)
     assert caught.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_nested_graph_subagent_tool_results_are_not_published_to_parent(tmp_path, monkeypatch):
+    from local_shell_mcp.webui.checkpoints import SQLiteCheckpointSaver
+
+    db = SQLiteDatabase(tmp_path / 'parent')
+    store = GenerationStore(db)
+    run, _ = store.begin('owner', {'text': 'Delegate private inspection'})
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(SQLiteCheckpointSaver, 'put_writes', lambda *args, **kwargs: None)
+    config = {'scopes': set(), 'grant_expires': None, 'stream_tools': noop,
+              'stream_text': noop, 'on_text': noop, 'profile': ProviderConfig(
+                  'openai', 'model', 'https://invalid.example', '')}
+    isolated = AgentRunner('owner', run, db, store,
+                           namespace='/subagent:delegation/graph:member:one', graph_node=True, **config)
+    foreground = AgentRunner('owner', run, db, store, namespace='/graph:member:two',
+                             graph_node=True, **config)
+    completed = {'proposal': {'name': 'file_read', 'args': {}}, 'output': 'PRIVATE CHILD FINDING'}
+    call = ModelToolCall('tool-child', 'file_read', {})
+    assert isolated._publishes_tool_steps() is False
+    original_events = store.events('owner', run.run_id)
+    await isolated._completed(call, completed)
+    assert store.events('owner', run.run_id) == original_events
+    assert foreground._publishes_tool_steps() is True
+    await foreground._completed(ModelToolCall('tool-root', 'file_read', {}),
+                                {'proposal': {'name': 'file_read', 'args': {}}, 'output': 'Public finding'})
+    recorded = store.events('owner', run.run_id)
+    assert any(item.get('event') == 'on_run_step_completed' for _, item in recorded)
+    assert 'PRIVATE CHILD FINDING' not in str(recorded)

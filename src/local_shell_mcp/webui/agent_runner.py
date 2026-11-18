@@ -172,6 +172,13 @@ class AgentRunner:
         return {"_truncated": True, "preview": raw.encode("utf-8")[:8192].decode(
             "utf-8", errors="ignore"), "note": "Full arguments retained for execution"}
 
+    def _publishes_tool_steps(self) -> bool:
+        # Graph members run inside a shared parent generation. A foreground
+        # graph node can publish its tool cards; an isolated subagent (or
+        # detached task) must keep its internal steps checkpoint-only.
+        return not (self.background_deny or
+                    (self.namespace and (not self.graph_node or '/subagent:' in self.namespace)))
+
     def _tool_step(self, call):
         checkpoint = self.active_config["configurable"].get("checkpoint_id", "")
         identity = "step_" + hashlib.sha256(
@@ -207,7 +214,7 @@ class AgentRunner:
             self.saver.put_writes(self.active_config, [("messages", {
                 "role": "tool", "tool_call_id": call.call_id, "content": output,
             })], task_id=call.call_id)
-        if self.namespace and not self.graph_node:
+        if not self._publishes_tool_steps():
             from .action_spec import is_action_tool
 
             if is_action_tool(call.name):
@@ -449,7 +456,7 @@ class AgentRunner:
         enabled = {tool["function"]["name"] for tool in state.context.tools}
         if any(call.name not in enabled for call in unresolved):
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
-        if not self.namespace or self.graph_node:
+        if self._publishes_tool_steps():
             for call in unresolved:
                 self._tool_step(call)
         endpoints = _repo().setting(self.owner, "endpoints", {}) or {}
