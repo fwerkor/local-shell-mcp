@@ -227,7 +227,10 @@ class AgentRunner:
             self.saver.put_writes(self.active_config, [("messages", {
                 "role": "tool", "tool_call_id": call.call_id, "content": output,
             })], task_id=call.call_id)
-        if self.namespace and not self.graph_node:
+        if self.namespace and (not self.graph_node or '/subagent:' in self.namespace):
+            # A graph team running inside a foreground subagent shares the
+            # parent's generation but must not expose intermediate tool
+            # arguments/results in its SSE or final persisted response.
             from .action_spec import is_action_tool
 
             if is_action_tool(call.name):

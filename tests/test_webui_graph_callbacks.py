@@ -158,3 +158,29 @@ async def test_graph_nodes_inherit_event_source_lease_for_every_model_dispatch(e
                        event_delivery_lease=('delivery','lease'))
     await runner.run(store.history('alice',run.conversation_id))
     assert observed and all(lease==('delivery','lease') for lease in observed)
+
+
+@pytest.mark.asyncio
+async def test_foreground_subagent_graph_tool_callback_keeps_parent_sse_private(environment):
+    database, _, store = environment
+    generation, _ = store.begin('alice', {'text': 'Delegate task to a graph team'})
+
+    async def stream(*_args, **_kwargs):
+        yield 'unused'
+
+    child = AgentRunner(
+        'alice', generation, database, store, scopes=set(), grant_expires=None,
+        stream_tools=stream, stream_text=stream, on_text=noop,
+        namespace='/subagent:team-call/graph:researcher:activation',
+        graph_node=True,
+    )
+    call = ModelToolCall('private-child-tool', 'run_shell', {'command': 'secret subagent args'})
+    await child._completed(call, {'output': 'private intermediate result'})
+    visible = [entry for _, entry in store.events('alice', generation.run_id)]
+    assert not [entry for entry in visible if entry.get('event') in {
+        'on_run_step', 'on_run_step_completed', 'on_run_step_closed', 'attachment',
+    }]
+    assert store.finish('alice', generation.run_id, status='complete', text='public team result')
+    final = store.events('alice', generation.run_id)[-1][1]['responseMessage']
+    assert 'secret subagent args' not in json.dumps(final)
+    assert 'private intermediate result' not in json.dumps(final)
