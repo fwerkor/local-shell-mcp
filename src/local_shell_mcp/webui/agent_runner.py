@@ -569,6 +569,11 @@ class AgentRunner:
             prior or None,
             semantic['appendix'],
         )
+        # The source renderer preserves JavaScript UTF-16 truncation semantics,
+        # including a half-surrogate at an astral boundary. Preserve its
+        # differential output; escape only invalid Unicode at the provider
+        # HTTP JSON boundary so utf-8 encoding cannot abort compaction.
+        effective = effective.encode('utf-8', 'backslashreplace').decode('utf-8')
         instruction = {'role': 'user', 'content': effective}
         summary_messages = [*messages, instruction]
         chunks = []
@@ -617,7 +622,8 @@ class AgentRunner:
         self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
                                  boundary=head_count, manual=manual,
                                  retained_tail=retained_tail,
-                                 covered_tool_call_ids=sorted(covered_calls))
+                                 covered_tool_call_ids=sorted(covered_calls),
+                                 visible_text_boundary=len(self.partial_text))
         if not self.namespace:
             import secrets
             identity = 'summary_' + secrets.token_hex(8)
@@ -760,6 +766,10 @@ class AgentRunner:
                 state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
                 self._summary_failures = 0
                 await self._save(state, [])
+                # History length may return to its pre-compaction value after
+                # the next tool batch. Do not suppress that distinct input as
+                # if it were an attempted retry of the old oversized history.
+                self._last_compaction_attempt_size = None
                 # A committed summary replaces the old prefix; restore a
                 # fresh v2 fading tier so past masking doesn't pin this run.
                 from .fading import create_fading_tier

@@ -728,7 +728,8 @@ class GenerationStore:
     def stage_summary(self, owner: str, run_id: str, summary_text: str, token_count: int,
                       *, boundary: int = 0, manual: bool = False,
                       retained_tail: list[dict] | None = None,
-                      covered_tool_call_ids: list[str] | None = None) -> None:
+                      covered_tool_call_ids: list[str] | None = None,
+                      visible_text_boundary: int | None = None) -> None:
         """Atomic candidate checkpoint in the *existing run state*, no deletion.
 
         The final assistant content and terminal run status commit together in
@@ -738,6 +739,9 @@ class GenerationStore:
             raise ValueError('A completed summary must contain text')
         if token_count < 0:
             raise ValueError('Invalid summary token count')
+        if visible_text_boundary is not None and (
+                type(visible_text_boundary) is not int or visible_text_boundary < 0):
+            raise ValueError('Invalid visible summary text boundary')
         with self.database.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id '
@@ -750,7 +754,8 @@ class GenerationStore:
                 'boundary': {'messageIndex': boundary}, 'tokenCount': token_count,
                 **({'initiatedBy': 'user'} if manual else {}),
                 **({'retainedTail': retained_tail} if retained_tail is not None else {}),
-                **({'coveredToolCallIds': covered_tool_call_ids} if covered_tool_call_ids is not None else {})}
+                **({'coveredToolCallIds': covered_tool_call_ids} if covered_tool_call_ids is not None else {}),
+                **({'visibleTextBoundary': visible_text_boundary} if visible_text_boundary is not None else {})}
             db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?', (_json(state), _now(), run_id))
 
     def manual_compaction(self, owner: str, run_id: str) -> bool:
@@ -825,6 +830,12 @@ class GenerationStore:
                         text_parts = [part['text'] for part in parts if isinstance(part, dict)
                                       and part.get('type') == 'text' and isinstance(part.get('text'), str)]
                         text = ''.join(text_parts) if text_parts else ('' if stop_at_checkpoint else text)
+                        if stop_at_checkpoint and isinstance(summary.get('visibleTextBoundary'), int):
+                            # The complete assistant message remains the
+                            # immutable user audit trail. Model history must
+                            # not re-inject text already summarized or held
+                            # in retainedTail before this checkpoint.
+                            text = text[max(0, summary['visibleTextBoundary']):]
                         tool_parts = [part['tool_call'] for part in parts if isinstance(part, dict)
                                       and part.get('type') == 'tool_call'
                                       and isinstance(part.get('tool_call'), dict)]

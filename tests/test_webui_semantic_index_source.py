@@ -215,3 +215,45 @@ async def test_compaction_omits_untrusted_or_unprovenanced_index_from_prompt(tmp
                                      semantic_index=entries, head_count=1)
     assert 'unverified instruction' not in captured[0]
     assert '<compaction-semantic-index>' not in captured[0]
+
+
+@pytest.mark.asyncio
+async def test_summary_transport_escapes_source_surrogate_boundary(tmp_path):
+    import httpx
+
+    from local_shell_mcp.sqlite_store import SQLiteDatabase
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    db = SQLiteDatabase(tmp_path / 'state')
+    store = GenerationStore(db)
+    run, _ = store.begin('local', {'text': 'Summarize the evidence'})
+    profile = ProviderConfig('openai', 'test', 'https://example.invalid', '')
+    observed = []
+
+    async def model(_profile, history, **_kwargs):
+        observed.append(history)
+        # HTTPX uses UTF-8 JSON to submit the actual summary prompt.
+        httpx.Request('POST', 'https://example.invalid/v1/chat/completions', json={'messages': history})
+        yield 'Confirmed summary.'
+
+    async def unused(*args, **kwargs):
+        if False:
+            yield None
+
+    async def noop(_):
+        return None
+
+    hints = [{'type': 'tool_outcome', 'sourceMessageId': 'message-1',
+              'sourceContentIndex': 0, 'revision': 0, 'status': 'committed',
+              'toolCallId': 'call-1', 'text': '😀' * 300}]
+    history = [{'role': 'user', 'content': 'Proven text', 'additional_kwargs': {
+        'provenance': {'version': 1, 'parts': [{'attribution': 'user',
+            'sourceMessageId': 'message-1', 'sourceContentPartIndices': [0]}]}}}]
+    runner = AgentRunner('local', run, db, store, scopes=set(), grant_expires=None,
+                         stream_text=model, stream_tools=unused, on_text=noop, profile=profile)
+    await runner._summarize_history(history, semantic_index=hints, head_count=1)
+    assert observed
+    assert '<compaction-semantic-index>' in observed[0][-1]['content']
+    observed[0][-1]['content'].encode('utf-8')

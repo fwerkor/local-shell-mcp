@@ -75,12 +75,19 @@ async def test_automatic_memory_tools_commit_with_persistent_attachment(memory_r
     event = store.events('alice', job.run_id)[-1][1]
     assert event['event'] == 'attachment'
     assert event['data']['type'] == 'memory'
-    assert event['data']['toolCallId'] == 'memory-1'
+    assert 'toolCallId' not in event['data']  # background operation has no inline MemoryCall
     assert event['data']['memory']['type'] == 'update'
     assert event['data']['messageId'] == job.response_message_id
     assert event['data']['conversationId'] == job.conversation_id
     assert store.finish('alice', job.run_id, status='complete', text='The answer')
-    assert store.events('alice', job.run_id)[-1][1]['final'] is True
+    final = store.events('alice', job.run_id)[-1][1]
+    assert final['final'] is True
+    assert final['responseMessage']['attachments'][0]['memory']['type'] == 'update'
+    assert 'toolCallId' not in final['responseMessage']['attachments'][0]
+    reloaded = WorkspaceRepository(SQLiteDatabase(db.root)).messages('alice', job.conversation_id)
+    assistant = next(message for message in reloaded['messages'] if message['role'] == 'assistant')
+    assert assistant['attachments'][0]['memory']['type'] == 'update'
+    assert 'toolCallId' not in assistant['attachments'][0]
 
 
 @pytest.mark.asyncio

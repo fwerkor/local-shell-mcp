@@ -198,7 +198,7 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
                 # attachments. Persist the same shape for SSE replay.
                 GenerationStore(database).append(owner, generation.run_id, {
                     'event': 'attachment', 'data': {
-                        'type': 'memory', 'toolCallId': event.call_id,
+                        'type': 'memory',
                         'messageId': generation.response_message_id,
                         'conversationId': generation.conversation_id,
                         'memory': settings_entry,

@@ -45,6 +45,30 @@ def response_attachments(db, owner: str, message_ids):
         collected[row["response_message_id"]].append(_attachment(
             row, row["response_message_id"], row["tool_call_id"], row["conversation_id"],
         ))
+    # Automatic Memory artifacts have no physical file and no visible tool
+    # call. The SSE event is persisted in the owning generation, so replay it
+    # from that trusted event log instead of unverified message metadata.
+    memory_rows = db.execute(
+        "SELECT e.data,r.conversation_id,json_extract(r.state,'$.responseMessageId') AS response_message_id "
+        "FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+        "JOIN generation_events e ON e.run_id=r.id WHERE c.owner=? AND "
+        "json_extract(r.state,'$.responseMessageId') IN (" + ",".join("?" for _ in ids) + ") "
+        "AND json_extract(e.data,'$.event')='attachment' "
+        "AND json_extract(e.data,'$.data.type')='memory' ORDER BY e.seq",
+        (owner, *ids),
+    ).fetchall()
+    for row in memory_rows:
+        event = json.loads(row['data'])
+        value = event.get('data')
+        if (not isinstance(value, dict) or not isinstance(value.get('memory'), dict)
+                or value.get('messageId') != row['response_message_id']
+                or value.get('conversationId') != row['conversation_id']):
+            continue
+        # Old automatic-memory events mistakenly set toolCallId despite no
+        # matching visible tool call. Keep them displayable after a reload.
+        artifact = dict(value)
+        artifact.pop('toolCallId', None)
+        collected[row['response_message_id']].append(artifact)
     return collected
 
 
