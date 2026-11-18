@@ -451,3 +451,23 @@ async def test_preempt_cancelled_during_provider_close_cannot_finalize_partial_a
     assert texts == ['Partial', ' continued.']
     assert final[-1]['content'] == ' continued.'
     assert final[-2]['content'] == 'Partial'
+
+
+def test_replayed_tool_completion_keeps_steer_index_equal_to_snapshot(context):
+    generations, steering, job, _ = context
+    generations.append('local', job.run_id, {'event': 'on_message_delta', 'data': {
+        'id': 'intro', 'delta': {'content': {'type': 'text', 'text': 'Before'}}}})
+    completion = {'event': 'on_run_step_completed', 'data': {'result': {
+        'id': 'tool-step-one', 'type': 'tool_call',
+        'tool_call': {'id': 'call-1', 'name': 'read', 'output': 'ready'}}}}
+    generations.append('local', job.run_id, completion)
+    generations.append('local', job.run_id, completion)
+    before, _ = generations.resume_snapshot('local', job.run_id)
+    assert [part['type'] for part in before['aggregatedContent']] == ['text', 'tool_call']
+    queued = _enqueue(steering, job, 'replayed-completion', 'Interpret the result')
+    assert steering.drain('local', job.run_id, boundary='post_tools')[0]['steerId'] == queued['steerId']
+    events = [e['data'] for _, e in generations.events('local', job.run_id)
+              if e.get('event') == 'on_steer_applied']
+    assert events[-1]['index'] == len(before['aggregatedContent']) == 2
+    current, _ = generations.resume_snapshot('local', job.run_id)
+    assert current['aggregatedContent'][2]['steerId'] == queued['steerId']

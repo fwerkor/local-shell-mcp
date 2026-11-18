@@ -337,27 +337,13 @@ class SteeringStore:
             # including unarmed items before the interrupting item.
             applied = list(queue)
             steer["queue"] = []
-            index = 0
-            previous_was_text = False
-            for entry in db.execute(
-                "SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,),
-            ):
-                event = json.loads(entry["data"])
-                kind = event.get("event")
-                if kind == "on_steer_applied":
-                    index += 1
-                    previous_was_text = False
-                elif kind == "on_run_step_completed":
-                    result = (event.get("data") or {}).get("result") or {}
-                    if isinstance(result.get("tool_call"), dict):
-                        index += 1
-                        previous_was_text = False
-                elif kind == "on_message_delta":
-                    content = ((event.get("data") or {}).get("delta") or {}).get("content") or {}
-                    if content.get("type") == "text" and content.get("text"):
-                        if not previous_was_text:
-                            index += 1
-                        previous_was_text = True
+            # Share the exact projection used by SSE reconnect. Counting raw
+            # completion events double-counts approval replays with the same
+            # stepId, and raw text events ignore checkpoint rewinds.
+            from .generations import GenerationStore
+
+            snapshot, _ = GenerationStore(self.database).resume_snapshot(owner, run_id)
+            index = len(snapshot['aggregatedContent'])
             for item in applied:
                 receipt = steer["receipts"].get(item.get("clientSteerId"))
                 if receipt is not None:
