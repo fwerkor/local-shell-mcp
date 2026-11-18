@@ -9,10 +9,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from .artifacts import edit_artifact
+from .artifacts import edit_artifact, find_all_artifacts
 from .auth import _same_origin
 from .routes import _body, _owner, _repo
 from .storage import _json, _now
+
+
+class ArtifactHistoryConflict(Exception):
+    """A visible artifact no longer matches its canonical model history."""
 
 
 async def update_artifact(request: Request):
@@ -27,6 +31,8 @@ async def update_artifact(request: Request):
         return _update(repo, owner, request.path_params["message_id"], index, original, updated)
     except sqlite3.Error:
         return JSONResponse({"error": "Internal server error"}, status_code=500)
+    except ArtifactHistoryConflict:
+        return JSONResponse({"error": "Canonical artifact history does not match the selected edit"}, status_code=409)
 
 
 def _update(repo, owner: str, message_id: str, index: int, original: str, updated: str):
@@ -50,6 +56,49 @@ def _update(repo, owner: str, message_id: str, index: int, original: str, update
         metadata["userSubmittedPaths"] = value["userSubmittedPaths"]
         db.execute("UPDATE messages SET text=?,content=?,metadata=?,updated_at=? WHERE id=?",
                    (value["text"], _json(value.get("content") or {}), _json(metadata), _now(), row["id"]))
+        # The original React editor mutates the completed assistant message.
+        # Since this branch additionally stores exact modelSteps, update the
+        # *matching source artifact* inside those canonical steps in the SAME
+        # SQLite transaction. Otherwise next-turn history would restore stale
+        # tool/model content and silently revert the user's edit.
+        run = db.execute(
+            "SELECT id,state FROM runs WHERE conversation_id=? AND "
+            "json_extract(state,'$.responseMessageId')=? ORDER BY created_at DESC LIMIT 1",
+            (row["conversation_id"], row["id"]),
+        ).fetchone()
+        if run is not None:
+            state = json.loads(run["state"])
+            steps = state.get("modelSteps")
+            if "modelSteps" in state:
+                if not isinstance(steps, list):
+                    raise ArtifactHistoryConflict()
+                matched = False
+                remaining = index
+                for step in steps:
+                    if not isinstance(step, dict) or step.get("role") != "assistant":
+                        continue
+                    content = step.get("content")
+                    if isinstance(content, str):
+                        source = {"text": content, "content": []}
+                    elif isinstance(content, list):
+                        source = {"text": "", "content": content}
+                    else:
+                        continue
+                    count = len(find_all_artifacts(source))
+                    if remaining >= count:
+                        remaining -= count
+                        continue
+                    try:
+                        modified, _ = edit_artifact(source, remaining, original, updated)
+                    except ValueError as exc:
+                        raise ArtifactHistoryConflict() from exc
+                    step["content"] = modified["text"] if isinstance(content, str) else modified["content"]
+                    db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
+                               (_json(state), _now(), run["id"]))
+                    matched = True
+                    break
+                if not matched:
+                    raise ArtifactHistoryConflict()
         response = {"conversationId": value["conversationId"], "text": value["text"]}
         if "content" in value:
             response["content"] = value["content"]

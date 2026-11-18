@@ -1,0 +1,302 @@
+{
+  "commit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+  "source": "packages/api/src/mcp/parsers.ts",
+  "sha256": "85170923b508332f4f9a647eeafbb7ac6d79d6d3fbb606d6f4d1838d7623d584",
+  "dependency": "typescript@5.9.3",
+  "vectors": [
+    {
+      "name": "empty",
+      "provider": "openai",
+      "result": {
+        "content": []
+      },
+      "expected": [
+        "(No response)",
+        null
+      ]
+    },
+    {
+      "name": "texts",
+      "provider": "openai",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "A"
+          },
+          {
+            "type": "text",
+            "text": "B"
+          }
+        ]
+      },
+      "expected": [
+        "A\n\nB",
+        null
+      ]
+    },
+    {
+      "name": "image_png",
+      "provider": "openai",
+      "result": {
+        "content": [
+          {
+            "type": "image",
+            "data": "AA==",
+            "mimeType": "image/png"
+          }
+        ]
+      },
+      "expected": [
+        "",
+        {
+          "content": [
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,AA=="
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "image_remote",
+      "provider": "anthropic",
+      "result": {
+        "content": [
+          {
+            "type": "image",
+            "data": "https://cdn.example.org/img.png",
+            "mimeType": "image/png"
+          }
+        ]
+      },
+      "expected": [
+        "",
+        {
+          "content": [
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "https://cdn.example.org/img.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rich_ui",
+      "provider": "google",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "A"
+          },
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "ui://screen",
+              "mimeType": "text/html",
+              "text": "<div>hello</div>"
+            }
+          }
+        ]
+      },
+      "expected": [
+        "A\n\nUI Resource ID: 4745336f4a\nUI Resource Marker: \\ui{4745336f4a}\nResource URI: ui://screen\nResource MIME Type: text/html\n\nUI Resource Markers Available:\n- Each resource above includes a stable ID and a marker hint like `\\ui{abc123}`\n- You should usually introduce what you're showing before placing the marker\n- For a single resource: \\ui{resource-id}\n- For multiple resources shown separately: \\ui{resource-id-a} \\ui{resource-id-b}\n- For multiple resources in a carousel: \\ui{resource-id-a,resource-id-b,resource-id-c}\n- The UI will be rendered inline where you place the marker\n- Format: \\ui{resource-id} or \\ui{id1,id2,id3} using the IDs provided above",
+        {
+          "ui_resources": {
+            "data": [
+              {
+                "uri": "ui://screen",
+                "mimeType": "text/html",
+                "text": "<div>hello</div>",
+                "resourceId": "4745336f4a"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "resource_text",
+      "provider": "openai",
+      "result": {
+        "content": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "file:///a",
+              "mimeType": "text/plain",
+              "text": "hello\nworld"
+            }
+          }
+        ]
+      },
+      "expected": [
+        "Resource Text: hello\nworld\nResource URI: file:///a\nResource MIME Type: text/plain",
+        null
+      ]
+    },
+    {
+      "name": "resource_utf8_blob",
+      "provider": "openai",
+      "result": {
+        "content": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "file:///a",
+              "mimeType": "text/plain",
+              "blob": "aGVsbG8="
+            }
+          }
+        ]
+      },
+      "expected": [
+        "Resource Text: hello\nResource URI: file:///a\nResource MIME Type: text/plain",
+        null
+      ]
+    },
+    {
+      "name": "resource_binary_blob",
+      "provider": "openai",
+      "result": {
+        "content": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "file:///binary",
+              "mimeType": "application/octet-stream",
+              "blob": "AP8="
+            }
+          }
+        ]
+      },
+      "expected": [
+        "Resource Content: 2 bytes of binary data (omitted; not UTF-8 text)\nResource URI: file:///binary\nResource MIME Type: application/octet-stream",
+        null
+      ]
+    },
+    {
+      "name": "resource_image_blob",
+      "provider": "google",
+      "result": {
+        "content": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "file:///image",
+              "mimeType": "image/png",
+              "blob": "AA=="
+            }
+          }
+        ]
+      },
+      "expected": [
+        "Resource URI: file:///image\nResource MIME Type: image/png",
+        {
+          "content": [
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,AA=="
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "resource_link",
+      "provider": "openai",
+      "result": {
+        "content": [
+          {
+            "type": "resource_link",
+            "uri": "file://a\nBAD",
+            "mimeType": "text/plain",
+            "name": "Name\nInjected",
+            "size": 1024,
+            "description": "notes"
+          }
+        ]
+      },
+      "expected": [
+        "Resource Name: Name Injected\nResource Description: notes\nResource URI: file://a BAD\nResource MIME Type: text/plain\nResource Size: 1024 bytes",
+        null
+      ]
+    },
+    {
+      "name": "unknown_content",
+      "provider": "openai",
+      "result": {
+        "content": [
+          {
+            "type": "audio",
+            "data": "AA=="
+          }
+        ]
+      },
+      "expected": [
+        "{\n  \"type\": \"audio\",\n  \"data\": \"AA==\"\n}",
+        null
+      ]
+    },
+    {
+      "name": "unrecognized_provider",
+      "provider": "other",
+      "result": {
+        "content": [
+          {
+            "type": "image",
+            "data": "AA==",
+            "mimeType": "image/png"
+          }
+        ]
+      },
+      "expected": [
+        "{\n  \"type\": \"image\",\n  \"data\": \"AA==\",\n  \"mimeType\": \"image/png\"\n}",
+        null
+      ]
+    },
+    {
+      "name": "image_and_text",
+      "provider": "openrouter",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Here"
+          },
+          {
+            "type": "image",
+            "data": "AA==",
+            "mimeType": "image/png"
+          },
+          {
+            "type": "text",
+            "text": "Look"
+          }
+        ]
+      },
+      "expected": [
+        "Here\n\nLook",
+        {
+          "content": [
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,AA=="
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
