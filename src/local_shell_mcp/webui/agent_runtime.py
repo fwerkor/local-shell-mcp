@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .providers import ModelToolCall, ModelUsage, ProviderConfig
+from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
 from .semantic_index import SemanticSnapshot
 
 
@@ -114,6 +114,7 @@ async def run_agent_loop(
             sampling["top_p"] = top_p
         calls: list[ModelToolCall] = []
         text_parts: list[str] = []
+        reasoning: list[dict] = []
         projected = project_messages(state) if project_messages else state.messages
         state.provider_projection = projected
         source = stream_tools(context.profile, projected, tools=context.tools,
@@ -125,6 +126,17 @@ async def run_agent_loop(
             elif isinstance(item, ModelUsage):
                 if on_model_usage is not None:
                     await on_model_usage(item, state)
+            elif isinstance(item, ModelThought):
+                if item.kind == "thinking":
+                    if reasoning and reasoning[-1].get("type") == "thinking" and not reasoning[-1].get("signature"):
+                        reasoning[-1]["thinking"] += item.text
+                    else:
+                        reasoning.append({"type": "thinking", "thinking": item.text})
+                elif item.kind == "signature":
+                    if reasoning and reasoning[-1].get("type") == "thinking":
+                        reasoning[-1]["signature"] = item.signature
+                elif item.kind == "redacted_thinking":
+                    reasoning.append({"type": "redacted_thinking", "data": item.data})
             elif item:
                 text_parts.append(item)
                 await on_text(item)
@@ -133,6 +145,8 @@ async def run_agent_loop(
             # record. Rejected model arguments must never enter durable state.
             calls = preflight_calls(calls, state)
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
+        if reasoning:
+            message["reasoning"] = reasoning
         if calls:
             import json
 

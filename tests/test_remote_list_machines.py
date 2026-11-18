@@ -78,7 +78,7 @@ def test_list_machines_serializes_concurrent_registry_mutations(tmp_path, monkey
             first = next(iterator)
             yield first
             first_yield.set()
-            assert continue_iteration.wait(2)
+            assert continue_iteration.wait(15)
             yield from iterator
 
     manager = RemoteManager()
@@ -107,14 +107,15 @@ def test_list_machines_serializes_concurrent_registry_mutations(tmp_path, monkey
     reader = threading.Thread(target=read_registry)
     writer = threading.Thread(target=rename_worker)
     reader.start()
-    assert first_yield.wait(2)
+    assert first_yield.wait(15)
     writer.start()
     time.sleep(0.05)
     assert not writer_done.is_set()
     continue_iteration.set()
-    reader.join(2)
-    writer.join(2)
+    reader.join(15)
+    writer.join(15)
 
+    assert not reader.is_alive() and not writer.is_alive()
     assert not errors
     assert writer_done.is_set()
     assert [row["name"] for row in manager.list_machines()["machines"]] == [

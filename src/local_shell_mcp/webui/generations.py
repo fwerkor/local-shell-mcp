@@ -153,6 +153,16 @@ class GenerationStore:
             ).fetchone()
             if active:
                 raise GenerationConflict(self._run(active))
+            # A successive user turn without an explicit branch pointer follows
+            # the last committed assistant, otherwise only its own prompt was
+            # visible to the model on the next request.
+            parent_id = payload.get("parentMessageId")
+            if "parentMessageId" not in payload and not new_conversation:
+                parent = db.execute(
+                    "SELECT id FROM messages WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
+                    (conversation_id,),
+                ).fetchone()
+                parent_id = parent["id"] if parent else None
             from .attachments import resolve_files
 
             files = resolve_files(db, owner, payload.get("files", []))
@@ -165,7 +175,7 @@ class GenerationStore:
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",
-                    (user_message_id, conversation_id, payload.get("parentMessageId"), "user", prompt,
+                    (user_message_id, conversation_id, parent_id, "user", prompt,
                      _json(payload.get("content") or {}), _json(user_metadata), now, now),
                 )
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
@@ -182,7 +192,7 @@ class GenerationStore:
                 "message": {
                     "messageId": user_message_id,
                     "conversationId": conversation_id,
-                    "parentMessageId": payload.get("parentMessageId"),
+                    "parentMessageId": parent_id,
                     "text": prompt,
                     "sender": "User",
                     "files": files,
@@ -208,8 +218,6 @@ class GenerationStore:
 
     def pause_for_question(self, owner: str, run_id: str, pending: dict,
                            history: list[dict], partial_text: str) -> bool:
-        if len(_json(history).encode("utf-8")) > 512 * 1024:
-            raise ValueError("Agent continuation state is too large")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -241,7 +249,20 @@ class GenerationStore:
         if (payload.get("type") != "action_oauth" or not isinstance(action_id, str)
                 or not isinstance(call_id, str) or type(version) is not int):
             raise ValueError("Invalid Action OAuth interrupt")
-        if len(_json(history).encode("utf-8")) > 512 * 1024 or len(_json(auth_delta).encode("utf-8")) > 256 * 1024:
+        # Canonical tool messages may retain identical content/raw_result for
+        # exact audit replay. The provider-facing context budget counts such
+        # bytes once; also bound the physical checkpoint to 1 MiB.
+        budget_history = []
+        for message in history:
+            if (isinstance(message, dict) and message.get("role") == "tool" and
+                    message.get("raw_result") == message.get("content")):
+                budget_history.append({key: value for key, value in message.items()
+                                       if key != "raw_result"})
+            else:
+                budget_history.append(message)
+        if (len(_json(budget_history).encode("utf-8")) > 512 * 1024 or
+                len(_json(history).encode("utf-8")) > 1024 * 1024 or
+                len(_json(auth_delta).encode("utf-8")) > 256 * 1024):
             raise ValueError("Action OAuth continuation too large")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -475,8 +496,6 @@ class GenerationStore:
     def complete_approval_batch(self, owner: str, run_id: str, action_id: str,
                                 history: list[dict], partial_text: str) -> bool:
         """Retire approval proof only after checkpointed tool results are saved."""
-        if len(_json(history).encode("utf-8")) > 512 * 1024:
-            raise ValueError("Agent continuation state is too large")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -773,124 +792,205 @@ class GenerationStore:
 
     def history(self, owner: str, conversation_id: str, max_messages: int | None = None,
                 *, message_id: str | None = None) -> list[dict]:
-        """Read the complete active branch until its last usable checkpoint.
+        """Walk the conversation branch and replay exact saved model steps.
 
-        Failed, empty and partial summary blocks never bound history; this is
-        exactly the distinction in LibreChat resolveCheckpointMessage().
-        Raw messages remain immutable for replay, edits and error recovery.
+        A finished run stores its ordered assistant/tool/steer messages in the
+        server-only runs.state; UI `tool_call.output` is *never* model history.
+        Earlier LibreChat-format rows use the source-format fallback.
         """
         from .compaction import (
             build_summary_carrier_text,
             find_checkpoint_summary_part,
             get_summary_part_text,
         )
+        from .message_dto import format_agent_messages
+
+        def legacy_steps(content, display_text, metadata):
+            """Backwards-compatible reconstruction for pre-canonical turns.
+
+            Their only durable tool results were in the old UI content parts.
+            New runs with modelSteps use exact canonical model history above.
+            """
+            if not isinstance(content, list):
+                return [{'role': 'assistant', 'content': display_text}]
+            tools = [part.get('tool_call') for part in content if isinstance(part, dict)
+                     and part.get('type') == 'tool_call' and isinstance(part.get('tool_call'), dict)]
+            pairs = [call for call in tools if isinstance(call.get('id'), str)
+                     and isinstance(call.get('name'), str) and 'output' in call]
+            text_chunks = [part['text'] for part in content if isinstance(part, dict)
+                           and part.get('type') == 'text' and isinstance(part.get('text'), str)]
+            thinking = [part.get('text') or part.get('thinking') for part in content
+                        if isinstance(part, dict) and part.get('type') in {'think', 'thinking', 'reasoning'}]
+            result = []
+            if pairs:
+                result.append({'role': 'assistant', 'content': None, 'tool_calls': [
+                    {'id': call['id'], 'type': 'function', 'function': {
+                        'name': call['name'], 'arguments': _json(call.get('args', {}))}}
+                    for call in pairs]})
+                result.extend({'role': 'tool', 'tool_call_id': call['id'],
+                               'content': str(call['output'])} for call in pairs)
+            nontext = [part for part in content if isinstance(part, dict)
+                       and part.get('type') in {'image', 'image_url', 'file'}]
+            if not pairs and nontext:
+                try:
+                    result.extend(format_agent_messages([{'role': 'assistant',
+                        'content': content, 'metadata': metadata}]))
+                except ValueError:
+                    result.append({'role': 'assistant', 'content': display_text})
+            elif text_chunks or not pairs:
+                message = {'role': 'assistant', 'content': ''.join(text_chunks) if text_chunks else display_text}
+                if thinking:
+                    message['reasoning_content'] = '\n'.join(str(chunk) for chunk in thinking if chunk)
+                result.append(message)
+            return result
 
         with self.database.connect() as db:
-            if not db.execute('SELECT 1 FROM conversations WHERE id=? AND owner=?',
+            if not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                               (conversation_id, owner)).fetchone():
-                raise KeyError('Conversation not found')
+                raise KeyError("Conversation not found")
             if message_id is None:
-                latest = db.execute('SELECT id FROM messages WHERE conversation_id=? '
-                                    'ORDER BY created_at DESC,id DESC LIMIT 1',
-                                    (conversation_id,)).fetchone()
-                message_id = latest['id'] if latest else None
-            reversed_messages: list[dict] = []
+                latest = db.execute(
+                    "SELECT id FROM messages WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
+                    (conversation_id,),
+                ).fetchone()
+                message_id = latest["id"] if latest else None
+            groups = []
             seen = set()
-            while message_id and message_id != '00000000-0000-0000-0000-000000000000':
+            while message_id and message_id != "00000000-0000-0000-0000-000000000000":
                 if message_id in seen:
-                    raise ValueError('Message graph contains a cycle')
+                    raise ValueError("Message graph contains a cycle")
                 seen.add(message_id)
-                row = db.execute('SELECT id,parent_id,role,text,content,metadata FROM messages '
-                                 'WHERE id=? AND conversation_id=?', (message_id, conversation_id)).fetchone()
+                row = db.execute("SELECT id,parent_id,role,text,content,metadata FROM messages WHERE id=? AND conversation_id=?",
+                                 (message_id, conversation_id)).fetchone()
                 if row is None:
-                    raise KeyError('Message ancestor not found')
-                role = row['role']
-                parts = json.loads(row['content'])
-                metadata = json.loads(row['metadata'])
-                stop_at_checkpoint = False
-                if role in {'user', 'assistant', 'system', 'tool'}:
-                    text = row['text'] or ''
-                    row_messages: list[dict] = []
-                    if isinstance(parts, list):
-                        represented_tool_calls: set[str] = set()
-                        summary = find_checkpoint_summary_part(parts) if role == 'assistant' else None
+                    raise KeyError("Message ancestor not found")
+                if row["role"] in {"user", "assistant"}:
+                    metadata = json.loads(row["metadata"])
+                    content = json.loads(row["content"])
+                    if row["role"] == "assistant":
+                        summary = find_checkpoint_summary_part(content) if isinstance(content, list) else None
                         if summary is not None:
-                            stop_at_checkpoint = True
-                            covered_by_summary = set(summary.get('coveredToolCallIds') or [])
-                            parts = parts[parts.index(summary):]
-                            row_messages.append({'role': 'system',
-                                                 'content': build_summary_carrier_text(get_summary_part_text(summary))})
-                            # The summary covers only the pruned prefix. Carry
-                            # the exact unsummarized recent turns into next-run
-                            # history before stopping ancestral traversal.
-                            retained = summary.get('retainedTail')
-                            if isinstance(retained, list):
-                                retained = [message for message in retained if isinstance(message, dict)
-                                            and message.get('role') in {'user', 'assistant', 'tool'}]
-                                for message in retained:
-                                    if message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
-                                        represented_tool_calls.add(message['tool_call_id'])
-                                    for call in message.get('tool_calls') or []:
-                                        if isinstance(call, dict) and isinstance(call.get('id'), str):
-                                            represented_tool_calls.add(call['id'])
-                                row_messages.extend(retained)
-                        text_parts = [part['text'] for part in parts if isinstance(part, dict)
-                                      and part.get('type') == 'text' and isinstance(part.get('text'), str)]
-                        text = ''.join(text_parts) if text_parts else ('' if stop_at_checkpoint else text)
-                        if stop_at_checkpoint and isinstance(summary.get('visibleTextBoundary'), int):
-                            # The complete assistant message remains the
-                            # immutable user audit trail. Model history must
-                            # not re-inject text already summarized or held
-                            # in retainedTail before this checkpoint.
-                            text = text[max(0, summary['visibleTextBoundary']):]
-                        tool_parts = [part['tool_call'] for part in parts if isinstance(part, dict)
-                                      and part.get('type') == 'tool_call'
-                                      and isinstance(part.get('tool_call'), dict)]
-                        calls = []
-                        results = []
-                        for call in tool_parts:
-                            ident, name = call.get('id'), call.get('name')
-                            if (not isinstance(ident, str) or not isinstance(name, str) or
-                                    'output' not in call or ident in represented_tool_calls or
-                                    (stop_at_checkpoint and ident in covered_by_summary)):
-                                continue
-                            calls.append({'id': ident, 'type': 'function', 'function': {
-                                'name': name, 'arguments': _json(call.get('args', {}))}})
-                            results.append({'role': 'tool', 'tool_call_id': ident,
-                                            'content': str(call['output'])})
-                        if calls:
-                            row_messages.append({'role': 'assistant', 'content': None, 'tool_calls': calls})
-                            row_messages.extend(results)
-                        thinking = [part.get('text') or part.get('thinking') for part in parts
-                                    if isinstance(part, dict) and part.get('type') in {'think', 'thinking', 'reasoning'}]
-                        if text or (not calls and not stop_at_checkpoint):
-                            item = {'role': role, 'content': text}
-                            if thinking:
-                                item['reasoning_content'] = '\n'.join(str(chunk) for chunk in thinking if chunk)
-                            row_messages.append(item)
-                    if not row_messages and not stop_at_checkpoint:
-                        row_messages.append({'role': role, 'content': text})
-                    files = metadata.get('files', [])
-                    if role == 'user' and files and row_messages:
-                        descriptors = []
-                        for file in files:
-                            attachment = db.execute('SELECT id,name,path FROM attachments WHERE id=? AND owner=?',
-                                                    (file['file_id'], owner)).fetchone()
-                            descriptors.append({'file_id': file['file_id'], 'machine': 'local',
-                                **({'filename': attachment['name'], 'path': attachment['path']}
-                                   if attachment else {'unavailable': True})})
-                        row_messages[-1]['content'] = str(row_messages[-1].get('content') or '') + \
-                            '\n\nController attachments (use authorized LSM file tools):\n' + _json(descriptors)
-                    reversed_messages.extend(reversed(row_messages))
-                if stop_at_checkpoint:
+                            # Model context is cut at the most recent complete
+                            # compaction. Keep the original UI transcript but
+                            # never replay summarized tool output into the next
+                            # model request.
+                            prefix = {'role': 'system', 'content': build_summary_carrier_text(
+                                get_summary_part_text(summary))}
+                            recent = summary.get('retainedTail')
+                            recent = [message for message in recent if isinstance(message, dict)
+                                      and message.get('role') in {'user', 'assistant', 'tool'}] \
+                                if isinstance(recent, list) else []
+                            boundary = summary.get('visibleTextBoundary')
+                            text = row['text'] or ''
+                            if type(boundary) is int and boundary >= 0:
+                                text = text[boundary:]
+                            # This response may have a short unsummarized tail
+                            # after the saved text boundary.
+                            group = [prefix, *recent]
+                            if text:
+                                group.append({'role': 'assistant', 'content': text})
+                            groups.append(group)
+                            break
+                        previous = db.execute(
+                            "SELECT state FROM runs WHERE conversation_id=? AND json_extract(state,'$.responseMessageId')=? "
+                            "ORDER BY created_at DESC LIMIT 1", (conversation_id, row["id"]),
+                        ).fetchone()
+                        persisted = json.loads(previous["state"]) if previous else {}
+                        if persisted.get('modelSteps') or (
+                                'modelSteps' in persisted and not row['text'] and not content):
+                            # A canonical run never reads preview-truncated UI
+                            # outputs as tool evidence. Empty cancelled runs
+                            # remain empty; old runs and empty tool-less stubs
+                            # still reconstruct from their display text.
+                            groups.append(persisted['modelSteps'])
+                        else:
+                            groups.append(legacy_steps(content, row['text'], metadata))
+                    else:
+                        value = row["text"]
+                        if isinstance(content, list):
+                            # Legacy UI structured content takes precedence over
+                            # the display string; retain non-text media intact.
+                            relevant = [part for part in content if isinstance(part, dict)
+                                        and part.get("type") in {"text", "image", "image_url", "file"}]
+                            if relevant:
+                                value = relevant
+                                if all(part["type"] == "text" for part in relevant):
+                                    value = "".join(part.get("text", "") for part in relevant)
+                        files = metadata.get("files") or []
+                        if files:
+                            descriptors = []
+                            for item in files:
+                                attachment = db.execute("SELECT id,name,path FROM attachments WHERE id=? AND owner=?",
+                                                        (item["file_id"], owner)).fetchone()
+                                descriptors.append({"file_id": item["file_id"], "machine": "local",
+                                    **({"filename": attachment["name"], "path": attachment["path"]}
+                                       if attachment else {"unavailable": True})})
+                            note = "Controller attachments (use authorized LSM file tools):\n" + _json(descriptors)
+                            if isinstance(value, list):
+                                value = [*value, {"type": "text", "text": note}]
+                            else:
+                                value += "\n\n" + note
+                        groups.append([{"role": "user", "content": value}])
+                if max_messages is not None and len(groups) >= max(1, max_messages):
                     break
-                if max_messages is not None and len(reversed_messages) >= max(1, max_messages):
-                    break
-                message_id = row['parent_id']
-        return list(reversed(reversed_messages))
+                message_id = row["parent_id"]
+        return [step for group in reversed(groups) for step in group]
+
+    def model_history_boundary(self, owner: str, run_id: str, *, initial: int | None = None) -> int:
+        """Retain the original prompt boundary through Ask User/approval checkpoints.
+
+        A resumed snapshot contains this run's prior assistant/tool/steer steps.
+        Its current length cannot be used to select newly generated steps.
+        """
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError("Generation not found")
+            state = json.loads(row["state"])
+            if "modelHistoryStart" not in state:
+                if initial is None or initial < 0:
+                    raise ValueError("Missing initial model-history boundary")
+                state["modelHistoryStart"] = initial
+                db.execute("UPDATE runs SET state=? WHERE id=?", (_json(state), run_id))
+            return int(state["modelHistoryStart"])
+
+    def checkpoint_model_steps(self, owner: str, run_id: str) -> list[dict] | None:
+        """Recover canonical, complete steps from a durable owned checkpoint.
+
+        This is used only for interrupted/error/aborted runs. The checkpoint is
+        server-owned and scoped to this generation, not the latest conversation
+        step or the short run-step preview emitted to the browser.
+        """
+        from .checkpoints import SQLiteCheckpointSaver
+        from .message_dto import completed_model_steps
+
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.conversation_id,r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                return None
+            boundary = json.loads(row["state"]).get("modelHistoryStart")
+            if type(boundary) is not int or boundary < 0:
+                return None
+            cid = row["conversation_id"]
+        saver = SQLiteCheckpointSaver(self.database, owner)
+        checkpoint = saver.get_tuple(saver.config(cid, run_id, event_actor=True))
+        if checkpoint is None:
+            return None
+        values = checkpoint["checkpoint"].get("channel_values") or {}
+        messages = values.get("messages")
+        if not isinstance(messages, list) or boundary > len(messages):
+            return None
+        return completed_model_steps(messages, boundary)
 
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
-               error: str | None = None) -> bool:
+               error: str | None = None, model_steps: list[dict] | None = None) -> bool:
         if status not in _TERMINAL:
             raise ValueError("Only terminal statuses can finish a generation")
         with self.database.connect() as db:
@@ -902,6 +1002,12 @@ class GenerationStore:
             if not row or row["status"] in _TERMINAL:
                 return False
             generation = self._run(row)
+            state = json.loads(row["state"])
+            if model_steps is not None:
+                # Store canonical messages separately from the React preview.
+                # No tool result is truncated on this storage path.
+                state["modelSteps"] = model_steps
+                db.execute("UPDATE runs SET state=? WHERE id=?", (_json(state), run_id))
             now = _now()
             # Preserve source React tool-call parts in history and final SSE,
             # rather than erasing them when the assistant text is committed.
@@ -918,9 +1024,30 @@ class GenerationStore:
             staged = run_state.get('summaryCheckpoint')
             from .compaction import is_usable_summary_part, mark_compaction_outcome
 
-            # A summary checkpoint trims only the subsequent provider model
-            # projection. The saved Assistant DTO is the user's audit trail,
-            # including tool results that were visible before compaction.
+            attachments: list[dict] = []
+            attachment_positions: dict[tuple, int] = {}
+            for event_row in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
+                event = json.loads(event_row["data"])
+                if event.get("event") != "attachment" or not isinstance(event.get("data"), dict):
+                    continue
+                attachment = event["data"]
+                # Native file previews can emit pending then ready/failed for a
+                # single file. Keep the final owned representation, not copies.
+                if attachment.get("file_id"):
+                    key = ("file", attachment["file_id"], attachment.get("toolCallId"))
+                elif attachment.get("type") == "ui_resources" and isinstance(attachment.get("ui_resources"), list):
+                    key = ("ui_resources", attachment.get("toolCallId"), tuple(
+                        resource.get("resourceId") for resource in attachment["ui_resources"]
+                        if isinstance(resource, dict)
+                    ))
+                else:
+                    key = None
+                if key is not None and key in attachment_positions:
+                    attachments[attachment_positions[key]] = attachment
+                else:
+                    if key is not None:
+                        attachment_positions[key] = len(attachments)
+                    attachments.append(attachment)
             content = ([dict(staged)] if is_usable_summary_part(staged) else []) + (
                 ([{"type": "text", "text": text, "phase": "final_answer"}] if text else [])
                 + list(tool_parts.values())
@@ -932,10 +1059,11 @@ class GenerationStore:
                 content.append({"type": "error", "error": error or "Generation failed"})
             if run_state.get('manualCompaction'):
                 mark_compaction_outcome(content, aborted=False)
-            from .tool_attachments import response_attachments
+            from .tool_attachments import response_attachments, visible_response_attachments
 
-            attachments = response_attachments(db, owner, [generation.response_message_id])[
+            verified = response_attachments(db, owner, [generation.response_message_id])[
                 generation.response_message_id]
+            attachments = visible_response_attachments(verified, attachments)
             response_metadata = {"sender": "Assistant", "isCreatedByUser": False,
                                  "unfinished": status != "complete",
                                  **({"attachments": attachments} if attachments else {})}
@@ -943,7 +1071,6 @@ class GenerationStore:
                 response_metadata['metadata'] = {'contextUsage': run_state['contextUsage']}
             response_message = {
                 **({'metadata': response_metadata['metadata']} if 'metadata' in response_metadata else {}),
-                **({'attachments': attachments} if attachments else {}),
                 "messageId": generation.response_message_id,
                 "conversationId": generation.conversation_id,
                 "parentMessageId": generation.user_message_id,
@@ -951,8 +1078,9 @@ class GenerationStore:
                 "text": text,
                 "content": content,
                 "unfinished": status != "complete",
+                **({"attachments": attachments} if attachments else {}),
             }
-            if content or attachments:
+            if content or attachments or model_steps:
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",
@@ -1030,6 +1158,7 @@ class GenerationStore:
                                        (_json(state), _now(), row["id"]))
                             recovered += 1
                             continue
-            if self.finish(row["owner"], row["id"], status="interrupted"):
+            if self.finish(row["owner"], row["id"], status="interrupted",
+                           model_steps=self.checkpoint_model_steps(row["owner"], row["id"])):
                 recovered += 1
         return recovered

@@ -72,6 +72,22 @@ def response_attachments(db, owner: str, message_ids):
     return collected
 
 
+def visible_response_attachments(files: list[dict], stored: object) -> list[dict]:
+    """Keep source MCP UI resources but authenticate file records via live links.
+
+    Stored message metadata can outlive a deleted file. Never re-expose a
+    legacy/unverified file descriptor by trusting the snapshot. UI resources
+    are a separate (non-file) message attachment and survive cloned histories.
+    """
+    ui = []
+    if isinstance(stored, list):
+        for record in stored:
+            if (isinstance(record, dict) and record.get("type") == "ui_resources"
+                    and isinstance(record.get("ui_resources"), list)):
+                ui.append(record)
+    return [*files, *ui]
+
+
 def controller_tool_file_ids(output):
     """Source artifact.files only; never infer ownership from arbitrary paths.
 
