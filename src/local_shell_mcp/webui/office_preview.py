@@ -331,11 +331,10 @@ def _excel_date(raw: str, epoch1904: bool) -> str:
 
 def _xlsx_html(z: ZipFile) -> str:
     names = set(z.namelist())
-    ns_main = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
     shared = []
     if 'xl/sharedStrings.xml' in names:
         strings = _read_xml(z, 'xl/sharedStrings.xml')
-        shared = [_text(si) for si in strings.findall(f'./{ns_main}si')]
+        shared = [_text(si) for si in strings.findall('./{*}si')]
     workbook = _read_xml(z, 'xl/workbook.xml')
     epoch1904 = (workbook.find('./{*}workbookPr') is not None and
                  workbook.find('./{*}workbookPr').get('date1904') in {'1', 'true'})
@@ -348,23 +347,24 @@ def _xlsx_html(z: ZipFile) -> str:
             if identifier and '..' not in PurePosixPath(target).parts and ':' not in target:
                 rels[identifier] = target if target.startswith('xl/') else 'xl/' + target
     sheets = []
-    for index, sheet in enumerate(workbook.findall(f'./{ns_main}sheets/{ns_main}sheet')):
+    for index, sheet in enumerate(workbook.findall('./{*}sheets/{*}sheet')):
         name = sheet.get('name', f'Sheet{index+1}')
-        rel_id = sheet.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+        rel_id = (sheet.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                  or sheet.get('{http://purl.oclc.org/ooxml/officeDocument/relationships}id'))
         location = rels.get(rel_id, f'xl/worksheets/sheet{index+1}.xml')
         if location not in names:
             continue
         root = _read_xml(z, location)
-        sheet_data = root.find(f'./{ns_main}sheetData')
+        sheet_data = root.find('./{*}sheetData')
         rows = []
         total = 0
         if sheet_data is not None:
-            for row in sheet_data.findall(f'./{ns_main}row'):
+            for row in sheet_data.findall('./{*}row'):
                 total += 1
                 if len(rows) >= MAX_ROWS:
                     continue
                 cells = {}
-                for cell in row.findall(f'./{ns_main}c'):
+                for cell in row.findall('./{*}c'):
                     address = cell.get('r', '')
                     match = re.match(r'^([A-Z]+)', address)
                     column = 0
@@ -378,9 +378,9 @@ def _xlsx_html(z: ZipFile) -> str:
                         continue
                     kind = cell.get('t', '')
                     if kind == 'inlineStr':
-                        value = _text(cell.find(f'./{ns_main}is')) if cell.find(f'./{ns_main}is') is not None else ''
+                        value = _text(cell.find('./{*}is')) if cell.find('./{*}is') is not None else ''
                     else:
-                        raw = cell.findtext(f'./{ns_main}v', default='')
+                        raw = cell.findtext('./{*}v', default='')
                         if kind == 's':
                             try:
                                 value = shared[int(raw)]

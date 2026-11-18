@@ -433,3 +433,26 @@ def test_xlsx_clock_styles_do_not_invent_calendar_epoch():
     rendered = buffer_to_office_html(workbook, 'clocks.xlsx', 'application/octet-stream')
     assert '12:00' in rendered and '00:00:00' in rendered and '18:00:00' in rendered
     assert '1899-12-' not in rendered and '1900-01-' not in rendered
+
+
+def test_strict_ooxml_xlsx_namespace_renders_sheets_and_shared_strings():
+    strict = 'http://purl.oclc.org/ooxml/spreadsheetml/main'
+    rel = 'http://purl.oclc.org/ooxml/officeDocument/relationships'
+    workbook = _synthetic_xlsx({
+        'xl/workbook.xml': f'<workbook xmlns="{strict}" xmlns:r="{rel}">'
+                           '<sheets><sheet name="Strict report" sheetId="1" r:id="rId7"/>'
+                           '</sheets></workbook>',
+        'xl/_rels/workbook.xml.rels': '<Relationships xmlns="http://schemas.openxmlformats.org/'
+                                     'package/2006/relationships">'
+                                     '<Relationship Id="rId7" Target="worksheets/sheet1.xml"/>'
+                                     '</Relationships>',
+        'xl/sharedStrings.xml': f'<sst xmlns="{strict}"><si><t>Strict text value</t></si></sst>',
+        'xl/worksheets/sheet1.xml': f'<worksheet xmlns="{strict}">'
+                                    '<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c>'
+                                    '<c r="B1" t="inlineStr"><is><t>Inline value</t></is></c>'
+                                    '</row></sheetData></worksheet>',
+    })
+    html = buffer_to_office_html(workbook, 'strict.xlsx', 'application/octet-stream')
+    assert 'Strict text value' in html
+    assert 'Inline value' in html
+    assert 'This workbook contains no sheets' not in html
