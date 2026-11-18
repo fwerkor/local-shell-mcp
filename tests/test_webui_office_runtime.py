@@ -217,7 +217,9 @@ def test_native_file_write_ui_payload_does_not_exceed_persisted_sse_event_limit(
     assert call.arguments['content'] == raw
     assert len(AgentRunner._visible_tool_args(ModelToolCall(
         'plain', 'file_write', {'path': 'small.csv', 'content': 'data'}))['content']) == 4
-    assert AgentRunner._visible_tool_args(ModelToolCall('other', 'run_shell', {'command': raw}))['command'] == raw
+    plain = ModelToolCall('other', 'run_shell', {'command': raw})
+    assert AgentRunner._visible_tool_args(plain)['_truncated'] is True
+    assert plain.arguments['command'] == raw
 
 
 @pytest.mark.asyncio
