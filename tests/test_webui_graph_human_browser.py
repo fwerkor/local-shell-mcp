@@ -19,7 +19,8 @@ from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('parallel', [False, True], ids=['serial', 'parallel-fanout'])
-async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_path, monkeypatch, parallel):
+@pytest.mark.parametrize('root_ask', [True, False], ids=['root-opt-in', 'child-only-opt-in'])
+async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_path, monkeypatch, parallel, root_ask):
     pytest.importorskip('langgraph')
     playwright = pytest.importorskip('playwright.async_api')
     import uvicorn
@@ -35,7 +36,7 @@ async def test_original_react_direct_graph_child_human_resume_after_reload(tmp_p
     db = shared_database(get_settings().state_dir)
     repo = AgentRepository(db)
     root = repo.create('local', {'name': 'Graph root', 'provider': 'openAI',
-                                 'model': 'graph-root', 'tools': ['ask_user_question']})
+                                 'model': 'graph-root', 'tools': ['ask_user_question'] if root_ask else []})
     child = repo.create('local', {'name': 'Graph child', 'provider': 'openAI',
                                   'model': 'graph-child', 'tools': ['ask_user_question']})
     sibling = repo.create('local', {'name': 'Graph parallel sibling', 'provider': 'openAI',
