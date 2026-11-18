@@ -264,6 +264,19 @@ def model_message_fragments(messages: list[dict]) -> list[ContentFragment]:
         provenance = {'user': 'user', 'assistant': 'model', 'system': 'system', 'tool': 'tool'}[role]
         if isinstance(content, str):
             fragments.append(ContentFragment('assembled_context', 'assembled_context', content, provenance))
+        # Provider-bound history may carry private reasoning independently of
+        # assistant.content. The OpenAI transport forwards these fields, so
+        # assembled-context protection must inspect them as well.
+        for name in ('reasoning_content', 'thinking', 'reasoning'):
+            reasoning = message.get(name)
+            if reasoning is None:
+                continue
+            try:
+                words = _nested_strings(reasoning)
+            except ValueError:
+                words = ['x' * (_MAX_FIELD_CHARS + 1)]
+            fragments.extend(ContentFragment('assembled_context', 'assembled_context', word, provenance)
+                             for word in words)
         for call in message.get('tool_calls') or []:
             if not isinstance(call, dict):
                 continue

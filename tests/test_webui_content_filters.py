@@ -284,3 +284,23 @@ def test_assembled_context_inspects_provider_bound_tool_call_arguments():
     assert any('Bearer secret-token' in item.text for item in fragments)
     assert any(item.text == 'safe' for item in fragments)
     assert isinstance(inspect_content(fragments, _policy('messages')), ContentFilterBlocked)
+
+
+def test_assembled_context_scans_provider_bound_thinking_and_reasoning_fields():
+    messages = [{'role': 'assistant', 'content': 'harmless answer',
+                 'reasoning_content': 'Bearer secret-token'},
+                {'role': 'assistant', 'content': None,
+                 'thinking': [{'type': 'text', 'text': 'Bearer second-token'}]},
+                {'role': 'assistant', 'content': 'safe',
+                 'reasoning': {'text': 'Bearer third-token'}}]
+    fragments = model_message_fragments(messages)
+    assert {item.text for item in fragments} >= {
+        'Bearer secret-token', 'Bearer second-token', 'Bearer third-token'}
+    assert isinstance(inspect_content(fragments, _policy('messages', fields=['assembled_context'])), ContentFilterBlocked)
+
+
+def test_reasoning_nested_overflow_fails_closed_for_protected_context():
+    messages = [{'role': 'assistant', 'content': 'safe',
+                 'reasoning_content': {'tokens': ['x' * 300_000]}}]
+    assert isinstance(inspect_content(model_message_fragments(messages),
+                                      _policy('messages', fields=['assembled_context'])), ContentFilterBlocked)
