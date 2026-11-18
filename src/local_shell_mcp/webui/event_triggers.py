@@ -398,10 +398,17 @@ def _queue_detached_completion(db: Any, original: Any, envelope: dict,
     evidence = parse_terminal_evidence(json.loads(action["evidence"]))
     if evidence is None or evidence["status"] != "succeeded":
         raise PermissionError("Detached action has no authoritative successful terminal evidence")
+    if (evidence["taskId"] != action["task_id"] or
+            evidence["idempotencyKey"] != action["idempotency_key"]):
+        raise PermissionError("Detached terminal evidence does not match the reserved host task")
+    # The internal continuation must include the owner-verified terminal
+    # result, not only a generic wake instruction with no completed output.
+    completion = _json({"taskId": action["task_id"], "toolName": action["tool_name"],
+                        "toolCallId": action["tool_call_id"], "result": evidence["result"]})
     continuation = {**envelope, "requestId": str(uuid.uuid4()),
                     "deliveryId": "detached_completion:" + action["task_id"],
                     "receivedAt": now,
-                    "input": _INPUT,
+                    "input": _INPUT + "\n\nVerified detached tool completion: " + completion,
                     "event": {"id": action["task_id"], "type": _EVENT_TYPE,
                               "occurredAt": evidence["observedAt"],
                               "source": {"id": _EVENT_SOURCE, "type": "internal"},

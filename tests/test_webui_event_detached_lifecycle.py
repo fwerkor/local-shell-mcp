@@ -137,6 +137,15 @@ async def test_detached_completion_is_one_host_native_call_then_one_internal_con
         assert event['event']['type'] == _EVENT_TYPE
         assert event['event']['payload']['invocationId'] == root_id
         assert event['event']['payload']['taskId'] == native_id
+        assert event['input'].startswith('Resume the suspended event actor')
+        completion = json.loads(event['input'].split('Verified detached tool completion: ', 1)[1])
+        assert completion == {'taskId': native_id, 'toolName': 'run_shell',
+                              'toolCallId': 'verified',
+                              'result': '{"ok":true,"stdout":"done"}'}
+    with db.connect() as conn:
+        continuation_input = conn.execute('SELECT text FROM messages WHERE id=?',
+                                          (runs[1].user_message_id,)).fetchone()['text']
+    assert native_id in continuation_input and 'stdout' in continuation_input
     assert len(runs) == 2  # root event turn and exactly one internal continuation
     GenerationStore(db).finish('owner', runs[1].run_id, status='complete', text='Finalized')
     assert await process_event_deliveries(db, dispatch=dispatch) == 0
