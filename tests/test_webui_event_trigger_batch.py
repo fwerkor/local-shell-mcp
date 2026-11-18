@@ -130,3 +130,52 @@ def test_distinct_ordering_lanes_cannot_silently_merge_same_child_event(environm
     with db.connect() as conn:
         assert conn.execute('SELECT count(*) FROM agent_event_deliveries '
                             'WHERE batch_root_id IS NULL').fetchone()[0]==2
+
+
+@pytest.mark.asyncio
+async def test_coalesced_events_split_at_rendered_128k_model_input_budget(environment):
+    db, child, key, binding = environment
+    ids = []
+    for i in range(2):
+        payload = {'mode': 'continue', 'event': {'id': f'large-{i}', 'type': 'activity',
+            'occurredAt': i + 1}, 'target': {'agentId': child['id'],
+            'conversationId': binding['threadId'], 'parentMessageId': _NO_PARENT,
+            'bindingId': binding['id']}, 'input': f'{i}:' + 'Q' * 70_000,
+            'coalesce': {'key': 'same-batch'}}
+        ids.append(enqueue_event(db, 'owner', key['id'], f'large-{i}', payload)['id'])
+    with db.connect() as conn:
+        roots = conn.execute('SELECT id,batch_count,batch_root_id FROM agent_event_deliveries '
+                             'ORDER BY seq').fetchall()
+        assert len(roots) == 2
+        assert [r['batch_count'] for r in roots] == [1, 1]
+        assert all(r['batch_root_id'] is None for r in roots)
+        conn.execute('UPDATE agent_event_deliveries SET available_at=0 WHERE id IN (?,?)', ids)
+    admitted = []
+
+    async def dispatch(owner, generation, *args, **kwargs):
+        admitted.append(generation)
+
+    assert await process_event_deliveries(db, dispatch=dispatch) == 1
+    GenerationStore(db).finish('owner', admitted[0].run_id, status='complete', text='Done A')
+    assert await process_event_deliveries(db, dispatch=dispatch) == 1
+    assert len(admitted) == 2
+    with db.connect() as conn:
+        texts = [conn.execute('SELECT text FROM messages WHERE id=?', (job.user_message_id,)).fetchone()[0]
+                 for job in admitted]
+        assert all(len(text.encode('utf-8')) < 128 * 1024 for text in texts)
+        assert any(text.startswith('0:') for text in texts)
+        assert any(text.startswith('1:') for text in texts)
+    GenerationStore(db).finish('owner', admitted[1].run_id, status='complete', text='Done B')
+
+
+def test_individually_oversized_coalesced_event_rejected_before_enqueue(environment):
+    db, child, key, binding = environment
+    payload = {'mode': 'continue', 'event': {'id': 'single-large', 'type': 'activity',
+        'occurredAt': 1}, 'target': {'agentId': child['id'],
+        'conversationId': binding['threadId'], 'parentMessageId': _NO_PARENT,
+        'bindingId': binding['id']}, 'input': 'X' * 131_000,
+        'coalesce': {'key': 'large'}}
+    with pytest.raises(ValueError, match='generation prompt budget'):
+        enqueue_event(db, 'owner', key['id'], 'huge-single', payload)
+    with db.connect() as conn:
+        assert conn.execute('SELECT count(*) FROM agent_event_deliveries').fetchone()[0] == 0

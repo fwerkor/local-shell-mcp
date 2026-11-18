@@ -163,3 +163,28 @@ async def test_event_worker_singleton_and_stop(environment,monkeypatch):
     assert _WORKERS[str(db.path)] is worker and not worker.done()
     await shutdown_event_workers()
     assert not _WORKERS and worker.done()
+
+
+@pytest.mark.asyncio
+async def test_deleted_target_interrupts_already_admitted_event_generation(environment):
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    db, agent, key = environment
+    delivery = send(environment, 'deleted-after-start')
+    calls = []
+
+    async def dispatch(owner, generation, *args, **kwargs):
+        calls.append(generation)
+
+    assert await process_event_deliveries(db, dispatch=dispatch) == 1
+    run = calls[0]
+    assert GenerationStore(db).get('alice', run.run_id).status == 'running'
+    assert AgentRepository(db).delete('alice', agent['id'])
+    with db.connect() as conn:
+        conn.execute('UPDATE agent_event_deliveries SET lease_until=0 WHERE id=?', (delivery,))
+    assert await process_event_deliveries(db, dispatch=dispatch) == 0
+    assert GenerationStore(db).get('alice', run.run_id).status == 'interrupted'
+    terminal = GenerationStore(db).events('alice', run.run_id)[-1][1]
+    assert terminal['final'] is True
+    assert get_event(db, 'alice', key['id'], delivery)['error']['code'] == 'AGENT_NOT_FOUND'
+    await shutdown_event_workers()

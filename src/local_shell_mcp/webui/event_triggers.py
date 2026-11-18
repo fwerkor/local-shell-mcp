@@ -558,10 +558,19 @@ def enqueue_event(database: Any, owner: str, source_key_id: str, identity: str,
 
     envelope, lane = prepare_source_event(owner, source_key_id, identity, body)
     coalesce_key = _coalescing_key(envelope, body.get("coalesce"))
-    encoded_bytes = len(_json(envelope).encode("utf-8"))
+    encoded = _json(envelope)
+    encoded_bytes = len(encoded.encode("utf-8"))
     if coalesce_key and encoded_bytes > _MAX_BATCH_BYTES:
         raise ValueError("Coalesced envelope exceeds the 512KiB batch limit")
     key = delivery_key(envelope)
+    if coalesce_key is not None:
+        from .generations import _MAX_PROMPT_BYTES
+
+        # A singleton batch must already fit the generation input limit. The
+        # 512 KiB upstream transport allowance cannot override that bound.
+        incoming = {'id': key, 'envelope': encoded}
+        if len(_batch_input(incoming, []).encode('utf-8')) > _MAX_PROMPT_BYTES:
+            raise ValueError('Coalesced Agent Trigger input exceeds generation prompt budget')
     source = AgentRepository(database).get(owner, envelope["target"]["agentId"])
     if source is None:
         raise PermissionError("Event target Agent is not owned by the authenticated source principal")
@@ -600,21 +609,33 @@ def enqueue_event(database: Any, owner: str, source_key_id: str, identity: str,
         parent = None
         available_at = now
         if coalesce_key is not None:
-            parent = db.execute(
-                "SELECT id,available_at FROM agent_event_deliveries "
+            candidates = db.execute(
+                "SELECT id,available_at,envelope FROM agent_event_deliveries "
                 "WHERE owner=? AND source_key_id=? AND coalesce_key=? AND ordering_key=? "
                 "AND batch_root_id IS NULL AND status='pending' AND coalesce_until>? "
                 "AND batch_count<? AND batch_bytes+?<=? "
-                "ORDER BY seq DESC LIMIT 1",
+                "ORDER BY seq DESC",
                 (owner, source_key_id, coalesce_key, lane, now, _MAX_BATCH_SIZE,
                  encoded_bytes, _MAX_BATCH_BYTES),
-            ).fetchone()
+            ).fetchall()
+            # Count the *rendered* 128 KiB model prompt, including all event
+            # wrapper fields, escaping and multibyte Unicode. Splitting at
+            # enrollment keeps both batches admissible with stable IDs.
+            for candidate in candidates:
+                members = db.execute(
+                    'SELECT id,envelope FROM agent_event_deliveries '
+                    'WHERE batch_root_id=? ORDER BY seq', (candidate['id'],),
+                ).fetchall()
+                rendered = _batch_input(candidate, [*members, incoming])
+                if len(rendered.encode('utf-8')) <= _MAX_PROMPT_BYTES:
+                    parent = candidate
+                    break
             available_at = now + _COALESCE_WINDOW_MS if parent is None else parent["available_at"]
         db.execute("INSERT INTO agent_event_deliveries "
                    "(id,owner,source_key_id,fingerprint,envelope,mode,ordering_key,status,"
                    "available_at,coalesce_key,coalesce_until,batch_root_id,batch_count,batch_bytes,"
                    "created_at,updated_at) VALUES(?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?)",
-                   (key, owner, source_key_id, fingerprint, _json(envelope), envelope["mode"],
+                   (key, owner, source_key_id, fingerprint, encoded, envelope["mode"],
                     lane, available_at, coalesce_key,
                     available_at if coalesce_key is not None and parent is None else None,
                     parent["id"] if parent else None, 1, encoded_bytes, now, now))
@@ -887,8 +908,15 @@ async def process_event_deliveries(database: Any, *, dispatch: Any = None,
             envelope = json.loads(row["envelope"])
             agent = AgentRepository(database).get(row["owner"], envelope["target"]["agentId"])
             if agent is None:
+                if row['run_id'] and envelope['mode'] != 'steer':
+                    # Dead-lettering a delivery must also terminate its
+                    # admitted generation in the same SQLite transaction.
+                    # Otherwise no worker can publish final SSE or release
+                    # the conversation's active-generation lock.
+                    store.finish(row['owner'], row['run_id'], status='interrupted',
+                                 error='Agent event target was removed', _connection=db)
                 db.execute("UPDATE agent_event_deliveries SET status='dead',error_code=?,"
-                           "error_type=?,updated_at=? WHERE id=?",
+                           "error_type=?,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE id=?",
                            ("AGENT_NOT_FOUND", "KeyError", now, row["id"]))
                 continue
             token = _PROCESS + ":" + secrets.token_hex(12)
