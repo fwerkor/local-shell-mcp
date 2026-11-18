@@ -675,35 +675,83 @@ class GenerationStore:
                 (run_id,),
             ).fetchall()
             max_seq = entries[-1]["seq"] if entries else 0
-        steps = {}
-        content_parts: list[dict] = []
+        steps: dict[str, dict] = {}
+        indexed_parts: dict[int, dict] = {}
+        trailing: list[dict] = []
+        unindexed_tool_slots: dict[str, int] = {}
+
+        def valid_index(value: object) -> bool:
+            return type(value) is int and 0 <= value <= 10_000
+
+        def put_text(chunk: str, index: int | None):
+            if valid_index(index):
+                previous = indexed_parts.get(index)
+                if previous is not None and previous.get('type') == 'text':
+                    previous['text'] += chunk
+                else:
+                    indexed_parts[index] = {'type': 'text', 'text': chunk, 'phase': 'final_answer'}
+            elif trailing and trailing[-1].get('type') == 'text':
+                trailing[-1]['text'] += chunk
+            else:
+                trailing.append({'type': 'text', 'text': chunk, 'phase': 'final_answer'})
+
         for entry in entries:
-            item = json.loads(entry["data"])
-            event, data = item.get("event"), item.get("data") or {}
-            if event == "on_run_step" and isinstance(data, dict) and isinstance(data.get("id"), str):
-                steps[data["id"]] = data
-            elif event == "on_run_step_closed" and data.get("id") in steps:
-                steps[data["id"]] = {**steps[data["id"]], **{
-                    key: data[key] for key in ("status", "closed_at") if key in data}}
-            elif event == "on_run_step_completed":
-                result = data.get("result") or {}
-                identity = result.get("id")
+            item = json.loads(entry['data'])
+            event, data = item.get('event'), item.get('data') or {}
+            if event == 'on_run_step' and isinstance(data, dict) and isinstance(data.get('id'), str):
+                steps[data['id']] = data
+            elif event == 'on_run_step_closed' and data.get('id') in steps:
+                steps[data['id']] = {**steps[data['id']], **{
+                    key: data[key] for key in ('status', 'closed_at') if key in data}}
+            elif event == 'on_run_step_completed':
+                result = data.get('result') or {}
+                identity = result.get('id')
                 if identity in steps:
-                    steps[identity] = {**steps[identity], "status": "completed",
-                                       "completed_at": result.get("completed_at")}
-                if isinstance(result.get("tool_call"), dict):
-                    content_parts.append({"type": "tool_call", "tool_call": {
-                        **result["tool_call"], "stepId": identity}})
-            elif event == "on_message_delta":
-                content = (data.get("delta") or {}).get("content") or {}
-                if content.get("type") == "text" and isinstance(content.get("text"), str) and content["text"]:
-                    if content_parts and content_parts[-1].get("type") == "text":
-                        content_parts[-1]["text"] += content["text"]
+                    steps[identity] = {**steps[identity], 'status': 'completed',
+                                       'completed_at': result.get('completed_at')}
+                if isinstance(result.get('tool_call'), dict):
+                    part = {'type': 'tool_call', 'tool_call': {
+                        **result['tool_call'], 'stepId': identity}}
+                    index = result.get('index')
+                    if not valid_index(index) and identity in steps:
+                        index = steps[identity].get('index')
+                    if valid_index(index):
+                        indexed_parts[index] = part
+                    elif isinstance(identity, str) and identity in unindexed_tool_slots:
+                        trailing[unindexed_tool_slots[identity]] = part
                     else:
-                        content_parts.append({"type": "text", "text": content["text"],
-                                              "phase": "final_answer"})
-            elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
-                content_parts.append(data["part"])
+                        if isinstance(identity, str):
+                            unindexed_tool_slots[identity] = len(trailing)
+                        trailing.append(part)
+            elif event == 'on_message_delta':
+                content = (data.get('delta') or {}).get('content') or {}
+                if content.get('type') == 'text' and isinstance(content.get('text'), str) and content['text']:
+                    step = steps.get(data.get('id')) if isinstance(data.get('id'), str) else None
+                    index = step.get('index') if step is not None else None
+                    put_text(content['text'], index)
+            elif event == 'on_steer_applied' and isinstance(data.get('part'), dict):
+                index = data.get('index')
+                if valid_index(index):
+                    indexed_parts[index] = data['part']
+                else:
+                    trailing.append(data['part'])
+            elif event == 'on_content_rewind':
+                # Recovered human controls retract provider text not anchored
+                # in the durable checkpoint. Never replay that abandoned tail.
+                preserved = data.get('preserveText')
+                if isinstance(preserved, str):
+                    remaining = preserved
+                    for index in sorted(indexed_parts):
+                        part = indexed_parts[index]
+                        if part.get('type') == 'text':
+                            part['text'], remaining = remaining[:len(part['text'])], remaining[len(part['text']):]
+                    for part in trailing:
+                        if part.get('type') == 'text':
+                            part['text'], remaining = remaining[:len(part['text'])], remaining[len(part['text']):]
+                    if remaining:
+                        put_text(remaining, None)
+        content_parts = ([indexed_parts.get(i, {'type': 'text', 'text': '', 'phase': 'final_answer'})
+                          for i in range(max(indexed_parts) + 1)] if indexed_parts else []) + trailing
         pending = state.get("pendingAction")
         initial = content_parts
         pending_steers = (state.get("steering") or {}).get("queue", [])
