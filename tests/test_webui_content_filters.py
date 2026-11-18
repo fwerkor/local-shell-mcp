@@ -304,3 +304,17 @@ def test_reasoning_nested_overflow_fails_closed_for_protected_context():
                  'reasoning_content': {'tokens': ['x' * 300_000]}}]
     assert isinstance(inspect_content(model_message_fragments(messages),
                                       _policy('messages', fields=['assembled_context'])), ContentFilterBlocked)
+
+
+def test_fragment_overflow_only_blocks_fields_selected_by_the_policy():
+    fragments = [ContentFragment('assembled_context', 'assembled_context', 'ordinary', 'system')]
+    fragments *= 4099
+    submission_only = _policy('messages', fields=['content_part'])
+    assert inspect_content(fragments, submission_only) is None
+    # A protected source and selected field still fail closed at the budget.
+    with pytest.raises(ContentFilterBlocked) as blocked:
+        inspect_content(fragments, _policy('messages', fields=['assembled_context']))
+    assert blocked.value.field == 'assembled_context'
+    # Invalid field policies cannot evade the configured fail-closed behavior.
+    with pytest.raises(ContentFilterBlocked):
+        inspect_content(fragments, _policy('messages', fields=[]))

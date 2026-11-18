@@ -124,15 +124,21 @@ def inspect_content(fragments: Iterable[ContentFragment], filters: dict | None,
     snapshots = []
     for index, fragment in enumerate(fragments):
         if index > _MAX_ITEMS:
-            # Never ignore a later protected fragment after bounded traversal.
-            protected = next((record for record in snapshots
-                              if (_policies(filters, record.source) or {}).get('action') != 'audit'
-                              and _policies(filters, record.source)), None)
-            if protected is None and isinstance(fragment, ContentFragment):
-                policy = _policies(filters, fragment.source)
-                protected = fragment if policy and policy.get('action') != 'audit' else None
-            if protected is not None:
-                raise ContentFilterBlocked(protected.source, protected.field)
+            # Only matching fields count as protected: a messages policy for
+            # content_part must not block a long assembled_context conversation.
+            # Invalid blocking field policies fail closed, as in normal scanning.
+            for record in (*snapshots, fragment):
+                if not isinstance(record, ContentFragment):
+                    raise TypeError('Expected a typed content fragment')
+                policy = _policies(filters, record.source)
+                if policy is None or policy.get('action') == 'audit':
+                    continue
+                try:
+                    fields = _policy_fields(policy)
+                except ValueError:
+                    raise ContentFilterBlocked(record.source, record.field) from None
+                if fields is None or record.field in fields:
+                    raise ContentFilterBlocked(record.source, record.field)
             break
         snapshots.append(fragment)
     if not snapshots:
