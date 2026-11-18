@@ -240,7 +240,10 @@ async def test_shell_journal_lookup_and_native_stop(bound):
         assert durable._payload("invalid") == {}
         repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "none"})
         durable.mark_revoked("local")
-        assert await durable.sweep() == 1
+        # A concurrent revocation sweeper may already have taken ownership
+        # of the cancellation before this explicit sweep. The durable task
+        # state, not the number of this caller's claims, is the invariant.
+        await durable.sweep()
         assert rows()[0]["state"] == "stopped"
     finally:
         from local_shell_mcp.shell_ops import kill_shell
