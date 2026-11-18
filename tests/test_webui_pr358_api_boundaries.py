@@ -154,3 +154,22 @@ async def test_oauth_retry_never_steals_an_inflight_graph_actor(tmp_path, monkey
         existing.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await existing
+
+
+def test_restored_final_answer_step_uses_last_unclosed_steer_boundary(hosted_api):
+    _, store, _ = hosted_api
+    run, _ = store.begin('local', {'text': 'Respond to steer'})
+    root = f'step_{run.run_id}'
+    next_step = f'{root}_after_steer_2'
+    store.append('local', run.run_id, {'event': 'on_run_step',
+        'data': {'id': root, 'type': 'message_creation', 'index': 0, 'created_at': 100}})
+    store.append('local', run.run_id, {'event': 'on_run_step_closed', 'data': {'id': root}})
+    store.append('local', run.run_id, {'event': 'on_steer_applied',
+        'data': {'steerId': 'steer-a', 'text': 'Now use a shorter answer'}})
+    store.append('local', run.run_id, {'event': 'on_run_step',
+        'data': {'id': next_step, 'type': 'message_creation', 'index': 2, 'created_at': 200}})
+    assert generation_routes._last_open_message_step(store, 'local', run.run_id) == (
+        next_step, 2, 200)
+    store.append('local', run.run_id, {'event': 'on_run_step_closed',
+        'data': {'id': next_step}})
+    assert generation_routes._last_open_message_step(store, 'local', run.run_id) is None

@@ -98,6 +98,32 @@ def _generator_headers(protocol_version: int = 2) -> dict[str, str]:
     }
 
 
+def _last_open_message_step(store: GenerationStore, owner: str, run_id: str):
+    """Restore the active final-answer step from trusted persisted SSE events.
+
+    Steer boundaries close the preceding step and open a new one at a later
+    content index. A resumed actor must not revert to the old index 0.
+    """
+    opened: dict[str, dict] = {}
+    order: list[str] = []
+    closed: set[str] = set()
+    for _, event in store.events(owner, run_id):
+        data = event.get('data') or {}
+        if event.get('event') == 'on_run_step' and data.get('type') == 'message_creation':
+            identifier = data.get('id')
+            if (isinstance(identifier, str) and isinstance(data.get('index'), int)
+                    and data.get('index') >= 0):
+                opened[identifier] = data
+                order.append(identifier)
+        elif event.get('event') == 'on_run_step_closed' and isinstance(data.get('id'), str):
+            closed.add(data['id'])
+    for identifier in reversed(order):
+        if identifier in opened and identifier not in closed:
+            item = opened[identifier]
+            return identifier, item['index'], item.get('created_at')
+    return None
+
+
 async def _run_model(
     owner: str, generation: Generation, profile: ProviderConfig,
     *, instructions: str = "", parameters: dict | None = None,
@@ -141,12 +167,21 @@ async def _run_model(
             from .attachments import with_agent_context
 
             history = with_agent_context(_database(), owner, parent_agent, history)
-        if resume_history is None:
+        recovered_step = (_last_open_message_step(repo, owner, generation.run_id)
+                          if resume_history is not None else None)
+        if recovered_step is not None:
+            step_id, step_index, created = recovered_step
+            now_ms = created if isinstance(created, int) else now_ms
+        else:
+            if resume_history is not None:
+                snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
+                step_index = len(snapshot['aggregatedContent'])
+                step_id = f"step_{generation.run_id}_after_resume_{step_index}"
             check_wakeup_lease()
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step", "data": {
                     "type": "message_creation", "id": step_id,
-                    "runId": generation.response_message_id, "index": 0,
+                    "runId": generation.response_message_id, "index": step_index,
                     "created_at": now_ms, "status": "in_progress",
                     "stepDetails": {"type": "message_creation", "message_creation": {
                         "message_id": generation.response_message_id,

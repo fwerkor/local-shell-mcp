@@ -152,3 +152,29 @@ async def test_full_wakeup_uses_real_parent_agent_runner_and_persists_sse(enviro
         assert any(event.get("event") == "on_run_step" for event in events)
         assert any(event.get("final") is True for event in events)
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_failed_child_error_survives_automatic_wakeup_and_result_claim(environment):
+    db, repo, store, child, parent, parent_run = environment
+    host, task_id, _ = await make_task(environment)
+    await completed(host, task_id)
+    store.finish('local', parent_run.run_id, status='complete', text='Delegation complete')
+    with db.connect() as conn:
+        conn.execute('UPDATE subagent_tasks SET status=?,error=?,result=NULL WHERE id=?',
+                     ('error', 'Detached subagent task failed (TimeoutError)', task_id))
+    dispatched = []
+
+    async def dispatch(owner, generation, profile, agent, **kwargs):
+        dispatched.append(generation)
+
+    await wait_admission()
+    assert await process_wakeups(db, dispatch=dispatch) == 1
+    assert len(dispatched) == 1
+    with db.connect() as conn:
+        prompt = conn.execute('SELECT text FROM messages WHERE id=?',
+                              (dispatched[0].user_message_id,)).fetchone()['text']
+    assert 'Detached subagent task failed (TimeoutError)' in prompt
+    assert '"status":"error"' in prompt
+    assert json.loads(await host.check({'background_task_id': task_id}))['status'] == 'delivery_scheduled'
+    await shutdown_subagent_tasks()
