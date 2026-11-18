@@ -99,6 +99,35 @@ def _generator_headers(protocol_version: int = 2) -> dict[str, str]:
     }
 
 
+def _recovered_terminal_steps(store, owner: str, run_id: str, visible_text: str) -> list[dict] | None:
+    """Keep safely streamed assistant text after a durable tool checkpoint.
+
+    A provider abort has no completed model checkpoint for its unfinished answer,
+    but that answer has already been displayed and must remain in model history.
+    Do not resurrect unmatched tool calls from an interrupted model turn.
+    """
+    steps = store.checkpoint_model_steps(owner, run_id)
+    if steps is None:
+        return None
+    from copy import deepcopy
+
+    recovered = deepcopy(steps)
+    prior_text = ''.join(step['content'] for step in recovered
+                         if step.get('role') == 'assistant' and isinstance(step.get('content'), str))
+    if visible_text and visible_text.startswith(prior_text):
+        remaining = visible_text[len(prior_text):]
+    elif visible_text and visible_text != prior_text:
+        remaining = visible_text
+    else:
+        remaining = ''
+    if remaining:
+        if recovered and recovered[-1].get('role') == 'assistant' and isinstance(recovered[-1].get('content'), str):
+            recovered[-1]['content'] += remaining
+        else:
+            recovered.append({'role': 'assistant', 'content': remaining})
+    return recovered
+
+
 async def _run_model(
     owner: str, generation: Generation, profile: ProviderConfig,
     *, instructions: str = "", parameters: dict | None = None,
@@ -211,8 +240,16 @@ async def _run_model(
 approved_batch=approved_batch, on_injected=on_injected,
                              wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
                              actor_lease=actor_lease, recovery_steers=recovery_steers)
+        # Only the first entry determines this run's prefix. After human
+        # actions, resume_history/checkpoints already contain prior run steps.
+        original_boundary = len(history) if resume_history is None else len(
+            repo.history(owner, generation.conversation_id, message_id=generation.user_message_id)
+        ) + int(bool(instructions))
+        history_start = repo.model_history_boundary(
+            owner, generation.run_id, initial=original_boundary,
+        )
         try:
-            await runner.run(history)
+            finished_messages = await runner.run(history)
         except AgentSuspended:
             return
         check_wakeup_lease()
@@ -223,8 +260,25 @@ approved_batch=approved_batch, on_injected=on_injected,
                 "created_at": now_ms, "closed_at": int(time.time() * 1000),
             },
         }, actor_lease=actor_lease)
+        from .message_dto import model_steps
+
+        # A handoff may replace system instructions, changing the context
+        # prefix length. Locate the original request within the final graph
+        # state so the response is not discarded by a stale numeric offset.
+        if history_start > 0:
+            source_user = next((message for message in reversed(history[:history_start])
+                                if message.get("role") == "user"), None)
+            if source_user is not None:
+                matched = [index for index, message in enumerate(finished_messages)
+                           if message == source_user]
+                if matched:
+                    history_start = matched[-1] + 1
+                elif len(finished_messages) <= history_start:
+                    history_start = 0
+            elif len(finished_messages) <= history_start:
+                history_start = 0
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
-                    actor_lease=actor_lease)
+                    model_steps=model_steps(finished_messages, history_start), actor_lease=actor_lease)
     except asyncio.CancelledError:
         if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
             check_wakeup_lease()
@@ -233,7 +287,8 @@ approved_batch=approved_batch, on_injected=on_injected,
         if (asyncio.current_task() not in _SHUTDOWN_TASKS and
                 not (pending and pending.get("payload", {}).get("type") == "action_oauth")):
             repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts),
-                        actor_lease=actor_lease)
+                        model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
+                                                             "".join(text_parts)), actor_lease=actor_lease)
         raise
     except Exception as exc:
         # A former controller cannot publish failure after its lease changed.
@@ -245,7 +300,9 @@ approved_batch=approved_batch, on_injected=on_injected,
         # Do not put provider tokens, request metadata or secrets in response.
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=f"Model generation failed ({type(exc).__name__})", actor_lease=actor_lease)
+                    error=f"Model generation failed ({type(exc).__name__})",
+                    model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
+                                                             "".join(text_parts)), actor_lease=actor_lease)
     finally:
         if heartbeat is not None:
             heartbeat.cancel()

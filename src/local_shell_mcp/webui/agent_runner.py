@@ -22,7 +22,6 @@ from .approval_runtime import (
     ask_user_approval_policy,
     build_approval_payload,
     execute_approval_batch,
-    truncate_approval_result,
 )
 from .ask_user_tools import ASK_USER_TOOLS, build_ask_user_payload
 from .checkpoints import SQLiteCheckpointSaver
@@ -184,13 +183,17 @@ class AgentRunner:
 
     @staticmethod
     def _visible_tool_args(call):
-        """Bound only the UI/SSE copy; native execution/checkpoint keep full args."""
+        """Bound SSE previews; full native arguments remain untouched."""
         args = call.arguments
-        if call.name == "file_write" and isinstance(args, dict):
-            content = args.get("content")
+        if call.name == 'file_write' and isinstance(args, dict):
+            content = args.get('content')
             if isinstance(content, str) and len(content) > 8192:
-                return {**args, "content": f"[omitted {len(content)} characters from file-write UI event]"}
-        return args
+                return {**args, 'content': f'[omitted {len(content)} characters from file-write UI event]'}
+        raw = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+        if len(raw.encode("utf-8")) <= 16 * 1024:
+            return args
+        return {"_truncated": True, "preview": raw.encode("utf-8")[:8192].decode(
+            "utf-8", errors="ignore"), "note": "Full arguments retained for execution"}
 
     def _tool_step(self, call):
         checkpoint = self.active_config["configurable"].get("checkpoint_id", "")
@@ -256,13 +259,35 @@ class AgentRunner:
                                                 database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
+        # A UI resource marker is only resolvable after the original client
+        # receives a canonical attachment. Derive it from the same native MCP
+        # envelope retained in the checkpoint; never infer from display JSON.
+        if call.name == "mcp_tool_call" and isinstance(output, str):
+            from .mcp_projection import mcp_tool_history_message
+
+            artifact = mcp_tool_history_message(call, output, self.initial_profile.provider if self.initial_profile else "openai").get("artifact")
+            ui = artifact.get("ui_resources") if isinstance(artifact, dict) else None
+            if isinstance(ui, dict) and isinstance(ui.get("data"), list) and ui["data"]:
+                # SSE event storage has a strict byte ceiling. The full MCP
+                # envelope remains in the durable tool checkpoint for replay;
+                # oversized UI resources cannot invalidate a completed tool.
+                import json
+
+                payload = {
+                    "event": "attachment", "data": {
+                        "type": "ui_resources", "messageId": self.generation.response_message_id,
+                        "toolCallId": call.call_id, "conversationId": self.generation.conversation_id,
+                        "ui_resources": ui["data"],
+                    },
+                }
+                if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= 240_000:
+                    self.store.append(self.owner, self.generation.run_id, payload)
         end_at = int(time.time() * 1000)
         event = {
             "event": "on_run_step_completed", "data": {"result": {
                 "id": step["id"], "index": step["index"], "completed_at": end_at,
                 "type": "tool_call", "tool_call": {
-                    "id": call.call_id, "name": call.name,
-                    "args": self._visible_tool_args(call),
+                    "id": call.call_id, "name": call.name, "args": self._visible_tool_args(call),
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},
@@ -595,8 +620,9 @@ class AgentRunner:
             check_breaker=self._check_grant, on_completed=self._completed,
         )
         commands = [output for output in outputs if isinstance(output, dict) and output.get("graph")]
-        messages = [{"role": "tool", "tool_call_id": call.call_id,
-                     "content": truncate_approval_result(output, 400_000)}
+        from .mcp_projection import mcp_tool_history_message
+
+        messages = [mcp_tool_history_message(call, output, state.context.profile.provider)
                     for call, output in zip(calls, outputs, strict=True) if isinstance(output, str)]
         if not commands:
             return ToolBatchOutput(messages)

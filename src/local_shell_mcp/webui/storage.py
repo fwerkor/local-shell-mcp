@@ -209,7 +209,7 @@ class WorkspaceRepository:
                               [*params, limit + 1]).fetchall()
             has_next = len(rows) > limit
             page = rows[:limit]
-            from .tool_attachments import response_attachments
+            from .tool_attachments import response_attachments, visible_response_attachments
 
             current = response_attachments(
                 db, owner, [row["id"] for row in page if row["role"] == "assistant"])
@@ -221,7 +221,8 @@ class WorkspaceRepository:
                 ):
                     # Deleted attachment rows cascade the file association.
                     # A stale snapshot must not resurrect a deleted file.
-                    message["attachments"] = current.get(row["id"], [])
+                    message["attachments"] = visible_response_attachments(
+                        current.get(row["id"], []), message.get("attachments"))
                 messages.append(message)
         return {"messages": messages,
                 "nextCursor": _cursor_encode(page[-1]["created_at"], page[-1]["id"]) if has_next else None}
