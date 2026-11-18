@@ -284,7 +284,21 @@ async def test_revocation_racing_with_native_start_recovers_unreturned_worker_id
     monkeypatch.setattr(tools, "_remote_call", worker)
     started = asyncio.create_task(call(cid, "delayed-worker", "job_start",
                                        {"machine": "worker1", "command": "sleep 20"}))
-    await asyncio.wait_for(created.wait(), timeout=5)
+    # Windows runners may spend several seconds initializing process and
+    # SQLite state before reaching the mocked remote dispatch. Race the
+    # awaited dispatch against an early failure of the launch task so a
+    # rejected start is reported directly instead of a misleading timeout.
+    creation = asyncio.create_task(created.wait())
+    try:
+        finished, _ = await asyncio.wait(
+            {creation, started}, timeout=25, return_when=asyncio.FIRST_COMPLETED,
+        )
+        if creation not in finished:
+            if started in finished:
+                await started  # Surface the actual initialization exception.
+            raise AssertionError("Native job_start never reached the worker dispatch")
+    finally:
+        creation.cancel()
     assert rows()[0]["state"] == "reserved"
     repo.save_setting("local", "agent.machine_policy.conversation." + cid,
                       {"local": "write", "worker1": "none", "worker2": "write"})
