@@ -140,3 +140,53 @@ async def test_owned_user_artifact_edit_reaches_model_history(artifact_app):
         assert response.status_code == 200
     history = GenerationStore(repo.database).history("alice", convo["conversationId"], message_id=message["messageId"])
     assert history == [{"role": "user", "content": ":::artifact\nfresh\n:::"}]
+
+
+@pytest.mark.asyncio
+async def test_artifact_editor_updates_full_canonical_model_steps_atomically(artifact_app):
+    repo, convo, _, app = artifact_app
+    store = GenerationStore(repo.database)
+    source = ':::artifact{identifier="one"}\n```text\nold\n```\n:::'
+    run, _ = store.begin("alice", {"conversationId": convo["conversationId"], "text": "Generate an artifact"})
+    steps = [{"role": "assistant", "content": source}, {"role": "assistant", "content": "plain response"}]
+    assert store.finish("alice", run.run_id, status="complete", text=source, model_steps=steps)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers={"x-owner": "alice"}) as client:
+        response = await client.post("/api/messages/artifact/" + run.response_message_id,
+                                     json={"index": 0, "original": "old", "updated": "new"})
+    assert response.status_code == 200, response.text
+    persisted = store.history("alice", convo["conversationId"], message_id=run.response_message_id)
+    assert "new" in persisted[-2]["content"] and "old" not in persisted[-2]["content"]
+    assert persisted[-1]["content"] == "plain response"
+    with repo.database.connect() as db:
+        stored = json.loads(db.execute("SELECT state FROM runs WHERE id=?", (run.run_id,)).fetchone()["state"])
+        assert stored["modelSteps"][0]["content"] == persisted[-2]["content"]
+
+
+@pytest.mark.asyncio
+async def test_canonical_artifact_list_and_mismatch_are_transaction_safe(artifact_app):
+    repo, convo, _, app = artifact_app
+    store = GenerationStore(repo.database)
+    source = ':::artifact{identifier="diagram"}\n```text\nold\n```\n:::'
+    run, _ = store.begin("alice", {"conversationId": convo["conversationId"], "text": "make chart"})
+    canonical = [None, {"role": "tool", "content": "not the visible assistant"},
+                 {"role": "assistant", "content": None},
+                 {"role": "assistant", "content": "plain answer"},
+                 {"role": "assistant", "content": [{"type": "text", "text": source}]}]
+    assert store.finish("alice", run.run_id, status="complete", text=source, model_steps=canonical)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers={"x-owner": "alice"}) as client:
+        endpoint = "/api/messages/artifact/" + run.response_message_id
+        edit = {"index": 0, "original": "old", "updated": "new"}
+        assert (await client.post(endpoint, json=edit)).status_code == 200
+        with repo.database.connect() as db:
+            state = json.loads(db.execute("SELECT state FROM runs WHERE id=?", (run.run_id,)).fetchone()["state"])
+        assert "new" in state["modelSteps"][-1]["content"][0]["text"]
+        # The React message may have an artifact that cannot be located in
+        # canonical steps after a concurrent or corrupt migration. Reject the
+        # edit and roll back both rows, never commit an inconsistent replay.
+        with repo.database.connect() as db:
+            state["modelSteps"][-1]["content"] = []
+            db.execute("UPDATE runs SET state=? WHERE id=?", (json.dumps(state), run.run_id))
+        before = repo.messages("alice", convo["conversationId"])
+        conflict = await client.post(endpoint, json={"index": 0, "original": "new", "updated": "different"})
+        assert conflict.status_code == 409
+        assert repo.messages("alice", convo["conversationId"]) == before
