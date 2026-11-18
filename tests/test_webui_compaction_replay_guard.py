@@ -71,3 +71,25 @@ async def test_identical_history_size_can_compact_again_after_checkpoint(tmp_pat
     await runner._before_model(state)
     assert len(calls) == 2
     assert state.messages[0]['content'].startswith('<summary>')
+
+
+def test_multiple_checkpoints_keep_cumulative_covered_tool_ids(tmp_path):
+    import json
+
+    db = SQLiteDatabase(tmp_path / 'state')
+    store = GenerationStore(db)
+    run, _ = store.begin('local', {'text': 'Summarize two tool results'})
+    for i in (1, 2):
+        store.append('local', run.run_id, {'event': 'on_run_step_completed', 'data': {
+            'result': {'id': f'step-{i}', 'type': 'tool_call', 'tool_call': {
+                'id': f'call-{i}', 'name': 'run_shell', 'args': {}, 'output': f'old tool output {i}'}}}})
+        store.stage_summary('local', run.run_id, f'Summary after tool {i}.', 10,
+                            covered_tool_call_ids=[f'call-{i}'])
+    with db.connect() as conn:
+        checkpoint = json.loads(conn.execute('SELECT state FROM runs WHERE id=?',
+                                             (run.run_id,)).fetchone()['state'])['summaryCheckpoint']
+    assert checkpoint['coveredToolCallIds'] == ['call-1', 'call-2']
+    assert store.finish('local', run.run_id, status='complete', text='Final conclusion')
+    history = store.history('local', run.conversation_id)
+    assert all(msg.get('tool_call_id') not in {'call-1', 'call-2'} for msg in history)
+    assert 'Summary after tool 2.' in history[0]['content']

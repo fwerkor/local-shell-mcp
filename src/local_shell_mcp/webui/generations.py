@@ -750,6 +750,13 @@ class GenerationStore:
             if row is None:
                 raise KeyError('Generation no longer active')
             state = json.loads(row['state'])
+            previous = state.get('summaryCheckpoint') or {}
+            prior_ids = previous.get('coveredToolCallIds') if isinstance(previous, dict) else None
+            if covered_tool_call_ids is not None or isinstance(prior_ids, list):
+                covered_tool_call_ids = sorted({
+                    call_id for call_id in [*(prior_ids or []), *(covered_tool_call_ids or [])]
+                    if isinstance(call_id, str) and call_id
+                })
             state['summaryCheckpoint'] = {'type': 'summary', 'content': [{'type': 'text', 'text': summary_text}],
                 'boundary': {'messageIndex': boundary}, 'tokenCount': token_count,
                 **({'initiatedBy': 'user'} if manual else {}),
