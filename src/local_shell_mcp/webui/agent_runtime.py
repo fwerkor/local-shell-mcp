@@ -151,8 +151,13 @@ async def run_agent_loop(
         state.messages.append(message)
         state.pending_calls = calls
         state.completed = not calls
-        if (not calls and on_boundary is not None and
-            await on_boundary(state, "stream" if sealed else "terminal")):
+        injected = (not calls and on_boundary is not None and
+                    await on_boundary(state, "stream" if sealed else "terminal"))
+        if injected or sealed:
+            # A client may cancel a queued preempt while aclose() releases the
+            # provider stream. Never finalize the truncated partial answer as
+            # successful when the seal happened but no steer was injected.
+            # Continue the model from that partial assistant message instead.
             state.completed = False
         if save_state is not None:
             await save_state(state, calls)

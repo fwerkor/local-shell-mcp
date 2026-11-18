@@ -317,3 +317,137 @@ def test_applied_steer_is_replayed_after_crash_before_checkpoint_without_duplica
         'Use the new direction', 'Use the new direction']
     runner._reconcile_drained_steers(state)
     assert len([m for m in state.messages if m.get('source') == 'steer']) == 2
+
+
+def test_steer_identity_recovery_does_not_consume_identical_prior_turn(context):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    generations, steering, job, _ = context
+    db = generations.database
+    ack = _enqueue(steering, job, 'new-receipt', 'Be concise')
+    assert len(steering.drain('local', job.run_id, boundary='terminal')) == 1
+    profile = ProviderConfig('openai', 'stub', 'https://example.invalid', '')
+    runner = AgentRunner('local', job, db, generations, scopes=set(), grant_expires=None,
+                         stream_tools=None, stream_text=None, on_text=None, profile=profile)
+    state = AgentLoopState(AgentContext(profile, []), [
+        {'role': 'user', 'content': 'Be concise', 'source': 'steer', 'steerId': 'older-run'},
+        {'role': 'user', 'content': 'Current query'},
+    ])
+    runner._reconcile_drained_steers(state)
+    assert [msg['steerId'] for msg in state.messages if msg.get('source') == 'steer'] == [
+        'older-run', ack['steerId']]
+    runner._reconcile_drained_steers(state)
+    assert len([msg for msg in state.messages if msg.get('steerId') == ack['steerId']]) == 1
+
+
+@pytest.mark.asyncio
+async def test_post_tool_crash_recovered_steer_follows_cached_tool_result(context):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState, ToolBatchOutput
+    from local_shell_mcp.webui.providers import ModelToolCall
+
+    generations, steering, job, profile = context
+    db = generations.database
+    pending = ModelToolCall('call-pending', 'run_shell', {'command': 'echo done'})
+    original = [{'role': 'user', 'content': 'Run command'},
+                {'role': 'assistant', 'content': None, 'tool_calls': [
+                    {'id': 'call-pending', 'type': 'function',
+                     'function': {'name': 'run_shell', 'arguments': '{"command":"echo done"'}}]}]
+
+    async def unused(*args, **kwargs):
+        yield 'done'
+
+    async def noop(_):
+        return None
+
+    before = AgentRunner('local', job, db, generations, scopes=set(), grant_expires=None,
+                         stream_tools=unused, stream_text=unused, on_text=noop, profile=profile)
+    state = AgentLoopState(AgentContext(profile, []), original,
+                           step=2, pending_calls=[pending], tool_step_started=True)
+    before.saver.put(before.config, {
+        'v': 1, 'id': '00000000000000000001',
+        'channel_values': before._snapshot(state),
+        'channel_versions': {'messages': 2}, 'versions_seen': {},
+    }, {'source': 'loop', 'step': 2})
+    new = _enqueue(steering, job, 'crash-recovery', 'Change next reply')
+    assert steering.drain('local', job.run_id, boundary='post_tools')[0]['steerId'] == new['steerId']
+    presented = []
+
+    async def model(_profile, messages, **kwargs):
+        presented.extend(messages)
+        yield 'All finished.'
+
+    resumed = AgentRunner('local', job, db, generations, scopes=set(), grant_expires=None,
+                          stream_tools=model, stream_text=model, on_text=noop, profile=profile)
+
+    async def dispatch(_calls, _state):
+        return ToolBatchOutput([{'role': 'tool', 'tool_call_id': 'call-pending', 'content': 'done'}])
+
+    resumed._dispatch = dispatch
+    await resumed.run(original)
+    roles = [msg['role'] for msg in presented]
+    assert roles[:4] == ['user', 'assistant', 'tool', 'user']
+    assert presented[3]['steerId'] == new['steerId']
+
+
+@pytest.mark.asyncio
+async def test_preempt_cancelled_during_provider_close_cannot_finalize_partial_answer():
+    from local_shell_mcp.webui.agent_runtime import (
+        AgentContext,
+        AgentLoopState,
+        ToolBatchOutput,
+        run_agent_loop,
+    )
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    still_queued = [True]
+    invocations = []
+    texts = []
+
+    class Stream:
+        def __init__(self, index):
+            self.index = index
+            self.emitted = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.emitted:
+                raise StopAsyncIteration
+            self.emitted = True
+            return 'Partial' if self.index == 0 else ' continued.'
+
+        async def aclose(self):
+            if self.index == 0:
+                # Cancellation wins the race after seal but before drain.
+                still_queued[0] = False
+
+    def stream(*args, **kwargs):
+        invocations.append(list(args[1]))
+        return Stream(len(invocations) - 1)
+
+    async def text(value):
+        texts.append(value)
+
+    async def preempt():
+        return still_queued[0]
+
+    async def drain(_state, boundary):
+        assert boundary in {'stream', 'terminal'}
+        return False
+
+    async def dispatch(_calls, _state):
+        return ToolBatchOutput([])
+
+    profile = ProviderConfig('openai', 'test', 'https://example.invalid', '')
+    state = AgentLoopState(AgentContext(profile, []), [{'role': 'user', 'content': 'Write a reply'}])
+    final = await run_agent_loop(state, stream_tools=stream, stream_text=stream,
+                                 dispatch=dispatch, on_text=text, on_boundary=drain,
+                                 on_stream_chunk=preempt)
+    assert len(invocations) == 2
+    assert texts == ['Partial', ' continued.']
+    assert final[-1]['content'] == ' continued.'
+    assert final[-2]['content'] == 'Partial'

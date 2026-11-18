@@ -97,6 +97,7 @@ async def _run_model(
     params = parameters or {}
     step_id = "step_" + generation.run_id
     step_index = 0
+    needs_post_tool_step = False
     now_ms = int(time.time() * 1000)
     if resume_history is not None:
         # A human continuation must append into the last text step, which may
@@ -140,8 +141,12 @@ async def _run_model(
             })
 
         async def append_text(chunk):
+            nonlocal needs_post_tool_step
             if not chunk:
                 return
+            if needs_post_tool_step:
+                needs_post_tool_step = False
+                await _open_followup_step('after_tool')
             text_parts.append(chunk)
             repo.append(owner, generation.run_id, {
                 "event": "on_message_delta", "data": {
@@ -151,9 +156,9 @@ async def _run_model(
                 },
             })
 
-        async def on_injected():
-            nonlocal step_id, step_index, now_ms
-
+        async def _open_followup_step(reason):
+            nonlocal step_id, step_index, now_ms, needs_post_tool_step
+            needs_post_tool_step = False
             # Upstream reserves an absolute content slot per message_creation.
             # Once a STEER part occupies the next slot, subsequent provider
             # text must use a *new* runStep index or useStepHandler appends it
@@ -168,7 +173,7 @@ async def _run_model(
             })
             snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
             step_index = len(snapshot["aggregatedContent"])
-            step_id = f"step_{generation.run_id}_after_steer_{step_index}"
+            step_id = f"step_{generation.run_id}_{reason}_{step_index}"
             now_ms = closed_at
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step", "data": {
@@ -182,6 +187,16 @@ async def _run_model(
                 },
             })
 
+        async def on_injected():
+            await _open_followup_step('after_steer')
+
+        async def on_tool_completed(_call):
+            nonlocal needs_post_tool_step
+            # The Controller's tool-completion event is already durable. Only
+            # the *next provider text* opens another text slot, avoiding empty
+            # message steps on tool-only turns and keeping React indices exact.
+            needs_post_tool_step = True
+
         runner = AgentRunner(owner, generation, _database(), repo,
                              scopes=granted_scopes, grant_expires=grant_expires,
                              stream_tools=stream_model_with_tools, stream_text=stream_model,
@@ -189,7 +204,8 @@ async def _run_model(
                              parameters=params, ask_user_enabled=ask_user_enabled,
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
-                             approved_batch=approved_batch, on_injected=on_injected)
+                             approved_batch=approved_batch, on_injected=on_injected,
+                             on_tool_completed=on_tool_completed)
         try:
             await runner.run(history)
         except AgentSuspended:

@@ -47,8 +47,9 @@ class AgentRunner:
                  parameters=None, ask_user_enabled=False, mcp_enabled=False,
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
-                 approved_batch=None, on_injected=None):
+                 approved_batch=None, on_injected=None, on_tool_completed=None):
         self.on_injected = on_injected
+        self.on_tool_completed = on_tool_completed
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -198,6 +199,8 @@ class AgentRunner:
             self.store.append(self.owner, self.generation.run_id, event)
         if is_action_tool(call.name):
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
+        if self.on_tool_completed is not None:
+            await self.on_tool_completed(call)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -428,20 +431,20 @@ class AgentRunner:
             content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
                 item["files"], ensure_ascii=False,
             )
-        return {"role": "user", "content": content, "source": "steer"}
+        return {"role": "user", "content": content, "source": "steer",
+                **({'steerId': item['steerId']} if isinstance(item.get('steerId'), str) else {})}
 
     def _reconcile_drained_steers(self, state):
         """Recover durable applied steers not yet included in a model checkpoint.
 
         drain() records an applied receipt before the graph snapshot. A crash
         in that window must not silently lose the accepted user instruction.
-        Compare occurrence counts, not merely text equality: two identical
-        steers are distinct accepted messages.
+        Match stable steer identities, never the text of older user turns.
+        If the interrupted checkpoint ends in pending tool calls, queue
+        recovered steers until those tool results have been appended.
         """
         if self.namespace:
             return
-        from collections import Counter
-
         with self.database.connect() as db:
             row = db.execute(
                 "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
@@ -451,17 +454,21 @@ class AgentRunner:
         if row is None:
             return
         parts = json.loads(row["state"]).get("steerParts") or []
-        persisted = Counter(m.get("content") for m in state.messages
-                            if isinstance(m, dict) and m.get("source") == "steer"
-                            and isinstance(m.get("content"), str))
-        required = Counter()
+        checkpoint_ids = {m.get('steerId') for m in state.messages
+                          if isinstance(m, dict) and m.get('source') == 'steer'
+                          and isinstance(m.get('steerId'), str)}
+        missing = []
         for part in parts:
-            if not isinstance(part, dict) or not isinstance(part.get("steer"), str):
+            if (not isinstance(part, dict) or not isinstance(part.get('steer'), str)
+                    or not isinstance(part.get('steerId'), str)):
                 continue
-            message = self._steer_message(part)
-            required[message["content"]] += 1
-            if required[message["content"]] > persisted[message["content"]]:
-                state.messages.append(message)
+            if part['steerId'] not in checkpoint_ids:
+                missing.append(self._steer_message(part))
+                checkpoint_ids.add(part['steerId'])
+        if state.pending_calls:
+            self._pending_recovered_steers = missing
+        else:
+            state.messages.extend(missing)
 
     async def run(self, history, *, recursion_limit=None):
         restored = self.saver.get_tuple(self.config)
@@ -489,6 +496,7 @@ class AgentRunner:
                     self.cache[replay_key(call, index)] = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)},
                                                          "output": match["content"]}
                     self.saver.put_writes(self.active_config, [("messages", match)], task_id=call.call_id)
+        self._pending_recovered_steers = []
         self._reconcile_drained_steers(state)
         if recursion_limit is not None:
             state.context.recursion_limit = recursion_limit
@@ -555,12 +563,15 @@ class AgentRunner:
             # inject from the same owner/epoch-fenced durable queue.
             if self.namespace:
                 return False
+            recovered = self._pending_recovered_steers
+            self._pending_recovered_steers = []
             applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary)
-            if applied and self.on_injected is not None:
+            if (recovered or applied) and self.on_injected is not None:
                 await self.on_injected()
+            loop_state.messages.extend(recovered)
             for item in applied:
                 loop_state.messages.append(self._steer_message(item))
-            return bool(applied)
+            return bool(recovered or applied)
 
         async def should_seal_stream():
             return not self.namespace and self.steers.has_preempt(self.owner, self.generation.run_id)
