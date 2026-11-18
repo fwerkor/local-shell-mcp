@@ -212,14 +212,20 @@ async def _run_model(
         # A handoff may replace system instructions, changing the context
         # prefix length. Locate the original request within the final graph
         # state so the response is not discarded by a stale numeric offset.
-        if history_start > 0 and len(finished_messages) <= history_start:
+        if history_start > 0:
             source_user = next((message for message in reversed(history[:history_start])
-                                if message.get("role") == "user"), None)
+                                if message.get('role') == 'user'), None)
             if source_user is not None:
+                # The runner can prepend a memory system message after this
+                # boundary is calculated. Anchor on the actual submitted user
+                # message, even when the output list grew by exactly one.
                 matched = [index for index, message in enumerate(finished_messages)
                            if message == source_user]
-                history_start = matched[-1] + 1 if matched else 0
-            else:
+                if matched:
+                    history_start = matched[-1] + 1
+                elif len(finished_messages) <= history_start:
+                    history_start = 0
+            elif len(finished_messages) <= history_start:
                 history_start = 0
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
                     model_steps=model_steps(finished_messages, history_start))
