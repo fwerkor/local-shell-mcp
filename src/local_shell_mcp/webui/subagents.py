@@ -272,9 +272,10 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
     task = args.get("description")
     description = task if isinstance(task, str) and task.strip() else "No task description provided"
     messages = []
-    instructions = config.agent.get("instructions")
-    additional = config.agent.get("additional_instructions")
-    system = "\n\n".join(value for value in (instructions, additional) if isinstance(value, str) and value)
+    from .artifact_prompts import agent_instructions
+    from .providers import selected_provider
+
+    system = agent_instructions(config.agent, selected_provider({}, config.agent))
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": description})

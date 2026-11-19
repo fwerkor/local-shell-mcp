@@ -531,5 +531,13 @@
       ],
       "node_runtime_required": false
     }
+  },
+  "artifacts_office_fixture_lock": {
+    "sample.docx": "23c30abe8d50720ab7acd0aad6f69427c8b101bdab39f515dd6e69d1d336de63",
+    "sample.xlsx": "394c6bd079c0d68d4e4edb4dd630a0418b0ed856d3ee2ab0e9ffcfcf5d20f2b9",
+    "sample.xls": "3f0282b67989043e5186c52e1784341ebac9649ebec416f54b57f9efcb691d2f",
+    "sample.ods": "d81a5886c068be340eb888d99854027b0b861498f874ea8328913e421aa6007e",
+    "sample.pptx": "b3c0d9957f92f98da34b9abeeadf58f6a972b07d312faa02b272bae919d535c0",
+    "empty.docx": "9106332c57592e86f80688601055761f32d2ca7da659964198f572dc48de9198"
   }
 }

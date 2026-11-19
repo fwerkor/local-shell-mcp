@@ -22,6 +22,7 @@ from .approval_runtime import (
     build_approval_payload,
     execute_approval_batch,
 )
+from .artifact_prompts import agent_instructions
 from .ask_user_tools import ASK_USER_TOOLS, build_ask_user_payload
 from .checkpoints import SQLiteCheckpointSaver
 from .handoff import (
@@ -127,8 +128,12 @@ class AgentRunner:
 
     @staticmethod
     def _visible_tool_args(call):
-        """Bound SSE argument previews; persisted/native arguments remain complete."""
+        """Bound SSE previews; native and checkpoint arguments remain complete."""
         args = call.arguments
+        if call.name == 'file_write' and isinstance(args, dict):
+            content = args.get('content')
+            if isinstance(content, str) and len(content) > 8192:
+                return {**args, 'content': f'[omitted {len(content)} characters from file-write UI event]'}
         raw = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
         if len(raw.encode("utf-8")) <= 16 * 1024:
             return args
@@ -176,6 +181,23 @@ class AgentRunner:
                 self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
             return
         step = self._tool_step(call)
+        if call.name == "file_write" and isinstance(output, str):
+            # Original callbacks.js `on_tool_end` publishes tool artifacts
+            # separately from the model-visible tool result. The native LSM
+            # file-write response is the trusted success/hash evidence; keep
+            # the original file contents outside model message history.
+            from contextlib import suppress
+
+            from starlette.exceptions import HTTPException
+
+            from ..settings import get_settings
+            from .office_preview import publish_native_file_write
+
+            # The authorized tool write already completed. An optional preview
+            # failure cannot change the native result or its audit record.
+            with suppress(ValueError, PermissionError, OSError, HTTPException):
+                await publish_native_file_write(self.owner, self.generation, call, output,
+                                                database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
         # A UI resource marker is only resolvable after the original client
@@ -434,7 +456,7 @@ class AgentRunner:
         received = receive_handoff(update.get("messages") or [], destination)
         history = received["filteredMessages"] if received else update.get("messages") or []
         history = [message for message in history if message.get("role") != "system"]
-        instructions = target.get("instructions") or ""
+        instructions = agent_instructions(target, selected_provider({}, target))
         if received and received.get("instructions"):
             instructions += "\n\n" + received["instructions"]
         if instructions:
@@ -491,7 +513,7 @@ class AgentRunner:
                 original = next(call for call in state.pending_calls if call.call_id == result.call.call_id)
                 record = {"proposal": {"name": original.name, "args": copy.deepcopy(original.arguments)}, "output": result.raw_content if result.raw_content is not None else result.content}
                 self.cache[replay_key(original, state.pending_calls.index(original))] = record
-                await self._completed(original, record)
+                await self._completed(result.call, record)
 
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
