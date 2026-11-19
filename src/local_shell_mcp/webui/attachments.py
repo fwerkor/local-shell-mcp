@@ -16,6 +16,7 @@ import re
 import sqlite3
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
@@ -328,9 +329,13 @@ async def publish_attachment(owner, name, content_type, chunks, state_dir, *, ex
 
 def _public_attachment_metadata(metadata):
     """Never surface unsanitized legacy HTML as a trusted office preview."""
+    # The renderer uses this marker only for escaped, bounded Office HTML
+    # created internally by publish_office_tool_output. Never forward a marker
+    # from the stored metadata into the client DTO.
+    trusted = metadata.get('trustedOfficeRenderer') == 'escaped-office-v1'
     public_metadata = {key: value for key, value in metadata.items()
-                       if key != "extracted_text"}
-    if public_metadata.get("textFormat") == "html":
+                       if key not in {'extracted_text', 'trustedOfficeRenderer'}}
+    if public_metadata.get("textFormat") == "html" and not trusted:
         public_metadata.pop("text", None)
         public_metadata.pop("textFormat", None)
         public_metadata["status"] = "failed"
@@ -457,6 +462,12 @@ async def download_react_file(request: Request):
 
     owner = _owner(request)
     _require_ui_scopes(request, "shell:read")
+    # LibreChat's retained useFileDownload calls /download/:userId/:file_id.
+    # The owner in the path is NEVER a source of authorization: bind it to
+    # the authenticated single-user controller principal before lookup.
+    path_owner = request.path_params.get("user_id")
+    if path_owner is not None and path_owner != owner:
+        raise HTTPException(404, detail="Attachment not found")
     with _repo().database.connect() as db:
         row = db.execute("SELECT * FROM attachments WHERE id=? AND owner=?",
                          (request.path_params["file_id"], owner)).fetchone()
@@ -466,8 +477,24 @@ async def download_react_file(request: Request):
     root = get_settings().state_dir.resolve() / "attachments"
     if path.is_symlink() or root not in path.resolve().parents or not path.is_file():
         raise HTTPException(404, detail="Attachment not found")
+    # Pinned LibreChat files.js getDownloadFileMetadata: only the allowlisted
+    # fields reach the browser cache. Do not expose extracted text, owner,
+    # tenant, physical controller path, or other private SQLite metadata.
+    allowed = (
+        "conversationId", "message", "file_id", "temp_file_id", "bytes", "model",
+        "embedded", "filename", "filepath", "storageKey", "storageRegion", "object",
+        "type", "usage", "context", "source", "filterSource", "width", "height",
+        "expiresAt", "preview", "textFormat", "status", "previewError",
+        "createdAt", "updatedAt",
+    )
+    public_file = file_record(row)
+    metadata = {key: public_file[key] for key in allowed if key in public_file}
     return FileResponse(path, media_type="application/octet-stream", filename=row["name"],
-                        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"})
+                        headers={
+                            "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+                            "X-File-Metadata": quote(json.dumps(metadata, ensure_ascii=False,
+                                                           separators=(",", ":")), safe="~()*!.'-"),
+                        })
 
 def recover_attachment_deletions():
     from .file_deletion import AttachmentDeletionStore
@@ -685,5 +712,6 @@ def attachment_routes() -> list[Route]:
         Route("/api/files/images", upload_react_file, methods=["POST"]),
         Route("/api/files/{file_id}/preview", file_preview, methods=["GET"]),
         Route("/api/files/download/{file_id}", download_react_file, methods=["GET"]),
+        Route("/api/files/download/{user_id}/{file_id}", download_react_file, methods=["GET"]),
         Route("/api/lsm/controller/attachments/upload", upload_attachment, methods=["POST"]),
     ]

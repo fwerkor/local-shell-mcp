@@ -8,6 +8,7 @@ owned by the Controller's event loop, not by the browser connection.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import logging
@@ -18,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .approval_runtime import ApprovalBatch, prepare_approval_batch
+from .artifact_prompts import artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
@@ -102,11 +104,23 @@ class GenerationStore:
             return self._run(row) if row else None
 
     def begin(self, owner: str, payload: dict, agent: dict | None = None, *,
-              protocol_version: int = 2) -> tuple[Generation, bool]:
+              protocol_version: int = 2,
+              trusted_new_conversation_id: str | None = None,
+              _connection: Any | None = None) -> tuple[Generation, bool]:
         client_request_id = payload.get("clientRequestId")
         if client_request_id is not None and (not isinstance(client_request_id, str) or
                                                not 1 <= len(client_request_id) <= 160):
             raise ValueError("Invalid client request id")
+        # These idempotency namespaces are host-generated only. A browser can
+        # see a task handle and must not be able to preoccupy its continuation
+        # key with an unrelated generation before the child settles.
+        if isinstance(client_request_id, str):
+            if client_request_id.startswith("subagent-wakeup:") and _connection is None:
+                raise ValueError("Internal completion idempotency key cannot be submitted")
+            if client_request_id.startswith("subagent:") and trusted_new_conversation_id is None:
+                raise ValueError("Internal child idempotency key cannot be submitted")
+            if client_request_id.startswith("trigger_") and _connection is None:
+                raise ValueError("Internal Agent Trigger idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")
         new_conversation = raw_conversation_id in (None, "", "new", "new_conversation")
         if raw_conversation_id is not None and not isinstance(raw_conversation_id, str):
@@ -114,7 +128,19 @@ class GenerationStore:
         project_id = payload.get("projectId", payload.get("chatProjectId")) if new_conversation else None
         if project_id is not None and (not isinstance(project_id, str) or not project_id):
             raise ValueError("Invalid project id")
-        conversation_id = str(uuid.uuid4()) if new_conversation else raw_conversation_id
+        # Internal-only allocation for a host-reserved subagent child. No HTTP
+        # field can select this value; the host registered its trusted lineage
+        # before this conversation becomes externally observable.
+        if trusted_new_conversation_id is not None:
+            if not new_conversation or not isinstance(trusted_new_conversation_id, str):
+                raise ValueError("A reserved child conversation must be a new conversation")
+            try:
+                if str(uuid.UUID(trusted_new_conversation_id)) != trusted_new_conversation_id:
+                    raise ValueError("Invalid reserved child conversation identity")
+            except ValueError as exc:
+                raise ValueError("Invalid reserved child conversation identity") from exc
+        conversation_id = (trusted_new_conversation_id or str(uuid.uuid4())) \
+            if new_conversation else raw_conversation_id
         prompt = payload.get("text")
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
             raise ValueError("A non-empty text message is required (max 128 KiB)")
@@ -132,9 +158,15 @@ class GenerationStore:
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
+            "artifactsMode": artifact_mode(payload, agent),
         }
-        with self.database.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        # Internal trigger delivery supplies its already-locked SQLite
+        # transaction. The generation and a one-shot child result claim must
+        # commit or roll back together; ordinary HTTP admission is unchanged.
+        with (contextlib.nullcontext(_connection) if _connection is not None
+              else self.database.connect()) as db:
+            if _connection is None:
+                db.execute("BEGIN IMMEDIATE")
             if client_request_id:
                 prior = db.execute(
                     "SELECT r.* FROM generation_requests gr JOIN runs r ON r.id=gr.run_id "
@@ -247,9 +279,11 @@ class GenerationStore:
         return json.loads(row["state"]).get("pendingAction")
 
     def pause_for_question(self, owner: str, run_id: str, pending: dict,
-                           history: list[dict], partial_text: str) -> bool:
+                           history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -273,7 +307,7 @@ class GenerationStore:
             return True
 
     def pause_for_oauth(self, owner: str, run_id: str, pending: dict,
-                        history: list[dict], partial_text: str, auth_delta: dict) -> bool:
+                        history: list[dict], partial_text: str, auth_delta: dict, *, actor_lease=None) -> bool:
         """Park a model-selected OAuth tool without any live Python waiter.
 
         The original React sign-in delta and the durable interrupt are written
@@ -302,6 +336,8 @@ class GenerationStore:
             raise ValueError("Action OAuth continuation too large")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -489,8 +525,9 @@ class GenerationStore:
             return self._run(row), history, partial_text
 
     def pause_for_approval(self, owner: str, run_id: str, pending: dict,
-                           history: list[dict], partial_text: str) -> bool:
-        return self.pause_for_question(owner, run_id, pending, history, partial_text)
+                           history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
+        return self.pause_for_question(owner, run_id, pending, history, partial_text,
+                                       actor_lease=actor_lease)
 
     def claim_approval(self, owner: str, run_id: str, action_id: str,
                        decisions: list[dict]) -> tuple[Generation, list[dict], str, ApprovalBatch]:
@@ -662,10 +699,12 @@ class GenerationStore:
         return prepare_approval_batch(review["payload"], review["resolutions"]) if review else None
 
     def complete_approval_batch(self, owner: str, run_id: str, action_id: str,
-                                history: list[dict], partial_text: str) -> bool:
+                                history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
         """Retire approval proof only after checkpointed tool results are saved."""
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -683,11 +722,33 @@ class GenerationStore:
                        (_json(state), _now(), run_id))
             return True
 
-    def append(self, owner: str, run_id: str, event: dict) -> int:
+    @staticmethod
+    def _record_completed_arguments(db, run_id: str, event: dict, full_arguments: dict | None):
+        """Owner-verified, durable tool evidence outside truncated SSE previews."""
+        if full_arguments is None:
+            return
+        tool = ((event.get('data') or {}).get('result') or {}).get('tool_call') or {}
+        if (event.get('event') != 'on_run_step_completed' or not isinstance(tool.get('id'), str)
+                or not isinstance(tool.get('name'), str) or not isinstance(full_arguments, dict)):
+            raise ValueError('Invalid completed tool evidence')
+        row = db.execute('SELECT state FROM runs WHERE id=?', (run_id,)).fetchone()
+        state = json.loads(row['state'])
+        proofs = state.setdefault('completedToolArguments', {})
+        proof = {'name': tool['name'], 'arguments': full_arguments}
+        if tool['id'] in proofs and proofs[tool['id']] != proof:
+            raise ValueError('Cannot change completed tool arguments')
+        proofs[tool['id']] = proof
+        db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?', (_json(state), _now(), run_id))
+
+    def append(self, owner: str, run_id: str, event: dict, *, actor_lease=None,
+               full_arguments: dict | None = None) -> int:
         encoded = _json(event)
         if len(encoded.encode("utf-8")) > 256 * 1024:
             raise ValueError("Generation event exceeds 256 KiB")
         with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             if not db.execute(
                 "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -697,10 +758,12 @@ class GenerationStore:
             if count >= _EVENT_LIMIT:
                 raise ValueError("Generation event retention limit reached")
             cursor = db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, encoded))
+            self._record_completed_arguments(db, run_id, event, full_arguments)
             return int(cursor.lastrowid)
 
     def append_tool_completion(self, owner: str, run_id: str, event: dict,
-                               tool_call_id: str, file_ids: list[str]) -> int:
+                               tool_call_id: str, file_ids: list[str],
+                               *, actor_lease=None, full_arguments: dict | None = None) -> int:
         """Commit a tool completion and its file attachments atomically."""
         from .tool_attachments import link_tool_attachment
 
@@ -711,6 +774,8 @@ class GenerationStore:
             raise ValueError("Tool attachment count exceeds limit")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             if not db.execute(
                 "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -746,6 +811,7 @@ class GenerationStore:
                 raise ValueError("Generation event retention limit reached")
             cursor = db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                                 (run_id, encoded))
+            self._record_completed_arguments(db, run_id, event, full_arguments)
             for ident in file_ids:
                 try:
                     link_tool_attachment(
@@ -878,6 +944,28 @@ class GenerationStore:
             ).fetchall()
             return [(int(row[0]), json.loads(row[1])) for row in rows]
 
+    def accumulated_text(self, owner: str, run_id: str) -> str:
+        """Reassemble already-streamed deltas for a restarted owner-bound run.
+
+        A resumed StateGraph must not lose previous assistant text, and must not
+        reemit old SSE chunks. This uses the existing generation event contract.
+        """
+        with self.database.connect() as db:
+            rows = db.execute(
+                "SELECT ge.data FROM generation_events ge JOIN runs r ON r.id=ge.run_id "
+                "JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE c.owner=? AND ge.run_id=? ORDER BY ge.seq", (owner, run_id),
+            ).fetchall()
+        chunks = []
+        for row in rows:
+            event = json.loads(row["data"])
+            if event.get("event") == "on_message_delta":
+                content = event.get("data", {}).get("delta", {}).get("content", {})
+                value = content.get("text") if isinstance(content, dict) else None
+                if isinstance(value, str):
+                    chunks.append(value)
+        return "".join(chunks)
+
     def history(self, owner: str, conversation_id: str, max_messages: int = 50,
                 *, message_id: str | None = None) -> list[dict]:
         """Walk the conversation branch and replay exact saved model steps.
@@ -939,6 +1027,9 @@ class GenerationStore:
                                             part = next(steers, None)
                                             if part is not None:
                                                 step['content'] = merged_text(part)
+                                                step['files'] = part.get('files', [])
+                                                step['quotes'] = part.get('quotes', [])
+                                                step['steerId'] = part.get('steerId')
                                 # Legacy React artifact edits store a text block
                                 # while history API originally exposed its text.
                                 # Keep the scalar-text contract when no media or
@@ -1037,11 +1128,16 @@ class GenerationStore:
 
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
                error: str | None = None, expired_action_id: str | None = None,
+               actor_lease=None, _connection: Any | None = None,
                model_steps: list[dict] | None = None) -> bool:
         if status not in _TERMINAL:
             raise ValueError("Only terminal statuses can finish a generation")
-        with self.database.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        with (contextlib.nullcontext(_connection) if _connection is not None
+              else self.database.connect()) as db:
+            if _connection is None:
+                db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=?", (run_id, owner),
@@ -1061,10 +1157,16 @@ class GenerationStore:
             # rather than erasing them when the assistant text is committed.
             tool_positions = {}
             content = []
+            attachments = {}
             for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
                 value = json.loads(event["data"])
                 kind = value.get("event")
                 data = value.get("data") or {}
+                if kind == "attachment":
+                    attachment = data
+                    if (isinstance(attachment, dict) and isinstance(attachment.get("file_id"), str)
+                            and attachment.get("messageId") == generation.response_message_id):
+                        attachments[attachment["file_id"]] = attachment
                 if kind == "on_run_step_completed":
                     result = data.get("result", {})
                     if isinstance(result.get("tool_call"), dict):
@@ -1089,8 +1191,26 @@ class GenerationStore:
                     _rewind_uncheckpointed_text(content, data.get('preserveText', ''))
             if not content and text:
                 content.append({"type": "text", "text": text, "phase": "final_answer"})
-            # The original chronological position of each completed tool is
-            # retained relative to subsequent STEER and model-text parts.
+            # The source ON_RUN_STEP_CLOSED event is the authoritative status
+            # and duration even after reconnect; never infer a stop from the
+            # absence of a live streaming task or the event's unstable index.
+            for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq",
+                                    (run_id,)):
+                value = json.loads(event["data"])
+                if value.get("event") != "on_run_step_closed":
+                    continue
+                closed = value.get("data") or {}
+                part = (content[tool_positions[closed["id"]]] if closed.get("id") in tool_positions else None)
+                if not part or closed.get("status") not in {"completed", "failed", "cancelled"}:
+                    continue
+                tool = part["tool_call"]
+                tool["runStepStatus"] = closed["status"]
+                opened_at, closed_at = closed.get("created_at"), closed.get("closed_at")
+                if (type(closed_at) in (int, float) and closed_at > 0 and
+                    (type(opened_at) not in (int, float) or opened_at <= closed_at)):
+                    tool["runStepClosedAt"] = closed_at
+                    if type(opened_at) in (int, float):
+                        tool["runStepDurationMs"] = closed_at - opened_at
             # LibreChat agents/client.js emits ContentTypes.ERROR as a content
             # part. A top-level final.error alone is ignored by finalHandler.
             # Persist the same part so the error survives history reload too.
@@ -1132,6 +1252,7 @@ class GenerationStore:
                 "sender": "Assistant", "isCreatedByUser": False,
                 "text": text,
                 "content": content,
+                **({"attachments": attachments} if attachments else {}),
                 "unfinished": status != "complete",
             }
             if content or attachments or model_steps:

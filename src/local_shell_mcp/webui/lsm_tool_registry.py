@@ -213,14 +213,22 @@ def _validate_arguments(arguments: Any) -> None:
 
 async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
                     granted_scopes: set[str], grant_expires: int | None = None,
-                    run_id: str | None = None) -> str:
-    """Dispatch through FastMCP's original validated, audited tool function."""
+                    run_id: str | None = None,
+                    authorization_conversation_id: str | None = None) -> str:
+    """Dispatch through FastMCP's original validated, audited tool function.
+
+    Detached child generations own native tasks in their actual child
+    conversation while inheriting the verified original parent conversation's
+    machine policy. Never bind a child's run_id to its parent's conversation:
+    durable_tasks.reserve requires the run to belong to the owned task scope.
+    """
     from . import durable_tasks
 
     tool = _tool(call.name)
     arguments = call.arguments
     _validate_arguments(arguments)
     intent = None
+    permission_conversation_id = authorization_conversation_id or conversation_id
 
     def check_authorization():
         if run_id is not None and durable_tasks.is_run_cancelled(run_id):
@@ -244,13 +252,13 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
             destination = arguments.get("destination_machine") or "local"
             if not isinstance(source, str) or not isinstance(destination, str):
                 raise ValueError("Invalid transfer machines")
-            authorize_machine_action(owner, conversation_id, source, "read",
+            authorize_machine_action(owner, permission_conversation_id, source, "read",
                                      scopes=granted_scopes, expires=grant_expires)
-            authorize_machine_action(owner, conversation_id, destination, "write",
+            authorize_machine_action(owner, permission_conversation_id, destination, "write",
                                      scopes=granted_scopes, expires=grant_expires)
         else:
             for machine in _targets(tool, arguments):
-                authorize_machine_action(owner, conversation_id, machine, operation,
+                authorize_machine_action(owner, permission_conversation_id, machine, operation,
                                          scopes=granted_scopes, expires=grant_expires)
         if tool.name == "job_retry" and arguments.get("machine") in {None, "", "local"}:
             # Controller-managed transfer jobs retain remote endpoints in their
@@ -258,7 +266,7 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
             from ..jobs import job_retry_machine_requirements
 
             for machine, required in job_retry_machine_requirements(arguments.get("job_id")):
-                authorize_machine_action(owner, conversation_id, machine, required,
+                authorize_machine_action(owner, permission_conversation_id, machine, required,
                                          scopes=granted_scopes, expires=grant_expires)
         extra_scope = _ADDITIONAL_SCOPES.get(tool.name)
         if extra_scope and extra_scope not in granted_scopes:
@@ -273,7 +281,8 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
         tool.name in {"run_shell", "run_python"} and arguments.get("persist_on_timeout")
     )):
         intent = durable_tasks.reserve(owner, conversation_id, run_id, call.call_id,
-                                      tool.name, arguments, granted_scopes, grant_expires)
+                                      tool.name, arguments, granted_scopes, grant_expires,
+                                      authorization_conversation_id=authorization_conversation_id)
         check_authorization()
     invocation = dict(arguments)
     if intent is not None and intent.key is not None:

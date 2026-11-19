@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from .agents import AgentRepository
+from .artifact_prompts import agent_instructions, artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
@@ -34,7 +35,23 @@ from .routes import _body, _owner
 log = logging.getLogger(__name__)
 _TASKS: dict[str, asyncio.Task] = {}
 _TASK_GUARD = asyncio.Lock()
-_SHUTTING_DOWN = False
+# Preserve durable running checkpoints only for cooperative Controller shutdown.
+# Explicit abort/disconnect cancellation keeps its existing terminal semantics.
+_SHUTDOWN_TASKS: set[asyncio.Task] = set()
+
+
+def _prune_stale_task_handles() -> None:
+    """Do not hand tasks tied to a terminated loop to a replacement loop.
+
+    A Controller restart creates a fresh event loop; durable state is in SQLite,
+    not in these ephemeral handles. Test in-process reloads can retain module
+    globals across closed loops, so those handles must never enter gather().
+    """
+    for run_id, task in list(_TASKS.items()):
+        if task.done() or task.get_loop().is_closed():
+            if _TASKS.get(run_id) is task:
+                _TASKS.pop(run_id, None)
+            _SHUTDOWN_TASKS.discard(task)
 
 
 def _database():
@@ -120,8 +137,14 @@ async def _run_model(
     resume_history: list[dict] | None = None, partial_text: str = "",
     approved_batch=None, resume_namespace: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+    wakeup_lease: tuple[str, str] | None = None,
+    event_delivery_lease: tuple[str, str] | None = None,
+    actor_lease=None,
+    recovery_steers: bool = False,
 ) -> None:
     repo = _generation_store()
+    heartbeat = asyncio.create_task(actor_lease.keep_alive(), name="generation-lease-" + generation.run_id) \
+        if actor_lease is not None else None
     text_parts: list[str] = [partial_text] if partial_text else []
     params = parameters or {}
     step_id = "step_" + generation.run_id
@@ -143,6 +166,19 @@ async def _run_model(
                 step_id = saved['id']
                 step_index = saved.get('index', 0)
                 now_ms = saved.get('created_at', now_ms)
+
+    def check_wakeup_lease():
+        if actor_lease is not None:
+            actor_lease.assert_current()
+        if wakeup_lease is not None:
+            from .subagent_wakeup import assert_wakeup_lease
+
+            assert_wakeup_lease(repo.database, owner, generation.run_id, wakeup_lease)
+        if event_delivery_lease is not None:
+            from .event_triggers import assert_event_lease
+
+            assert_event_lease(repo.database, owner, generation.run_id, event_delivery_lease)
+
     try:
         from .agent_runner import AgentRunner
         from .agent_runtime import AgentSuspended
@@ -157,6 +193,7 @@ async def _run_model(
 
             history = with_agent_context(_database(), owner, parent_agent, history)
         if resume_history is None:
+            check_wakeup_lease()
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step", "data": {
                     "type": "message_creation", "id": step_id,
@@ -167,10 +204,11 @@ async def _run_model(
                         "content_type": "text", "phase": "final_answer",
                     }},
                 },
-            })
+            }, actor_lease=actor_lease)
 
         async def append_text(chunk):
             nonlocal needs_post_tool_step
+            check_wakeup_lease()
             if not chunk:
                 return
             if needs_post_tool_step:
@@ -183,10 +221,11 @@ async def _run_model(
                         "type": "text", "text": chunk, "phase": "final_answer",
                     }},
                 },
-            })
+            }, actor_lease=actor_lease)
 
         async def _open_followup_step(reason):
             nonlocal step_id, step_index, now_ms, needs_post_tool_step
+            check_wakeup_lease()
             needs_post_tool_step = False
             # Upstream reserves an absolute content slot per message_creation.
             # Once a STEER part occupies the next slot, subsequent provider
@@ -199,7 +238,7 @@ async def _run_model(
                     "status": "completed", "runId": generation.response_message_id,
                     "created_at": now_ms, "closed_at": closed_at,
                 },
-            })
+            }, actor_lease=actor_lease)
             snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
             step_index = len(snapshot["aggregatedContent"])
             step_id = f"step_{generation.run_id}_{reason}_{step_index}"
@@ -214,7 +253,7 @@ async def _run_model(
                         "content_type": "text", "phase": "final_answer",
                     }},
                 },
-            })
+            }, actor_lease=actor_lease)
 
         async def on_injected():
             await _open_followup_step('after_steer')
@@ -234,7 +273,9 @@ async def _run_model(
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
                              approved_batch=approved_batch, on_injected=on_injected,
-                             on_tool_completed=on_tool_completed)
+                             on_tool_completed=on_tool_completed,
+                             wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
+                             actor_lease=actor_lease, recovery_steers=recovery_steers)
         # Only the first entry determines this run's prefix. After human
         # actions, resume_history/checkpoints already contain prior run steps.
         original_boundary = len(history) if resume_history is None else len(
@@ -247,61 +288,82 @@ async def _run_model(
             finished_messages = await runner.run(history)
         except AgentSuspended:
             return
+        check_wakeup_lease()
         repo.append(owner, generation.run_id, {
             "event": "on_run_step_closed", "data": {
                 "id": step_id, "index": step_index, "type": "message_creation",
                 "status": "completed", "runId": generation.response_message_id,
                 "created_at": now_ms, "closed_at": int(time.time() * 1000),
             },
-        })
+        }, actor_lease=actor_lease)
         from .message_dto import model_steps
 
         # A handoff may replace system instructions, changing the context
         # prefix length. Locate the original request within the final graph
         # state so the response is not discarded by a stale numeric offset.
-        if history_start > 0 and len(finished_messages) <= history_start:
+        if history_start > 0:
             source_user = next((message for message in reversed(history[:history_start])
                                 if message.get("role") == "user"), None)
             if source_user is not None:
                 matched = [index for index, message in enumerate(finished_messages)
                            if message == source_user]
-                history_start = matched[-1] + 1 if matched else 0
-            else:
+                if matched:
+                    history_start = matched[-1] + 1
+                elif len(finished_messages) <= history_start:
+                    history_start = 0
+            elif len(finished_messages) <= history_start:
                 history_start = 0
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
-                    model_steps=model_steps(finished_messages, history_start))
+                    model_steps=model_steps(finished_messages, history_start), actor_lease=actor_lease)
     except asyncio.CancelledError:
+        if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
+            check_wakeup_lease()
         current = repo.get(owner, generation.run_id)
         pending = repo.pending_action(owner, generation.run_id) if current and current.status == "requires_action" else None
-        # Preserve durable human-approval claims during graceful Controller
-        # shutdown and retain browser OAuth action parking.
-        if not ((_SHUTTING_DOWN and repo.resume_claim(owner, generation.run_id)) or
-                (pending and pending.get("payload", {}).get("type") == "action_oauth")):
+        if (asyncio.current_task() not in _SHUTDOWN_TASKS and
+                not (pending and pending.get("payload", {}).get("type") == "action_oauth")):
             repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts),
                         model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
-                                                             "".join(text_parts)))
+                                                             "".join(text_parts)), actor_lease=actor_lease)
         raise
     except Exception as exc:
+        # A former controller cannot publish failure after its lease changed.
+        if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
+            try:
+                check_wakeup_lease()
+            except Exception:
+                return
         # Do not put provider tokens, request metadata or secrets in response.
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
                     error=f"Model generation failed ({type(exc).__name__})",
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
-                                                             "".join(text_parts)))
+                                                             "".join(text_parts)), actor_lease=actor_lease)
     finally:
+        if heartbeat is not None:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+        if actor_lease is not None:
+            actor_lease.release()
+        _SHUTDOWN_TASKS.discard(asyncio.current_task())
         async with _TASK_GUARD:
-            _TASKS.pop(generation.run_id, None)
+            if _TASKS.get(generation.run_id) is asyncio.current_task():
+                _TASKS.pop(generation.run_id, None)
 
 
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
                       agent: dict | None, native_file_tools: bool = False, write_tools: bool = False,
                       ask_user_enabled: bool = False, mcp_enabled: bool = False,
+                      artifacts_mode: str | None = None,
                       resume_history: list[dict] | None = None, partial_text: str = "",
                       approved_batch=None, resume_namespace: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+                      wakeup_lease: tuple[str, str] | None = None,
+                      event_delivery_lease: tuple[str, str] | None = None,
+                      recovery_steers: bool = False,
                       oauth_claim: tuple[str, str, int, bool] | None = None) -> bool:
-    # A fast provider callback can arrive before the paused graph's original
-    # task has left _run_model finally. Do not drop that authorization event.
+    from .generation_actor_lease import ActorLease
+
     previous = _TASKS.get(generation.run_id)
     if oauth_claim is not None and previous is not None and not previous.done():
         try:
@@ -309,6 +371,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
         except TimeoutError:
             return False
     async with _TASK_GUARD:
+        _prune_stale_task_handles()
         existing = _TASKS.get(generation.run_id)
         if existing and not existing.done():
             return False
@@ -319,16 +382,21 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
             if claimed is None:
                 return False
             generation, resume_history, partial_text = claimed
+        actor_lease = ActorLease.claim(_database(), owner, generation.run_id)
+        if actor_lease is None:
+            return False
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
-                       instructions=str((agent or {}).get("instructions") or ""),
+                       instructions=agent_instructions(agent, profile.provider, artifacts_mode),
                        parameters=(agent or {}).get("model_parameters") or {},
                        native_file_tools=native_file_tools, write_tools=write_tools,
                        ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                        parent_agent=agent,
                        resume_history=resume_history, partial_text=partial_text,
                        approved_batch=approved_batch, resume_namespace=resume_namespace,
-                       granted_scopes=granted_scopes, grant_expires=grant_expires),
+                       granted_scopes=granted_scopes, grant_expires=grant_expires,
+                       wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
+                       actor_lease=actor_lease, recovery_steers=recovery_steers),
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task
@@ -373,10 +441,27 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
     if row is None or not row["agent_id"]:
         return False
     state = json.loads(row["state"])
-    agent = AgentRepository(database).get(owner, row["agent_id"])
+    repository = AgentRepository(database)
+    agent = repository.get(owner, row["agent_id"])
     if agent is None:
         return False
-    record = ActionRepository(database).get_for_tool(owner, agent["id"], payload.get("tool_name"))
+    action_agent = agent
+    namespace = pending.get('namespace', '')
+    if isinstance(namespace, str) and '/graph:' in namespace:
+        # A paused graph node owns the Action binding while the generation's
+        # root agent_id remains unchanged. Validate graph membership against
+        # the owner's current topology, not a client-supplied agent identifier.
+        from .graph_topology import admit_agent_graph
+
+        member = namespace.rsplit('/graph:', 1)[-1].split(':', 1)[0]
+        topology = admit_agent_graph(owner, agent, repository)
+        reachable = (topology.reachable_agent_ids or topology.agent_ids) if topology else ()
+        if member not in reachable:
+            return False
+        action_agent = repository.get(owner, member)
+        if action_agent is None:
+            return False
+    record = ActionRepository(database).get_for_tool(owner, action_agent["id"], payload.get("tool_name"))
     if record is None or record[2]["action_id"] != aid or record[2]["action_version"] != rev:
         return False
     # Reattaching after a restart requires a checkpoint with the exact model
@@ -522,6 +607,7 @@ async def start_generation(request: Request):
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
+                          artifacts_mode=artifact_mode(payload, agent),
                           granted_scopes=frozenset(scopes), grant_expires=grant_expires)
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh, protocol_version=protocol), status_code=202,
@@ -607,8 +693,10 @@ async def stream_generation(request: Request):
         after = max(0, int(cursor)) if cursor else 0
     except ValueError as exc:
         raise HTTPException(400, detail="Invalid SSE replay cursor") from exc
-    return StreamingResponse(_events(owner, generation, after,
-                                     resume=request.query_params.get("resume") == "true"),
+    resume = request.query_params.get("resume") == "true"
+    if resume and generation.status == "running":
+        await _reattach_running_actor(request, owner, generation)
+    return StreamingResponse(_events(owner, generation, after, resume=resume),
                              media_type="text/event-stream",
                              headers=_generator_headers(request_protocol(request, stored_version=generation.protocol_version)))
 
@@ -706,7 +794,6 @@ async def steer_generation(request: Request):
     return JSONResponse({**result, "generationProtocolVersion": protocol},
                         status_code=202, headers=_generator_headers(protocol))
 
-
 async def mutate_steer(request: Request):
     from .steering import SteeringStore, SteerRejection
 
@@ -756,6 +843,63 @@ async def abort_generation(request: Request):
                         headers=_generator_headers(protocol))
 
 
+async def _reattach_running_actor(request: Request, owner: str, generation: Generation) -> None:
+    """Fresh-request authorization for reconnecting a checkpointed root actor.
+
+    No controller startup process can inherit a machine grant or run tools.
+    Live foreign actors remain the unique owners of the run and only get SSE.
+    """
+    from .checkpoints import SQLiteCheckpointSaver
+    from .generation_actor_lease import active_run_ids
+    from .machine_permissions import require_machine_scope, resolve_access
+    from .routes import _repo
+
+    current = _TASKS.get(generation.run_id)
+    if current is not None and not current.done():
+        return
+    if generation.run_id in active_run_ids(_database()):
+        return
+    cid = generation.conversation_id
+    saver = SQLiteCheckpointSaver(_database(), owner)
+    checkpoint = saver.get_tuple(saver.config(cid, generation.run_id, event_actor=True))
+    graph_checkpoint = saver.get_tuple(saver.config(
+        cid, generation.run_id + ":graph:", event_actor=True))
+    if checkpoint is None and graph_checkpoint is None:
+        from .steering import SteeringStore
+
+        if not SteeringStore(_database()).applied_parts(owner, generation.run_id):
+            raise HTTPException(409, detail="Generation has no recoverable checkpoint")
+    try:
+        scopes, expiry = _request_grant(request)
+        machine_policy = resolve_access(owner, cid)
+        for machine, level in machine_policy.items():
+            if level in {"read", "write"}:
+                require_machine_scope(scopes, machine, level, expires=expiry)
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    with _database().connect() as db:
+        row = db.execute("SELECT state,agent_id FROM runs WHERE id=?", (generation.run_id,)).fetchone()
+    state = json.loads(row["state"])
+    try:
+        profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    agent = AgentRepository(_database()).get(owner, row["agent_id"]) if row["agent_id"] else None
+    if row["agent_id"] and agent is None:
+        raise HTTPException(404, detail="Agent no longer available")
+    await _start_task(
+        owner, generation, profile, agent,
+        native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
+        write_tools=any(level == "write" for level in machine_policy.values()),
+        ask_user_enabled=bool(state.get("askUserEnabled")),
+        mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+        resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
+        partial_text=_generation_store().accumulated_text(owner, generation.run_id),
+        granted_scopes=frozenset(scopes), grant_expires=expiry,
+        recovery_steers=True,
+    )
+
+
 async def resume_generation(request: Request):
     owner = _owner(request)
     payload = await _body(request)
@@ -778,6 +922,10 @@ async def resume_generation(request: Request):
                 raise HTTPException(403, detail=str(exc)) from exc
         if generation.status != "running":
             raise HTTPException(409, detail="Generation cannot be resumed")
+        expected = payload.get("generationCreatedAt")
+        if expected is not None and str(generation.generation_created_at) != str(expected):
+            raise HTTPException(409, detail="Generation identity mismatch")
+        await _reattach_running_actor(request, owner, generation)
         return JSONResponse(_generation_body(generation, status="resumed", resumed=True, protocol_version=protocol),
                             headers=_generator_headers(protocol))
 
@@ -891,27 +1039,29 @@ async def resume_generation(request: Request):
                       native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
+                      artifacts_mode=state.get("artifactsMode"),
                       mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
-                      granted_scopes=frozenset(scopes), grant_expires=expiry)
+                      granted_scopes=frozenset(scopes), grant_expires=expiry,
+                      recovery_steers=True)
     return JSONResponse(_generation_body(resumed, status="resuming", resumed=True, protocol_version=protocol),
                         headers=_generator_headers(protocol))
 
 
 async def shutdown_generations() -> None:
-    global _SHUTTING_DOWN
-    _SHUTTING_DOWN = True
-    try:
-        async with _TASK_GUARD:
-            tasks = list(_TASKS.values())
-            for task in tasks:
-                task.cancel()
-        if tasks:
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
-    finally:
-        _SHUTTING_DOWN = False
+    async with _TASK_GUARD:
+        _prune_stale_task_handles()
+        tasks = list(_TASKS.values())
+        for task in tasks:
+            _SHUTDOWN_TASKS.add(task)
+            task.cancel()
+    if tasks:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
+    from .subagent_task_host import shutdown_subagent_tasks
+
+    await shutdown_subagent_tasks()
 
 
 def generation_routes() -> list[Route]:

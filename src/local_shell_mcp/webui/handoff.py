@@ -60,6 +60,12 @@ def merge_handoff_state(current: dict | None, update: dict | None) -> dict | Non
         )):
             raise ValueError("Conflicting replayed handoff transition")
         transitions[transition["id"]] = transition
+    # LangGraph merges sibling updates after each member has independently
+    # finalized against the same pre-superstep state. Enforce the *shared*
+    # budget here as well, before any sibling recipients may be scheduled.
+    limit = current.get("maxHandoffs")
+    if limit is not None and len(transitions) > limit:
+        raise HandoffLimitError(limit)
     return {
         **current,
         "parallel": current["parallel"] or update["parallel"],

@@ -99,3 +99,121 @@ controller crash in that window cannot guarantee the original actor's
 exactly-once model consumption. Generation recovery currently parks/interrupts
 orphans rather than silently resuming their machine grants. These constraints
 are documented rather than advertising full LibreChat runtime parity.
+
+## Cross-PR integration acceptance (Draft Graph #354 + HITL #357)
+
+A separate integration branch merges the exact independent Draft histories (without
+mutating either source branch). It combines the graph scheduler with source HITL
+approval precedence, durable resume-claim replay, original React status/SSE sync,
+and the Steer HTTP FIFO. Foreground graph node model streams now consume Steer;
+detached subagent graph nodes are not allowed to steal the root user queue.
+The stable `on_injected` callback moves the original React message-creation
+index after an applied Steer, including when a graph node is producing text.
+
+Regression: `tests/test_webui_graph_steer_integration.py` exercises real
+Python LangGraph and a preempted foreground graph node; its model observes the
+user's new instruction before the stale old response can finish.
+The initial combined full-suite run completed **2479 passed, 4 skipped** before
+new graph-Steer regressions were added. The dedicated real LangGraph tests now
+cover both a serial steer and concurrent fan-out where one SQLite receipt is
+applied exactly once. The next Graph lease patch is carried into each compiled
+child node; a real SQLite wakeup takeover test now proves that the old graph
+actor is fenced before the next model call.
+
+Unverified: deterministic Steer delivery across simultaneous fan-out siblings,
+true cross-process root-generation actor ownership/lease fencing, full original
+rich-media Steer encoding, exact-once provider/tool effects after a crash, and
+full graph actor event-hook parity. The merged implementation must not be
+advertised as exact full upstream parity without those tests and fixes.
+
+Local complete suite after the Graph trigger retry update: **2490 passed,
+5 skipped**. The additional graph actor lease-takeover regression was added
+after that full run and separately passed with the serial/parallel steer tests.
+
+## 2026-11-14 — foreground actor leases, crash repair and native Steer media
+
+A separate source-compatible integration continuation on Draft PR #358 adds the
+following controller-only paths; Worker still has no React, browser, LangGraph
+or additional runtime dependency:
+
+- `generation_actor_lease.py` and SQLite `generation_actor_leases` now provide
+  fresh high-entropy lease tokens, transactional single-actor admission,
+  20-second renewal, 120-second expiry, transactional event/final/Steer commit
+  fencing, and per-token safe release. `AgentRunner`, its compiled StateGraph
+  members and synchronous child agents inherit the parent lease; interrupted
+  tool-only provider streams re-check the token before executing proposals.
+- Startup recognizes foreign live Controller leases and does not terminate
+  their runs. A crashed ordinary actor's checkpoint remains available in
+  SQLite for **fresh authorized browser SSE/resume** reattachment, which
+  resolves the Agent and machine grants anew; startup does not silently
+  re-execute native tools using an expired OAuth token. Closed event-loop task
+  handles are pruned before a new Controller loop can schedule/reap tasks.
+- Source `steering/runtime.ts:drainAndBuildInjections` applies an event before
+  asynchronous media encoding. SQLite similarly commits the applied receipt
+  and SSE atomically. `SteeringStore.applied_parts` plus deterministic
+  `steer:<steerId>` message IDs re-inject only uncheckpointed applied parts
+  during an authenticated recovery, not on an ordinary parallel graph run.
+  The same SQLite drain transaction privately stores the elected graph node
+  namespace for each claimed steer; only that node can consume its recovery
+  message if sibling nodes race after a crash. The public SSE part excludes
+  the node namespace, retaining the original React contract.
+- `steer_media.py` resolves every media file from its **owner-scoped SQLite**
+  ID at the injection boundary; only legitimate attachments under the private
+  state directory are read. Image formats (JPEG/PNG/GIF/WebP), PDF and bounded
+  UTF-8 file context can be assembled into native OpenAI-compatible,
+  Anthropic and Gemini request formats; malformed/oversized/revoked files
+  degrade to text without discarding the user instruction. File bytes are
+  never included in source React SSE events, persisted chat parts or graph
+  checkpoints. `provider_multimodal.py` encodes model-turn content transiently
+  and preserves plain-string Anthropic compatibility.
+- The original unmodified React Chromium client is tested against a real
+  Python LangGraph graph in both a direct serial edge and parallel fan-out:
+  its child Agent asks a question, the page reloads, the exact pending action
+  resumes after a valid answer, and the conversation remains coherent after
+  a second reload. The completed parallel sibling is not re-executed by
+  the resumed graph scheduler. Standalone Python Graph tests also verify
+  this checkpointed sibling result at the model-call level. A second real
+  Python parallel StateGraph test checks a tool approval/rejection interrupt:
+  rejected tool actions cannot run, the question/approval branch continues,
+  and its completed sibling never executes again.
+
+Validation: real two-Controller SQLite claim races, stale-token model/event/
+final-result refusal, expired-lease takeover, no-checkpoint orphan behavior,
+no-checkpoint applied Steer replay, document/image owner authorization,
+transient historical media replay and native provider wire payloads. Malformed
+provider-specific media metadata is bounded/ignored rather than executed or
+sent onward to an untrusted media URL.
+The full source-oracle coverage suite completed **2514 passed, 5 skipped**;
+HTTP, MCP, actual native PTY and original React browser smoke checks also
+passed. An additional **123 focused tests passed**, including local Graph
+fan-out Ask User, Tool Approval, Steer recovery, Provider multimodal wire
+formats, actor claims and native registry guard paths. Combined branch coverage
+passes unchanged quality gates: **95.35% total, every module >=90%**
+(`agent_runner.py` 96.6%, `steering.py` 94.2%, `provider_multimodal.py`
+98.2%, `steer_media.py` 98%+, `generation_actor_lease.py` 98%+). The frozen
+GitHub cross-platform CI must finish before the Draft can be marked ready.
+
+Not claimed: the source's complete arbitrary Agent Trigger system, every
+LangGraph event hook and callback payload, rich audio/video attachment
+transcoding, or an exactly-once guarantee for *external irreversible native
+side effects* across a crash. An old actor may have completed an external
+operation before losing its lease; native tool replay still depends on the
+underlying LSM idempotency/ownership contract. These are separate from the
+once-only persisted Steer receipt and replay-safe graph checkpoint claims.
+
+## 2026-11-14 — transactional checkpoint and HITL lease fencing
+
+After merging the then-current `main` (`992c3c74`) into the isolated stacked
+branch, the Provider's new model-level `top_p` sampling contract coexists with
+source preemptive Steer stream control. Ordinary and parallel Graph actor
+ownership is now verified **inside the same `BEGIN IMMEDIATE` transaction** as
+SQLite agent checkpoint writes, checkpoint pending tool/interrupt writes,
+human Ask User or Tool Approval pause, approval proof retirement, as well as
+original generation SSE/final state and Steer FIFO commits. The sibling
+LangGraph saver inherits the exact parent actor lease. An old Controller whose
+lease expired cannot publish an old graph checkpoint or pending action even
+when the token was valid before the transaction started. Regressions include
+a full two-Controller takeover between checkpoint creation and subsequent
+writes, stale tool-step refusal, and a successful fresh lease writing the same
+owned checkpoint. Original local and graph-only savers without an active HTTP
+actor keep their existing separate owner-bound semantics.

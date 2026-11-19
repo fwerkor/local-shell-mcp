@@ -61,6 +61,7 @@ class SubagentInvocation:
     parent_tool_call_id: str
     subagent_type: str
     child_configs: tuple[SubagentConfig, ...]
+    parent_agent_id: str | None = None
 
 
 def resolve_subagent_max_turns(agent: dict, endpoint_config: dict | None = None) -> int:
@@ -90,9 +91,6 @@ def build_subagent_configs(owner: str, parent: dict | None, database: Any, *,
         return []
     if depth > MAX_SUBAGENT_DEPTH:
         raise ValueError(f"Subagent graph exceeds the maximum depth of {MAX_SUBAGENT_DEPTH} at agent {parent.get('id')}.")
-    # Do not accidentally advertise a team as a single-agent approximation.
-    if settings.get("graphs"):
-        raise ValueError("Configured graph subagents require the multi-agent graph executor.")
     count = _count if _count is not None else [0]
     repository = AgentRepository(database)
     configs = []
@@ -144,6 +142,36 @@ def build_subagent_configs(owner: str, parent: dict | None, database: Any, *,
         if child is None:
             raise PermissionError("Subagent is not owned by the current principal")
         append(child, identity)
+    # LibreChat packages/api/src/agents/run.ts buildSubagentConfigs: graph entries
+    # are isolated StateGraphs with an explicitly designated result member.
+    for definition in settings.get("graphs") or []:
+        members = []
+        for identity in definition["agent_ids"]:
+            member = repository.get(owner, identity)
+            if member is None:
+                raise PermissionError("Graph subagent member is not owned by the current principal")
+            members.append(member)
+        if not members:
+            continue
+        count[0] += 1
+        if count[0] > MAX_SUBAGENT_RUN_CONFIGS:
+            raise ValueError(f"Subagent run configuration exceeds the maximum of {MAX_SUBAGENT_RUN_CONFIGS} expanded entries.")
+        entry = next((member for member in members if member["id"] == definition["entry_agent_id"]), None)
+        if entry is None:
+            raise ValueError("Graph subagent entry is not a configured member")
+        team = copy.deepcopy(entry)
+        team["edges"] = [copy.deepcopy(edge) for edge in definition["edges"]]
+        # The upstream graph receives every member, even a non-edge member.
+        team["graphAgentIds"] = [member["id"] for member in members]
+        team["entryAgentId"] = definition["entry_agent_id"]
+        team["resultAgentId"] = definition["result_agent_id"]
+        for edge in team["edges"]:
+            if edge.get("excludeResults") is False and not edge.get("prompt"):
+                edge.pop("excludeResults")
+        configs.append(SubagentConfig(
+            definition["type"], definition["name"], definition["description"], team,
+            min(resolve_subagent_max_turns(member, endpoint_config) for member in members), owner,
+        ))
     return configs
 
 
@@ -172,10 +200,12 @@ def build_subagent_tool_params(configs: list[SubagentConfig], *, background: boo
             "description": description}
 
 
-def subagent_tools(configs: list[SubagentConfig]) -> list[dict]:
+def subagent_tools(configs: list[SubagentConfig], *, background: bool = False,
+                   thread_continuation: bool = False) -> list[dict]:
     if not configs:
         return []
-    params = build_subagent_tool_params(configs)
+    params = build_subagent_tool_params(configs, background=background,
+                                        thread_continuation=thread_continuation)
     return [{"type": "function", "function": {
         "name": params["name"], "description": params["description"],
         "parameters": params["schema"],
@@ -240,7 +270,9 @@ def filter_subagent_result(messages: list[dict]) -> str:
 
 async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
                           execute_child: Callable[[SubagentInvocation], Awaitable[list[dict] | str]],
+                          start_background: Callable[[SubagentInvocation, str | None], Awaitable[str]] | None = None,
                           owner: str, conversation_id: str, parent_run_id: str, database: Any,
+                          parent_agent_id: str | None = None,
                           scopes: frozenset[str], grant_expires: int | None,
                           max_depth: int = MAX_SUBAGENT_DEPTH,
                           propagate_error: Callable[[Exception], bool] | None = None) -> str:
@@ -264,17 +296,19 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
         raise PermissionError("Subagent is not owned by the current principal")
     if grant_expires is not None and grant_expires <= time.time():
         raise PermissionError("Authentication grant expired")
-    if args.get("run_in_background") is True:
-        raise ValueError("Background subagent execution is not available without a host task store")
+    background = args.get("run_in_background") is True
     thread = args.get("subagent_thread_id")
-    if isinstance(thread, str) and thread.strip():
+    if isinstance(thread, str) and thread.strip() and not background:
         return '{"status":"rejected","tool":"subagent","message":"Child-thread continuation requires run_in_background."}'
+    if background and start_background is None:
+        raise ValueError("Background subagent execution is not available without a host task store")
     task = args.get("description")
     description = task if isinstance(task, str) and task.strip() else "No task description provided"
     messages = []
-    instructions = config.agent.get("instructions")
-    additional = config.agent.get("additional_instructions")
-    system = "\n\n".join(value for value in (instructions, additional) if isinstance(value, str) and value)
+    from .artifact_prompts import agent_instructions
+    from .providers import selected_provider
+
+    system = agent_instructions(config.agent, selected_provider({}, config.agent))
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": description})
@@ -286,8 +320,12 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
         scopes=frozenset(scopes), grant_expires=grant_expires, owner=owner,
         conversation_id=conversation_id, parent_run_id=parent_run_id,
         parent_tool_call_id=call.call_id, subagent_type=kind,
+        parent_agent_id=parent_agent_id,
         child_configs=config.children if max_depth > 1 else (),
     )
+    if background:
+        assert start_background is not None
+        return await start_background(invocation, thread.strip() if isinstance(thread, str) and thread.strip() else None)
     try:
         result = await execute_child(invocation)
     except Exception as error:

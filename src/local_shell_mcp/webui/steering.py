@@ -119,7 +119,8 @@ class SteeringStore:
         return state.setdefault("steering", {"queue": [], "receipts": {}})
 
     def enqueue(self, owner: str, body: dict, *, preempt_capable: bool,
-                strict_delivery: bool = False) -> dict:
+                strict_delivery: bool = False,
+                event_delivery_lease: tuple[str, str] | None = None) -> dict:
         cid = body.get("conversationId")
         if not isinstance(cid, str) or not cid or cid == "new":
             raise SteerRejection(400, "INVALID_CONVERSATION")
@@ -138,6 +139,10 @@ class SteeringStore:
         fingerprint = _fingerprint(text, files, desired_preempt, quotes)
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if event_delivery_lease is not None:
+                from .event_triggers import assert_source_steer_claim
+
+                assert_source_steer_claim(db, owner, event_delivery_lease)
             row = self._latest(db, owner, cid)
             # Receipt must be read BEFORE current-run epoch fencing: a lost
             # ACK from a previous run must replay even if this chat moved on.
@@ -317,10 +322,12 @@ class SteeringStore:
             return bool(row and any(item.get("preempt") for item in
                                     (self._state(row).get("steering") or {}).get("queue", [])))
 
-    def drain(self, owner, run_id, *, boundary):
+    def drain(self, owner, run_id, *, boundary, actor_lease=None, recipient_namespace=""):
         """Atomic FIFO dequeue and SSE publication; never inject a newer run's items."""
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute("SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                              "WHERE r.id=? AND c.owner=? AND r.status='running'",
                              (run_id, owner)).fetchone()
@@ -352,6 +359,10 @@ class SteeringStore:
                         **({"clientSteerId": item["clientSteerId"]} if item.get("clientSteerId") else {}),
                         "createdAt": item["createdAt"], "files": item["files"], "quotes": item["quotes"]}
                 state.setdefault("steerParts", []).append(part)
+                # Only the winning Graph node may replay this claimed Steer
+                # after the event write but before its own model checkpoint.
+                # Keep this routing private in run state, not React parts.
+                state.setdefault("steerDelivery", {})[item["steerId"]] = recipient_namespace
                 db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                            (run_id, _json({"event": "on_steer_applied", "data": {
                                "steerId": item["steerId"],
@@ -364,6 +375,27 @@ class SteeringStore:
             db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                        (_json(state), _now(), run_id))
             return applied
+
+    def applied_parts(self, owner: str, run_id: str, *, namespace: str | None = None) -> list[dict]:
+        """One source of durable delivery truth across a failed graph checkpoint.
+
+        The queue is atomically consumed with the on_steer_applied receipt, but
+        the later agent/graph checkpoint can be lost in a crash. Replaying only
+        missing deterministic steer IDs repairs that crash window.
+        """
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+        if row is None:
+            return []
+        state = self._state(row)
+        parts = state.get("steerParts") or []
+        if namespace is None:
+            return list(parts)
+        routes = state.get("steerDelivery") or {}
+        return [part for part in parts if routes.get(part.get("steerId"), "") == namespace]
 
     def pending(self, owner, run_id):
         with self.database.connect() as db:
