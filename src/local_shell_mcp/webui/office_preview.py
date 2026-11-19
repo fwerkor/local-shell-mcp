@@ -14,6 +14,7 @@ import html
 import io
 import re
 import xml.etree.ElementTree as ET
+import zlib
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
@@ -88,8 +89,13 @@ def _read_xml(archive: ZipFile, path: str) -> ET.Element:
     if info.file_size > MAX_ENTRY_BYTES:
         raise UnsafeOfficeArchive("Office XML entry size limit exceeded")
     source = archive.read(path)
-    if b"<!DOCTYPE" in source.upper() or b"<!ENTITY" in source.upper():
-        raise UnsafeOfficeArchive("Office XML must not contain a DTD")
+    # XML supports UTF-16/UTF-32 and accepts entity declarations in those
+    # encodings. Check all byte lanes, not just the UTF-8 byte representation.
+    for stride in (1, 2, 4):
+        for lane in range(stride):
+            probe = source[lane::stride].upper()
+            if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe:
+                raise UnsafeOfficeArchive("Office XML must not contain a DTD")
     return ET.fromstring(source)
 
 
@@ -99,6 +105,24 @@ def _local(tag: str) -> str:
 
 def _text(node: ET.Element) -> str:
     return "".join(child.text or "" for child in node.iter() if _local(child.tag) in {"t", "v"})
+
+
+def _docx_text(node: ET.Element) -> str:
+    def paragraph(para: ET.Element) -> str:
+        fragments = []
+        for part in para.iter():
+            tag = _local(part.tag)
+            if tag == "t":
+                fragments.append(part.text or "")
+            elif tag == "tab":
+                fragments.append("\t")
+            elif tag in {"br", "cr"}:
+                fragments.append("\n")
+        return "".join(fragments)
+
+    if _local(node.tag) == "p":
+        return paragraph(node)
+    return "\n".join(paragraph(part) for part in node.iter() if _local(part.tag) == "p")
 
 
 def _escape(value: str) -> str:
@@ -149,7 +173,7 @@ def _table(rows):
                                             + '</tr>' for row in _bounded_rows(rows)) + '</tbody></table>'
 
 
-def _sheets(sheets):
+def _sheets(sheets, *, source_truncated: bool = False):
     if not sheets:
         return _document('<p class="lc-banner">This workbook contains no sheets.</p>')
     css = "".join(f'#lc-sheet-tab-{i}:checked~#lc-sheet-panel-{i}' + '{display:block}'
@@ -162,8 +186,16 @@ def _sheets(sheets):
     panels = ''
     for i, (_, rows, total) in enumerate(sheets):
         visible = list(_bounded_rows(rows))
+        clipped = source_truncated or total > len(visible) or len(rows) > len(visible)
+        if not clipped:
+            for original, rendered in zip(rows, visible, strict=False):
+                if len(original) != len(rendered) or any(
+                    str(value or "") != shown for value, shown in zip(original, rendered, strict=False)
+                ):
+                    clipped = True
+                    break
         banner = (f'<div class="lc-banner">Showing first {len(visible):,} of {total:,} rows. '
-                  'Download the file to see the rest.</div>') if total > len(visible) else ''
+                  'Preview truncated; download the file to see the rest.</div>') if clipped else ''
         panels += f'<section class="lc-sheet-panel" id="lc-sheet-panel-{i}">{banner}' \
                   f'<div class="lc-table-scroll">{_table(visible)}</div></section>'
     return _document(radios + tabs + panels, '<style>' + css + '</style>')
@@ -171,8 +203,19 @@ def _sheets(sheets):
 
 def _csv_html(data: bytes) -> str:
     text = data.decode("utf-8-sig", errors="replace")
-    rows = list(_bounded_rows(list(csv.reader(io.StringIO(text[:MAX_VISIBLE_CHARS * 2])))))
-    return _sheets([("CSV", rows, max(0, text.count("\n") + bool(text and not text.endswith("\n"))))])
+    input_limit = MAX_VISIBLE_CHARS * 2
+    rows = list(csv.reader(io.StringIO(text[:input_limit])))
+    return _sheets([("CSV", rows, max(0, text.count("\n") + bool(text and not text.endswith("\n"))))],
+                   source_truncated=len(text) > input_limit)
+
+
+def _docx_blocks(node: ET.Element):
+    for child in node:
+        kind = _local(child.tag)
+        if kind in {'p', 'tbl'}:
+            yield child
+        elif kind in {'sdt', 'sdtContent', 'customXml', 'ins'}:
+            yield from _docx_blocks(child)
 
 
 def _docx_html(z: ZipFile) -> str:
@@ -182,33 +225,120 @@ def _docx_html(z: ZipFile) -> str:
         return _document('<article class="lc-docx"></article>')
     lines = []
     consumed = 0
-    for child in body:
+    clipped = False
+    for child in _docx_blocks(body):
         if consumed >= MAX_VISIBLE_CHARS:
-            lines.append('<div class="lc-banner">Preview truncated. Download the file to see the rest.</div>')
+            clipped = True
             break
         kind = _local(child.tag)
         if kind == "p":
-            value = _text(child)[:max(0, MAX_VISIBLE_CHARS - consumed)]
+            entire = _docx_text(child)
+            remaining = MAX_VISIBLE_CHARS - consumed
+            if len(entire) > remaining:
+                clipped = True
+            value = entire[:remaining]
             consumed += len(value)
             lines.append(f'<p>{_escape(value)}</p>')
         elif kind == "tbl":
             rows = []
-            for tr in child.findall('./{*}tr')[:MAX_ROWS]:
-                rows.append([_text(tc) for tc in tr.findall('./{*}tc')])
-            rendered = _table(rows)
-            consumed += sum(len(v) for row in rows for v in row)
-            lines.append('<div class="lc-table-scroll">' + rendered + '</div>')
+            all_rows = child.findall('./{*}tr')
+            if len(all_rows) > MAX_ROWS:
+                clipped = True
+            for tr in all_rows[:MAX_ROWS]:
+                cells = [_docx_text(tc) for tc in tr.findall('./{*}tc')]
+                if len(cells) > MAX_COLUMNS:
+                    clipped = True
+                remaining = max(0, MAX_VISIBLE_CHARS - consumed)
+                bounded = []
+                for cell in cells[:MAX_COLUMNS]:
+                    if len(cell) > remaining:
+                        clipped = True
+                    bounded.append(cell[:remaining])
+                    consumed += len(bounded[-1])
+                    remaining = max(0, MAX_VISIBLE_CHARS - consumed)
+                rows.append(bounded)
+                if not remaining:
+                    clipped = True
+                    break
+            lines.append('<div class="lc-table-scroll">' + _table(rows) + '</div>')
+    if clipped:
+        lines.append('<div class="lc-banner">Preview truncated. Download the file to see the rest.</div>')
     return _document('<article class="lc-docx">' + "".join(lines) + '</article>')
+
+
+def _xlsx_date_styles(z: ZipFile) -> tuple[set[int], set[int], dict[int, bool]]:
+    if 'xl/styles.xml' not in z.namelist():
+        return set(), set(), {}
+    root = _read_xml(z, 'xl/styles.xml')
+    formats = {int(fmt.get('numFmtId')): fmt.get('formatCode', '')
+               for fmt in root.findall('./{*}numFmts/{*}numFmt')
+               if str(fmt.get('numFmtId', '')).isdigit()}
+    styles = root.find('./{*}cellXfs')
+    if styles is None:
+        return set(), set(), {}
+    builtins = set(range(14, 23)) | set(range(27, 37)) | set(range(50, 59))
+    result, durations, clocks = set(), set(), {}
+    for index, style in enumerate(styles):
+        code = int(style.get('numFmtId', '0'))
+        fmt = formats.get(code, '')
+        # Strip quoted literals, escapes, and bracketed color/locale markers.
+        fmt = re.sub(r'"[^"]*"|\\.|\[[^\]]*\]', '', fmt).lower()
+        if code in {45, 46, 47} or re.search(r'\[(?:h+|m+|s+)\]', formats.get(code, '').lower()):
+            durations.add(index)
+        elif code in {18, 19, 20, 21} or (
+                code in formats and bool(re.search(r'[hs]', fmt))
+                and not bool(re.search(r'[yd]', fmt))):
+            # A clock-time is a fraction of a day, not a calendar date.
+            # Built-ins 18-21 and custom h:mm / h:mm:ss have no epoch.
+            clocks[index] = code in {19, 21} or 's' in fmt
+        elif code in builtins or (code in formats and bool(re.search(r'[ymdhs]', fmt))):
+            result.add(index)
+    return result, durations, clocks
+
+
+def _excel_clock(raw: str, *, seconds: bool = False) -> str:
+    value = float(raw)
+    if not (0 <= value < 3_000_000):
+        return raw
+    total = round((value % 1) * 86_400)
+    hour, remain = divmod(total % 86_400, 3600)
+    minute, second = divmod(remain, 60)
+    return f'{hour:02d}:{minute:02d}:{second:02d}' if seconds else f'{hour:02d}:{minute:02d}'
+
+
+def _excel_duration(raw: str) -> str:
+    total = round(abs(float(raw)) * 86400)
+    hours, remaining = divmod(total, 3600)
+    minutes, seconds = divmod(remaining, 60)
+    return f"{'-' if float(raw) < 0 else ''}{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _excel_date(raw: str, epoch1904: bool) -> str:
+    from datetime import datetime, timedelta
+
+    value = float(raw)
+    if not (-100000 < value < 3000000):
+        return raw
+    if epoch1904:
+        base = datetime(1904, 1, 1)
+    else:
+        base = datetime(1899, 12, 31)
+        if value >= 60:
+            value -= 1  # Excel 1900 leap-year compatibility bug
+    rendered = base + timedelta(days=value)
+    return rendered.date().isoformat() if value.is_integer() else rendered.isoformat(sep=' ', timespec='seconds')
 
 
 def _xlsx_html(z: ZipFile) -> str:
     names = set(z.namelist())
-    ns_main = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
     shared = []
     if 'xl/sharedStrings.xml' in names:
         strings = _read_xml(z, 'xl/sharedStrings.xml')
-        shared = [_text(si) for si in strings.findall(f'./{ns_main}si')]
+        shared = [_text(si) for si in strings.findall('./{*}si')]
     workbook = _read_xml(z, 'xl/workbook.xml')
+    epoch1904 = (workbook.find('./{*}workbookPr') is not None and
+                 workbook.find('./{*}workbookPr').get('date1904') in {'1', 'true'})
+    date_styles, duration_styles, clock_styles = _xlsx_date_styles(z)
     rels = {}
     if 'xl/_rels/workbook.xml.rels' in names:
         for rel in _read_xml(z, 'xl/_rels/workbook.xml.rels'):
@@ -217,23 +347,24 @@ def _xlsx_html(z: ZipFile) -> str:
             if identifier and '..' not in PurePosixPath(target).parts and ':' not in target:
                 rels[identifier] = target if target.startswith('xl/') else 'xl/' + target
     sheets = []
-    for index, sheet in enumerate(workbook.findall(f'./{ns_main}sheets/{ns_main}sheet')):
+    for index, sheet in enumerate(workbook.findall('./{*}sheets/{*}sheet')):
         name = sheet.get('name', f'Sheet{index+1}')
-        rel_id = sheet.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+        rel_id = (sheet.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                  or sheet.get('{http://purl.oclc.org/ooxml/officeDocument/relationships}id'))
         location = rels.get(rel_id, f'xl/worksheets/sheet{index+1}.xml')
         if location not in names:
             continue
         root = _read_xml(z, location)
-        sheet_data = root.find(f'./{ns_main}sheetData')
+        sheet_data = root.find('./{*}sheetData')
         rows = []
         total = 0
         if sheet_data is not None:
-            for row in sheet_data.findall(f'./{ns_main}row'):
+            for row in sheet_data.findall('./{*}row'):
                 total += 1
                 if len(rows) >= MAX_ROWS:
                     continue
                 cells = {}
-                for cell in row.findall(f'./{ns_main}c'):
+                for cell in row.findall('./{*}c'):
                     address = cell.get('r', '')
                     match = re.match(r'^([A-Z]+)', address)
                     column = 0
@@ -247,9 +378,9 @@ def _xlsx_html(z: ZipFile) -> str:
                         continue
                     kind = cell.get('t', '')
                     if kind == 'inlineStr':
-                        value = _text(cell.find(f'./{ns_main}is')) if cell.find(f'./{ns_main}is') is not None else ''
+                        value = _text(cell.find('./{*}is')) if cell.find('./{*}is') is not None else ''
                     else:
-                        raw = cell.findtext(f'./{ns_main}v', default='')
+                        raw = cell.findtext('./{*}v', default='')
                         if kind == 's':
                             try:
                                 value = shared[int(raw)]
@@ -257,6 +388,17 @@ def _xlsx_html(z: ZipFile) -> str:
                                 value = ''
                         else:
                             value = raw
+                            style_index = cell.get('s', '0')
+                            if kind in {'', 'n'} and style_index.isdigit() and raw:
+                                try:
+                                    if int(style_index) in duration_styles:
+                                        value = _excel_duration(raw)
+                                    elif int(style_index) in clock_styles:
+                                        value = _excel_clock(raw, seconds=clock_styles[int(style_index)])
+                                    elif int(style_index) in date_styles:
+                                        value = _excel_date(raw, epoch1904)
+                                except (ValueError, OverflowError):
+                                    value = raw
                     cells[column] = value
                 if cells:
                     rows.append([cells.get(i, '') for i in range(min(MAX_COLUMNS, max(cells) + 1))])
@@ -272,6 +414,7 @@ def _xls_html(data: bytes) -> str:
 
     import xlrd
     from xlrd.compdoc import CompDocError
+    from xlrd.xldate import xldate_as_datetime
 
     try:
         book = xlrd.open_workbook(file_contents=data, on_demand=True)
@@ -288,8 +431,16 @@ def _xls_html(data: bytes) -> str:
                 values = []
                 for j in range(min(sheet.ncols, MAX_COLUMNS)):
                     item = sheet.cell_value(i, j)
-                    values.append(str(int(item)) if isinstance(item, float) and item.is_integer()
-                                  else str(item) if item is not None else '')
+                    if sheet.cell_type(i, j) == xlrd.XL_CELL_DATE:
+                        try:
+                            date = xldate_as_datetime(item, book.datemode)
+                            values.append(date.date().isoformat() if not (date.hour or date.minute or date.second)
+                                          else date.isoformat(sep=' ', timespec='seconds'))
+                        except (TypeError, ValueError, OverflowError, xlrd.XLDateError):
+                            values.append(str(item))
+                    else:
+                        values.append(str(int(item)) if isinstance(item, float) and item.is_integer()
+                                      else str(item) if item is not None else '')
                 rows.append(values)
             sheets.append((sheet.name, rows, sheet.nrows))
         return _sheets(sheets)
@@ -427,7 +578,7 @@ def buffer_to_office_html(data: bytes, name: str, mime_type: str) -> str | None:
             if bucket == 'spreadsheet':
                 return _ods_html(z) if 'content.xml' in z.namelist() else _xlsx_html(z)
             return _presentation_html(z)
-    except BadZipFile as error:
+    except (BadZipFile, zlib.error, EOFError) as error:
         raise ValueError('Malformed Office archive') from error
     except (NotImplementedError, RuntimeError) as error:
         # Unsupported ZIP compression/encryption is an optional preview
@@ -472,13 +623,14 @@ async def publish_office_tool_output(owner: str, run_id: str, tool_call_id: str,
     bucket = office_html_bucket(filename, mime_type)
     if bucket is None:
         raise ValueError('Not an Office preview artifact')
-    # Storage stores only the basename. Dedup needs the persisted identity.
+    # Attachment storage strips directories; deduplication must use the same
+    # canonical filename as the committed attachment event.
     filename = PurePosixPath(filename.replace("\\", "/")).name
     digest = hashlib.sha256(data).hexdigest()
     try:
         preview = await asyncio.to_thread(buffer_to_office_html, data, filename, mime_type)
         metadata = {'status': 'ready', 'text': preview, 'textFormat': 'html',
-                    'officeRenderer': 'static-escaped-v1', 'context': 'tool_output'}
+                    'trustedOfficeRenderer': 'escaped-office-v1', 'context': 'tool_output'}
     except (ValueError, ET.ParseError, OSError, KeyError, OverflowError, csv.Error):
         metadata = {'status': 'failed', 'previewError': 'unsupported', 'context': 'tool_output'}
     metadata['sourceDigest'] = digest
@@ -514,13 +666,12 @@ async def publish_office_tool_output(owner: str, run_id: str, tool_call_id: str,
         message_id = state.get('responseMessageId')
         if not isinstance(message_id, str) or not message_id:
             raise ValueError('Missing trusted response message identity')
+        db.execute(
+            'INSERT INTO tool_attachment_links(run_id,response_message_id,tool_call_id,file_id) '
+            'VALUES(?,?,?,?)', (run_id, message_id, tool_call_id, file_id),
+        )
         descriptor = {**file_record(attachment_row), 'messageId': message_id,
                       'toolCallId': tool_call_id, 'conversationId': row['conversation_id']}
-        # The verified original and its Controller owner-bound response link
-        # are one atomic publication. Otherwise the strict attachment reader
-        # (introduced by the lifecycle port) would drop Office artifacts.
-        db.execute('INSERT INTO tool_attachment_links(run_id,response_message_id,tool_call_id,file_id) '
-                   'VALUES(?,?,?,?)', (run_id, message_id, tool_call_id, file_id))
         db.execute('INSERT INTO generation_events(run_id,data) VALUES(?,?)',
                    (run_id, json.dumps({'event': 'attachment', 'data': descriptor},
                                        ensure_ascii=False, separators=(',', ':'))))

@@ -329,13 +329,13 @@ async def publish_attachment(owner, name, content_type, chunks, state_dir, *, ex
 
 def _public_attachment_metadata(metadata):
     """Never surface unsanitized legacy HTML as a trusted office preview."""
+    # The renderer uses this marker only for escaped, bounded Office HTML
+    # created internally by publish_office_tool_output. Never forward a marker
+    # from the stored metadata into the client DTO.
+    trusted = metadata.get('trustedOfficeRenderer') == 'escaped-office-v1'
     public_metadata = {key: value for key, value in metadata.items()
-                       if key != "extracted_text"}
-    # This marker is written only by the internal static Office renderer,
-    # whose document content is escaped before publication. Legacy arbitrary
-    # HTML preview metadata must continue to fail closed.
-    trusted_office = public_metadata.pop("officeRenderer", None) == "static-escaped-v1"
-    if public_metadata.get("textFormat") == "html" and not trusted_office:
+                       if key not in {'extracted_text', 'trustedOfficeRenderer'}}
+    if public_metadata.get("textFormat") == "html" and not trusted:
         public_metadata.pop("text", None)
         public_metadata.pop("textFormat", None)
         public_metadata["status"] = "failed"

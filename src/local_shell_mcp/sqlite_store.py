@@ -722,10 +722,10 @@ class SQLiteStateStore:
                 if os.name == "nt":
                     import msvcrt
 
-                    handle.seek(0)
-                    if handle.read(1) == b"":
-                        handle.write(b"0")
-                        handle.flush()
+                    # Byte-range locks work beyond EOF on Windows. Do not read
+                    # or write that byte before acquiring the lock: another
+                    # process may already hold it, and Windows rejects the
+                    # attempted read with PermissionError instead of waiting.
                     handle.seek(0)
                     msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
                 else:

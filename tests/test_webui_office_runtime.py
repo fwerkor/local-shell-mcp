@@ -217,9 +217,9 @@ def test_native_file_write_ui_payload_does_not_exceed_persisted_sse_event_limit(
     assert call.arguments['content'] == raw
     assert len(AgentRunner._visible_tool_args(ModelToolCall(
         'plain', 'file_write', {'path': 'small.csv', 'content': 'data'}))['content']) == 4
-    plain = ModelToolCall('other', 'run_shell', {'command': raw})
-    assert AgentRunner._visible_tool_args(plain)['_truncated'] is True
-    assert plain.arguments['command'] == raw
+    other = ModelToolCall('other', 'run_shell', {'command': raw})
+    assert AgentRunner._visible_tool_args(other)['_truncated'] is True
+    assert other.arguments['command'] == raw
 
 
 @pytest.mark.asyncio
@@ -304,4 +304,32 @@ async def test_unsupported_zip_compression_preserves_original_attachment_after_g
     events = [entry['data'] for _, entry in store.events('local', run.run_id)
               if entry.get('event') == 'attachment']
     assert len(events) == 1 and events[0]['file_id'] == artifact['file_id']
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_trusted_csv_preview_survives_dto_and_terminal_history(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.webui.attachments import _public_attachment_metadata
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / 'state'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    get_settings.cache_clear()
+    db = shared_database(tmp_path / 'state')
+    store = GenerationStore(db)
+    run, _ = store.begin('local', {'text': 'Create CSV'})
+    args = {'database': db, 'state_dir': tmp_path / 'state'}
+    result = await publish_office_tool_output('local', run.run_id, 'csv-call',
+                                              'report.csv', 'text/csv', b'name,value\nAlice,1\n', **args)
+    assert result['status'] == 'ready' and result['textFormat'] == 'html'
+    assert 'Alice' in result['text']
+    assert 'trustedOfficeRenderer' not in result
+    with db.connect() as sql:
+        assert sql.execute('SELECT count(*) FROM tool_attachment_links').fetchone()[0] == 1
+    assert store.finish('local', run.run_id, status='complete', text='Created')
+    final = store.events('local', run.run_id)[-1][1]['responseMessage']
+    assert final['attachments'][0]['file_id'] == result['file_id']
+    assert final['attachments'][0]['textFormat'] == 'html'
+    assert _public_attachment_metadata({'status': 'ready', 'textFormat': 'html',
+                                        'text': '<script>unsafe</script>'})['status'] == 'failed'
     get_settings.cache_clear()

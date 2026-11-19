@@ -384,7 +384,6 @@ async def test_child_thread_remains_readonly_after_parent_run_deleted(artifact_a
             "index": 0, "original": "old", "updated": "blocked",
         })
     assert result.status_code == 409
-
 async def test_artifact_editor_updates_full_canonical_model_steps_atomically(artifact_app):
     repo, convo, _, app = artifact_app
     store = GenerationStore(repo.database)

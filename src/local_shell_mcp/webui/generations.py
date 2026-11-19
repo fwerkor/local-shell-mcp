@@ -1127,6 +1127,7 @@ class GenerationStore:
                 "sender": "Assistant", "isCreatedByUser": False,
                 "text": text,
                 "content": content,
+                **({"attachments": attachments} if attachments else {}),
                 "unfinished": status != "complete",
             }
             if content or attachments or model_steps:
