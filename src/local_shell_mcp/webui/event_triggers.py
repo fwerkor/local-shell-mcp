@@ -329,7 +329,7 @@ def _observed_action(db: Any, run_id: str, expected: dict) -> bool:
             continue
         action = (event.get("data") or {}).get("result") or {}
         tool = action.get("tool_call")
-        if not isinstance(tool, dict):
+        if not isinstance(tool, dict) or tool.get('executed') is False:
             continue
         output = tool.get("output")
         if isinstance(output, str) and (output.startswith("Tool failed (") or

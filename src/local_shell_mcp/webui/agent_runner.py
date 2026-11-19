@@ -224,7 +224,7 @@ class AgentRunner:
                           actor_lease=self.actor_lease)
         return step
 
-    async def _completed(self, call, record):
+    async def _completed(self, call, record, *, executed: bool = True):
         output = record["output"]
         if isinstance(output, str):
             self.saver.put_writes(self.active_config, [("messages", {
@@ -236,7 +236,7 @@ class AgentRunner:
             # arguments/results in its SSE or final persisted response.
             from .action_spec import is_action_tool
 
-            if is_action_tool(call.name):
+            if is_action_tool(call.name) and executed:
                 self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
             return
         step = self._tool_step(call)
@@ -289,6 +289,7 @@ class AgentRunner:
                 "type": "tool_call", "tool_call": {
                     "id": call.call_id, "name": call.name, "args": self._visible_tool_args(call),
                     "type": "tool_call", "output": preview, "progress": 1,
+                    **({"executed": False} if not executed else {}),
                 },
             }},
         }
@@ -299,11 +300,13 @@ class AgentRunner:
         if identities:
             self.store.append_tool_completion(
                 self.owner, self.generation.run_id, event, call.call_id, identities,
-                actor_lease=self.actor_lease, full_arguments=call.arguments,
+                actor_lease=self.actor_lease,
+                full_arguments=call.arguments if executed else None,
             )
         else:
             self.store.append(self.owner, self.generation.run_id, event,
-                              actor_lease=self.actor_lease, full_arguments=call.arguments)
+                              actor_lease=self.actor_lease,
+                              full_arguments=call.arguments if executed else None)
         # Source agents@4.0.1 Graph.closeRunStep: terminal closure is an
         # independent event. First close wins and survives SSE reconnect and
         # durable final history, including native tool denial/error paths.
@@ -329,7 +332,7 @@ class AgentRunner:
             }, actor_lease=self.actor_lease)
         from .action_spec import is_action_tool
 
-        if is_action_tool(call.name):
+        if is_action_tool(call.name) and executed:
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
 
     async def _invoke(self, call, state):
@@ -709,7 +712,8 @@ class AgentRunner:
                 original = next(call for call in state.pending_calls if call.call_id == result.call.call_id)
                 record = {"proposal": {"name": original.name, "args": copy.deepcopy(original.arguments)}, "output": result.raw_content if result.raw_content is not None else result.content}
                 self.cache[replay_key(original, state.pending_calls.index(original))] = record
-                await self._completed(result.call, record)
+                await self._completed(result.call, record,
+                                      executed=result.decision in {"approve", "edit"})
 
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
