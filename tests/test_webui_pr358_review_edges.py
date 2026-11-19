@@ -186,3 +186,121 @@ def test_active_step_lookup_reads_all_event_pages_after_steer(tmp_path):
         'id': 'second', 'type': 'message_creation', 'index': 2, 'created_at': 200}})
     assert generation_routes._last_open_message_step(store, 'owner', run.run_id) == (
         'second', 2, 200)
+
+
+@pytest.mark.asyncio
+async def test_graph_team_handoff_uses_admitted_team_edges_not_saved_entry_edges(tmp_path):
+    from local_shell_mcp.webui.agents import AgentRepository
+
+    database = SQLiteDatabase(tmp_path / 'db')
+    repository = AgentRepository(database)
+    entry = repository.create('owner', {'name': 'Team entry', 'provider': 'openAI', 'model': 'entry'})
+    sink = repository.create('owner', {'name': 'Team sink', 'provider': 'openAI', 'model': 'sink'})
+    team = {**entry,
+            'edges': [{'from': entry['id'], 'to': sink['id'], 'edgeType': 'handoff'}],
+            'graphAgentIds': [entry['id'], sink['id']], 'entryAgentId': entry['id'],
+            'resultAgentId': sink['id']}
+    assert not repository.get('owner', entry['id']).get('edges')
+    store = GenerationStore(database)
+    run, _ = store.begin('owner', {'text': 'Transfer to sink'}, entry)
+
+    async def unused(*args, **kwargs):
+        yield 'unused'
+
+    async def noop(_):
+        return None
+
+    runner = AgentRunner('owner', run, database, store, scopes=set(), grant_expires=None,
+                         stream_tools=unused, stream_text=unused, on_text=noop,
+                         agent=team, graph_node=True, graph_definition=team)
+    current = AgentLoopState(AgentContext(ProviderConfig('openai', 'entry', 'https://example.invalid', ''),
+                                          [{'function': {'name': 'transfer_to_' + sink['id']}}], agent=entry),
+                             [{'role': 'user', 'content': 'Start'}])
+    command = await runner._invoke(ModelToolCall('transfer-call', 'transfer_to_' + sink['id'], {}),
+                                   current)
+    assert command is not None
+    # The handoff still observes the owner boundary: revoking the target blocks it.
+    repository.delete('owner', sink['id'])
+    with pytest.raises(PermissionError):
+        await runner._invoke(ModelToolCall('transfer-again', 'transfer_to_' + sink['id'], {}), current)
+
+
+def test_uncheckpointed_stream_suffix_is_rewound_on_recovery_before_final(tmp_path):
+    db = SQLiteDatabase(tmp_path / 'state')
+    store = GenerationStore(db)
+    run, _ = store.begin('owner', {'text': 'Complete the response'})
+    store.append('owner', run.run_id, {'event': 'on_run_step', 'data': {
+        'type': 'message_creation', 'id': 'answer-step', 'index': 0}})
+    def publish(chunk):
+        store.append('owner', run.run_id, {'event': 'on_message_delta', 'data': {
+            'id': 'answer-step', 'delta': {'content': {'type': 'text', 'text': chunk}}}})
+
+    publish('Confirmed prefix. ')
+    publish('Stale unfinished turn')
+    assert store.accumulated_text('owner', run.run_id) == 'Confirmed prefix. Stale unfinished turn'
+    store.append('owner', run.run_id, {'event': 'on_content_rewind',
+                                       'data': {'preserveText': 'Confirmed prefix. '}})
+    snapshot, _ = store.resume_snapshot('owner', run.run_id)
+    assert snapshot['aggregatedContent'][0]['text'] == 'Confirmed prefix. '
+    assert store.accumulated_text('owner', run.run_id) == 'Confirmed prefix. '
+    publish('Fresh completed turn')
+    assert store.finish('owner', run.run_id, status='complete',
+                        text='Confirmed prefix. Fresh completed turn')
+    final = store.events('owner', run.run_id)[-1][1]['responseMessage']
+    assert final['text'] == 'Confirmed prefix. Fresh completed turn'
+    assert final['content'] == [{'type': 'text', 'text': 'Confirmed prefix. Fresh completed turn',
+                                 'phase': 'final_answer'}]
+    assert 'Stale unfinished' not in str(final)
+
+
+@pytest.mark.asyncio
+async def test_reattached_actor_rewinds_uncheckpointed_sse_before_model_replay(tmp_path, monkeypatch):
+    import asyncio
+
+    from local_shell_mcp.webui import agent_runner
+
+    db = SQLiteDatabase(tmp_path / 'state')
+    store = GenerationStore(db)
+    run, _ = store.begin('owner', {'text': 'Restart the interrupted reply'})
+    store.append('owner', run.run_id, {'event': 'on_run_step', 'data': {
+        'type': 'message_creation', 'id': 'message-step', 'index': 0, 'created_at': 100}})
+    for text in ('Confirmed. ', 'Abandoned partial'):
+        store.append('owner', run.run_id, {'event': 'on_message_delta', 'data': {
+            'id': 'message-step', 'delta': {'content': {'type': 'text', 'text': text}}}})
+    monkeypatch.setattr(generation_routes, '_database', lambda: db)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    captured = []
+
+    class StubRunner:
+        def __init__(self, *_args, on_text=None, partial_text='', **_kwargs):
+            self.on_text = on_text
+            self.partial_text = partial_text
+
+        async def run(self, history):
+            assert store.accumulated_text('owner', run.run_id) == 'Confirmed. '
+            assert any(event.get('event') == 'on_content_rewind'
+                       for _, event in store.events('owner', run.run_id))
+            await self.on_text('Recovered answer')
+            self.partial_text += 'Recovered answer'
+            captured.append(True)
+            return [*history, {'role': 'assistant', 'content': 'Recovered answer'}]
+
+    class StubLease:
+        def assert_current(self, db=None):
+            return None
+
+        async def keep_alive(self):
+            await asyncio.sleep(3600)
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(agent_runner, 'AgentRunner', StubRunner)
+    profile = ProviderConfig('openai', 'stub', 'https://example.invalid', '')
+    await generation_routes._run_model('owner', run, profile,
+        resume_history=store.history('owner', run.conversation_id),
+        partial_text='Confirmed. ', actor_lease=StubLease(), recovery_steers=True)
+    assert captured
+    final = store.events('owner', run.run_id)[-1][1]['responseMessage']
+    assert final['text'] == 'Confirmed. Recovered answer'
+    assert 'Abandoned partial' not in str(final)

@@ -310,6 +310,16 @@ class AgentRunner:
             graph = self.repository.get(self.owner, self.graph_definition["id"])
             if graph is None:
                 raise RuntimeSafetyError("Agent graph is no longer available")
+            if self.graph_definition.get('graphAgentIds'):
+                # Graph-team subagents are admitted from an isolated snapshot
+                # whose edges are not written to the entry Agent's standalone
+                # definition. Revalidate ownership and that exact topology;
+                # consulting the saved entry's unrelated edges rejects tools
+                # already advertised by the team's admitted graph.
+                from .graph_topology import admit_agent_graph
+
+                admit_agent_graph(self.owner, self.graph_definition, self.repository)
+                graph = self.graph_definition
             edge = handoff_edge_for_call(self.owner, graph, self.repository, call.name,
                                          source_agent_id=current["id"])
             return build_handoff_command(edge, current["id"], current.get("name") or current["id"],

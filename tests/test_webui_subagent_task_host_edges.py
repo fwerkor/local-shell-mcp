@@ -698,3 +698,33 @@ async def test_remote_owner_renews_before_expiry_then_later_disappears(host_envi
     assert settled["status"] == "completed"
     assert json.loads(await host.check({"background_task_id": task_id}))["result"] == "recovered after second remote expiry"
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('terminal','status'), [('cancel', 'aborted'), ('expired', 'error')])
+async def test_recovered_terminal_task_also_finishes_owned_child_generation(
+        host_environment, monkeypatch, terminal, status):
+    async def unused(*args, **kwargs):
+        yield 'unused'
+
+    host, invocation = await start_task(host_environment, unused, start=False)
+    async def no_dispatch(_task_id):
+        return None
+
+    monkeypatch.setattr(host, '_ensure_active', no_dispatch)
+    task_id = json.loads(await host.start(invocation))['background_task_id']
+    monkeypatch.setattr(host, '_ensure_active', SQLiteSubagentTaskHost._ensure_active.__get__(host))
+    task = host._get(task_id)
+    assert task['status'] == 'running'
+    child_generation, _ = GenerationStore(host.db).begin('local', {'text': 'Unfinished child'},
+        host_environment[3], trusted_new_conversation_id=task['child_conversation_id'])
+    with host.db.connect() as db:
+        db.execute('UPDATE subagent_tasks SET child_run_id=?,child_registered=1,'
+                   'cancel_requested=?,grant_expires=?,lease_owner=NULL,lease_until=NULL WHERE id=?',
+                   (child_generation.run_id, int(terminal == 'cancel'),
+                    time.time()-2 if terminal == 'expired' else None, task_id))
+    await host._ensure_active(task_id)
+    assert host._get(task_id)['status'] == ('cancelled' if terminal == 'cancel' else 'error')
+    run = GenerationStore(host.db).get('local', child_generation.run_id)
+    assert run.status == status
+    assert GenerationStore(host.db).events('local', child_generation.run_id)[-1][1]['final'] is True

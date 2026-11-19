@@ -386,14 +386,22 @@ class SQLiteSubagentTaskHost:
                     # Cancellation arrived after our pre-terminal registration
                     # check. Leave it pending for the next guarded admission.
                     return
+                reason = "Detached subagent task cancelled by its parent."
+                if row['child_run_id']:
+                    GenerationStore(self.db).finish(self.owner, row['child_run_id'],
+                                                    status='aborted', error=reason, _connection=db)
                 db.execute("UPDATE subagent_tasks SET status='cancelled', error=?, updated_at=? "
-                           "WHERE id=?", ("Detached subagent task cancelled by its parent.", now, task_id))
+                           "WHERE id=?", (reason, now, task_id))
                 terminal = True
             elif row["grant_expires"] is not None and row["grant_expires"] <= time.time():
                 if not pre_expired:
                     return
+                reason = "Authentication grant expired"
+                if row['child_run_id']:
+                    GenerationStore(self.db).finish(self.owner, row['child_run_id'],
+                                                    status='error', error=reason, _connection=db)
                 db.execute("UPDATE subagent_tasks SET status='error', error=?,updated_at=? WHERE id=?",
-                           ("Authentication grant expired", now, task_id))
+                           (reason, now, task_id))
                 terminal = True
             else:
                 lease = _PROCESS_ID + ":" + secrets.token_hex(12)

@@ -197,6 +197,16 @@ async def _run_model(
         from .agent_runner import AgentRunner
         from .agent_runtime import AgentSuspended
 
+        if recovery_steers and resume_history is not None and actor_lease is not None:
+            # Hold the unique run lease before modifying the durable SSE log.
+            # A model turn streaming after its last checkpoint is provisional;
+            # its suffix is regenerated after Controller restart, not resumed.
+            already_visible = repo.accumulated_text(owner, generation.run_id)
+            if already_visible != partial_text:
+                if not already_visible.startswith(partial_text):
+                    raise RuntimeError('Recovered checkpoint text conflicts with streamed reply')
+                repo.append(owner, generation.run_id, {'event': 'on_content_rewind',
+                    'data': {'preserveText': partial_text}}, actor_lease=actor_lease)
         history = resume_history if resume_history is not None else repo.history(
             owner, generation.conversation_id, message_id=generation.user_message_id,
         )
@@ -887,7 +897,10 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
         ask_user_enabled=bool(state.get("askUserEnabled")),
         mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
         resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
-        partial_text=_generation_store().accumulated_text(owner, generation.run_id),
+        partial_text=(checkpoint['checkpoint']['channel_values'].get('partial_text')
+                      if checkpoint is not None and isinstance(
+                          checkpoint['checkpoint']['channel_values'].get('partial_text'), str)
+                      else _generation_store().accumulated_text(owner, generation.run_id)),
         granted_scopes=frozenset(scopes), grant_expires=expiry,
         recovery_steers=True,
     )

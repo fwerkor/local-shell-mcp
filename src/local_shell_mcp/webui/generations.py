@@ -883,6 +883,10 @@ class GenerationStore:
                 value = content.get("text") if isinstance(content, dict) else None
                 if isinstance(value, str):
                     chunks.append(value)
+            elif event.get('event') == 'on_content_rewind':
+                preserved = (event.get('data') or {}).get('preserveText')
+                if isinstance(preserved, str):
+                    chunks = [preserved]
         return "".join(chunks)
 
     def history(self, owner: str, conversation_id: str, max_messages: int = 50,
@@ -1091,6 +1095,21 @@ class GenerationStore:
                             content.append({"type": "text", "text": delta["text"], "phase": "final_answer"})
                 elif kind == "on_steer_applied" and isinstance(data.get("part"), dict):
                     content.append(data["part"])
+                elif kind == 'on_content_rewind' and isinstance(data.get('preserveText'), str):
+                    # A partially streamed model turn was abandoned at the
+                    # latest durable checkpoint. Remove only its text suffix;
+                    # retain the existing tool/steer content anchors.
+                    remaining = data['preserveText']
+                    replayed = []
+                    for part in content:
+                        if part.get('type') == 'text':
+                            piece = remaining[:len(part['text'])]
+                            remaining = remaining[len(piece):]
+                            if piece:
+                                replayed.append({**part, 'text': piece})
+                        else:
+                            replayed.append(part)
+                    content = replayed
             if not content and text:
                 content.append({"type": "text", "text": text, "phase": "final_answer"})
             content += list(tool_parts.values())
