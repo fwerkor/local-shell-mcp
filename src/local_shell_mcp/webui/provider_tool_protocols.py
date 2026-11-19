@@ -55,7 +55,7 @@ def _content_blocks(blocks: list[dict], provider: str) -> list[dict]:
 
             converted = native_content_parts([block], provider)
             if not converted:
-                raise ValueError("Invalid provider file content")
+                raise ValueError("Unsupported provider file content")
             result.extend(converted)
         elif kind in {"thinking", "redacted_thinking"} and provider == "anthropic" or kind == "image" and provider == "anthropic" and "source" in block:
             result.append(copy.deepcopy(block))
