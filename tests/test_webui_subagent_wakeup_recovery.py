@@ -310,3 +310,45 @@ async def test_sibling_child_completions_serialize_on_newest_parent_assistant(en
         assert conn.execute("SELECT count(*) FROM subagent_wakeups WHERE "
                             "status='done'").fetchone()[0] == 2
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cause', ['expired', 'agent_removed', 'provider_error'])
+async def test_dead_wakeup_terminates_admitted_continuation_atomically(environment, monkeypatch, cause):
+    import time
+
+    from wakeup_helpers import completed, make_task, wait_admission
+
+    from local_shell_mcp.webui import subagent_wakeup
+    from local_shell_mcp.webui.agents import AgentRepository
+
+    db, repo, store, child, parent, parent_run = environment
+    host, task_id, _ = await make_task(environment)
+    await completed(host, task_id)
+    assert store.finish('local', parent_run.run_id, status='complete', text='Delegated')
+    started = []
+
+    async def dispatched(owner, generation, *args, **kwargs):
+        started.append(generation)
+
+    await wait_admission()
+    assert await subagent_wakeup.process_wakeups(db, dispatch=dispatched) == 1
+    assert len(started) == 1
+    with db.connect() as conn:
+        conn.execute('UPDATE subagent_wakeups SET lease_until=0 WHERE task_id=?', (task_id,))
+        if cause == 'expired':
+            conn.execute('UPDATE subagent_tasks SET grant_expires=? WHERE id=?', (time.time()-1, task_id))
+    if cause == 'agent_removed':
+        assert AgentRepository(db).delete('local', parent['id'])
+    if cause == 'provider_error':
+        from local_shell_mcp.webui import providers
+        monkeypatch.setattr(providers, 'provider_config', lambda *args, **kwargs: (_ for _ in ()).throw(ValueError('missing model')))
+    assert await subagent_wakeup.process_wakeups(db, dispatch=dispatched) == 0
+    with db.connect() as conn:
+        wakeup = conn.execute('SELECT status,error FROM subagent_wakeups WHERE task_id=?',
+                              (task_id,)).fetchone()
+        assert wakeup['status'] == 'dead' and wakeup['error']
+        assert conn.execute('SELECT result_claimed FROM subagent_tasks WHERE id=?',
+                            (task_id,)).fetchone()[0] == 0
+    assert store.get('local', started[0].run_id).status == 'interrupted'
+    assert store.events('local', started[0].run_id)[-1][1]['final'] is True

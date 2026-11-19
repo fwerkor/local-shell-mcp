@@ -159,6 +159,17 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+CREATE TABLE IF NOT EXISTS active_subagent_threads (
+    owner TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    parent_run_id TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(owner,thread_id)
+);
+CREATE INDEX IF NOT EXISTS idx_active_subagent_threads_parent
+ON active_subagent_threads(parent_run_id,active);
 CREATE TABLE IF NOT EXISTS generation_requests (
     owner TEXT NOT NULL,
     client_request_id TEXT NOT NULL,
@@ -278,6 +289,63 @@ CREATE TABLE IF NOT EXISTS subagent_wakeups (
 );
 CREATE INDEX IF NOT EXISTS idx_subagent_wakeups_pending ON
     subagent_wakeups(status,created_at);
+-- Original LibreChat Agent Trigger source admission: separate API-key identity,
+-- envelope idempotency, ordered SQLite lane and per-replica leased dispatch.
+CREATE TABLE IF NOT EXISTS agent_event_source_keys (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    label TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    permissions TEXT NOT NULL,
+    expires_at INTEGER,
+    revoked_at INTEGER,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_keys_owner ON agent_event_source_keys(owner,created_at);
+CREATE TABLE IF NOT EXISTS agent_event_bindings (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    source_key_id TEXT NOT NULL REFERENCES agent_event_source_keys(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL,
+    parent_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_message_id TEXT NOT NULL,
+    parent_agent_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_bindings_owner ON agent_event_bindings(owner,source_key_id);
+CREATE TABLE IF NOT EXISTS agent_event_deliveries (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    owner TEXT NOT NULL,
+    source_key_id TEXT NOT NULL REFERENCES agent_event_source_keys(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK(mode IN ('fire','continue','steer')),
+    ordering_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending','leased','succeeded','dead')),
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    lease_owner TEXT,
+    lease_until INTEGER,
+    error_code TEXT,
+    error_type TEXT,
+    result TEXT,
+    coalesce_key TEXT,
+    coalesce_until INTEGER,
+    batch_root_id TEXT,
+    batch_count INTEGER NOT NULL DEFAULT 1,
+    batch_bytes INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,source_key_id,id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_deliveries_lane
+    ON agent_event_deliveries(owner,ordering_key,seq,status);
+CREATE INDEX IF NOT EXISTS idx_agent_event_deliveries_eligible
+    ON agent_event_deliveries(status,available_at,lease_until);
 -- Fenced foreground HTTP chat generation owner; independent of detached
 -- internal subagent completion wakeup leases and native Job/Shell ownership.
 CREATE TABLE IF NOT EXISTS generation_actor_leases (
@@ -288,6 +356,63 @@ CREATE TABLE IF NOT EXISTS generation_actor_leases (
 );
 CREATE INDEX IF NOT EXISTS idx_generation_actor_leases_expiry
     ON generation_actor_leases(expires_at);
+-- Host-owned ordinary background calls are process-local (source background.ts).
+-- A restart never silently retries an irreversible tool. The one-shot result,
+-- unknown outcome and parent-auth lineage remain durable for honest polling.
+-- Original LibreChat event-actor detached action: one immutable action per
+-- bound-child delivery, persisted in the SAME transaction as the native task.
+-- A lost launch acknowledgement is indeterminate and must not re-execute.
+CREATE TABLE IF NOT EXISTS agent_event_detached_actions (
+    delivery_id TEXT PRIMARY KEY REFERENCES agent_event_deliveries(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL UNIQUE,
+    tool_name TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    argument_hash TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN
+       ('reserved','running','launch_indeterminate','succeeded','failed','cancelled')),
+    evidence TEXT,
+    recovery_after INTEGER NOT NULL,
+    observed_at INTEGER,
+    continuation_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_event_detached_tasks
+    ON agent_event_detached_actions(owner,task_id,status);
+CREATE TABLE IF NOT EXISTS agent_background_tools (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    authorization_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_tool_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    argument_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('running','completed','error','cancelled','uncertain')),
+    result TEXT,
+    error_type TEXT,
+    claimed INTEGER NOT NULL DEFAULT 0,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    lease_owner TEXT,
+    lease_until INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,conversation_id,parent_run_id,parent_tool_call_id)
+);
+CREATE INDEX IF NOT EXISTS idx_background_tool_scope
+  ON agent_background_tools(owner,authorization_conversation_id,created_at);
+-- Replay an acknowledged poll only to the same authenticated Agent tool call.
+-- An independent tool call cannot claim an already consumed result.
+CREATE TABLE IF NOT EXISTS agent_background_tool_claims (
+    task_id TEXT PRIMARY KEY REFERENCES agent_background_tools(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    claimant_run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    claimant_call_id TEXT NOT NULL,
+    response TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS agent_durable_tasks (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
@@ -433,6 +558,22 @@ class SQLiteDatabase:
             ):
                 if column not in existing_wakeup:
                     db.execute(f"ALTER TABLE subagent_wakeups ADD COLUMN {column} {definition}")
+            # Existing Controllers may already have an external Trigger queue.
+            # Add source 750ms/8-event/512KiB bound-child coalescing in place.
+            event_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(agent_event_deliveries)")
+            }
+            for column, definition in (
+                ("coalesce_key", "TEXT"),
+                ("coalesce_until", "INTEGER"),
+                ("batch_root_id", "TEXT"),
+                ("batch_count", "INTEGER NOT NULL DEFAULT 1"),
+                ("batch_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if column not in event_columns:
+                    db.execute(f"ALTER TABLE agent_event_deliveries ADD COLUMN {column} {definition}")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_agent_event_delivery_batch "
+                       "ON agent_event_deliveries(owner,coalesce_key,batch_root_id,coalesce_until)")
             # Source event-driven completion readiness: committing a parent
             # turn or durable child terminal row clears its waiting backoff in
             # the SAME transaction. No cross-process in-memory wake event.
@@ -581,10 +722,10 @@ class SQLiteStateStore:
                 if os.name == "nt":
                     import msvcrt
 
-                    handle.seek(0)
-                    if handle.read(1) == b"":
-                        handle.write(b"0")
-                        handle.flush()
+                    # Byte-range locks work beyond EOF on Windows. Do not read
+                    # or write that byte before acquiring the lock: another
+                    # process may already hold it, and Windows rejects the
+                    # attempted read with PermissionError instead of waiting.
                     handle.seek(0)
                     msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
                 else:

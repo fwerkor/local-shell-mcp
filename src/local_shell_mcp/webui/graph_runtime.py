@@ -85,6 +85,11 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             raise PermissionError("Agent graph member is not owned by the current principal")
         members[ident] = member
     source_history = messages_state_reducer([], copy.deepcopy(history))
+    # The originating HTTP request may override its Agent's artifact mode.
+    # _run_model already constructed the complete root instructions, including
+    # this ephemeral override; preserve that system content at root activation.
+    source_system = [m.get('content') for m in source_history
+                     if m.get('role') == 'system' and isinstance(m.get('content'), str)]
     initial_count = len(source_history)
     graph = StateGraph(MultiAgentState)
     handoff_sources = topology.handoff_sources
@@ -92,6 +97,8 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
     direct_destinations = {ident: set() for ident in member_ids}
     for edge in topology.edges:
         for src in endpoints(edge, "from"):
+            if src not in members:
+                continue
             for dest in endpoints(edge, "to"):
                 if dest in members:
                     destinations[src].add(dest)
@@ -122,21 +129,42 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                 incoming.append(_route_prompt(_limit_prompt(prompt)))
         elif state.get("agentMessages"):
             incoming = copy.deepcopy(state["agentMessages"])
-        # Remove root/previous member system messages from shared graph input.
-        incoming = [message for message in incoming if message.get('role') != 'system']
-        instructions = member.get("instructions") or ""
+        # Every activation receives only its own Agent instructions. The
+        # shared graph input may retain the root's system prompt across
+        # direct supersteps and fan-in, which must not leak to other members.
+        incoming = [msg for msg in incoming if msg.get("role") != "system"]
+        from .artifact_prompts import agent_instructions
+        from .providers import selected_provider
+
+        instructions = ("\n\n".join(source_system) if agent_id == source_id and source_system
+                        else agent_instructions(member, selected_provider({}, member)))
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})
         from .attachments import with_agent_context
 
         incoming = with_agent_context(parent.database, parent.owner, member, incoming)
 
+        # Source callbacks.js visibility applies to both SSE and the final
+        # persisted assistant text. Keep intermediate messages in graph state,
+        # but do not leak hidden sequential nodes via live deltas or reloads.
+        hide_intermediate = (root.get("hide_sequential_outputs") is True and
+                             root.get("resultAgentId") is not None and
+                             agent_id != root["resultAgentId"] and
+                             not topology.routing_parallel)
+        if hide_intermediate and not state.get("agentMessages"):
+            parent.store.append(parent.owner, parent.generation.run_id, {
+                "event": "on_agent_update", "data": {
+                    "runId": parent.generation.response_message_id,
+                    "message": f"{member.get('name') or 'Agent'} is thinking...",
+                },
+            }, actor_lease=parent.actor_lease)
+
         async def emit(delta: str) -> None:
-            # Pause/restart snapshots must retain the generation-wide prefix,
-            # including streamed text from earlier graph activations.
-            parent.partial_text += delta
-            child.partial_text = parent.partial_text
-            await parent.on_text(delta)
+            # All nodes use one event stream and the existing generation actor.
+            if not hide_intermediate:
+                parent.partial_text += delta
+                child.partial_text = parent.partial_text
+                await parent.on_text(delta)
 
         from .ask_user_tools import ask_user_requested
 
@@ -163,7 +191,9 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             background_deny=parent.background_deny,
             task_control_host=parent.task_control_host, task_control_id=parent.task_control_id,
             subagent_depth=parent.subagent_depth, on_injected=parent.on_injected,
-            wakeup_lease=parent.wakeup_lease, actor_lease=parent.actor_lease,
+            wakeup_lease=parent.wakeup_lease,
+            event_delivery_lease=parent.event_delivery_lease,
+            actor_lease=parent.actor_lease,
             recovery_steers=parent.recovery_steers,
         )
         child.route.restore(state.get("handoffState"))
@@ -260,7 +290,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             graph.add_node(to_node, fan_in)
             graph.add_edge(to_node, target)
         for edge in edges:
-            sources = endpoints(edge, "from")
+            sources = [source for source in endpoints(edge, "from") if source in members]
             if not prompted:
                 sources = [source for source in sources if source not in handoff_sources]
             if sources:

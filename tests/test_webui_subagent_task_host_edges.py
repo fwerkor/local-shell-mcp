@@ -701,9 +701,39 @@ async def test_remote_owner_renews_before_expiry_then_later_disappears(host_envi
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(('terminal','status'), [('cancel', 'aborted'), ('expired', 'error')])
-async def test_recovered_terminal_task_also_finishes_owned_child_generation(
-        host_environment, monkeypatch, terminal, status):
+@pytest.mark.parametrize('cancelled', [True, False])
+async def test_unregistered_child_settles_cancel_or_expired_grant_before_activation(
+    host_environment, monkeypatch, cancelled,
+):
+    from dataclasses import replace
+
+    async def unused(*args, **kwargs):
+        raise AssertionError('Cancelled or expired task cannot invoke a model')
+        yield ''
+
+    host, invocation = await start_task(host_environment, unused, start=False)
+    async def no_dispatch(_task_id):
+        return None
+
+    monkeypatch.setattr(host, '_ensure_active', no_dispatch)
+    unique = replace(invocation, parent_tool_call_id='preflight-' + str(cancelled))
+    task = json.loads(await host.start(unique))['background_task_id']
+    with host.db.connect() as db:
+        # Model a crash before the child guard's activation acknowledgement.
+        db.execute('UPDATE subagent_tasks SET child_registered=0,cancel_requested=?,grant_expires=? '
+                   'WHERE id=?', (int(cancelled), None if cancelled else time.time()-1, task))
+    monkeypatch.setattr(host, '_ensure_active', SQLiteSubagentTaskHost._ensure_active.__get__(host))
+    await host._ensure_active(task)
+    row = host._get(task)
+    assert row['status'] == ('cancelled' if cancelled else 'error')
+    assert not row['child_registered'] and not row['child_run_id']
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_child_guard_settlement_rejects_wrong_lease_and_unregistered_task(
+    host_environment, monkeypatch,
+):
     async def unused(*args, **kwargs):
         yield 'unused'
 
@@ -712,19 +742,47 @@ async def test_recovered_terminal_task_also_finishes_owned_child_generation(
         return None
 
     monkeypatch.setattr(host, '_ensure_active', no_dispatch)
-    task_id = json.loads(await host.start(invocation))['background_task_id']
-    monkeypatch.setattr(host, '_ensure_active', SQLiteSubagentTaskHost._ensure_active.__get__(host))
-    task = host._get(task_id)
-    assert task['status'] == 'running'
-    child_generation, _ = GenerationStore(host.db).begin('local', {'text': 'Unfinished child'},
-        host_environment[3], trusted_new_conversation_id=task['child_conversation_id'])
+    task = json.loads(await host.start(invocation))['background_task_id']
+    seen = []
+    class Guard:
+        def settle(self, owner, child, parent):
+            seen.append((owner, child, parent))
+    monkeypatch.setattr(host, '_child_activity', lambda: Guard())
     with host.db.connect() as db:
-        db.execute('UPDATE subagent_tasks SET child_run_id=?,child_registered=1,'
-                   'cancel_requested=?,grant_expires=?,lease_owner=NULL,lease_until=NULL WHERE id=?',
-                   (child_generation.run_id, int(terminal == 'cancel'),
-                    time.time()-2 if terminal == 'expired' else None, task_id))
-    await host._ensure_active(task_id)
-    assert host._get(task_id)['status'] == ('cancelled' if terminal == 'cancel' else 'error')
-    run = GenerationStore(host.db).get('local', child_generation.run_id)
-    assert run.status == status
-    assert GenerationStore(host.db).events('local', child_generation.run_id)[-1][1]['final'] is True
+        db.execute('UPDATE subagent_tasks SET child_registered=0 WHERE id=?', (task,))
+    host._settle_child_registration(task, before_terminal=True)
+    assert seen == []  # Unregistered child cannot be settled.
+    with host.db.connect() as db:
+        db.execute('UPDATE subagent_tasks SET child_registered=1,lease_owner=?,lease_until=? WHERE id=?',
+                   ('real-lease', int(time.time()*1000)+30000, task))
+    host._settle_child_registration(task)
+    host._settle_child_registration(task, before_terminal=True, lease_token='foreign-lease')
+    host._settle_child_registration(task, before_terminal=True)
+    assert seen == []
+    host._settle_child_registration(task, before_terminal=True, lease_token='real-lease')
+    assert len(seen) == 1 and seen[0][0] == 'local'
+    monkeypatch.setattr(host, '_child_activity', lambda: None)
+    host._settle_child_registration(task, before_terminal=True, lease_token='real-lease')
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_child_thread_continuations_return_structured_busy_rejection(host_environment):
+    ready, release = asyncio.Event(), asyncio.Event()
+
+    async def model(profile, history, **kwargs):
+        ready.set()
+        await release.wait()
+        yield 'Child work finished'
+
+    host, original = await start_task(host_environment, model, call_id='original')
+    assert original['status'] == 'running'
+    await asyncio.wait_for(ready.wait(), 10)
+    _, rejected = await start_task(host_environment, model, call_id='parallel-continuation',
+                                  thread_id=original['subagent_thread_id'])
+    assert rejected['status'] == 'rejected'
+    assert 'already running' in rejected['message']
+    assert len(host.list()) == 1
+    release.set()
+    await settle(host, original['background_task_id'])
+    await shutdown_subagent_tasks()

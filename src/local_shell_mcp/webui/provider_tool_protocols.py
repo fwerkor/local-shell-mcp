@@ -48,6 +48,9 @@ def _content_blocks(blocks: list[dict], provider: str) -> list[dict]:
                     raise ValueError("Anthropic requires a URL or base64 encoded image")
                 result.append({"type": "image", "source": source})
         elif kind == "file":
+            # Steer media is already an owner-authorized, validated data URL.
+            # Preserve the main serializer's strict image/thinking handling,
+            # extending its content type surface for native PDF attachments.
             from .provider_multimodal import native_content_parts
 
             converted = native_content_parts([block], provider)

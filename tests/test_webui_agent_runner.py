@@ -37,7 +37,9 @@ def runtime(tmp_path, monkeypatch):
 async def _wait_tasks():
     tasks = list(generation_routes._TASKS.values())
     if tasks:
-        await asyncio.wait_for(asyncio.gather(*tasks), 5)
+        # Slow Windows CI runners can spend several seconds on file tool
+        # dispatch before the continuation finishes. Keep a bounded wait.
+        await asyncio.wait_for(asyncio.gather(*tasks), 30)
 
 
 @pytest.mark.asyncio

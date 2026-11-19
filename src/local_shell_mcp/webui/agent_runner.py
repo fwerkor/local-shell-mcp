@@ -18,6 +18,7 @@ from .agent_runtime import (
 )
 from .agents import AgentRepository
 from .approval_runtime import (
+    ApprovalBatch,
     approval_policy_decision,
     ask_user_approval_policy,
     build_approval_payload,
@@ -48,8 +49,8 @@ class AgentRunner:
                  graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None,
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
-                 on_injected=None, wakeup_lease=None, actor_lease=None, recovery_steers=False):
-        self.on_injected = on_injected
+                 on_injected=None, wakeup_lease=None, event_delivery_lease=None,
+                 actor_lease=None, recovery_steers=False, on_tool_completed=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -63,9 +64,12 @@ class AgentRunner:
         self.background_deny = background_deny
         self.task_control_host, self.task_control_id = task_control_host, task_control_id
         self.subagent_depth = subagent_depth
+        self.on_injected = on_injected
         self.wakeup_lease = wakeup_lease
+        self.event_delivery_lease = event_delivery_lease
         self.actor_lease = actor_lease
         self.recovery_steers = recovery_steers
+        self.on_tool_completed = on_tool_completed
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
@@ -79,6 +83,7 @@ class AgentRunner:
         self.active_config = self.config
         self.cache = {}
         self.configs = {}
+        self._injected_background_names: dict[str, frozenset[str]] = {}
         self.route = HandoffRouting(self.graph_entry_id, self.graph_max_handoffs, self.graph_parallel)
 
     def _check_grant(self):
@@ -93,6 +98,11 @@ class AgentRunner:
 
             assert_wakeup_lease(self.database, self.owner,
                                 self.generation.run_id, self.wakeup_lease)
+        if self.event_delivery_lease is not None:
+            from .event_triggers import assert_event_lease
+
+            assert_event_lease(self.database, self.owner, self.generation.run_id,
+                               self.event_delivery_lease)
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
@@ -107,6 +117,7 @@ class AgentRunner:
                                  scopes=set(self.scopes), expires=self.grant_expires)
         tools = [tool for tool in native if unrestricted or tool["function"]["name"] in selected
                  or tool["function"]["name"] in {"session_manage", "plan_manage"}]
+        native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
                       if unrestricted or tool["function"]["name"] in selected]
@@ -132,6 +143,16 @@ class AgentRunner:
             )
         if self.graph_definition:
             tools += handoff_tools(self.owner, self.graph_definition, self.repository, source_agent_id=identity)
+        background_names = frozenset()
+        if not self.background_deny:
+            from .background_tools import inject_tools
+
+            tools, background_names = inject_tools(tools, agent, native_names=native_names)
+            self._injected_background_names[identity] = background_names
+            if background_names and not any(t["function"]["name"] == "check_background_task" for t in tools):
+                from .subagent_task_host import check_background_task_tools
+
+                tools += check_background_task_tools()
         override = (agent or {}).get("recursion_limit")
         limit = override if type(override) in (int, float) and override > 0 else 50
         return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
@@ -164,8 +185,12 @@ class AgentRunner:
 
     @staticmethod
     def _visible_tool_args(call):
-        """Bound SSE argument previews; persisted/native arguments remain complete."""
+        """Bound SSE previews; native and checkpoint arguments remain complete."""
         args = call.arguments
+        if call.name == 'file_write' and isinstance(args, dict):
+            content = args.get('content')
+            if isinstance(content, str) and len(content) > 8192:
+                return {**args, 'content': f'[omitted {len(content)} characters from file-write UI event]'}
         raw = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
         if len(raw.encode("utf-8")) <= 16 * 1024:
             return args
@@ -208,7 +233,7 @@ class AgentRunner:
                           actor_lease=self.actor_lease)
         return step
 
-    async def _completed(self, call, record):
+    async def _completed(self, call, record, *, executed: bool = True):
         output = record["output"]
         if isinstance(output, str):
             self.saver.put_writes(self.active_config, [("messages", {
@@ -217,10 +242,27 @@ class AgentRunner:
         if not self._publishes_tool_steps():
             from .action_spec import is_action_tool
 
-            if is_action_tool(call.name):
+            if is_action_tool(call.name) and executed:
                 self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
             return
         step = self._tool_step(call)
+        if call.name == "file_write" and isinstance(output, str):
+            # Original callbacks.js `on_tool_end` publishes tool artifacts
+            # separately from the model-visible tool result. The native LSM
+            # file-write response is the trusted success/hash evidence; keep
+            # the original file contents outside model message history.
+            from contextlib import suppress
+
+            from starlette.exceptions import HTTPException
+
+            from ..settings import get_settings
+            from .office_preview import publish_native_file_write
+
+            # The authorized tool write already completed. An optional preview
+            # failure cannot change the native result or its audit record.
+            with suppress(ValueError, PermissionError, OSError, HTTPException):
+                await publish_native_file_write(self.owner, self.generation, call, output,
+                                                database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
         # A UI resource marker is only resolvable after the original client
@@ -246,17 +288,18 @@ class AgentRunner:
                 }
                 if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= 240_000:
                     self.store.append(self.owner, self.generation.run_id, payload)
+        end_at = int(time.time() * 1000)
         event = {
             "event": "on_run_step_completed", "data": {"result": {
-                "id": step["id"], "index": step["index"], "completed_at": int(time.time() * 1000),
+                "id": step["id"], "index": step["index"], "completed_at": end_at,
                 "type": "tool_call", "tool_call": {
                     "id": call.call_id, "name": call.name, "args": self._visible_tool_args(call),
                     "type": "tool_call", "output": preview, "progress": 1,
+                    **({"executed": False} if not executed else {}),
                 },
             }},
         }
-        # Persist the completion evidence with its Controller file links.
-        from .action_spec import is_action_tool
+        # Persist completed tool evidence and Controller file links atomically.
         from .tool_attachments import controller_tool_file_ids
 
         identities = controller_tool_file_ids(output)
@@ -264,12 +307,41 @@ class AgentRunner:
             self.store.append_tool_completion(
                 self.owner, self.generation.run_id, event, call.call_id, identities,
                 actor_lease=self.actor_lease,
+                full_arguments=call.arguments if executed else None,
             )
         else:
             self.store.append(self.owner, self.generation.run_id, event,
-                              actor_lease=self.actor_lease)
-        if is_action_tool(call.name):
+                              actor_lease=self.actor_lease,
+                              full_arguments=call.arguments if executed else None)
+        # Source agents@4.0.1 Graph.closeRunStep: terminal closure is an
+        # independent event. First close wins and survives SSE reconnect and
+        # durable final history, including native tool denial/error paths.
+        with self.database.connect() as db:
+            previous = db.execute(
+                "SELECT 1 FROM generation_events WHERE run_id=? AND "
+                "json_extract(data,'$.event')='on_run_step_closed' AND "
+                "json_extract(data,'$.data.id')=? LIMIT 1",
+                (self.generation.run_id, step["id"]),
+            ).fetchone()
+        if previous is None:
+            failed = isinstance(output, str) and (
+                output.startswith("Tool failed (") or output.startswith("Blocked: ")
+                or output.startswith("API call failed (")
+            )
+            self.store.append(self.owner, self.generation.run_id, {
+                "event": "on_run_step_closed", "data": {
+                    "id": step["id"], "index": step["index"], "type": "tool_calls",
+                    "runId": step["runId"],
+                    "status": "failed" if failed else "completed",
+                    "closed_at": end_at, "created_at": step["created_at"],
+                },
+            }, actor_lease=self.actor_lease)
+        from .action_spec import is_action_tool
+
+        if is_action_tool(call.name) and executed:
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
+        if self.on_tool_completed is not None:
+            await self.on_tool_completed(call)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -279,15 +351,73 @@ class AgentRunner:
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
         if call.name == "check_background_task":
+            from .background_tools import check_tool_task
             from .subagent_task_host import SQLiteSubagentTaskHost
 
             host = SQLiteSubagentTaskHost(
                 self.database, self.owner, self.authorization_conversation_id,
                 stream_tools=self.stream_tools, stream_text=self.stream_text,
             )
-            return await host.check(call.arguments, tool_call_id=call.call_id,
-                                    parent_run_id=self.generation.run_id,
-                                    parent_agent_id=(state.context.agent or {}).get("id", "default"))
+            task_id = call.arguments.get("background_task_id")
+            action = call.arguments.get("action") or "poll"
+            if isinstance(task_id, str) and task_id.startswith("tooltask_"):
+                return json.dumps(check_tool_task(self.database, self.owner,
+                                                  self.authorization_conversation_id, task_id, action,
+                                                  claimant_run_id=self.generation.run_id,
+                                                  claimant_call_id=call.call_id),
+                                  ensure_ascii=False)
+            child = await host.check(call.arguments, tool_call_id=call.call_id,
+                                     parent_run_id=self.generation.run_id,
+                                     parent_agent_id=(state.context.agent or {}).get("id", "default"))
+            if not task_id and action == "poll":
+                from .background_tools import check_tool_task
+
+                try:
+                    decoded = json.loads(child)
+                except (TypeError, ValueError):
+                    # Existing hosted task controllers may return a plain-text
+                    # observation rather than the original JSON task list.
+                    # Do not erase a valid result while merging ordinary tools.
+                    return child
+                if not isinstance(decoded, dict) or not isinstance(decoded.get("tasks"), list):
+                    return child
+                decoded["tasks"].extend(check_tool_task(
+                    self.database, self.owner, self.authorization_conversation_id, None))
+                decoded["outstanding"] = sum(task["status"] == "running" for task in decoded["tasks"])
+                return json.dumps(decoded, ensure_ascii=False)
+            return child
+        if ("run_in_background" in call.arguments and
+                call.name in self._injected_background_names.get(
+                    (state.context.agent or {}).get("id") or "default", frozenset())):
+            from .background_tools import eligible, start_tool_task
+            from .lsm_tool_registry import call_tool as invoke_native
+
+            shown = next((tool for tool in state.context.tools
+                          if tool["function"]["name"] == call.name), None)
+            params = (shown or {}).get("function", {}).get("parameters", {})
+            if not eligible(call.name) or "run_in_background" not in params.get("properties", {}):
+                raise RuntimeSafetyError("run_in_background was not enabled for this tool")
+            args = {key: value for key, value in call.arguments.items() if key != "run_in_background"}
+            native_call = ModelToolCall(call.call_id, call.name, args, call.provider_data)
+            if call.arguments["run_in_background"] is True:
+                if self.background_deny:
+                    raise RuntimeSafetyError("Background execution is disabled in this child context")
+
+                async def detached_dispatch(c, scopes, expires, authorization):
+                    return await invoke_native(self.owner, self.generation.conversation_id, c,
+                                               granted_scopes=set(scopes), grant_expires=expires,
+                                               run_id=self.generation.run_id,
+                                               authorization_conversation_id=authorization)
+
+                return await start_tool_task(self.database, self.owner,
+                                             self.generation.conversation_id,
+                                             self.authorization_conversation_id,
+                                             self.generation.run_id, native_call,
+                                             scopes=frozenset(self.scopes),
+                                             grant_expires=self.grant_expires,
+                                             dispatch=detached_dispatch,
+                                             event_delivery_lease=self.event_delivery_lease)
+            call = native_call
         if call.name == "subagent":
             from .subagent_task_host import SQLiteSubagentTaskHost
 
@@ -383,8 +513,9 @@ class AgentRunner:
                             background_deny=self.background_deny,
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
                             subagent_depth=invocation.remaining_depth,
-                            wakeup_lease=self.wakeup_lease, actor_lease=self.actor_lease,
-                            recovery_steers=self.recovery_steers)
+                            wakeup_lease=self.wakeup_lease,
+                            event_delivery_lease=self.event_delivery_lease,
+                            actor_lease=self.actor_lease, recovery_steers=self.recovery_steers)
         from .attachments import with_agent_context
 
         history = with_agent_context(self.database, self.owner, invocation.agent,
@@ -531,6 +662,54 @@ class AgentRunner:
             raise RuntimeSafetyError("Handoff commands require an active StateGraph node")
         return ToolBatchOutput(messages, graph_commands=combined)
 
+    @staticmethod
+    def _steer_message(item):
+        content = merged_text(item)
+        if item.get("files"):
+            content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
+                item["files"], ensure_ascii=False,
+            )
+        return {"role": "user", "content": content, "source": "steer",
+                **({'steerId': item['steerId']} if isinstance(item.get('steerId'), str) else {})}
+
+    def _reconcile_drained_steers(self, state):
+        """Recover durable applied steers not yet included in a model checkpoint.
+
+        drain() records an applied receipt before the graph snapshot. A crash
+        in that window must not silently lose the accepted user instruction.
+        Match stable steer identities, never the text of older user turns.
+        If the interrupted checkpoint ends in pending tool calls, queue
+        recovered steers until those tool results have been appended.
+        """
+        if self.namespace:
+            return
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'",
+                (self.generation.run_id, self.owner),
+            ).fetchone()
+        if row is None:
+            return
+        parts = json.loads(row["state"]).get("steerParts") or []
+        checkpoint_ids = {m.get('steerId') for m in state.messages
+                          if isinstance(m, dict) and m.get('source') == 'steer'
+                          and isinstance(m.get('steerId'), str)}
+        missing = []
+        for part in parts:
+            if (not isinstance(part, dict) or not isinstance(part.get('steer'), str)
+                    or not isinstance(part.get('steerId'), str)):
+                continue
+            if part['steerId'] not in checkpoint_ids:
+                missing.append(self._steer_message(part))
+                checkpoint_ids.add(part['steerId'])
+        if state.pending_calls:
+            self._pending_recovered_steers = missing
+        else:
+            state.messages.extend(missing)
+            if missing:
+                state.completed = False
+
     async def run(self, history, *, recursion_limit=None):
         from .graph_topology import admit_agent_graph
 
@@ -571,6 +750,9 @@ class AgentRunner:
         # never create a second public steer part.
         is_foreground = (not self.namespace or
                          (self.graph_node and self.namespace.startswith("/graph:")))
+        self._pending_recovered_steers = []
+        if is_foreground and not self.recovery_steers:
+            self._reconcile_drained_steers(state)
         if is_foreground and self.recovery_steers:
             existing_steers = {message.get("steerId") for message in state.messages
                                if isinstance(message, dict)}
@@ -591,10 +773,30 @@ class AgentRunner:
             self.resume_namespace = self.namespace
             self.approved_batch = self.store.approved_batch(self.owner, self.generation.run_id)
         if self.approved_batch is not None and self.resume_namespace == self.namespace:
+            pending_ids = {call.call_id for call in state.pending_calls}
+            remaining = tuple(entry for entry in self.approved_batch.entries
+                              if entry.call_id in pending_ids)
+            if not remaining:
+                # The persisted checkpoint already passed ToolNode and model
+                # execution resumed. Retiring the proof prevents a subsequent
+                # restart from re-running tools that are no longer pending.
+                completed_ids = {m.get('tool_call_id') for m in state.messages
+                                 if isinstance(m, dict) and m.get('role') == 'tool'}
+                expected_ids = {entry.call_id for entry in self.approved_batch.entries}
+                if not expected_ids.issubset(completed_ids):
+                    raise RuntimeSafetyError('Approved tool checkpoint is missing persisted outcomes')
+                if review:
+                    self.store.complete_approval_batch(self.owner, self.generation.run_id,
+                                                       review['actionId'], state.messages, self.partial_text)
+                self.approved_batch = None
+                review = None
+            else:
+                self.approved_batch = ApprovalBatch(remaining)
+        if self.approved_batch is not None and self.resume_namespace == self.namespace:
             # LibreChat ToolNode approval can precede a browser OAuth login.
             # Resolve all Action credentials before executing *any* reviewed
             # sibling; pending review proof remains in SQLite across login.
-            reviewed_calls = [entry.tool_call() for entry in self.approved_batch.entries
+            reviewed_calls = [entry.tool_call() for entry in getattr(self.approved_batch, "entries", ())
                               if entry.decision["type"] in {"approve", "edit"} and
                               not any(call.call_id == entry.call_id and
                                       replay_key(call, index) in self.cache
@@ -605,7 +807,8 @@ class AgentRunner:
                 original = next(call for call in state.pending_calls if call.call_id == result.call.call_id)
                 record = {"proposal": {"name": original.name, "args": copy.deepcopy(original.arguments)}, "output": result.raw_content if result.raw_content is not None else result.content}
                 self.cache[replay_key(original, state.pending_calls.index(original))] = record
-                await self._completed(original, record)
+                await self._completed(result.call, record,
+                                      executed=result.decision in {"approve", "edit"})
 
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
@@ -647,11 +850,15 @@ class AgentRunner:
             # BEGIN IMMEDIATE drain elects one consumer in parallel fan-out.
             if self.namespace and not (self.graph_node and self.namespace.startswith("/graph:")):
                 return False
+            recovered = self._pending_recovered_steers if boundary == "post_tools" else []
+            if recovered:
+                self._pending_recovered_steers = []
             applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary,
                                         actor_lease=self.actor_lease,
                                         recipient_namespace=self.namespace)
-            if applied and self.on_injected is not None:
+            if (recovered or applied) and self.on_injected is not None:
                 await self.on_injected()
+            current.messages.extend(recovered)
             for item in applied:
                 # The graph checkpoint contains only durable owned references.
                 # Encode actual media per provider request, never persist base64.
@@ -659,7 +866,7 @@ class AgentRunner:
                                          "source": "steer", "steerId": item["steerId"],
                                          "id": "steer:" + item["steerId"],
                                          "files": item.get("files", [])})
-            return bool(applied)
+            return bool(recovered or applied)
 
         async def should_seal_stream():
             # Check even tool-only provider chunks: they produce no on_text

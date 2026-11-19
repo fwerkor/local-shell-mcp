@@ -564,6 +564,165 @@ Controller 已经退出，另一 Controller 的 poll 也会立即发现可领取
 本次仅提供内部 Subagent 完成事件的有界重试、死信及安全自动续接。
 其它 Agent Trigger 类型尚未引入未经授权的公共 HTTP 入口。
 
+### 2026-11-14 — 原版 Agent Trigger Remote Source、Fire 与受保护的绑定 Continue
+
+锁定 `triggers/{ingress,bindings,envelope,delivery,engine}.ts` 和
+`agents/json.ts` 原版 SHA-256。按原版 `POST /api/agents/v1/events`、
+`GET /api/agents/v1/events/:deliveryId`、
+`POST /api/agents/v1/events/bindings` 接入现有 Starlette 路由。
+原 LibreChat 使用 Remote Agents API Key，LSM 以 OAuth
+`admin:config` 受控管理的独立、可撤销 event-source bearer key
+（`/api/agents/v1/event-source-keys`，只返回一次明文）承载对应身份；
+控制器 OAuth、UI cookie、普通 MCP key **不能**冒充远程事件源。
+事件 `source`、`principal`、`receivedAt` 在可信中间件重建；强制单个
+`Idempotency-Key`，禁止多值 headers/非法字符，单包限制 1MiB，
+事件结果查询只返回来源可见的状态、有限错误类型及受限结果标识。
+
+`webui/event_triggers.py` 以独立 SQLite `agent_event_source_keys`、
+`agent_event_bindings`、`agent_event_deliveries` 表实现 `trigger_` SHA256
+原版投递键、内容指纹冲突、默认和显式 lane（SQLite seq 按入队先后）、
+重试限制、令牌 fenced 的跨 Controller 恢复与 source key 即时撤权。
+`fire` 使用原有 `GenerationStore.begin` + `AgentRunner` + SSE；入队与
+生成记录原子提交，重启/调度失败不会分配第二个根 generation。
+远程 API Key 不继承机器控制权限、MCP 工具或无人批准的 HITL 操作。
+所有 HTTP 普通 Chat 接口拒绝 clientRequestId=`trigger_*` 预占内部事件。
+
+`continue` 严格要求 API-key 所属直接子 Agent 绑定，服务器完全覆盖调用者
+提供的 conversation/agent/branch；原始 `Constants.NO_PARENT` 首轮
+和最新真实 assistant 后续分支分别由 Controller 指定。绑定须先由
+PR #352 `ActiveChildThreads.activate` 在子会话公开前登记只读保护，
+**在 PR #352 尚未合入时安全返回 503**，绝不创建未保护的子会话。
+不可用时仍可使用 `fire`；其它 Agent 的 Draft PR 不会被本 PR 自动合入。
+
+新的 SHA-256 字节完全一致的 `triggers/envelope.ts` 与依赖
+`agents/json.ts` fixture 由 Bun **直接执行**；与 Python 逐例核对
+fire/continue/steer 投递 identity、CJK 字符和可信 source 字段。
+另外覆盖完整 ASGI Key 生命周期、授权撤销即时杀死 leased actor、
+多 Controller 抢占和同一 run 恢复、顺序 lane 排他/跨 lane 并发、
+真实模型 SSE、8 次失败/死信以及含伪造目标的绑定 API。
+
+仍需后续独立实现/合入原版 `steer`（由 Draft #358 承接 Graph/HITL）、
+expectedAction host-observed 证据、750ms/8 项 coalescing、全局多来源
+Trigger 管理。当前 unsupported modes 和 contracts **拒绝入队**，
+没有假装完成或将不可信请求直接送到 Subagent completion 队列。
+
+
+## Artifacts model generation, original previews, active-thread edit fence (incremental)
+
+Pinned source: LibreChat 0.8.8 `e8f3be08623663d4ad7f7241e693c94469b63bb0`.
+This section supplements the existing Artifacts editor/source-vector port above;
+it does not replace that implementation.
+
+| Behavior | Pinned source | Python/React path | State / evidence |
+| --- | --- | --- | --- |
+| Prompt selection and Agent capability | `packages/api/src/prompts/artifacts/index.ts` and `packages/api/src/agents/initialize.ts` | `webui/artifact_prompts.py`, `generation_routes.py`, `generations.py` | Done for default/shadcnui/custom mode and openai/anthropic/google selectors. Original JS `generateArtifactsPrompt` and nested `generateShadcnPrompt` output compared byte-for-byte across 15 provider-mode combinations. |
+| Source-locked Shadcn component docs | `packages/api/src/prompts/artifacts/components.ts` and `generate.ts` | `artifact_prompt_snapshot.json` and `scripts/export-librechat-artifact-prompts.py` | Done, 47 source records -> 33 effective keys after object spreads; SHA-256 of pinned source stored; source-locked build-time extraction, no Node at runtime. |
+| Agent / child / handoff system injection | `packages/api/src/agents/initialize.ts`; `@librechat/agents` 4.0.1 runtime | `generation_routes._start_task`, `subagents.invoke_subagent`, `agent_runner.AgentRunner` | Done for existing supported Python graph paths. Ephemeral mode saved in SQLite run state for resume; no mutation of saved Agent instructions. Tests check real run-loop, immutable idempotent mode snapshot, incremental stream events, persistence, edit and next model-turn read; a separate Ask User / HTTP resume test proves the restored checkpoint contains exactly one original Shadcn system prompt. |
+| Artifact output delta / final history | `api/server/controllers/agents/callbacks.js`; `api/app/clients/prompts/formatMessages.js` | Existing `GenerationStore.append/finish/history` and retained `ArtifactRow` | Text Artifact format passes through unchanged; streamed partial text, full final structured text and saved edits are retained. Generated multi-artifact cards verified in original Chromium; no parallel rich/tool payload protocol introduced. |
+| Child thread read-only from registration through settlement | `packages/api/src/agents/guard.ts`; `api/server/services/Endpoints/agents/subagentThreadStore.js` | `webui/child_thread_activity.py`; `artifact_routes._update`; shared SQLite `active_subagent_threads` | Owner-scoped child registry checked inside the same SQLite write transaction as edit, before static metadata and reserved UUID checks. Trusted `activate` verifies owner/active parent run and forbids parent thread; `settle` verifies run ownership while retaining permanent read-only identity. A deleted parent generation cannot unlock its child. The **full graph task owner must wire its actual child creation/settlement paths** to these calls before runtime-wide active thread parity can be claimed. |
+| Preview MIME routing | `client/src/utils/artifacts.ts`, `client/src/components/Artifacts/ArtifactPreview.tsx` | Original retained React preview and Monaco components | HTML, React, Mermaid, SVG (including `image/svg` alias), Markdown, synthetic DOCX/spreadsheet/presentation previews and source-only code bucket now exercised in real Chromium. Office controls expose preview-only tabs; code exposes source-only. Downloaded bytes/filenames tested for model-supplied preview HTML and code. The source-mapped Python Office **binary-to-static-escaped-HTML conversion** is now tested using the original LibreChat `.docx` fixture; the real browser opens the final SQLite-persisted card, and downloads **exact original ZIP/DOCX bytes**, not the derived HTML. Full original CDN-based high-fidelity visual rendering is still out of scope. No custom editor/preview replacement. |
+| Canonical file-backed Artifact download and metadata | `packages/data-provider/src/data-service.ts:getFileDownload`; `api/server/routes/files/files.js:getDownloadFileMetadata` | `webui/attachments.py:download_react_file`; original `useArtifactDownload` and `useAttachmentLink` | The retained frontend requests `GET /api/files/download/:userId/:file_id`; the old Python implementation only exposed `/:file_id` and could not serve original-file panel downloads. Both routes now resolve through the same owner-scoped SQLite record with authenticated principal/path-owner match, content-disposition, original `application/octet-stream` bytes and URL-encoded **allowlisted** `X-File-Metadata` (no owner, text, physical path). Wrong-owner/missing records get 404; the legacy single-ID route still works. Real Chromium plus SQLite test proves original DOCX archive survives the view/download path without substituting cached HTML. Static HTML production from actual Office binary input now works through `publish_office_tool_output` for authorized native local file writes; async content extraction/agent resource/remote tool callbacks remain shared integration work. |
+| Trusted native tool-produced Office files | `api/server/controllers/agents/callbacks.js:on_tool_end`; `packages/api/src/files/documents/html.ts:bufferToOfficeHtml`; `zipSafety.ts` | `agent_runner.AgentRunner._completed` + `webui/office_preview.py` + `GenerationStore.finish` | Completed for **authorized local `file_write`** Office outputs (.docx, .xlsx, .xls, .ods, .csv, .pptx, .potx). The existing LSM native file-write must succeed and return matching filename/bytes/SHA-256; no model-provided path is opened. Source bytes are published through the existing `publish_attachment` with SQLite run owner/status validation and an atomic original `attachment` SSE. Retry of the same call+content reuses the first file without a second event; `GenerationStore.finish` attaches it to final message/SQLite metadata for refresh. Invalid preview formats retain downloadable raw bytes with `failed` status. Six pinned LibreChat office binaries, actual original-model `file_write` dispatch and real Chromium DOCX→HTML→download pass. Tool UI events omit large base64, native args/checkpoint remain untouched. Remote files, arbitrary shell outputs, MCP image/UI resources and Graph-child tool callbacks **not ported here**. |
+| Safe Office HTML fallback | `packages/api/src/files/documents/html.ts` and `zipSafety.ts` | `webui/office_preview.py` | Escaped static HTML, 512KiB output cap; actual ZIP inflation 25MiB per entry / 100MiB total, DTD/ENTITY refusal, max 5,000 rows / 500 slides / 256 cols. Original XLS BIFF via `xlrd>=2.0.2,<3` (pure Python); other parsers stdlib. No required Node or LibreOffice runtime. The original CDN-based high-fidelity DOCX/PPTX renderers are deliberately not claimed; current output is semantic/text-and-table preview only. |
+| Offline and CSP limits | Original `@codesandbox/sandpack-react` `SandpackProvider` and preview components | Retained frontend assets | Chromium with all non-loopback requests blocked confirmed `*.sandpack-static-server.codesandbox.io/__csb_relay/` for static HTML/SVG/Markdown and `2-19-8-sandpack.codesandbox.io/` for React. Monaco editor offline **does not imply offline Sandpack runtime**; blocked-network test only asserts the shell/cards, not that external previews rendered. Mermaid panel did not require an iframe in this test. |
+| Tool-produced artifacts, filtering | `api/server/controllers/agents/callbacks.js`, `packages/api/src/mcp/parsers.ts`, original host content-filter helpers | Existing tool event/attachment and message protocol paths | **Not complete**: upstream callback's file-backed artifact attachment events, `files` mapping, content-filter host policy, image/UI resource projections and full rich/tool history await their owners' shared message-protocol/attachment implementations. No duplicate payload representation was created. |
+
+Evidence commands (independent worktree):
+
+```sh
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_prompts.py tests/test_webui_artifact_routes.py tests/test_webui_artifacts_source.py
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_browser.py tests/test_webui_artifact_preview_browser.py tests/test_webui_artifact_file_download_browser.py tests/test_webui_attachments.py tests/test_webui_office_preview.py tests/test_webui_office_runtime.py
+# Source-differential oracle only; Node and npm dedent are BUILD/TEST dependencies,
+# not needed by the Python+SQLite controller:
+node scripts/check-librechat-artifact-prompt-diff.cjs /path/to/pinned-LibreChat /path/to/dedent-1.7.0
+```
+
+Original editor's retry/invalid input/owner boundaries still apply. New tests additionally
+cover active and settled child mutation denial (including deleted parent run),
+partial Artifact cancellation, multiple independent Artifacts and repeated editing,
+and two competing edits with the same original source (one 200, the stale second 400).
+The focused source/editor/preview suite passed 49 tests before the additional
+original-file download E2E, with 98.3% branch coverage across the four
+Artifacts-specific Python modules. The previous full isolated suite passed 2346
+cases and 95.33% global branch coverage; the added download route is being
+re-checked in CI (do not infer a new full-suite pass from the earlier run). No remaining behavior is
+represented as fully source-equivalent merely because an identically named
+frontend feature appears. The new Office preview's separate source-differential
+format fixtures and security tests are in `tests/test_webui_office_preview.py`,
+native runtime/owner/idempotency tests in `tests/test_webui_office_runtime.py`, and
+native-file-write-to-React replay in `test_webui_artifact_file_download_browser.py`.
+
+### 2026-11-14 — 合并 source Graph/HITL #358、Artifacts #352、Remote Event Steer/Batch/ExpectedAction
+
+已将最新 `origin/main`、原版 Graph/HITL/Steer 集成 PR #358 和源 Artifacts/Office
+PR #352 合入 PR #354 的独立 worktree（仅代码分支；不操作另两个 PR）。
+Graph 代次 ownership 与 SQLite actor lease、审批中断、原版 SSE/RunStepState、
+Tool Approval/Ask User 和真正的 Artifacts child 活动只读标记同时生效。
+外部 Event Actor 可以严格使用 *已完成* 的父 Agent assistant reply 预登记
+`ActiveChildThreads.reserve_for_completed_parent`，并保留永久不可编辑的子会话
+保护；不能把已完成父 generation 当作当前运行中的普通 Subagent。
+
+`triggers/host.ts` 的 `steer` 复用既有 `SteeringStore.enqueue`，一次性
+`clientSteerId=trigger_*` 与原本 SSE 事件；在**同一 SQLite 事务**中复核
+事件源密钥、owner、lease 和 generation CreatedAt，旧 Controller 被撤权后
+不得再修改 steering FIFO。即便入队完成后程序崩溃，重试也复用原
+Steer receipt 而非二次注入。
+
+`triggers/batch.ts` observational bound-child `continue` 支持 opt-in
+`coalesce.key`、750ms 聚合窗口、8 项最大批次与 512KiB 上限，
+按源 occurredAt、接收时间、事件 ID、delivery key 稳定排序，
+组装真实 `kind:librechat.agent_event_batch` JSON 输入，成员 receipt 由
+root terminal 同步结算；无绑定/expectedAction/steer 不能合并。
+
+`triggers/expectedAction.ts` 用 byte-pinned 原 TS `matchesExpectedAction`
+Bun 差分覆盖完整工具名、`_mcp_` 前缀、JSON 参数解析和递归 subset
+匹配。任务终态只能根据本机宿主保存的
+`on_run_step_completed.data.result.tool_call` 证据确认动作是否发生；
+仅模型文字、失败工具结果、错误参数与无效生成不作为成功证据。暂停的人审
+必须等持久审批完成后再判断。
+
+尚需进一步处理 source `background.ts` 普通工具后台化、事件源完整的
+Detached Action 证据持久重传、复杂跨机 Coalescing 操作回执与剩余
+源 Graph RunStepState 边缘消息类型。本节不代表这几项已经全部完成。
+
+### PR #354 — Graph、普通工具后台化与 Detached Action 终态续接补齐（2026-11-16）
+
+本节为当前三个明确缺口的源码对照和验证界限；不表示其余 LibreChat 全模块都已移植。
+
+1. `packages/api/src/agents/background.ts`：可配置原生工具 `run_in_background` 参数、原
+   LSM tool registry + machine ACL + OAuth scope 审计执行、同会话 10 并发/同 owner 40 并发、
+   单次可认领 SQLite 结果，`check_background_task` 与 Subagent 任务统一入口、
+   跨进程取消意图及租约检测。进程重启后的不可确认工具结果为 `uncertain`，绝不自动重跑
+   可能已发生副作用的调用。原版对非对象工具/内置控制/文件/图像/MCP request-scoped
+   资源排除；已通过真实 AgentRunner→native call_tool→任务认领/取消的回归。
+2. `packages/api/src/agents/triggers/detachedAction.ts`：一个绑定 `continue` 投递最多拥有
+   一个匹配 `expectedAction` 的后台工具，在同一 SQLite 事务登记工具与行动证据；
+   `mark_running`、原始宿主终态证据（结果/错误按源长度上限）、进程失联的
+   `launch_indeterminate`、恢复后完整验证、原式一次性内部
+   `librechat.event_actor.detached_completion` 续接投递均已接通。工具启动回执、
+   模型声称与 `ok:false` 都不能冒充成功；取消/撤销来源后不能生成续接。原始
+   `detachedAction.ts` 纯解析函数使用 Bun 直接转译锁定源码片段差分测试，
+   UTF-16 字符串长度、JSON 安全整数、字段边界逐一验证。
+3. `@librechat/agents Graph.ts`、`api/server/controllers/agents/callbacks.js`、
+   `packages/data-provider/src/runSteps.ts`：Graph 原版 `entryAgentId`、`resultAgentId`、
+   `graphAgentIds`、`maxHandoffs` 被 Agent SQLite 配置正确保留；串行隐含输出不会
+   再进入最终回复或 live SSE；图成员工具调用持久化 `on_run_step`、
+   `on_run_step_completed` 和原版 `on_run_step_closed`（终态、可信时间戳与持续时长），
+   刷新后可按 stepId 恢复。外部事件来源的执行租约沿所有 LangGraph 节点
+   传递；路由提示仅添加一次。真实 Graph + 独立 SQL 读取的 SSE/历史测试覆盖。
+
+所有源文件 SHA-256 保存在 `UPSTREAM_LOCK.json`。相关新测试已并入 CI 选择清单。
+
+
+#### Source graph Actor 分支覆盖核验
+
+源 Graph/HITL 审批和断点恢复进一步覆盖：批准、拒绝、后台禁止人工交互、
+Ask User 批次限制、LangGraph 交接、可信 checkpoint 重放、过期 Agent、
+审批批次续接、Steer 去重、子任务控制的提交和确认。
+Artifacts 完成态父会话注册及 Detached Action 的原子 CAS 重试、撤权、未知
+启动结果另有针对性测试。项目要求全量覆盖率≥95%、逐模块≥90%，
+使用同一个完整测试样本加增量源分支样本验证；CI 再次独立复核。
+
 ## Provider 消息历史与 MCP 富媒体迁移（PR #343 后续独立分支）
 
 | 固定原版源码 | Python/SQLite 的唯一消息表示 | 范围、证据及保留差异 |

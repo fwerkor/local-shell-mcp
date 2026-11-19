@@ -492,3 +492,32 @@ async def test_graph_http_recovery_rechecks_machine_scopes(context, monkeypatch)
             "conversationId": generation.conversation_id})
     assert result.status_code == 403
     assert generation.run_id not in generation_routes._TASKS
+
+
+@pytest.mark.asyncio
+async def test_graph_members_receive_complete_artifact_prompts_and_root_ephemeral_override(context):
+    from local_shell_mcp.webui.artifact_prompts import agent_instructions
+
+    repo, store, db = context
+    parent = create(repo, 'artifact-root')
+    child = create(repo, 'artifact-child')
+    parent = repo.update('local', parent['id'], {'artifacts': 'default',
+        'edges': [{'from': parent['id'], 'to': child['id'], 'edgeType': 'direct'}]})
+    child = repo.update('local', child['id'], {'artifacts': 'shadcnui',
+                                               'instructions': 'Child only guidance'})
+    seen = {}
+
+    async def model(profile, history, **kwargs):
+        seen[profile.model] = [m['content'] for m in history if m.get('role') == 'system']
+        yield profile.model + ' done'
+
+    actor, generation = runner(context, parent, model)
+    prompt = agent_instructions(parent, 'openai', 'shadcnui')
+    await actor.run([{'role': 'system', 'content': prompt},
+                     *store.history('local', generation.conversation_id)])
+    assert len(seen['artifact-root']) == 1
+    assert seen['artifact-root'][0] == prompt
+    assert 'Additional Artifact Instructions for React Components' in seen['artifact-root'][0]
+    assert len(seen['artifact-child']) == 1
+    assert 'Child only guidance' in seen['artifact-child'][0]
+    assert 'Additional Artifact Instructions for React Components' in seen['artifact-child'][0]

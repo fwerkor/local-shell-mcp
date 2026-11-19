@@ -119,7 +119,8 @@ class SteeringStore:
         return state.setdefault("steering", {"queue": [], "receipts": {}})
 
     def enqueue(self, owner: str, body: dict, *, preempt_capable: bool,
-                strict_delivery: bool = False) -> dict:
+                strict_delivery: bool = False,
+                event_delivery_lease: tuple[str, str] | None = None) -> dict:
         cid = body.get("conversationId")
         if not isinstance(cid, str) or not cid or cid == "new":
             raise SteerRejection(400, "INVALID_CONVERSATION")
@@ -138,6 +139,10 @@ class SteeringStore:
         fingerprint = _fingerprint(text, files, desired_preempt, quotes)
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if event_delivery_lease is not None:
+                from .event_triggers import assert_source_steer_claim
+
+                assert_source_steer_claim(db, owner, event_delivery_lease)
             row = self._latest(db, owner, cid)
             # Receipt must be read BEFORE current-run epoch fencing: a lost
             # ACK from a previous run must replay even if this chat moved on.
@@ -253,6 +258,9 @@ class SteeringStore:
                         return {"removed": True, "replayed": True}
                     if receipt["state"] == "leftover":
                         receipt["state"] = "cancelled"
+                        steers = previous_state.get("steering") or {}
+                        steers["leftovers"] = [item for item in steers.get("leftovers", [])
+                                               if item.get("steerId") != sid]
                         db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                                    (_json(previous_state), _now(), previous["id"]))
                         return {"removed": True, "replayed": True}
@@ -300,6 +308,8 @@ class SteeringStore:
                     return {"removed": True, "replayed": True}
                 if receipt and receipt["item"]["steerId"] == sid and receipt["state"] == "leftover":
                     receipt["state"] = "cancelled"
+                    steer["leftovers"] = [item for item in steer.get("leftovers", [])
+                                          if item.get("steerId") != sid]
                     db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                                (_json(state), _now(), row["id"]))
                     return {"removed": True, "replayed": True}
@@ -334,22 +344,13 @@ class SteeringStore:
             # including unarmed items before the interrupting item.
             applied = list(queue)
             steer["queue"] = []
-            index = 0
-            previous_was_text = False
-            for entry in db.execute(
-                "SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,),
-            ):
-                event = json.loads(entry["data"])
-                kind = event.get("event")
-                if kind == "on_steer_applied":
-                    index += 1
-                    previous_was_text = False
-                elif kind == "on_message_delta":
-                    content = ((event.get("data") or {}).get("delta") or {}).get("content") or {}
-                    if content.get("type") == "text" and content.get("text"):
-                        if not previous_was_text:
-                            index += 1
-                        previous_was_text = True
+            # Share the exact projection used by SSE reconnect. Counting raw
+            # completion events double-counts approval replays with the same
+            # stepId, and raw text events ignore checkpoint rewinds.
+            from .generations import GenerationStore
+
+            snapshot, _ = GenerationStore(self.database).resume_snapshot(owner, run_id)
+            index = len(snapshot['aggregatedContent'])
             for item in applied:
                 receipt = steer["receipts"].get(item.get("clientSteerId"))
                 if receipt is not None:
@@ -416,4 +417,6 @@ class SteeringStore:
             if receipt:
                 receipt["state"] = "leftover"
         steer["queue"] = []
+        if leftover:
+            steer["leftovers"] = leftover
         return leftover

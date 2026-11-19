@@ -84,7 +84,7 @@ async def _data_frames(response) -> AsyncIterator[str]:
 
 
 def _openai_messages(messages: list[dict]) -> list[dict]:
-    """Strip UI-only steer metadata from OpenAI model wire requests."""
+    """Return the model wire DTO without steer-only UI metadata."""
     from .mcp_projection import openai_wire_messages
 
     return openai_wire_messages(messages)

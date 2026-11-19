@@ -139,6 +139,13 @@ async def test_restart_preserves_signin_and_bearer_reattachment_runs_action_once
     assert ctx.store.recover_orphans() == 0
     reopened = GenerationStore(SQLiteDatabase(ctx.path))
     assert reopened.pending_action("local", ctx.gen.run_id)["payload"]["tool_call_id"] == "call-oauth"
+    snapshot, watermark = reopened.resume_snapshot("local", ctx.gen.run_id)
+    prompts = snapshot["pendingOAuthPrompts"]
+    assert len(prompts) == 1 and watermark > 0
+    assert prompts[0]["toolCallId"] == "call-oauth"
+    assert prompts[0]["stepId"] in {step["id"] for step in snapshot["runSteps"]}
+    assert prompts[0]["authURL"].startswith("https://id.example.org/")
+    assert prompts[0]["expiresAt"] > 0
     assert not ctx.seen
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ctx.app),
                                  base_url="https://chat.example.org", follow_redirects=False) as client:

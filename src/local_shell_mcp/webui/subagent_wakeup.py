@@ -285,6 +285,19 @@ def assert_wakeup_lease(database: Any, owner: str, run_id: str,
         raise RuntimeSafetyError("Automatic completion actor lease was revoked")
 
 
+def _dead_dispatched(db: Any, store: GenerationStore, row: Any,
+                     task_id: str, now: int, reason: str) -> None:
+    """Atomically retire a wakeup and terminate its admitted generation."""
+    if row['run_id']:
+        store.finish(row['owner'], row['run_id'], status='interrupted',
+                     error=reason, _connection=db)
+    db.execute("UPDATE subagent_wakeups SET status='dead',error=?,"
+               "lease_owner=NULL,lease_until=NULL,updated_at=? WHERE task_id=?",
+               (reason, now, task_id))
+    db.execute("UPDATE subagent_tasks SET result_claimed=0,result_claim_key=NULL "
+               "WHERE id=? AND result_claim_key=?", (task_id, 'wakeup:' + task_id))
+
+
 def _retire(db: Any, task_id: str, reason: str) -> None:
     db.execute("UPDATE subagent_wakeups SET status='retired',error=?,updated_at=? "
                "WHERE task_id=? AND status='pending'", (reason, _now(), task_id))
@@ -465,21 +478,13 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                 if row["lease_until"] is not None and row["lease_until"] > now:
                     continue
                 if expiry is not None and expiry <= time.time():
-                    store.finish(owner, generation.run_id, status="interrupted",
-                                 error="Parent authorization expired during wakeup", _connection=db)
-                    db.execute("UPDATE subagent_wakeups SET status='dead',error=?,updated_at=? WHERE task_id=?",
-                               ("Parent authorization expired during wakeup", now, task_id))
-                    db.execute("UPDATE subagent_tasks SET result_claimed=0,result_claim_key=NULL "
-                               "WHERE id=? AND result_claim_key=?", (task_id, "wakeup:" + task_id))
+                    _dead_dispatched(db, store, row, task_id, now,
+                                     'Parent authorization expired during wakeup')
                     continue
                 agent = AgentRepository(database).get(owner, row["parent_agent_id"])
                 if agent is None:
-                    store.finish(owner, generation.run_id, status="interrupted",
-                                 error="Parent Agent removed during continuation", _connection=db)
-                    db.execute("UPDATE subagent_wakeups SET status='dead',error=?,updated_at=? WHERE task_id=?",
-                               ("Parent Agent removed during continuation", now, task_id))
-                    db.execute("UPDATE subagent_tasks SET result_claimed=0,result_claim_key=NULL "
-                               "WHERE id=? AND result_claim_key=?", (task_id, "wakeup:" + task_id))
+                    _dead_dispatched(db, store, row, task_id, now,
+                                     'Parent Agent removed during continuation')
                     continue
                 policy = resolve_access(owner, row["parent_conversation_id"],
                                         repo=WorkspaceRepository(database))
@@ -489,12 +494,8 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                             require_machine_scope(set(scopes), machine, level, expires=expiry)
                     profile = provider_config(selected_provider({}, agent), agent.get("model"))
                 except (ValueError, PermissionError):
-                    store.finish(owner, generation.run_id, status="interrupted",
-                                 error="Parent provider or delegated permission unavailable", _connection=db)
-                    db.execute("UPDATE subagent_wakeups SET status='dead',error=?,updated_at=? WHERE task_id=?",
-                               ("Parent provider or delegated permission unavailable", now, task_id))
-                    db.execute("UPDATE subagent_tasks SET result_claimed=0,result_claim_key=NULL "
-                               "WHERE id=? AND result_claim_key=?", (task_id, "wakeup:" + task_id))
+                    _dead_dispatched(db, store, row, task_id, now,
+                                     'Parent provider or delegated permission unavailable')
                     continue
                 token = _PROCESS + ":" + secrets.token_hex(12)
                 claimed = db.execute("UPDATE subagent_wakeups SET lease_owner=?,lease_until=?,"

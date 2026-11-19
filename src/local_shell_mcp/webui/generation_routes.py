@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from .agents import AgentRepository
+from .artifact_prompts import agent_instructions, artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
@@ -173,6 +174,7 @@ async def _run_model(
     approved_batch=None, resume_namespace: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
     wakeup_lease: tuple[str, str] | None = None,
+    event_delivery_lease: tuple[str, str] | None = None,
     actor_lease=None,
     recovery_steers: bool = False,
 ) -> None:
@@ -183,7 +185,23 @@ async def _run_model(
     params = parameters or {}
     step_id = "step_" + generation.run_id
     step_index = 0
+    needs_post_tool_step = False
     now_ms = int(time.time() * 1000)
+    if resume_history is not None:
+        # A human continuation must append into the last text step, which may
+        # have been advanced past a STEER part before suspension.
+        with _database().connect() as db:
+            prior = db.execute(
+                "SELECT data FROM generation_events WHERE run_id=? "
+                "AND json_extract(data,'$.event')='on_run_step' ORDER BY seq DESC LIMIT 1",
+                (generation.run_id,),
+            ).fetchone()
+        if prior:
+            saved = json.loads(prior['data']).get('data') or {}
+            if saved.get('type') == 'message_creation' and isinstance(saved.get('id'), str):
+                step_id = saved['id']
+                step_index = saved.get('index', 0)
+                now_ms = saved.get('created_at', now_ms)
 
     def check_wakeup_lease():
         if actor_lease is not None:
@@ -192,6 +210,10 @@ async def _run_model(
             from .subagent_wakeup import assert_wakeup_lease
 
             assert_wakeup_lease(repo.database, owner, generation.run_id, wakeup_lease)
+        if event_delivery_lease is not None:
+            from .event_triggers import assert_event_lease
+
+            assert_event_lease(repo.database, owner, generation.run_id, event_delivery_lease)
 
     try:
         from .agent_runner import AgentRunner
@@ -240,9 +262,13 @@ async def _run_model(
             }, actor_lease=actor_lease)
 
         async def append_text(chunk):
+            nonlocal needs_post_tool_step
             check_wakeup_lease()
             if not chunk:
                 return
+            if needs_post_tool_step:
+                needs_post_tool_step = False
+                await _open_followup_step('after_tool')
             text_parts.append(chunk)
             repo.append(owner, generation.run_id, {
                 "event": "on_message_delta", "data": {
@@ -252,9 +278,14 @@ async def _run_model(
                 },
             }, actor_lease=actor_lease)
 
-        async def on_injected():
-            nonlocal step_id, step_index, now_ms
+        async def _open_followup_step(reason):
+            nonlocal step_id, step_index, now_ms, needs_post_tool_step
             check_wakeup_lease()
+            needs_post_tool_step = False
+            # Upstream reserves an absolute content slot per message_creation.
+            # Once a STEER part occupies the next slot, subsequent provider
+            # text must use a *new* runStep index or useStepHandler appends it
+            # into the old text block before the visible steer.
             closed_at = int(time.time() * 1000)
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step_closed", "data": {
@@ -265,7 +296,7 @@ async def _run_model(
             }, actor_lease=actor_lease)
             snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
             step_index = len(snapshot["aggregatedContent"])
-            step_id = f"step_{generation.run_id}_after_steer_{step_index}"
+            step_id = f"step_{generation.run_id}_{reason}_{step_index}"
             now_ms = closed_at
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step", "data": {
@@ -279,6 +310,16 @@ async def _run_model(
                 },
             }, actor_lease=actor_lease)
 
+        async def on_injected():
+            await _open_followup_step('after_steer')
+
+        async def on_tool_completed(_call):
+            nonlocal needs_post_tool_step
+            # The Controller's tool-completion event is already durable. Only
+            # the *next provider text* opens another text slot, avoiding empty
+            # message steps on tool-only turns and keeping React indices exact.
+            needs_post_tool_step = True
+
         runner = AgentRunner(owner, generation, _database(), repo,
                              scopes=granted_scopes, grant_expires=grant_expires,
                              stream_tools=stream_model_with_tools, stream_text=stream_model,
@@ -287,8 +328,9 @@ async def _run_model(
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
                              approved_batch=approved_batch, on_injected=on_injected,
-                             wakeup_lease=wakeup_lease, actor_lease=actor_lease,
-                             recovery_steers=recovery_steers)
+                             on_tool_completed=on_tool_completed,
+                             wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
+                             actor_lease=actor_lease, recovery_steers=recovery_steers)
         # Only the first entry determines this run's prefix. After human
         # actions, resume_history/checkpoints already contain prior run steps.
         original_boundary = len(history) if resume_history is None else len(
@@ -329,7 +371,7 @@ async def _run_model(
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
                     model_steps=model_steps(finished_messages, history_start), actor_lease=actor_lease)
     except asyncio.CancelledError:
-        if wakeup_lease is not None or actor_lease is not None:
+        if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
             check_wakeup_lease()
         current = repo.get(owner, generation.run_id)
         pending = repo.pending_action(owner, generation.run_id) if current and current.status == "requires_action" else None
@@ -341,7 +383,7 @@ async def _run_model(
         raise
     except Exception as exc:
         # A former controller cannot publish failure after its lease changed.
-        if wakeup_lease is not None or actor_lease is not None:
+        if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
             try:
                 check_wakeup_lease()
             except Exception:
@@ -367,10 +409,12 @@ async def _run_model(
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
                       agent: dict | None, native_file_tools: bool = False, write_tools: bool = False,
                       ask_user_enabled: bool = False, mcp_enabled: bool = False,
+                      artifacts_mode: str | None = None,
                       resume_history: list[dict] | None = None, partial_text: str = "",
                       approved_batch=None, resume_namespace: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
                       wakeup_lease: tuple[str, str] | None = None,
+                      event_delivery_lease: tuple[str, str] | None = None,
                       recovery_steers: bool = False,
                       oauth_claim: tuple[str, str, int, bool] | None = None) -> bool:
     from .generation_actor_lease import ActorLease
@@ -398,7 +442,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
             return False
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
-                       instructions=str((agent or {}).get("instructions") or ""),
+                       instructions=agent_instructions(agent, profile.provider, artifacts_mode),
                        parameters=(agent or {}).get("model_parameters") or {},
                        native_file_tools=native_file_tools, write_tools=write_tools,
                        ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
@@ -406,8 +450,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        resume_history=resume_history, partial_text=partial_text,
                        approved_batch=approved_batch, resume_namespace=resume_namespace,
                        granted_scopes=granted_scopes, grant_expires=grant_expires,
-                       wakeup_lease=wakeup_lease, actor_lease=actor_lease,
-                       recovery_steers=recovery_steers),
+                       wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
+                       actor_lease=actor_lease, recovery_steers=recovery_steers),
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task
@@ -625,6 +669,7 @@ async def start_generation(request: Request):
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
+                          artifacts_mode=artifact_mode(payload, agent),
                           granted_scopes=frozenset(scopes), grant_expires=grant_expires)
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh, protocol_version=protocol), status_code=202,
@@ -643,9 +688,28 @@ async def _events(owner: str, generation: Generation, after: int = 0,
             "sync": True, "resumeState": snapshot, "pendingEvents": [],
             "generationProtocolVersion": generation.protocol_version,
         }, ensure_ascii=False, separators=(",", ":")) + "\n\n").encode()
+        # The React resumeState projection restores text/tool cards, while
+        # attachmentHandler consumes independent SSE attachment events. A
+        # disconnected browser has none of these attachments in memory.
+        # Reproject owner-bound attachments at the captured watermark before
+        # live replay; leave the sequence cursor unchanged to avoid rollback.
+        cursor = 0
+        while cursor < watermark:
+            batch = store.events(owner, generation.run_id, cursor)
+            if not batch:
+                break
+            for seq, item in batch:
+                if seq > watermark:
+                    break
+                if item.get('event') == 'attachment' and isinstance(item.get('data'), dict):
+                    yield ('data: ' + json.dumps(item, ensure_ascii=False,
+                           separators=(',', ':')) + '\n\n').encode()
+                cursor = seq
+            if cursor >= watermark:
+                break
+        # The sync snapshot does not signal terminal completion to React.
+        # Re-send a final event already included in the cursor watermark.
         if watermark > after:
-            # React requires the terminal event even when sync advanced the
-            # cursor past it, otherwise the resumed UI remains perpetually active.
             finished = store.events(owner, generation.run_id, watermark - 1, limit=1)
             if finished and finished[0][1].get("final"):
                 seq, value = finished[0]
@@ -716,9 +780,16 @@ async def generation_status(request: Request):
     store = _generation_store()
     pending = store.client_pending_action(store.pending_action(owner, generation.run_id))
     resume_state, _ = store.resume_snapshot(owner, generation.run_id)
+    from .steering import _public
+
+    with _database().connect() as db:
+        row = db.execute("SELECT state FROM runs WHERE id=?", (generation.run_id,)).fetchone()
+    run_state = json.loads(row["state"]) if row else {}
+    leftovers = (run_state.get("steering") or {}).get("leftovers") or []
     return JSONResponse({
         "active": active,
         "status": generation.status,
+        **({"unrecoveredSteers": [_public(item) for item in leftovers]} if leftovers else {}),
         **({"pendingAction": pending} if pending is not None else {}),
         "resumeState": resume_state,
         "aggregatedContent": resume_state["aggregatedContent"],
@@ -978,6 +1049,8 @@ async def resume_generation(request: Request):
             raise HTTPException(409, detail="Model identity mismatch")
         paused_task = _TASKS.get(generation.run_id)
         if claim is not None and paused_task is not None and not paused_task.done():
+            # A retry after an accepted human decision is an acknowledgment,
+            # not a wait on a potentially long-running model continuation.
             submission = ({"decisions": payload.get("decisions")}
                           if pending.get("payload", {}).get("type") == "tool_approval"
                           else {key: payload[key] for key in ("answer", "answers") if key in payload})
@@ -1043,6 +1116,7 @@ async def resume_generation(request: Request):
                       native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
+                      artifacts_mode=state.get("artifactsMode"),
                       mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
