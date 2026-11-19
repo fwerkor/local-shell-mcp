@@ -47,6 +47,13 @@ def _content_blocks(blocks: list[dict], provider: str) -> list[dict]:
                 else:
                     raise ValueError("Anthropic requires a URL or base64 encoded image")
                 result.append({"type": "image", "source": source})
+        elif kind == "file":
+            from .provider_multimodal import native_content_parts
+
+            converted = native_content_parts([block], provider)
+            if not converted:
+                raise ValueError("Unsupported provider file content")
+            result.extend(converted)
         elif kind in {"thinking", "redacted_thinking"} and provider == "anthropic" or kind == "image" and provider == "anthropic" and "source" in block:
             result.append(copy.deepcopy(block))
         else:

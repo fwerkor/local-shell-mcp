@@ -940,6 +940,9 @@ class GenerationStore:
                                             part = next(steers, None)
                                             if part is not None:
                                                 step['content'] = merged_text(part)
+                                                step['files'] = part.get('files', [])
+                                                step['quotes'] = part.get('quotes', [])
+                                                step['steerId'] = part.get('steerId')
                                 # Legacy React artifact edits store a text block
                                 # while history API originally exposed its text.
                                 # Keep the scalar-text contract when no media or
