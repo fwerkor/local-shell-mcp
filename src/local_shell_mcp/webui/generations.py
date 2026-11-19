@@ -653,7 +653,26 @@ class GenerationStore:
                        (_json(state), _now(), run_id))
             return True
 
-    def append(self, owner: str, run_id: str, event: dict, *, actor_lease=None) -> int:
+    @staticmethod
+    def _record_completed_arguments(db, run_id: str, event: dict, full_arguments: dict | None):
+        """Owner-verified, durable tool evidence outside truncated SSE previews."""
+        if full_arguments is None:
+            return
+        tool = ((event.get('data') or {}).get('result') or {}).get('tool_call') or {}
+        if (event.get('event') != 'on_run_step_completed' or not isinstance(tool.get('id'), str)
+                or not isinstance(tool.get('name'), str) or not isinstance(full_arguments, dict)):
+            raise ValueError('Invalid completed tool evidence')
+        row = db.execute('SELECT state FROM runs WHERE id=?', (run_id,)).fetchone()
+        state = json.loads(row['state'])
+        proofs = state.setdefault('completedToolArguments', {})
+        proof = {'name': tool['name'], 'arguments': full_arguments}
+        if tool['id'] in proofs and proofs[tool['id']] != proof:
+            raise ValueError('Cannot change completed tool arguments')
+        proofs[tool['id']] = proof
+        db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?', (_json(state), _now(), run_id))
+
+    def append(self, owner: str, run_id: str, event: dict, *, actor_lease=None,
+               full_arguments: dict | None = None) -> int:
         encoded = _json(event)
         if len(encoded.encode("utf-8")) > 256 * 1024:
             raise ValueError("Generation event exceeds 256 KiB")
@@ -670,6 +689,7 @@ class GenerationStore:
             if count >= _EVENT_LIMIT:
                 raise ValueError("Generation event retention limit reached")
             cursor = db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, encoded))
+            self._record_completed_arguments(db, run_id, event, full_arguments)
             return int(cursor.lastrowid)
 
     def resume_snapshot(self, owner: str, run_id: str) -> tuple[dict, int]:
@@ -742,7 +762,7 @@ class GenerationStore:
         return result, max_seq
     def append_tool_completion(self, owner: str, run_id: str, event: dict,
                                tool_call_id: str, file_ids: list[str],
-                               *, actor_lease=None) -> int:
+                               *, actor_lease=None, full_arguments: dict | None = None) -> int:
         """Commit a tool completion and its file attachments atomically."""
         from .tool_attachments import link_tool_attachment
 
@@ -790,6 +810,7 @@ class GenerationStore:
                 raise ValueError("Generation event retention limit reached")
             cursor = db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                                 (run_id, encoded))
+            self._record_completed_arguments(db, run_id, event, full_arguments)
             for ident in file_ids:
                 try:
                     link_tool_attachment(

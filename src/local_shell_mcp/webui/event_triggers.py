@@ -321,6 +321,8 @@ def matches_expected_action(evidence: dict, expected: dict) -> bool:
 
 def _observed_action(db: Any, run_id: str, expected: dict) -> bool:
     """Trust the durable host tool-completed SSE; never the model's prose."""
+    run = db.execute('SELECT state FROM runs WHERE id=?', (run_id,)).fetchone()
+    proofs = (json.loads(run['state']).get('completedToolArguments') or {}) if run else {}
     for record in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
         event = json.loads(record["data"])
         if event.get("event") != "on_run_step_completed":
@@ -331,7 +333,8 @@ def _observed_action(db: Any, run_id: str, expected: dict) -> bool:
             continue
         output = tool.get("output")
         if isinstance(output, str) and (output.startswith("Tool failed (") or
-                                         output.startswith("Blocked: ")):
+                                         output.startswith("Blocked: ") or
+                                         output.startswith("API call failed (")):
             continue
         if isinstance(output, str):
             with contextlib.suppress(ValueError, TypeError):
@@ -342,8 +345,14 @@ def _observed_action(db: Any, run_id: str, expected: dict) -> bool:
                     # Neither an acknowledged background *launch* nor a native
                     # explicit failure is a completed expectedAction.
                     continue
+        proof = proofs.get(tool.get('id')) if isinstance(tool.get('id'), str) else None
+        # The actual executed arguments live in owned SQLite run state, in the
+        # same transaction as the completed SSE event. UI previews are bounded
+        # and may replace large arguments with a `_truncated` marker.
+        actual = (proof.get('arguments') if isinstance(proof, dict)
+                  and proof.get('name') == tool.get('name') else tool.get('args'))
         if matches_expected_action({"toolName": tool.get("name"),
-                                    "arguments": tool.get("args")}, expected):
+                                    "arguments": actual}, expected):
             return True
     return False
 

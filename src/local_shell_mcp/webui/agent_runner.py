@@ -299,11 +299,11 @@ class AgentRunner:
         if identities:
             self.store.append_tool_completion(
                 self.owner, self.generation.run_id, event, call.call_id, identities,
-                actor_lease=self.actor_lease,
+                actor_lease=self.actor_lease, full_arguments=call.arguments,
             )
         else:
             self.store.append(self.owner, self.generation.run_id, event,
-                              actor_lease=self.actor_lease)
+                              actor_lease=self.actor_lease, full_arguments=call.arguments)
         # Source agents@4.0.1 Graph.closeRunStep: terminal closure is an
         # independent event. First close wins and survives SSE reconnect and
         # durable final history, including native tool denial/error paths.
@@ -317,6 +317,7 @@ class AgentRunner:
         if previous is None:
             failed = isinstance(output, str) and (
                 output.startswith("Tool failed (") or output.startswith("Blocked: ")
+                or output.startswith("API call failed (")
             )
             self.store.append(self.owner, self.generation.run_id, {
                 "event": "on_run_step_closed", "data": {

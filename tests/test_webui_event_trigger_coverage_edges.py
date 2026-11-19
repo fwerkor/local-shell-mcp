@@ -139,3 +139,67 @@ def test_expected_action_matches_mcp_suffix_and_rejects_malformed_argument_json(
     assert matches_expected_action({'toolName': 'file_write',
                                     'arguments': '{"path":"main.py"}'},
                                    {**expected, 'argumentSubset': {'path': 'main.py'}})
+
+
+def test_expected_action_uses_full_owned_execution_arguments_not_truncated_sse(tmp_path):
+    from local_shell_mcp.webui.event_triggers import _observed_action
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    database = SQLiteDatabase(tmp_path / 'db')
+    store = GenerationStore(database)
+    run, _ = store.begin('local', {'text': 'Call Action with a large body'})
+    full = {'project': 'support', 'payload': 'x' * 32_000}
+    completion = {'event': 'on_run_step_completed', 'data': {'result': {
+        'id': 'step-large', 'type': 'tool_call', 'tool_call': {
+            'id': 'call-large', 'name': 'send_action',
+            'args': {'_truncated': True, 'preview': 'too large to expose'},
+            'output': '{"ok":true}',
+        }}}}
+    store.append('local', run.run_id, completion, full_arguments=full)
+    with database.connect() as db:
+        assert _observed_action(db, run.run_id, {
+            'toolName': 'send_action', 'argumentSubset': {'project': 'support'}})
+        assert not _observed_action(db, run.run_id, {
+            'toolName': 'send_action', 'argumentSubset': {'project': 'unrelated'}})
+        persisted = json.loads(db.execute('SELECT state FROM runs WHERE id=?',
+                                          (run.run_id,)).fetchone()['state'])
+    assert persisted['completedToolArguments']['call-large']['arguments'] == full
+    assert '_truncated' in store.events('local', run.run_id)[-1][1]['data']['result']['tool_call']['args']
+
+
+def test_expected_action_does_not_accept_http_or_network_failure_evidence(tmp_path):
+    from local_shell_mcp.webui.event_triggers import _observed_action
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    database = SQLiteDatabase(tmp_path / 'db')
+    store = GenerationStore(database)
+    run, _ = store.begin('local', {'text': 'Call external service'})
+    for index, output in enumerate(('API call failed (HTTP 500)', 'API call failed (timeout)',
+                                     'API call failed (network error)')):
+        store.append('local', run.run_id, {'event': 'on_run_step_completed', 'data': {'result': {
+            'id': f'step-{index}', 'tool_call': {'id': f'call-{index}',
+                'name': f'action_{index}', 'args': {'tenant': 'support'}, 'output': output}}}},
+            full_arguments={'tenant': 'support'})
+    with database.connect() as db:
+        for index in range(3):
+            assert not _observed_action(db, run.run_id, {
+                'toolName': f'action_{index}', 'argumentSubset': {'tenant': 'support'}})
+
+
+def test_completed_file_tool_keeps_arguments_transactional_with_sse(tmp_path):
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    database = SQLiteDatabase(tmp_path / 'db')
+    store = GenerationStore(database)
+    run, _ = store.begin('local', {'text': 'Persist full tool arguments'})
+    event = {'event': 'on_run_step_completed', 'data': {'result': {
+        'id': 'file-step', 'type': 'tool_call', 'tool_call': {
+            'id': 'call-file', 'name': 'file_write', 'args': {'_truncated': True},
+            'output': 'saved'}}}}
+    store.append_tool_completion('local', run.run_id, event, 'call-file', [],
+                                 full_arguments={'path': 'report.md', 'content': 'A' * 33000})
+    with database.connect() as db:
+        state = json.loads(db.execute('SELECT state FROM runs WHERE id=?',
+                                      (run.run_id,)).fetchone()['state'])
+        assert state['completedToolArguments']['call-file']['arguments']['path'] == 'report.md'
+    assert sum(e.get('event') == 'on_run_step_completed' for _, e in store.events('local', run.run_id)) == 1
