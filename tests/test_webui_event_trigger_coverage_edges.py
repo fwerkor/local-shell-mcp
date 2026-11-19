@@ -203,3 +203,41 @@ def test_completed_file_tool_keeps_arguments_transactional_with_sse(tmp_path):
                                       (run.run_id,)).fetchone()['state'])
         assert state['completedToolArguments']['call-file']['arguments']['path'] == 'report.md'
     assert sum(e.get('event') == 'on_run_step_completed' for _, e in store.events('local', run.run_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_reviewed_tool_edits_record_actual_arguments_and_respond_is_not_execution(tmp_path, monkeypatch):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.checkpoints import SQLiteCheckpointSaver
+    from local_shell_mcp.webui.event_triggers import _observed_action
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
+
+    database = SQLiteDatabase(tmp_path / 'db')
+    store = GenerationStore(database)
+    run, _ = store.begin('local', {'text': 'Review tool calls'})
+
+    async def unused(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(SQLiteCheckpointSaver, 'put_writes', lambda *args, **kwargs: None)
+    runner = AgentRunner('local', run, database, store, scopes=set(), grant_expires=None,
+                         stream_tools=unused, stream_text=unused, on_text=unused,
+                         profile=ProviderConfig('openai', 'mock', 'https://example.invalid', ''))
+    reviewed = ModelToolCall('call-edited', 'send_action', {'to': 'new', 'payload': 'x' * 20000})
+    await runner._completed(reviewed, {'output': '{"ok":true}'}, executed=True)
+    offered = ModelToolCall('call-responded', 'send_action', {'to': 'unreviewed'})
+    await runner._completed(offered, {'output': 'Provided by user'}, executed=False)
+    with database.connect() as db:
+        assert _observed_action(db, run.run_id, {'toolName': 'send_action',
+                                                 'argumentSubset': {'to': 'new'}})
+        assert not _observed_action(db, run.run_id, {'toolName': 'send_action',
+                                                     'argumentSubset': {'to': 'unreviewed'}})
+        assert not _observed_action(db, run.run_id, {'toolName': 'send_action',
+                                                     'argumentSubset': {'to': 'old'}})
+        state = json.loads(db.execute('SELECT state FROM runs WHERE id=?', (run.run_id,)).fetchone()['state'])
+        assert state['completedToolArguments']['call-edited']['arguments']['to'] == 'new'
+        assert 'call-responded' not in state['completedToolArguments']
+    recorded = [e['data']['result']['tool_call'] for _, e in store.events('local', run.run_id)
+                if e.get('event') == 'on_run_step_completed']
+    assert any(e.get('executed') is False for e in recorded)
