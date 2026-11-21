@@ -83,13 +83,16 @@ class SQLiteCheckpointSaver:
 
     def __init__(self, database: Any, owner: str, *, ttl_seconds: float = DEFAULT_TTL_SECONDS,
                  hard_limit_bytes: int = CHECKPOINT_HARD_LIMIT_BYTES,
-                 warn_bytes: int = CHECKPOINT_WARN_BYTES):
+                 warn_bytes: int = CHECKPOINT_WARN_BYTES, actor_lease=None):
         if not isinstance(owner, str) or not owner:
             raise ValueError("Checkpoint owner is required")
         if ttl_seconds <= 0 or hard_limit_bytes <= 0 or warn_bytes <= 0:
             raise ValueError("Checkpoint limits must be positive")
+        if actor_lease is not None and actor_lease.owner != owner:
+            raise PermissionError("Checkpoint actor lease owner mismatch")
         self.database = database
         self.owner = owner
+        self.actor_lease = actor_lease
         self.ttl_seconds = ttl_seconds
         self.hard_limit_bytes = hard_limit_bytes
         self.warn_bytes = warn_bytes
@@ -145,6 +148,8 @@ class SQLiteCheckpointSaver:
         all_special = all(channel in WRITES_IDX_MAP for channel, _ in writes)
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if self.actor_lease is not None:
+                self.actor_lease.assert_current(db)
             db.execute("INSERT INTO agent_checkpoints(owner,thread_id,checkpoint_ns,checkpoint_id,anchored,expires_at) "
                        "VALUES(?,?,?,?,?,?) ON CONFLICT(owner,thread_id,checkpoint_ns,checkpoint_id) DO UPDATE SET "
                        "anchored=max(anchored,excluded.anchored)",
@@ -168,6 +173,8 @@ class SQLiteCheckpointSaver:
         event_actor = config.get("configurable", {}).get(EVENT_ACTOR_KEY)
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if self.actor_lease is not None:
+                self.actor_lease.assert_current(db)
             existing = db.execute("SELECT anchored FROM agent_checkpoints WHERE "
                                   "owner=? AND thread_id=? AND checkpoint_ns=? AND checkpoint_id=?", key).fetchone()
             if not event_actor and (existing is None or not existing["anchored"]):

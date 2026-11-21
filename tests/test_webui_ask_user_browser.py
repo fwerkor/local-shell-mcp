@@ -110,6 +110,13 @@ async def test_original_react_batched_questions_submit_answers_by_id(tmp_path, m
                 await page.get_by_text("Native tool result retained.", exact=True).first.wait_for(timeout=15000)
                 await page.get_by_text(re.compile(r"file[_ ]read", re.I)).first.wait_for(timeout=10000)
             else:
+                # The original React hook reconstructs this pending card
+                # from /chat/status.resumeState and /chat/stream?resume=true.
+                # Verify a full browser reload before answering, not merely
+                # the initial on_pending_action live SSE.
+                await page.get_by_role("button", name="README", exact=True).first.wait_for(timeout=15000)
+                await page.reload(wait_until="domcontentloaded")
+                await page.get_by_role("button", name="README", exact=True).first.wait_for(timeout=15000)
                 try:
                     await page.get_by_role("button", name="README", exact=True).first.click(timeout=15000)
                 except playwright.Error as exc:
@@ -118,6 +125,8 @@ async def test_original_react_batched_questions_submit_answers_by_id(tmp_path, m
                 await page.get_by_role("button", name=re.compile(r"^(Submit|提交)$")).first.click()
                 await page.get_by_text("Batch answers received correctly.", exact=True).first.wait_for(timeout=15000)
                 assert answers == [{"answers": {"file": "README.md", "format": "json"}}]
+                await page.reload(wait_until="domcontentloaded")
+                await page.get_by_text("Batch answers received correctly.", exact=True).first.wait_for(timeout=15000)
             assert not errors
     finally:
         if browser is not None:

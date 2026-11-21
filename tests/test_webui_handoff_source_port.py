@@ -86,6 +86,22 @@ def test_original_sdk_differential_routing_budget_scope_parallel_and_replay():
     assert results == expected
 
 
+def test_parallel_superstep_handoff_union_enforces_shared_budget():
+    baseline = state(1)
+    first = {"id": "handoff-a", "sourceAgentId": "b", "targetAgentId": "d",
+             "toolCallId": "tool-b", "scope": "turn", "depth": 0}
+    second = {"id": "handoff-b", "sourceAgentId": "c", "targetAgentId": "e",
+              "toolCallId": "tool-c", "scope": "turn", "depth": 0}
+    left = state(1, transitions=[first], parallel=True)
+    right = state(1, transitions=[second], parallel=True)
+    assert len(merge_handoff_state(baseline, left)["transitions"]) == 1
+    assert len(merge_handoff_state(left, left)["transitions"]) == 1
+    with pytest.raises(HandoffLimitError, match="handoff limit"):
+        merge_handoff_state(left, right)
+    with pytest.raises(HandoffLimitError, match="handoff limit"):
+        merge_handoff_state(right, left)
+
+
 def test_identity_union_conflicts_and_snapshot_are_independent():
     transition = {"id": "a", "sourceAgentId": "a", "targetAgentId": "b",
                   "toolCallId": "call", "scope": "conversation", "depth": 0}

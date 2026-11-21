@@ -223,3 +223,7 @@ full-head CI are still being verified. Earlier green commits do not validate
 this checkpoint. The graph scheduler, background child threads, full memory/
 semantic compaction, rich MCP provider projection, complete Actions/Artifacts
 and resource processing/lifecycle remain incomplete as documented above.
+
+## 2026-11-12 Human interaction increment
+
+Original React Ask User and tool-approval browser E2E now cover pause, reload, submit, continue and history reload. Status.resumeState, SSE sync snapshot and original action ID are preserved through SQLite restart. Source approval policies exempt Ask User by default but honor explicit ask/deny; machine permissions stay separate. Full upstream steer, event actor and nested graph parity are NOT accepted. Coverage thresholds remain 95% overall / 90% per module. See HUMAN_INTERACTION_PORT.md.
