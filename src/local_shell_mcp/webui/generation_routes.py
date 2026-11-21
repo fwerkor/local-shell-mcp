@@ -1163,7 +1163,11 @@ async def resume_generation(request: Request):
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
     except (ValueError, KeyError) as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+        # A changed retry is a conflict with a previously committed one-shot
+        # action, not a malformed new payload. Keep validation errors at 400.
+        detail = str(exc)
+        conflict = detail in {"Conflicting human action retry", "Stale human action"}
+        raise HTTPException(409 if conflict else 400, detail=detail) from exc
     from .routes import _repo
 
     await _start_task(owner, resumed, profile, agent,

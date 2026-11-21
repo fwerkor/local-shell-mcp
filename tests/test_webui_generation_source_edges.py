@@ -194,7 +194,8 @@ async def test_source_generation_resume_validation_and_pending_question(context,
         assert started and started[-1][1]['partial_text'] == 'prior'
         assert started[-1][1]['resume_history'][-1]['tool_call_id'] == 'call-1'
         assert (await client.post(url, json={'conversationId': cid, 'actionId': 'ask-1', 'answer': 'again'})).status_code == 409
-        assert (await client.post(url, json={'conversationId': cid})).status_code == 200
+        # A parked stub cannot reattach without a persisted model checkpoint.
+        assert (await client.post(url, json={'conversationId': cid})).status_code == 409
 
 
 @pytest.mark.asyncio

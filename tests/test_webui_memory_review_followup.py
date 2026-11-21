@@ -52,10 +52,14 @@ def test_checkpoint_keeps_tool_results_produced_after_its_coverage(tmp_path):
 
 @pytest.mark.asyncio
 async def test_memory_system_prompt_does_not_duplicate_user_in_canonical_steps(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
     from local_shell_mcp.webui import generation_routes, memory_agent
     from local_shell_mcp.webui.providers import ProviderConfig
     from local_shell_mcp.webui.storage import WorkspaceRepository
 
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / 'memory-db'))
+    get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path / 'memory-db')
     store = GenerationStore(db)
     WorkspaceRepository(db).save_setting('local', 'endpoints', {'memory': {}})

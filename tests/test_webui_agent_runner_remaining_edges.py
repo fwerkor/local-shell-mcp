@@ -21,7 +21,12 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
 @pytest.fixture
-def runner_state(tmp_path):
+def runner_state(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path / '.local-shell-mcp')
     store = GenerationStore(db)
     generation, _ = store.begin('local', {'text': 'Remember the previous message.'})
@@ -35,7 +40,8 @@ def runner_state(tmp_path):
 
     runner = AgentRunner('local', generation, db, store, scopes=set(), grant_expires=None,
                          stream_tools=stream, stream_text=stream, on_text=emit, profile=profile)
-    return db, store, generation, profile, runner
+    yield db, store, generation, profile, runner
+    get_settings.cache_clear()
 
 
 def test_context_read_failure_fails_closed_not_empty_memory(runner_state, monkeypatch):
