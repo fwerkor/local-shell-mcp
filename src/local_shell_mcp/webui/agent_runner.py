@@ -877,6 +877,18 @@ class AgentRunner:
         effective = effective.encode('utf-8', 'backslashreplace').decode('utf-8')
         instruction = {'role': 'user', 'content': effective}
         summary_messages = [*messages, instruction]
+        # Compaction must see the exact owner-scoped steering attachments that
+        # ordinary generation sends; otherwise the checkpoint drops their text.
+        from ..settings import get_settings
+        from .content_filters import inspect_content, model_message_fragments
+        from .steer_media import stamp_model_messages
+        from .storage import WorkspaceRepository
+
+        summary_messages = await stamp_model_messages(
+            self.database, self.owner, summary_messages, get_settings().state_dir)
+        policy = configured_filters(WorkspaceRepository(self.database), self.owner)
+        if inspect_content(model_message_fragments(summary_messages), policy) is not None:
+            raise RuntimeSafetyError('Summary context was blocked by content protection')
         chunks = []
         finish_reason = None
         limit = max(128, min(int(max_tokens), 16384))
@@ -914,7 +926,12 @@ class AgentRunner:
             raise ValueError('Summary completion is unverified near output token limit')
         count = count_tokens(build_summary_carrier_text(summary), exact=False)
         covered_calls = set()
+        covered_steers = set()
         for message in messages:
+            if message.get('role') == 'user' and message.get('source') == 'steer':
+                ident = message.get('steerId')
+                if isinstance(ident, str):
+                    covered_steers.add(ident)
             if message.get('role') == 'assistant':
                 covered_calls.update(call['id'] for call in message.get('tool_calls') or []
                                      if isinstance(call, dict) and isinstance(call.get('id'), str))
@@ -924,6 +941,7 @@ class AgentRunner:
                                  boundary=head_count, manual=manual,
                                  retained_tail=retained_tail,
                                  covered_tool_call_ids=sorted(covered_calls),
+                                 covered_steer_ids=sorted(covered_steers),
                                  visible_text_boundary=len(self.partial_text))
         if not self.namespace:
             import secrets
@@ -1153,7 +1171,7 @@ class AgentRunner:
             return await run_multi_agent_graph(self, history, topology, recursion_limit=recursion_limit)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
-        if not self.namespace:
+        if not self.namespace or (self.graph_node and self.namespace.startswith('/graph:')):
             memory_text = self._memory_context(self.root_agent)
             if memory_text:
                 history = [{'role': 'system', 'content': memory_text}, *history]

@@ -473,9 +473,13 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     db.execute("UPDATE subagent_tasks SET result_claimed=0,result_claim_key=NULL "
                                "WHERE id=? AND result_claim_key=?", (task_id, "wakeup:" + task_id))
                     continue
-                # Candidate selection happens outside the write transaction.
-                # A second Controller must never replace a live wakeup lease.
-                if row["lease_until"] is not None and row["lease_until"] > now:
+                # Candidate enumeration is only advisory. A second Controller
+                # must respect both an active lease and a scheduled retry.
+                # Candidate enumeration is only advisory. Another Controller
+                # may have renewed this lease while we waited for BEGIN
+                # IMMEDIATE. Never revoke its live actor or duplicate dispatch.
+                if ((row['lease_until'] is not None and row['lease_until'] > now) or
+                        (row['next_attempt_at'] is not None and row['next_attempt_at'] > now)):
                     continue
                 if expiry is not None and expiry <= time.time():
                     _dead_dispatched(db, store, row, task_id, now,
@@ -498,11 +502,14 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                                      'Parent provider or delegated permission unavailable')
                     continue
                 token = _PROCESS + ":" + secrets.token_hex(12)
-                claimed = db.execute("UPDATE subagent_wakeups SET lease_owner=?,lease_until=?,"
-                                     "next_attempt_at=NULL,updated_at=? WHERE task_id=? "
-                                     "AND status='dispatched' AND (lease_until IS NULL OR lease_until<=?)",
-                                     (token, now + _LEASE_MS, now, task_id, now))
-                if claimed.rowcount != 1:
+                claimed = db.execute(
+                    "UPDATE subagent_wakeups SET lease_owner=?,lease_until=?,"
+                    "next_attempt_at=NULL,updated_at=? WHERE task_id=? AND status='dispatched' "
+                    "AND (lease_until IS NULL OR lease_until<=?) "
+                    "AND (next_attempt_at IS NULL OR next_attempt_at<=?)",
+                    (token, now + _LEASE_MS, now, task_id, now, now),
+                ).rowcount
+                if claimed != 1:
                     continue
                 prepared = (generation, profile, agent, owner, scopes, expiry, policy, False, task_id, token)
         if prepared is not None:

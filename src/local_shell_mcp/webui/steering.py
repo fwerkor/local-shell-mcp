@@ -135,6 +135,19 @@ class SteeringStore:
             raise SteerRejection(400, "INVALID_CLIENT_STEER_ID")
         files = _sanitized_files(body.get("files"))
         quotes = _quotes(body.get("quotes"))
+        # Steering is another provider-bound user submission. Apply the same
+        # content_part policy before any durable queue or idempotency claim.
+        from .content_filters import ContentFilterBlocked, validate_message_submission
+        from .memory_protection import configured_filters
+        from .storage import WorkspaceRepository
+
+        filters = configured_filters(WorkspaceRepository(self.database), owner)
+        try:
+            for part in [text, *quotes]:
+                validate_message_submission(part, filters)
+            validate_message_submission(merged_text({'text': text, 'quotes': quotes}), filters)
+        except ContentFilterBlocked as exc:
+            raise SteerRejection(400, 'CONTENT_FILTER_BLOCKED', **exc.response()) from exc
         desired_preempt = body.get("preempt") is True
         fingerprint = _fingerprint(text, files, desired_preempt, quotes)
         with self.database.connect() as db:

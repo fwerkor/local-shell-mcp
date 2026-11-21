@@ -1124,6 +1124,7 @@ class GenerationStore:
                       *, boundary: int = 0, manual: bool = False,
                       retained_tail: list[dict] | None = None,
                       covered_tool_call_ids: list[str] | None = None,
+                      covered_steer_ids: list[str] | None = None,
                       visible_text_boundary: int | None = None) -> None:
         """Atomic candidate checkpoint in the *existing run state*, no deletion.
 
@@ -1152,11 +1153,18 @@ class GenerationStore:
                     call_id for call_id in [*(prior_ids or []), *(covered_tool_call_ids or [])]
                     if isinstance(call_id, str) and call_id
                 })
+            prior_steers = previous.get('coveredSteerIds') if isinstance(previous, dict) else None
+            if covered_steer_ids is not None or isinstance(prior_steers, list):
+                covered_steer_ids = sorted({
+                    ident for ident in [*(prior_steers or []), *(covered_steer_ids or [])]
+                    if isinstance(ident, str) and ident
+                })
             state['summaryCheckpoint'] = {'type': 'summary', 'content': [{'type': 'text', 'text': summary_text}],
                 'boundary': {'messageIndex': boundary}, 'tokenCount': token_count,
                 **({'initiatedBy': 'user'} if manual else {}),
                 **({'retainedTail': retained_tail} if retained_tail is not None else {}),
                 **({'coveredToolCallIds': covered_tool_call_ids} if covered_tool_call_ids is not None else {}),
+                **({'coveredSteerIds': covered_steer_ids} if covered_steer_ids is not None else {}),
                 **({'visibleTextBoundary': visible_text_boundary} if visible_text_boundary is not None else {})}
             db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?', (_json(state), _now(), run_id))
 
@@ -1307,12 +1315,23 @@ class GenerationStore:
                                     for call in (message.get('tool_calls') or []) if isinstance(call, dict)}
                                 retained_results = {message.get('tool_call_id') for message in recent
                                                     if message.get('role') == 'tool'}
+                                covered_steers = set(summary.get('coveredSteerIds') or [])
+                                retained_steers = {message.get('steerId') for message in recent
+                                                   if message.get('role') == 'user'
+                                                   and message.get('source') == 'steer'}
+                                replayed_steers = set(retained_steers)
                                 new_calls: set[str] = set()
                                 for message in steps:
                                     if not isinstance(message, dict):
                                         continue
                                     role = message.get('role')
-                                    if role == 'assistant' and isinstance(message.get('tool_calls'), list):
+                                    if role == 'user' and message.get('source') == 'steer':
+                                        ident = message.get('steerId')
+                                        if (isinstance(ident, str) and ident not in covered_steers
+                                                and ident not in replayed_steers):
+                                            group.append(message)
+                                            replayed_steers.add(ident)
+                                    elif role == 'assistant' and isinstance(message.get('tool_calls'), list):
                                         calls = [call for call in message['tool_calls']
                                                  if isinstance(call, dict) and isinstance(call.get('id'), str)
                                                  and call['id'] not in covered and call['id'] not in retained_calls]
@@ -1593,10 +1612,10 @@ class GenerationStore:
                     if key is not None:
                         attachment_positions[key] = len(attachments)
                     attachments.append(attachment)
-            if run_state.get('manualCompaction'):
-                mark_compaction_outcome(content, aborted=False)
             if is_usable_summary_part(staged):
                 content.insert(0, dict(staged))
+            if run_state.get('manualCompaction'):
+                mark_compaction_outcome(content, aborted=False)
             from .tool_attachments import response_attachments, visible_response_attachments
             verified = response_attachments(db, owner, [generation.response_message_id])[
                 generation.response_message_id]

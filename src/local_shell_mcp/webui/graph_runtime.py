@@ -15,9 +15,15 @@ from .handoff import HandoffRouting, merge_handoff_state, receive_handoff
 from .message_reducers import agent_messages_reducer, messages_state_reducer
 
 
+def _merge_prompt_inputs(current: dict | None, updates: dict | None) -> dict:
+    """Merge concurrent direct-edge prompts by destination, without cross-talk."""
+    return {**(current or {}), **(updates or {})}
+
+
 class MultiAgentState(TypedDict, total=False):
     messages: Annotated[list[dict], messages_state_reducer]
     agentMessages: Annotated[list[dict], agent_messages_reducer]
+    promptInputs: Annotated[dict[str, list[dict]], _merge_prompt_inputs]
     subagentResult: dict | None
     manualSummary: str | None
     initialInputCount: int
@@ -88,8 +94,14 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
     # The originating HTTP request may override its Agent's artifact mode.
     # _run_model already constructed the complete root instructions, including
     # this ephemeral override; preserve that system content at root activation.
+    # Conversation checkpoints are shared history, unlike root-only Agent
+    # instructions. Keep their system carriers across graph handoffs.
+    summary_carriers = [copy.deepcopy(m) for m in source_history
+                        if m.get('role') == 'system' and isinstance(m.get('content'), str)
+                        and m['content'].startswith('<summary>\n')]
     source_system = [m.get('content') for m in source_history
-                     if m.get('role') == 'system' and isinstance(m.get('content'), str)]
+                     if m.get('role') == 'system' and isinstance(m.get('content'), str)
+                     and not m['content'].startswith('<summary>\n')]
     initial_count = len(source_history)
     graph = StateGraph(MultiAgentState)
     handoff_sources = topology.handoff_sources
@@ -117,16 +129,26 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             raise PermissionError("Graph member Agent was revoked")
         current = copy.deepcopy(state["messages"])
         incoming = copy.deepcopy(state.get("agentMessages") or current)
-        reception = receive_handoff(current, agent_id)
+        # A non-preemptive steer can arrive after a transfer acknowledgement.
+        # Peel only the trailing steer suffix while recognizing the handoff;
+        # otherwise the first user steer masks the exact current-round tool.
+        transfer_history = list(current)
+        trailing_steers = []
+        while transfer_history and transfer_history[-1].get("source") == "steer":
+            trailing_steers.insert(0, transfer_history.pop())
+        reception = receive_handoff(transfer_history, agent_id)
         if reception is not None:
             incoming = [message for message in reception["filteredMessages"]
                         if message.get("role") != "system"]
+            incoming.extend(copy.deepcopy(trailing_steers))
             prompt = reception.get("instructions")
             if prompt:
                 if incoming and incoming[-1].get("role") == "tool":
                     incoming.append({"role": "assistant", "content":
                                      f"[Processed tool result and transferring to {agent_id}]"})
                 incoming.append(_route_prompt(_limit_prompt(prompt)))
+        elif (state.get("promptInputs") or {}).get(agent_id):
+            incoming = copy.deepcopy(state["promptInputs"][agent_id])
         elif state.get("agentMessages"):
             incoming = copy.deepcopy(state["agentMessages"])
         # Every activation receives only its own Agent instructions. The
@@ -140,6 +162,8 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                         else agent_instructions(member, selected_provider({}, member)))
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})
+        if summary_carriers:
+            incoming[1 if instructions else 0:1 if instructions else 0] = copy.deepcopy(summary_carriers)
         from .attachments import with_agent_context
 
         incoming = with_agent_context(parent.database, parent.owner, member, incoming)
@@ -209,6 +233,28 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             replies = [m for m in diff if m.get("role") in {"assistant", "ai"}]
             update["subagentResult"] = {"agentId": agent_id, "message": replies[-1] if replies else None}
         if child.graph_commands:
+            # Non-preemptive steering can drain after transfer tools have
+            # snapshotted their Send payloads. Forward the acknowledged steer
+            # to every receiving branch rather than losing it in the sender.
+            applied_steers = [m for m in diff if isinstance(m, dict)
+                              and m.get("source") == "steer" and isinstance(m.get("steerId"), str)]
+            if applied_steers:
+                # Ensure assistant tool calls and transfer acknowledgements
+                # remain adjacent in the global provider history.
+                steer_ids = {m["steerId"] for m in applied_steers}
+                update["messages"] = [m for m in diff if m.get("steerId") not in steer_ids]
+                for command in child.graph_commands:
+                    destinations = command.get("goto")
+                    for destination in destinations if isinstance(destinations, list) else [destinations]:
+                        if not isinstance(destination, dict) or destination.get("lg_name") != "Send":
+                            continue
+                        args = destination.get("args") or {}
+                        original = args.get("messages") or []
+                        existing_ids = {m.get("steerId") for m in original if isinstance(m, dict)}
+                        forwarded = [copy.deepcopy(m) for m in applied_steers
+                                     if m["steerId"] not in existing_ids]
+                        if forwarded:
+                            destination["args"] = {**args, "messages": [*original, *forwarded]}
             # ToolNode settled all commands and finalized the transition once.
             update["handoffState"] = child.route.snapshot()
             for command in child.graph_commands:
@@ -239,6 +285,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                         tool_result = copy.deepcopy(message)
                         tool_result.setdefault('id', 'handoff_result:' + identity)
                         update['messages'].append(tool_result)
+            update['messages'].extend(copy.deepcopy(applied_steers))
             goto = _as_goto(child.graph_commands, Send=Send)
             if len(goto) == 1 and not isinstance(goto[0], Send):
                 return Command(update=update, goto=goto[0])
@@ -272,7 +319,8 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             to_node = f"fan_in_{target}_prompt"
             prompt, exclude = prompted[0].get("prompt"), prompted[0].get("excludeResults")
 
-            async def fan_in(state: MultiAgentState, _prompt=prompt, _exclude=exclude):
+            async def fan_in(state: MultiAgentState, _prompt=prompt, _exclude=exclude,
+                             _target=target):
                 if not isinstance(_prompt, str):
                     raise ValueError("Persisted direct-edge prompt must be a string")
                 use_results = "{results}" in _prompt
@@ -283,8 +331,10 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                     return {}
                 prompt_msg = _route_prompt(_limit_prompt(rendered))
                 if _exclude is True or (use_results and _exclude is not False):
-                    return {"messages": [prompt_msg], "agentMessages":
-                            messages_state_reducer(state["messages"][:source_count], [prompt_msg])}
+                    # Concurrent B/C prompt branches must never share a single
+                    # last-value agentMessages channel at the join barrier.
+                    return {"messages": [prompt_msg], "promptInputs": {
+                        _target: messages_state_reducer(state["messages"][:source_count], [prompt_msg])}}
                 return {"messages": [prompt_msg]}
 
             graph.add_node(to_node, fan_in)
