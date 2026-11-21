@@ -101,6 +101,7 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
         [owner, conversation_id, run_id, call.call_id], separators=(',', ':')).encode()).hexdigest()
     now = _now()
     first = False
+    detached_lease: tuple[str, str] | None = None
     # The initial restart sweep may predate expiry of old process-local
     # leases. Reconcile them again before computing running quotas.
     recover_background_tools(database)
@@ -112,6 +113,23 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
         row = db.execute('SELECT * FROM agent_background_tools WHERE id=?', (identity,)).fetchone()
         if row is None and parent is None:
             raise PermissionError('Background tool requires an active owned parent run')
+        if event_delivery_lease is not None:
+            # A fire-event lease is authentic but cannot reserve a continue-only
+            # expectedAction record. Validate the owner and active source here.
+            delivery_id, token = event_delivery_lease
+            valid = db.execute(
+                "SELECT e.mode FROM agent_event_deliveries e JOIN agent_event_source_keys k "
+                "ON k.id=e.source_key_id AND k.owner=e.owner "
+                "WHERE e.id=? AND e.owner=? AND e.run_id=? AND e.status='leased' "
+                "AND e.lease_owner=? AND e.lease_until>? AND k.revoked_at IS NULL "
+                "AND (k.expires_at IS NULL OR k.expires_at>?)",
+                (delivery_id, owner, run_id, token, now, now),
+            ).fetchone()
+            if valid is None:
+                raise PermissionError('Event source lease was revoked')
+            is_continue = valid['mode'] == 'continue'
+        else:
+            is_continue = False
         if row is not None:
             if (row['argument_hash'] != fingerprint or row['tool_name'] != call.name or
                     row['authorization_conversation_id'] != authorization_conversation_id):
@@ -131,13 +149,14 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
                                  (authorization_conversation_id, owner)).fetchone()
             if not allowed:
                 raise PermissionError('Background tool authorization scope is invalid')
-            if event_delivery_lease is not None:
+            if is_continue:
                 from .detached_event_actions import reserve
 
-                reserve(db, owner=owner, run_id=run_id, lease=event_delivery_lease,
-                        task_id=identity, tool_name=call.name,
-                        tool_call_id=call.call_id, arguments=call.arguments,
-                        argument_hash=fingerprint, at=now)
+                if reserve(db, owner=owner, run_id=run_id, lease=event_delivery_lease,
+                           task_id=identity, tool_name=call.name,
+                           tool_call_id=call.call_id, arguments=call.arguments,
+                           argument_hash=fingerprint, at=now):
+                    detached_lease = event_delivery_lease
             db.execute('INSERT INTO agent_background_tools('
                        'id,owner,conversation_id,authorization_conversation_id,parent_run_id,'
                        'parent_tool_call_id,tool_name,argument_hash,status,lease_owner,lease_until,'
@@ -168,10 +187,10 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
                         if updated.rowcount != 1:
                             parent.cancel()
                             return
-                        if event_delivery_lease is not None:
+                        if detached_lease is not None:
                             from .detached_event_actions import renew_source_lease
 
-                            if not renew_source_lease(db, owner, run_id, event_delivery_lease, _now()):
+                            if not renew_source_lease(db, owner, run_id, detached_lease, _now()):
                                 parent.cancel()
                                 return
                             db.execute('UPDATE agent_event_detached_actions SET recovery_after=? '
@@ -179,12 +198,12 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
                                        (_now() + 30 * 60_000, identity, owner))
             lease_task = asyncio.create_task(heartbeat(), name='background-tool-lease')
             try:
-                if event_delivery_lease is not None:
+                if detached_lease is not None:
                     from .detached_event_actions import mark_running, renew_source_lease
 
                     with database.connect() as db:
                         db.execute('BEGIN IMMEDIATE')
-                        if not renew_source_lease(db, owner, run_id, event_delivery_lease, _now()):
+                        if not renew_source_lease(db, owner, run_id, detached_lease, _now()):
                             raise PermissionError('Detached event source was revoked')
                         mark_running(db, identity, owner, _now())
                 # Run the registered LSM audited tool path, not a new worker/RPC.
@@ -229,7 +248,7 @@ async def start_tool_task(database: Any, owner: str, conversation_id: str,
                                    'WHERE id=? AND status="running" AND lease_owner=?',
                                    (finish_status, locals().get('value') if finish_status == 'completed' else None,
                                     finish_error, _now(), identity, _LEASE_OWNER))
-                        if event_delivery_lease is not None:
+                        if detached_lease is not None:
                             from .detached_event_actions import settle
 
                             settle(db, identity, owner, finish_status, locals().get('value'),

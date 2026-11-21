@@ -417,12 +417,19 @@ class SQLiteSubagentTaskHost:
                     return
                 db.execute("UPDATE subagent_tasks SET status='cancelled', error=?, updated_at=? "
                            "WHERE id=?", ("Detached subagent task cancelled by its parent.", now, task_id))
+                if row['child_run_id']:
+                    GenerationStore(self.db).finish(self.owner, row['child_run_id'],
+                                                    status='aborted', _connection=db)
                 terminal = True
             elif row["grant_expires"] is not None and row["grant_expires"] <= time.time():
                 if not pre_expired:
                     return
                 db.execute("UPDATE subagent_tasks SET status='error', error=?,updated_at=? WHERE id=?",
                            ("Authentication grant expired", now, task_id))
+                if row['child_run_id']:
+                    GenerationStore(self.db).finish(self.owner, row['child_run_id'],
+                                                    status='error', error='Authentication grant expired',
+                                                    _connection=db)
                 terminal = True
             else:
                 lease = _PROCESS_ID + ":" + secrets.token_hex(12)

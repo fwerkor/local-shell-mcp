@@ -400,3 +400,46 @@ def test_persisted_background_result_claim_replays_exact_original_only_to_same_t
         claim = conn.execute('SELECT claimant_run_id,claimant_call_id FROM agent_background_tool_claims '
                              'WHERE task_id=?', (identity,)).fetchone()
         assert tuple(claim) == (generation.run_id, 'poll-call-one')
+
+
+@pytest.mark.asyncio
+async def test_authenticated_fire_event_uses_ordinary_background_without_continue_reservation(environment):
+    from local_shell_mcp.webui.event_triggers import enqueue_event, mint_source_key
+
+    db, agent, generation = environment
+    source = mint_source_key(db, 'owner', permissions=('fire',))
+    delivery = enqueue_event(db, 'owner', source['id'], 'native-fire-bg', {
+        'mode': 'fire', 'event': {'id': 'native-fire-bg', 'type': 'sample.ready', 'occurredAt': 123},
+        'target': {'agentId': agent['id']}, 'input': 'Handle this event',
+    })['id']
+    with db.connect() as sql:
+        sql.execute("UPDATE agent_event_deliveries SET run_id=?,status='leased',"
+                    "lease_owner=?,lease_until=? WHERE id=?",
+                    (generation.run_id, 'source-fenced', int(time.time()*1000)+120000, delivery))
+    seen = []
+
+    async def dispatch(call, scopes, expires, authorization):
+        seen.append(call.name)
+        return 'event handled in background'
+
+    response = json.loads(await start_tool_task(
+        db, 'owner', generation.conversation_id, generation.conversation_id,
+        generation.run_id, ModelToolCall('fire-tool-1', 'run_shell', {'command':'echo permitted'}),
+        scopes=frozenset(), grant_expires=None, dispatch=dispatch,
+        event_delivery_lease=(delivery, 'source-fenced')))
+    task = response['background_task_id']
+    await asyncio.wait_for(_TOOL_TASKS[task], 5)
+    assert seen == ['run_shell']
+    assert check_tool_task(db, 'owner', generation.conversation_id, task)['result'] == 'event handled in background'
+    with db.connect() as sql:
+        assert sql.execute('SELECT count(*) FROM agent_event_detached_actions WHERE delivery_id=?',
+                           (delivery,)).fetchone()[0] == 0
+        sql.execute('UPDATE agent_event_source_keys SET revoked_at=? WHERE id=?',
+                    (int(time.time()*1000), source['id']))
+    with pytest.raises(PermissionError, match='revoked'):
+        await start_tool_task(
+            db, 'owner', generation.conversation_id, generation.conversation_id,
+            generation.run_id, ModelToolCall('fire-tool-2', 'run_shell', {'command': 'echo denied'}),
+            scopes=frozenset(), grant_expires=None, dispatch=dispatch,
+            event_delivery_lease=(delivery, 'source-fenced'))
+    await shutdown_background_tools()
