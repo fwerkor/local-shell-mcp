@@ -607,3 +607,53 @@ async def test_detached_graph_returns_designated_member_instead_of_last_member(c
     result = await obj.run(store.history('local', job.conversation_id))
     assert len(result) == 1
     assert result[0]['content'] == 'answer:designated'
+
+
+@pytest.mark.asyncio
+async def test_single_handoff_post_tool_steer_keeps_ack_before_user_and_filters_transfer(context, monkeypatch):
+    from local_shell_mcp.webui.steering import SteeringStore
+
+    repo, store, db = context
+    parent, receiver = [create(repo, label) for label in ('sender', 'receiver')]
+    parent = repo.update('local', parent['id'], {'edges': [
+        {'from': parent['id'], 'to': receiver['id'], 'edgeType': 'handoff'},
+    ]})
+    observed = {}
+
+    async def model(profile, history, **kwargs):
+        if profile.model == 'sender':
+            yield ModelToolCall('single-handoff', 'transfer_to_' + receiver['id'], {})
+        else:
+            observed['received'] = history
+            yield 'Receiver saw the correction'
+
+    obj, job = runner(context, parent, model)
+    original_dispatch = AgentRunner._dispatch
+    applied = []
+
+    async def dispatch(self, calls, state):
+        result = await original_dispatch(self, calls, state)
+        if self.graph_node and self.root_agent['id'] == parent['id'] and result.graph_commands:
+            SteeringStore(db).enqueue('local', {
+                'conversationId': job.conversation_id,
+                'generationCreatedAt': job.generation_created_at,
+                'clientSteerId': 'single-transfer-correction',
+                'text': 'Use corrected context for receiver', 'preempt': False,
+            }, preempt_capable=True)
+            applied.append(True)
+        return result
+
+    monkeypatch.setattr(AgentRunner, '_dispatch', dispatch)
+    result = await obj.run(store.history('local', job.conversation_id))
+    assert applied == [True]
+    received = observed['received']
+    assert any(m.get('source') == 'steer' and 'corrected context' in m.get('content', '')
+               for m in received)
+    assert not any(m.get('role') == 'tool' and str(m.get('name', '')).startswith('transfer_to_')
+                   for m in received)
+    assert not any(m.get('role') == 'assistant' and m.get('tool_calls') for m in received)
+    sent_call = next(i for i, m in enumerate(result) if m.get('role') == 'assistant'
+                     and any(call.get('id') == 'single-handoff' for call in m.get('tool_calls') or []))
+    assert result[sent_call + 1]['role'] == 'tool'
+    assert result[sent_call + 1]['tool_call_id'] == 'single-handoff'
+    assert any(m.get('source') == 'steer' for m in result[sent_call + 2:])

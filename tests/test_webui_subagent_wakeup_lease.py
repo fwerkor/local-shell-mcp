@@ -79,3 +79,50 @@ async def test_old_controller_cannot_emit_or_finish_after_wakeup_lease_takeover(
     assert not any("old-owner-token-must-never-emit" in str(event)
                    for _, event in store.events("local", generation.run_id))
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_stale_candidate_cannot_replace_fresh_controller_wakeup_claim(environment, monkeypatch):
+    """Two Controllers may enumerate the same expired row before either locks it."""
+    from contextlib import contextmanager
+
+    from local_shell_mcp.webui.subagent_wakeup import process_wakeups
+
+    database, repo, store, child, parent, _ = environment
+    host, task_id, generation = await begin_automatic(environment)
+    with database.connect() as sql:
+        sql.execute('UPDATE subagent_wakeups SET lease_until=0,next_attempt_at=0 WHERE task_id=?',
+                    (task_id,))
+    original_connect = database.connect
+    swapped = []
+    healthy = 'controller-which-already-reacquired'
+
+    @contextmanager
+    def interleaved_connect():
+        observed = []
+        with original_connect() as sql:
+            # The first Controller enumerates the expired candidate; before its
+            # separate BEGIN IMMEDIATE, a second Controller safely renews it.
+            sql.set_trace_callback(lambda query: observed.append(query)
+                                   if 'SELECT w.task_id FROM subagent_wakeups' in query else None)
+            yield sql
+        if observed and not swapped:
+            with original_connect() as sql:
+                sql.execute('UPDATE subagent_wakeups SET lease_owner=?,lease_until=? '
+                            'WHERE task_id=?', (healthy, _now() + 120_000, task_id))
+            swapped.append(True)
+
+    monkeypatch.setattr(database, 'connect', interleaved_connect)
+    dispatches = []
+
+    async def dispatch(*args, **kwargs):
+        dispatches.append(True)
+
+    assert await process_wakeups(database, dispatch=dispatch) == 0
+    assert swapped == [True] and not dispatches
+    with original_connect() as sql:
+        record = sql.execute('SELECT lease_owner,lease_until FROM subagent_wakeups '
+                             'WHERE task_id=?', (task_id,)).fetchone()
+    assert record['lease_owner'] == healthy and record['lease_until'] > _now()
+    assert store.get('local', generation.run_id).status == 'running'
+    await shutdown_subagent_tasks()

@@ -123,10 +123,18 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             raise PermissionError("Graph member Agent was revoked")
         current = copy.deepcopy(state["messages"])
         incoming = copy.deepcopy(state.get("agentMessages") or current)
-        reception = receive_handoff(current, agent_id)
+        # A non-preemptive steer can arrive after a transfer acknowledgement.
+        # Peel only the trailing steer suffix while recognizing the handoff;
+        # otherwise the first user steer masks the exact current-round tool.
+        transfer_history = list(current)
+        trailing_steers = []
+        while transfer_history and transfer_history[-1].get("source") == "steer":
+            trailing_steers.insert(0, transfer_history.pop())
+        reception = receive_handoff(transfer_history, agent_id)
         if reception is not None:
             incoming = [message for message in reception["filteredMessages"]
                         if message.get("role") != "system"]
+            incoming.extend(copy.deepcopy(trailing_steers))
             prompt = reception.get("instructions")
             if prompt:
                 if incoming and incoming[-1].get("role") == "tool":
@@ -220,6 +228,10 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             applied_steers = [m for m in diff if isinstance(m, dict)
                               and m.get("source") == "steer" and isinstance(m.get("steerId"), str)]
             if applied_steers:
+                # Ensure assistant tool calls and transfer acknowledgements
+                # remain adjacent in the global provider history.
+                steer_ids = {m["steerId"] for m in applied_steers}
+                update["messages"] = [m for m in diff if m.get("steerId") not in steer_ids]
                 for command in child.graph_commands:
                     destinations = command.get("goto")
                     for destination in destinations if isinstance(destinations, list) else [destinations]:
@@ -262,6 +274,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                         tool_result = copy.deepcopy(message)
                         tool_result.setdefault('id', 'handoff_result:' + identity)
                         update['messages'].append(tool_result)
+            update['messages'].extend(copy.deepcopy(applied_steers))
             goto = _as_goto(child.graph_commands, Send=Send)
             if len(goto) == 1 and not isinstance(goto[0], Send):
                 return Command(update=update, goto=goto[0])
