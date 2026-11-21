@@ -1,0 +1,3 @@
+const fs=require('fs'); const c=require('./compaction_reference.cjs'),s=require('./summary_shared_reference.cjs');
+function run(x){let a=x.arg;try{switch(x.op){case 'markCompactionOutcome':c[x.op](a.parts,{aborted:a.aborted});return a.parts;case 'dropUnusableSummaryParts':return {changed:c[x.op](a),message:a};case 'stripUnusableSummaryParts':{const r=c[x.op](a);return {result:r,unchanged:r===a};}case 'resolveFailedTurnContent':return c[x.op](a.body,a.error);case 'buildSummarizationInstruction':return s[x.op](...a);default:return (c[x.op]||s[x.op])(a);}}catch(error){return {error:error.message,code:error.code};}}
+module.exports=run;if(require.main===module){const cases=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(cases.map(run)));}

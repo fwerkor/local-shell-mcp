@@ -8,7 +8,12 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 
-from local_shell_mcp.webui.providers import ProviderConfig, provider_config, stream_model
+from local_shell_mcp.webui.providers import (
+    ModelFinish,
+    ProviderConfig,
+    provider_config,
+    stream_model,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -151,3 +156,18 @@ def test_provider_configuration_does_not_require_writable_default_workspace(tmp_
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert provider_config("ollama", "local-model").model == "local-model"
     assert (tmp_path / ".local-shell-mcp" / "lsm.sqlite3").is_file()
+
+
+@pytest.mark.asyncio
+async def test_openai_stream_stop_reason_is_available_only_when_requested(monkeypatch):
+    captured = {}
+    _mock_client(monkeypatch, [
+        'data: {"choices":[{"delta":{"content":"Partial summary"}}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"length"}]}',
+        'data: [DONE]',
+    ], captured)
+    profile = ProviderConfig('openai', 'test-model', 'https://api.example.invalid/v1/chat/completions', 'key')
+    messages = [{'role': 'user', 'content': 'Summarize'}]
+    assert await _collect(stream_model(profile, messages)) == ['Partial summary']
+    assert await _collect(stream_model(profile, messages, emit_finish_reason=True)) == [
+        'Partial summary', ModelFinish('openai', 'length')]

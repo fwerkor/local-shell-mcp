@@ -14,11 +14,14 @@ from collections.abc import AsyncIterator
 
 from .approval_runtime import truncate_approval_result
 from .providers import (
+    ModelFinish,
     ModelThought,
     ModelToolCall,
+    ModelUsage,
     ProviderConfig,
     _anthropic_omits_sampling_parameters,
     _data_frames,
+    _usage_frame,
 )
 
 
@@ -173,7 +176,8 @@ def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], st
 
 async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, tools: list[dict],
                               max_tokens: int, temperature: float | None,
-                              top_p: float | None = None) -> AsyncIterator[str | ModelToolCall | ModelThought]:
+                              top_p: float | None = None,
+                              emit_finish_reason: bool = False) -> AsyncIterator[str | ModelToolCall | ModelUsage | ModelFinish | ModelThought]:
     import httpx
 
     history, instructions = native_messages(messages, config.provider)
@@ -203,8 +207,10 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
         if top_p is not None:
             body["generationConfig"]["topP"] = top_p
     else:
-        raise ValueError("Unsupported model provider")
+        raise ValueError('Unsupported model provider')
     pending: dict[int, dict] = {}
+    usage_snapshot = None
+    finish_reason = None
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
         "POST", config.url, headers=headers, json=body,
@@ -219,8 +225,13 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
                 continue
             if "error" in event or event.get("type") == "error":
                 raise RuntimeError("Model provider rejected the generation request")
+            usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "anthropic":
                 kind = event.get("type")
+                if kind == 'message_delta':
+                    reason = (event.get('delta') or {}).get('stop_reason')
+                    if isinstance(reason, str):
+                        finish_reason = reason
                 index = event.get("index")
                 if kind == "content_block_start":
                     block = event.get("content_block") or {}
@@ -245,7 +256,9 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
                             raise ValueError("Tool arguments arrived before tool declaration")
                         pending[index]["arguments"] += delta.get("partial_json") or ""
             else:
-                for candidate in event.get("candidates", []):
+                for candidate in event.get("candidates", [])[:1]:
+                    if isinstance(candidate.get('finishReason'), str):
+                        finish_reason = candidate['finishReason']
                     for part in (candidate.get("content") or {}).get("parts", []):
                         if isinstance(part.get("text"), str):
                             if part.get("thought"):
@@ -268,3 +281,7 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
             not isinstance(item["id"], str) or not item["id"]):
             raise ValueError("Invalid model tool call")
         yield ModelToolCall(item["id"], item["name"], arguments, item.get("metadata"))
+    if usage_snapshot is not None:
+        yield usage_snapshot
+    if emit_finish_reason:
+        yield ModelFinish(config.provider, finish_reason or 'unknown')

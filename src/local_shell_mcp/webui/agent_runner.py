@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import time
 
 from .agent_execution import execute_tool_batch, replay_key
@@ -18,6 +19,7 @@ from .agent_runtime import (
 )
 from .agents import AgentRepository
 from .approval_runtime import (
+    ApprovalBatch,
     approval_policy_decision,
     ask_user_approval_policy,
     build_approval_payload,
@@ -33,7 +35,22 @@ from .handoff import (
     handoff_tools,
     is_transfer_tool,
 )
-from .providers import ModelToolCall, provider_config, selected_provider
+from .memory import (
+    MEMORY_TOOL_USAGE_GUARD,
+    MemoryRepository,
+    agent_partition,
+    execute_memory_tool,
+    format_memory_context,
+    memory_config,
+    memory_enabled,
+    tool_definitions,
+)
+from .memory_protection import configured_filters
+from .providers import ModelFinish, ModelToolCall, ModelUsage, provider_config, selected_provider
+from .semantic_index import (
+    render_compaction_semantic_index,
+    snapshot_compaction_semantic_index,
+)
 from .steering import SteeringStore, merged_text
 from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
 
@@ -49,7 +66,7 @@ class AgentRunner:
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
                  on_injected=None, wakeup_lease=None, event_delivery_lease=None,
-                 actor_lease=None, recovery_steers=False):
+                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -68,11 +85,15 @@ class AgentRunner:
         self.event_delivery_lease = event_delivery_lease
         self.actor_lease = actor_lease
         self.recovery_steers = recovery_steers
+        self.on_tool_completed = on_tool_completed
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
         self.resume_history, self.resume_namespace = resume_history, resume_namespace
         self.partial_text, self.approved_batch = partial_text, approved_batch
+        # The caller's host-produced index is snapshotted before yielding to
+        # the provider, preventing concurrent user-owned changes to hints.
+        self.compaction_semantic_index = snapshot_compaction_semantic_index(compaction_semantic_index)
         self.repository = AgentRepository(database)
         self.saver = SQLiteCheckpointSaver(database, owner, actor_lease=actor_lease)
         self.steers = SteeringStore(database)
@@ -83,6 +104,9 @@ class AgentRunner:
         self.configs = {}
         self._injected_background_names: dict[str, frozenset[str]] = {}
         self.route = HandoffRouting(self.graph_entry_id, self.graph_max_handoffs, self.graph_parallel)
+        self.memory_artifacts: dict[str, dict] = {}
+        self._last_compaction_attempt_size = -1
+        self._summary_failures = 0
 
     def _check_grant(self):
         if self.actor_lease is not None:
@@ -102,6 +126,24 @@ class AgentRunner:
             assert_event_lease(self.database, self.owner, self.generation.run_id,
                                self.event_delivery_lease)
 
+    def _memory_context(self, agent: dict | None) -> str:
+        from .storage import WorkspaceRepository
+
+        settings = WorkspaceRepository(self.database)
+        if not memory_enabled(settings, self.owner):
+            return ''
+        # The original primary Agent reads shared personal memories even when
+        # it has no inline memory tool. Only an Agent explicitly registering
+        # the memory capability receives keys and a mutation-tool prompt.
+        has_tools = ('memory' in ((agent or {}).get('tools') or [])
+                     and memory_enabled(settings, self.owner, tools=True))
+        formatted = MemoryRepository(self.database).formatted(
+            self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
+        if formatted.get('readFailed'):
+            return ''
+        context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
+        return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
+
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
         from .lsm_tool_registry import available_tools
@@ -119,6 +161,18 @@ class AgentRunner:
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
                       if unrestricted or tool["function"]["name"] in selected]
+        from .storage import WorkspaceRepository
+        settings = WorkspaceRepository(self.database)
+        from .content_filters import validate_agent_instructions, validate_model_parameters
+
+        filters = configured_filters(settings, self.owner)
+        validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
+        parameters = (agent or {}).get('model_parameters') or self.initial_parameters
+        if isinstance(parameters, dict):
+            validate_model_parameters({'model_parameters': parameters}, filters)
+        if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
+            config = memory_config(settings, self.owner) or {}
+            tools += tool_definitions(config.get('validKeys'))
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
@@ -155,7 +209,8 @@ class AgentRunner:
         limit = override if type(override) in (int, float) and override > 0 else 50
         return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
                             tools, (agent or {}).get("model_parameters") or self.initial_parameters,
-                            recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent)
+                            recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent,
+                            compaction_semantic_index=self.compaction_semantic_index)
 
     def _snapshot(self, state):
         return {"messages": state.messages, "step": state.step, "model_turn": state.model_turn,
@@ -195,6 +250,14 @@ class AgentRunner:
         return {"_truncated": True, "preview": raw.encode("utf-8")[:8192].decode(
             "utf-8", errors="ignore"), "note": "Full arguments retained for execution"}
 
+    def _publishes_tool_steps(self) -> bool:
+        # Graph members run inside a shared parent generation. A foreground
+        # graph node can publish its tool cards; an isolated subagent (or
+        # detached task) must keep its internal steps checkpoint-only.
+        return not (getattr(self, "background_deny", False) or
+                    (self.namespace and (not getattr(self, "graph_node", False)
+                                         or '/subagent:' in self.namespace)))
+
     def _tool_step(self, call):
         checkpoint = self.active_config["configurable"].get("checkpoint_id", "")
         identity = "step_" + hashlib.sha256(
@@ -230,10 +293,7 @@ class AgentRunner:
             self.saver.put_writes(self.active_config, [("messages", {
                 "role": "tool", "tool_call_id": call.call_id, "content": output,
             })], task_id=call.call_id)
-        if self.namespace and (not self.graph_node or '/subagent:' in self.namespace):
-            # A graph team running inside a foreground subagent shares the
-            # parent's generation but must not expose intermediate tool
-            # arguments/results in its SSE or final persisted response.
+        if not self._publishes_tool_steps():
             from .action_spec import is_action_tool
 
             if is_action_tool(call.name) and executed:
@@ -282,6 +342,7 @@ class AgentRunner:
                 }
                 if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= 240_000:
                     self.store.append(self.owner, self.generation.run_id, payload)
+        artifacts = getattr(self, "memory_artifacts", {})
         end_at = int(time.time() * 1000)
         event = {
             "event": "on_run_step_completed", "data": {"result": {
@@ -289,6 +350,7 @@ class AgentRunner:
                 "type": "tool_call", "tool_call": {
                     "id": call.call_id, "name": call.name, "args": self._visible_tool_args(call),
                     "type": "tool_call", "output": preview, "progress": 1,
+                    **({'artifact': artifacts[call.call_id]} if call.call_id in artifacts else {}),
                     **({"executed": False} if not executed else {}),
                 },
             }},
@@ -334,6 +396,9 @@ class AgentRunner:
 
         if is_action_tool(call.name) and executed:
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
+        callback = getattr(self, "on_tool_completed", None)
+        if callback is not None:
+            await callback(call)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -342,6 +407,18 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name in {'set_memory', 'delete_memory'}:
+            from .storage import WorkspaceRepository
+            settings = WorkspaceRepository(self.database)
+            if not memory_enabled(settings, self.owner, tools=True):
+                raise RuntimeSafetyError('Memory tools are disabled')
+            config = {**(memory_config(settings, self.owner) or {}),
+                      'filters': configured_filters(settings, self.owner)}
+            result, artifact = execute_memory_tool(MemoryRepository(self.database), self.owner,
+                state.context.agent or {}, call.name, call.arguments, config)
+            if artifact is not None:
+                self.memory_artifacts[call.call_id] = artifact
+            return result
         if call.name == "check_background_task":
             from .background_tools import check_tool_task
             from .subagent_task_host import SQLiteSubagentTaskHost
@@ -432,6 +509,16 @@ class AgentRunner:
             graph = self.repository.get(self.owner, self.graph_definition["id"])
             if graph is None:
                 raise RuntimeSafetyError("Agent graph is no longer available")
+            if self.graph_definition.get('graphAgentIds'):
+                # Graph-team subagents are admitted from an isolated snapshot
+                # whose edges are not written to the entry Agent's standalone
+                # definition. Revalidate ownership and that exact topology;
+                # consulting the saved entry's unrelated edges rejects tools
+                # already advertised by the team's admitted graph.
+                from .graph_topology import admit_agent_graph
+
+                admit_agent_graph(self.owner, self.graph_definition, self.repository)
+                graph = self.graph_definition
             edge = handoff_edge_for_call(self.owner, graph, self.repository, call.name,
                                          source_agent_id=current["id"])
             return build_handoff_command(edge, current["id"], current.get("name") or current["id"],
@@ -455,6 +542,8 @@ class AgentRunner:
                 if meta.get("auth", {}).get("type") == "oauth":
                     oauth_token = await access_token(action_repo, self.owner, operation["action_id"])
                     if not oauth_token:
+                        if self.background_deny:
+                            return "Blocked: OAuth Action requires foreground human authorization."
                         raise RuntimeSafetyError("OAuth Action authorization was revoked before dispatch")
                     # The claim-to-HTTP boundary is a one-way replay fence.
                     # A crash during external execution cannot safely resend
@@ -528,6 +617,10 @@ class AgentRunner:
                 continue
             if await access_token(repo, self.owner, operation["action_id"]):
                 continue
+            if self.background_deny:
+                # Detached tasks must never park on a hidden OAuth redirect.
+                # _invoke returns a blocked tool result for this call instead.
+                continue
             url, _ = begin_flow(repo, self.owner, operation["action_id"],
                                 self.generation.run_id, call.call_id)
             step = self._tool_step(call)
@@ -564,16 +657,64 @@ class AgentRunner:
             raise RuntimeError("Unable to save pending Agent action")
         raise AgentSuspended()
 
+    @staticmethod
+    def _blocked_call(call: ModelToolCall) -> bool:
+        return call.arguments == {'_content_filter_blocked': True}
+
+    def _preflight_model_calls(self, calls: list[ModelToolCall], state: AgentLoopState) -> list[ModelToolCall]:
+        """Strip forbidden model tool arguments before event/checkpoint writes."""
+        from .content_filters import ContentFilterBlocked, validate_tool_arguments
+        from .storage import WorkspaceRepository
+
+        filters = configured_filters(WorkspaceRepository(self.database), self.owner)
+        sanitized = []
+        for call in calls:
+            if self._blocked_call(call):
+                sanitized.append(call)
+                continue
+            try:
+                validate_tool_arguments(call.name, call.arguments, filters)
+            except ContentFilterBlocked:
+                sanitized.append(ModelToolCall(call.call_id, call.name,
+                                               {'_content_filter_blocked': True}))
+            else:
+                sanitized.append(call)
+        return sanitized
+
+    async def _filtered_invoke(self, call, state):
+        """Apply source-scoped input and output policy on every tool path.
+
+        The same wrapper runs for ordinary batches and approved retries; it
+        must not expose blocked credentials in checkpoints or result previews.
+        """
+        from .content_filters import (
+            ContentFilterBlocked,
+            filtered_tool_output,
+            validate_tool_arguments,
+        )
+        from .storage import WorkspaceRepository
+
+        if self._blocked_call(call):
+            return 'Tool call blocked by configured content protection policy.'
+        filters = configured_filters(WorkspaceRepository(self.database), self.owner)
+        try:
+            validate_tool_arguments(call.name, call.arguments, filters)
+        except ContentFilterBlocked:
+            return 'Tool call blocked by configured content protection policy.'
+        result = await self._invoke(call, state)
+        return filtered_tool_output(call.name, result, filters)
+
     async def _dispatch(self, calls, state):
         from .routes import _repo
 
+        calls = self._preflight_model_calls(calls, state)
         if len({call.call_id for call in calls}) != len(calls) or any(not call.call_id for call in calls):
             raise ValueError("Tool call IDs must be non-empty and unique")
         unresolved = [call for index, call in enumerate(calls) if replay_key(call, index) not in self.cache]
         enabled = {tool["function"]["name"] for tool in state.context.tools}
         if any(call.name not in enabled for call in unresolved):
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
-        if not self.namespace or self.graph_node:
+        if self._publishes_tool_steps():
             for call in unresolved:
                 self._tool_step(call)
         endpoints = _repo().setting(self.owner, "endpoints", {}) or {}
@@ -583,6 +724,8 @@ class AgentRunner:
         for call in unresolved:
             selected_policy = ask_user_approval_policy(policy) if call.name == "ask_user_question" else policy
             decision = approval_policy_decision(selected_policy, call.name)
+            if self._blocked_call(call):
+                continue
             if decision and decision["decision"] == "deny":
                 output = "Blocked: " + decision.get("reason", "Rejected by policy")
                 record = {"proposal": {"name": call.name, "args": copy.deepcopy(call.arguments)}, "output": output}
@@ -618,7 +761,7 @@ class AgentRunner:
             [call for call in unresolved if replay_key(call, calls.index(call)) not in self.cache], state,
         )
         outputs = await execute_tool_batch(
-            calls, lambda call: self._invoke(call, state), settled=self.cache,
+            calls, lambda call: self._filtered_invoke(call, state), settled=self.cache,
             interrupting_names=frozenset({"subagent"}),
             is_interrupt=lambda error: isinstance(error, AgentSuspended),
             check_breaker=self._check_grant, on_completed=self._completed,
@@ -638,7 +781,395 @@ class AgentRunner:
             raise RuntimeSafetyError("Handoff commands require an active StateGraph node")
         return ToolBatchOutput(messages, graph_commands=combined)
 
+    @staticmethod
+    def _steer_message(item):
+        content = merged_text(item)
+        if item.get("files"):
+            content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
+                item["files"], ensure_ascii=False,
+            )
+        return {"role": "user", "content": content, "source": "steer",
+                "files": item.get("files") or [], "quotes": item.get("quotes") or [],
+                **({'steerId': item['steerId'], 'id': 'steer:' + item['steerId']}
+                   if isinstance(item.get('steerId'), str) else {})}
+
+    def _reconcile_drained_steers(self, state):
+        """Recover durable applied steers not yet included in a model checkpoint.
+
+        drain() records an applied receipt before the graph snapshot. A crash
+        in that window must not silently lose the accepted user instruction.
+        Match stable steer identities, never the text of older user turns.
+        If the interrupted checkpoint ends in pending tool calls, queue
+        recovered steers until those tool results have been appended.
+        """
+        if self.namespace:
+            return
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'",
+                (self.generation.run_id, self.owner),
+            ).fetchone()
+        if row is None:
+            return
+        parts = json.loads(row["state"]).get("steerParts") or []
+        checkpoint_ids = {m.get('steerId') for m in state.messages
+                          if isinstance(m, dict) and m.get('source') == 'steer'
+                          and isinstance(m.get('steerId'), str)}
+        missing = []
+        for part in parts:
+            if (not isinstance(part, dict) or not isinstance(part.get('steer'), str)
+                    or not isinstance(part.get('steerId'), str)):
+                continue
+            if part['steerId'] not in checkpoint_ids:
+                missing.append(self._steer_message(part))
+                checkpoint_ids.add(part['steerId'])
+        if state.pending_calls:
+            self._pending_recovered_steers = missing
+        else:
+            state.messages.extend(missing)
+            if missing:
+                state.completed = False
+
+    async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
+                                 prompt=None, update_prompt=None, head_count=0,
+                                 semantic_index=None, retained_tail=None, profile=None):
+        """Request the original checkpoint prompt from the selected model.
+
+        A failed/partial summary is never written, and never makes the old
+        context unreachable. The live model receives the same intact history.
+        """
+        from .compaction import (
+            DEFAULT_SUMMARIZATION_PROMPT,
+            DEFAULT_UPDATE_SUMMARIZATION_PROMPT,
+            build_summarization_instruction,
+            build_summary_carrier_text,
+        )
+        from .tokenizer import count_tokens
+
+        prior = ''
+        for item in reversed(messages):
+            text = item.get('content')
+            if item.get('role') == 'system' and isinstance(text, str) and text.startswith('<summary>\n'):
+                prior = text[len('<summary>\n'):].split('\n</summary>', 1)[0]
+                break
+        render_messages = messages
+        if semantic_index is None and not self.namespace:
+            # formatAgentMessages derives source indices from persisted host
+            # content. Reconstruct only one-to-one tool outcomes verified by
+            # the owner-bound SQLite ancestry and provider-visible text.
+            from .semantic_index_source import derive_persisted_semantic_index
+
+            semantic_index, render_messages = derive_persisted_semantic_index(
+                self.database, self.owner, self.generation.conversation_id,
+                self.generation.user_message_id, messages)
+        semantic = render_compaction_semantic_index(semantic_index, render_messages)
+        effective = build_summarization_instruction(
+            prompt or DEFAULT_SUMMARIZATION_PROMPT,
+            update_prompt or DEFAULT_UPDATE_SUMMARIZATION_PROMPT,
+            prior or None,
+            semantic['appendix'],
+        )
+        # The source renderer preserves JavaScript UTF-16 truncation semantics,
+        # including a half-surrogate at an astral boundary. Preserve its
+        # differential output; escape only invalid Unicode at the provider
+        # HTTP JSON boundary so utf-8 encoding cannot abort compaction.
+        effective = effective.encode('utf-8', 'backslashreplace').decode('utf-8')
+        instruction = {'role': 'user', 'content': effective}
+        summary_messages = [*messages, instruction]
+        # Compaction must see the exact owner-scoped steering attachments that
+        # ordinary generation sends; otherwise the checkpoint drops their text.
+        from .content_filters import inspect_content, model_message_fragments
+        from .steer_media import stamp_model_messages
+        from .storage import WorkspaceRepository
+
+        # The database and its attachment storage share the same state root.
+        # Do not initialize global settings while summarizing: detached/test
+        # runtimes can have a different workspace (or no writable /workspace).
+        summary_messages = await stamp_model_messages(
+            self.database, self.owner, summary_messages, self.database.root)
+        policy = configured_filters(WorkspaceRepository(self.database), self.owner)
+        if inspect_content(model_message_fragments(summary_messages), policy) is not None:
+            raise RuntimeSafetyError('Summary context was blocked by content protection')
+        chunks = []
+        finish_reason = None
+        limit = max(128, min(int(max_tokens), 16384))
+        profile = profile or self.initial_profile or self._context(self.root_agent).profile
+        if profile.provider in {"anthropic", "google"}:
+            from .provider_tool_protocols import stream_native_tools
+
+            response = stream_native_tools(profile, summary_messages, tools=[],
+                                           max_tokens=limit, temperature=None,
+                                           emit_finish_reason=True)
+        else:
+            response = self.stream_text(profile, summary_messages, max_tokens=limit,
+                                        emit_finish_reason=True)
+        async for value in response:
+            if isinstance(value, str):
+                chunks.append(value)
+            elif isinstance(value, ModelUsage):
+                # A summarizer's provider metadata must never be inserted into
+                # user-visible checkpoint text or mistaken for a tool call.
+                continue
+            elif isinstance(value, ModelFinish):
+                finish_reason = value.reason.lower()
+            else:
+                raise ValueError('Summary provider returned a tool call instead of text')
+        summary = ''.join(chunks).strip()
+        if not summary:
+            raise ValueError('Summarization produced empty output')
+        if finish_reason in {'length', 'max_tokens', 'max_tokens_reached', 'max_output_tokens',
+                             'max_output_tokens_reached'}:
+            raise ValueError('Summary response was truncated by the provider output limit')
+        # Some OpenAI-compatible endpoints omit finish_reason entirely. For
+        # them, refuse near-limit output instead of committing a partial
+        # checkpoint whose source conversation would become unreachable.
+        if finish_reason in {None, 'unknown'} and count_tokens(summary, exact=False) >= limit * 0.85:
+            raise ValueError('Summary completion is unverified near output token limit')
+        count = count_tokens(build_summary_carrier_text(summary), exact=False)
+        covered_calls = set()
+        covered_steers = set()
+        for message in messages:
+            if message.get('role') == 'user' and message.get('source') == 'steer':
+                ident = message.get('steerId')
+                if isinstance(ident, str):
+                    covered_steers.add(ident)
+            if message.get('role') == 'assistant':
+                covered_calls.update(call['id'] for call in message.get('tool_calls') or []
+                                     if isinstance(call, dict) and isinstance(call.get('id'), str))
+            elif message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
+                covered_calls.add(message['tool_call_id'])
+        self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
+                                 boundary=head_count, manual=manual,
+                                 retained_tail=retained_tail,
+                                 covered_tool_call_ids=sorted(covered_calls),
+                                 covered_steer_ids=sorted(covered_steers),
+                                 visible_text_boundary=len(self.partial_text),
+                                 model_history_start=(
+                                     sum(1 for message in messages if message.get('role') == 'system'
+                                         and not (isinstance(message.get('content'), str)
+                                                  and message['content'].startswith('<summary>\n')))
+                                     + 1 + len(retained_tail))
+                                 if retained_tail is not None and not manual and not self.namespace else None)
+        if not self.namespace:
+            import secrets
+            identity = 'summary_' + secrets.token_hex(8)
+            self.store.append(self.owner, self.generation.run_id, {
+                'event': 'on_run_step_completed', 'data': {'result': {
+                    'id': identity, 'type': 'summary', 'summary': {
+                        'type': 'summary', 'content': [{'type': 'text', 'text': summary}],
+                        'boundary': {'messageIndex': head_count}, 'tokenCount': count,
+                        **({'initiatedBy': 'user'} if manual else {}),
+                    }},},
+            })
+        return summary
+
+    async def _observe_model_usage(self, usage: ModelUsage, state: AgentLoopState) -> None:
+        """Update cumulative raw/provider ratio only on genuine usage frames."""
+        if self.namespace or usage.provider != state.context.profile.provider:
+            return
+        from .context_budget import calculate_budget
+
+        profile = state.context.profile
+        try:
+            estimate = calculate_budget(state.provider_projection or state.messages,
+                                    state.context.tools, 2_000_000,
+                                        reserve_ratio=0)
+            instruction_overhead = estimate.instruction_tokens + estimate.tool_schema_tokens
+            calibration = self.store.token_calibration(self.owner, self.generation.run_id,
+                                                       profile.provider, profile.model)
+            updated = calibration.observe(provider_input_tokens=usage.input_tokens,
+                                          raw_sent_this_turn=estimate.message_tokens,
+                                          instruction_overhead=instruction_overhead)
+            if updated != calibration:
+                self.store.record_token_calibration(self.owner, self.generation.run_id,
+                                                    profile.provider, profile.model, updated)
+        except Exception as exc:
+            # Usage is observational metadata; a failed calibration update
+            # cannot invalidate an otherwise successful model response.
+            logging.getLogger(__name__).warning('Token calibration failed (%s)', type(exc).__name__)
+
+    def _project_model_messages(self, state: AgentLoopState) -> list[dict]:
+        from .fading_projection import project_faded_provider_messages
+
+        return project_faded_provider_messages(state.messages, state.context.fading_tier)
+
+    def _update_fading_tier(self, state: AgentLoopState, budget, calibration, config, window: int) -> None:
+        from .fading import (
+            resolve_fading_tier,
+            seed_fading_tier,
+        )
+
+        profile = state.context.profile
+        agent_id = (state.context.agent or {}).get('id') or 'default'
+        current = state.context.fading_tier or self.store.fading_tier(
+            self.owner, self.generation.run_id, agent_id, profile.provider, profile.model)
+        seeded = seed_fading_tier(window, current)
+        current_turn = []
+        for message in reversed(state.messages):
+            if message.get('role') == 'user':
+                break
+            current_turn.append(message)
+        width = max((len(message.get('tool_calls') or []) for message in current_turn), default=1)
+        effective = max(0, budget.available_for_messages / calibration.ratio)
+        window_available = max(1, window - budget.reserve_tokens)
+        pressure = (window - budget.reserve_tokens - budget.remaining_context_tokens) / window_available
+        signals = {'contextPressure': pressure, 'effectiveRawTokens': effective,
+                   'summarizationEnabled': config.get('enabled') is not False,
+                   'toolExchangeWidth': max(1, width)}
+        resolved = resolve_fading_tier(seeded, window, signals)
+        state.context.fading_tier = resolved
+        if resolved != current:
+            self.store.record_fading_tier(self.owner, self.generation.run_id,
+                                          agent_id, profile.provider, profile.model, resolved)
+
+    async def _before_model(self, state):
+        """SDK-style recency + trigger, using the shared SQLite checkpoint."""
+        from .compaction import build_summary_carrier_text
+        from .content_filters import inspect_content, model_message_fragments
+        from .context_budget import (
+            calculate_budget,
+            should_trigger_summarization,
+            split_recent_turns,
+        )
+        from .storage import WorkspaceRepository
+
+        repository = WorkspaceRepository(self.database)
+        policy = configured_filters(repository, self.owner)
+        blocked = inspect_content(model_message_fragments(state.messages), policy)
+        if blocked is not None:
+            # No source text is copied into a model/user-visible error.
+            raise RuntimeSafetyError('Assembled model context was blocked by content protection')
+        if self.namespace:
+            return
+        settings = repository.setting(self.owner, 'endpoints', {}) or {}
+        agent_settings = settings.get('agents') or {}
+        params = state.context.parameters or {}
+        max_raw = params.get('max_context_tokens') or params.get('maxContextTokens') or agent_settings.get('maxContextTokens')
+        if not isinstance(max_raw, (int, float)) or isinstance(max_raw, bool) or not 0 < max_raw <= 2000000:
+            return
+        calibration = self.store.token_calibration(
+            self.owner, self.generation.run_id,
+            state.context.profile.provider, state.context.profile.model)
+        try:
+            config = settings.get('summarization') or {}
+            if not isinstance(config, dict):
+                config = {}
+            budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
+                                      reserve_ratio=config.get('reserveRatio', 0.05),
+                                      calibration_ratio=calibration.ratio)
+            self._update_fading_tier(state, budget, calibration, config, int(max_raw))
+            if config.get('enabled') is False or (budget.remaining_context_tokens > 0 and not isinstance(config.get('trigger'), dict)):
+                return
+            if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
+                return
+            system = [message for message in state.messages if message.get('role') == 'system']
+            messages = [message for message in state.messages if message.get('role') != 'system']
+            retain = config.get('retainRecent') or {}
+            head, tail = split_recent_turns(messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'))
+            if not should_trigger_summarization(
+                messages_to_refine_count=len(head), trigger=config.get('trigger'),
+                max_context_tokens=budget.max_context_tokens,
+                pre_prune_context_tokens=budget.max_context_tokens - budget.remaining_context_tokens,
+                remaining_context_tokens=budget.remaining_context_tokens,
+            ):
+                return
+            self._last_compaction_attempt_size = len(state.messages)
+            if budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
+                return
+            try:
+                options = config.get('parameters') or {}
+                summary = await self._summarize_history(
+                    [*system, *head], head_count=len(head),
+                    max_tokens=options.get('maxSummaryTokens', 2048),
+                    prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
+                    semantic_index=state.context.compaction_semantic_index,
+                    retained_tail=tail, profile=state.context.profile)
+                # Keep stable instructions and current summary, then the exact
+                # retained recent turns. Original messages stay in SQLite.
+                plain_system = [message for message in system if not (
+                    isinstance(message.get('content'), str)
+                    and message['content'].startswith('<summary>\n'))]
+                state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
+                self._summary_failures = 0
+                await self._save(state, [])
+                # History length may return to its pre-compaction value after
+                # the next tool batch. Do not suppress that distinct input as
+                # if it were an attempted retry of the old oversized history.
+                self._last_compaction_attempt_size = None
+                # A committed summary replaces the old prefix; restore a
+                # fresh v2 fading tier so past masking doesn't pin this run.
+                from .fading import create_fading_tier
+
+                state.context.fading_tier = create_fading_tier(int(max_raw))
+                try:
+                    self.store.record_fading_tier(
+                        self.owner, self.generation.run_id,
+                        (state.context.agent or {}).get('id') or 'default',
+                        state.context.profile.provider, state.context.profile.model,
+                        state.context.fading_tier)
+                except Exception as error:
+                    logging.getLogger(__name__).warning('Fading reset failed (%s)', type(error).__name__)
+            except Exception:
+                self._summary_failures += 1
+                # The source leaves the state intact on summary failure; never
+                # substitute an empty checkpoint or truncate a tool result.
+                return
+
+        finally:
+            # The pinned frontend consumes this event before the model call and
+            # reads the same last snapshot from response metadata after reload.
+            from .context_budget import context_usage_snapshot
+
+            config = settings.get('summarization') or {}
+            ratio = config.get('reserveRatio', 0.05) if isinstance(config, dict) else 0.05
+            snapshot = context_usage_snapshot(
+                state.messages, state.context.tools, int(max_raw), reserve_ratio=ratio,
+                run_id=self.generation.run_id,
+                agent_id=(state.context.agent or {}).get('id'),
+                calibration_ratio=calibration.ratio,
+            )
+            self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
+
+    async def _manual_compact(self, history):
+        from .storage import WorkspaceRepository
+        settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+        config = settings.get('summarization') or {}
+        if isinstance(config, dict) and config.get('enabled') is False:
+            raise ValueError('Compaction is disabled for this deployment')
+        config = config if isinstance(config, dict) else {}
+        from .content_filters import inspect_content, model_message_fragments
+
+        if inspect_content(model_message_fragments(history),
+                           configured_filters(WorkspaceRepository(self.database), self.owner)) is not None:
+            raise RuntimeSafetyError('Assembled model context was blocked by content protection')
+        non_system = [message for message in history if message.get('role') != 'system']
+        if not non_system:
+            raise ValueError('Nothing to compact')
+        await self._summarize_history(history, manual=True, head_count=len(non_system),
+            max_tokens=(config.get('parameters') or {}).get('maxSummaryTokens', 2048),
+            prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
+            semantic_index=self.compaction_semantic_index)
+        # Explicit compaction, like its automatic counterpart, resets the
+        # hysteresis ladder after the checkpoint was safely staged.
+        params = self.initial_parameters or {}
+        raw = params.get('max_context_tokens') or params.get('maxContextTokens') or (settings.get('agents') or {}).get('maxContextTokens')
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and 0 < raw <= 2_000_000:
+            from .fading import create_fading_tier
+
+            try:
+                self.store.record_fading_tier(
+                    self.owner, self.generation.run_id,
+                    (self.root_agent or {}).get('id') or 'default',
+                    self.initial_profile.provider, self.initial_profile.model,
+                    create_fading_tier(int(raw)))
+            except Exception as exc:
+                logging.getLogger(__name__).warning('Manual fading reset failed (%s)', type(exc).__name__)
+        return history
+
     async def run(self, history, *, recursion_limit=None):
+        if not self.namespace and self.store.manual_compaction(self.owner, self.generation.run_id):
+            return await self._manual_compact(history)
         from .graph_topology import admit_agent_graph
 
         topology = admit_agent_graph(self.owner, self.graph_definition, self.repository)
@@ -648,6 +1179,10 @@ class AgentRunner:
             return await run_multi_agent_graph(self, history, topology, recursion_limit=recursion_limit)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
+        if not self.namespace or (self.graph_node and self.namespace.startswith('/graph:')):
+            memory_text = self._memory_context(self.root_agent)
+            if memory_text:
+                history = [{'role': 'system', 'content': memory_text}, *history]
         state = AgentLoopState(context, history)
         if restored:
             self.active_config = restored["config"]
@@ -678,6 +1213,9 @@ class AgentRunner:
         # never create a second public steer part.
         is_foreground = (not self.namespace or
                          (self.graph_node and self.namespace.startswith("/graph:")))
+        self._pending_recovered_steers = []
+        if is_foreground and not self.recovery_steers:
+            self._reconcile_drained_steers(state)
         if is_foreground and self.recovery_steers:
             existing_steers = {message.get("steerId") for message in state.messages
                                if isinstance(message, dict)}
@@ -697,6 +1235,26 @@ class AgentRunner:
         if review and review.get("namespace", "") == self.namespace:
             self.resume_namespace = self.namespace
             self.approved_batch = self.store.approved_batch(self.owner, self.generation.run_id)
+        if self.approved_batch is not None and self.resume_namespace == self.namespace:
+            pending_ids = {call.call_id for call in state.pending_calls}
+            remaining = tuple(entry for entry in self.approved_batch.entries
+                              if entry.call_id in pending_ids)
+            if not remaining:
+                # The persisted checkpoint already passed ToolNode and model
+                # execution resumed. Retiring the proof prevents a subsequent
+                # restart from re-running tools that are no longer pending.
+                completed_ids = {m.get('tool_call_id') for m in state.messages
+                                 if isinstance(m, dict) and m.get('role') == 'tool'}
+                expected_ids = {entry.call_id for entry in self.approved_batch.entries}
+                if not expected_ids.issubset(completed_ids):
+                    raise RuntimeSafetyError('Approved tool checkpoint is missing persisted outcomes')
+                if review:
+                    self.store.complete_approval_batch(self.owner, self.generation.run_id,
+                                                       review['actionId'], state.messages, self.partial_text)
+                self.approved_batch = None
+                review = None
+            else:
+                self.approved_batch = ApprovalBatch(remaining)
         if self.approved_batch is not None and self.resume_namespace == self.namespace:
             # LibreChat ToolNode approval can precede a browser OAuth login.
             # Resolve all Action credentials before executing *any* reviewed
@@ -723,7 +1281,7 @@ class AgentRunner:
                 if call.name == "ask_user_question":
                     await self._pause(build_ask_user_payload(call.arguments, call.call_id), state)
                     raise AssertionError("Suspended question should not return")
-                return await self._invoke(call, state)
+                return await self._filtered_invoke(call, state)
 
             await execute_approval_batch(self.approved_batch, dispatch=reviewed_dispatch,
                                          on_completed=completed)
@@ -755,11 +1313,15 @@ class AgentRunner:
             # BEGIN IMMEDIATE drain elects one consumer in parallel fan-out.
             if self.namespace and not (self.graph_node and self.namespace.startswith("/graph:")):
                 return False
+            recovered = self._pending_recovered_steers if boundary == "post_tools" else []
+            if recovered:
+                self._pending_recovered_steers = []
             applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary,
                                         actor_lease=self.actor_lease,
                                         recipient_namespace=self.namespace)
-            if applied and self.on_injected is not None:
+            if (recovered or applied) and self.on_injected is not None:
                 await self.on_injected()
+            current.messages.extend(recovered)
             for item in applied:
                 # The graph checkpoint contains only durable owned references.
                 # Encode actual media per provider request, never persist base64.
@@ -767,7 +1329,7 @@ class AgentRunner:
                                          "source": "steer", "steerId": item["steerId"],
                                          "id": "steer:" + item["steerId"],
                                          "files": item.get("files", [])})
-            return bool(applied)
+            return bool(recovered or applied)
 
         async def should_seal_stream():
             # Check even tool-only provider chunks: they produce no on_text
@@ -777,25 +1339,40 @@ class AgentRunner:
                                (self.graph_node and self.namespace.startswith("/graph:")))
             return owns_user_queue and self.steers.has_preempt(self.owner, self.generation.run_id)
 
-        async def stream_tools_with_media(profile, messages, **kwargs):
+        async def prepared_provider_messages(messages):
             from ..settings import get_settings
+            from .content_filters import inspect_content, model_message_fragments
             from .steer_media import stamp_model_messages
+            from .storage import WorkspaceRepository
 
-            prepared = await stamp_model_messages(self.database, self.owner, messages, get_settings().state_dir)
+            prepared = await stamp_model_messages(self.database, self.owner, messages,
+                                                  get_settings().state_dir)
+            # Before-model inspection covers canonical checkpoint messages, but
+            # steer_media can add text from an owned file only at provider time.
+            # Check the exact expanded request before either provider stream.
+            if any(message.get('role') == 'user' and message.get('source') == 'steer'
+                   and message.get('files') for message in messages):
+                policy = configured_filters(WorkspaceRepository(self.database), self.owner)
+                if inspect_content(model_message_fragments(prepared), policy) is not None:
+                    raise RuntimeSafetyError('Assembled model context was blocked by content protection')
+            return prepared
+
+        async def stream_tools_with_media(profile, messages, **kwargs):
+            prepared = await prepared_provider_messages(messages)
             async for event in self.stream_tools(profile, prepared, **kwargs):
                 yield event
 
         async def stream_text_with_media(profile, messages, **kwargs):
-            from ..settings import get_settings
-            from .steer_media import stamp_model_messages
-
-            prepared = await stamp_model_messages(self.database, self.owner, messages, get_settings().state_dir)
+            prepared = await prepared_provider_messages(messages)
             async for event in self.stream_text(profile, prepared, **kwargs):
                 yield event
 
         result = await run_agent_loop(
             state, stream_tools=stream_tools_with_media, stream_text=stream_text_with_media,
             dispatch=self._dispatch, on_text=emit, save_state=self._save,
+            before_model=self._before_model, on_model_usage=self._observe_model_usage,
+            project_messages=self._project_model_messages,
+            preflight_calls=self._preflight_model_calls,
             on_boundary=inject_steers, on_stream_chunk=should_seal_stream,
             inject_controls=inject if self.task_control_host else None,
             should_preempt=(lambda: self.task_control_host.has_interrupt(self.task_control_id))

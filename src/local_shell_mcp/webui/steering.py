@@ -135,6 +135,19 @@ class SteeringStore:
             raise SteerRejection(400, "INVALID_CLIENT_STEER_ID")
         files = _sanitized_files(body.get("files"))
         quotes = _quotes(body.get("quotes"))
+        # Steering is another provider-bound user submission. Apply the same
+        # content_part policy before any durable queue or idempotency claim.
+        from .content_filters import ContentFilterBlocked, validate_message_submission
+        from .memory_protection import configured_filters
+        from .storage import WorkspaceRepository
+
+        filters = configured_filters(WorkspaceRepository(self.database), owner)
+        try:
+            for part in [text, *quotes]:
+                validate_message_submission(part, filters)
+            validate_message_submission(merged_text({'text': text, 'quotes': quotes}), filters)
+        except ContentFilterBlocked as exc:
+            raise SteerRejection(400, 'CONTENT_FILTER_BLOCKED', **exc.response()) from exc
         desired_preempt = body.get("preempt") is True
         fingerprint = _fingerprint(text, files, desired_preempt, quotes)
         with self.database.connect() as db:
@@ -258,6 +271,9 @@ class SteeringStore:
                         return {"removed": True, "replayed": True}
                     if receipt["state"] == "leftover":
                         receipt["state"] = "cancelled"
+                        steers = previous_state.get("steering") or {}
+                        steers["leftovers"] = [item for item in steers.get("leftovers", [])
+                                               if item.get("steerId") != sid]
                         db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                                    (_json(previous_state), _now(), previous["id"]))
                         return {"removed": True, "replayed": True}
@@ -305,6 +321,8 @@ class SteeringStore:
                     return {"removed": True, "replayed": True}
                 if receipt and receipt["item"]["steerId"] == sid and receipt["state"] == "leftover":
                     receipt["state"] = "cancelled"
+                    steer["leftovers"] = [item for item in steer.get("leftovers", [])
+                                          if item.get("steerId") != sid]
                     db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
                                (_json(state), _now(), row["id"]))
                     return {"removed": True, "replayed": True}
@@ -339,22 +357,13 @@ class SteeringStore:
             # including unarmed items before the interrupting item.
             applied = list(queue)
             steer["queue"] = []
-            index = 0
-            previous_was_text = False
-            for entry in db.execute(
-                "SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,),
-            ):
-                event = json.loads(entry["data"])
-                kind = event.get("event")
-                if kind == "on_steer_applied":
-                    index += 1
-                    previous_was_text = False
-                elif kind == "on_message_delta":
-                    content = ((event.get("data") or {}).get("delta") or {}).get("content") or {}
-                    if content.get("type") == "text" and content.get("text"):
-                        if not previous_was_text:
-                            index += 1
-                        previous_was_text = True
+            # Share the exact projection used by SSE reconnect. Counting raw
+            # completion events double-counts approval replays with the same
+            # stepId, and raw text events ignore checkpoint rewinds.
+            from .generations import GenerationStore
+
+            snapshot, _ = GenerationStore(self.database).resume_snapshot(owner, run_id)
+            index = len(snapshot['aggregatedContent'])
             for item in applied:
                 receipt = steer["receipts"].get(item.get("clientSteerId"))
                 if receipt is not None:
@@ -421,4 +430,6 @@ class SteeringStore:
             if receipt:
                 receipt["state"] = "leftover"
         steer["queue"] = []
+        if leftover:
+            steer["leftovers"] = leftover
         return leftover

@@ -79,7 +79,9 @@ def _redact(value: dict) -> dict:
     return {"provider": value["provider"],
             **({"name": value["name"]} if "name" in value else {}),
             "base_url": urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", "")),
-            "models": value["models"], "configured": configured(value)}
+            "models": value["models"], "configured": configured(value),
+            "include_usage": value.get("include_usage") is True or (
+                value["provider"] == "openai" and parsed.hostname == "api.openai.com")}
 
 
 def all_profiles() -> list[dict]:
@@ -125,8 +127,12 @@ def _validate(body: dict) -> dict:
     key = body.get("api_key")
     if key is not None and (not isinstance(key, str) or len(key) > 16384 or any(ord(char) < 32 for char in key)):
         raise ValueError("Invalid model API key")
+    include_usage = body.get('include_usage')
+    if include_usage is not None and type(include_usage) is not bool:
+        raise ValueError('include_usage must be a boolean')
     return {**({"name": name} if name is not None else {}), "provider": kind, "base_url": base,
-            "models": models, "api_key": (key.strip() or None) if key else None}
+            "models": models, "api_key": (key.strip() or None) if key else None,
+            'include_usage': include_usage}
 
 
 def _access(request):
@@ -181,6 +187,8 @@ async def provider_profiles(request):
                 raise HTTPException(409, detail="Existing channel provider type cannot be changed")
             if value["api_key"] is None:
                 value["api_key"] = previous.get("api_key", "")
+            if value['include_usage'] is None:
+                value['include_usage'] = previous.get('include_usage', False)
             db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) "
                        "DO UPDATE SET value=excluded.value", (_OWNER, key, json.dumps(value)))
     return JSONResponse(public_profiles(), headers={"Cache-Control": "no-store"})

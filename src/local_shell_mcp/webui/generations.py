@@ -49,6 +49,30 @@ class GenerationConflict(Exception):
         super().__init__("Conversation already has an active generation")
 
 
+def _rewind_uncheckpointed_text(parts: list[dict], saved: str) -> None:
+    """Remove incomplete provider text after the last durable human checkpoint.
+
+    Preserve the placement of tool calls and steers; only assistant text is
+    provisional while a model stream is in flight. The exact checkpointed
+    prefix is retained even when it spans several independent text parts.
+    """
+    if not isinstance(saved, str):
+        raise ValueError('Invalid checkpoint text prefix')
+    remaining = len(saved)
+    retained = []
+    for part in parts:
+        if part.get('type') != 'text':
+            retained.append(part)
+            continue
+        if remaining <= 0:
+            continue
+        piece = part['text'][:remaining]
+        if piece:
+            retained.append({**part, 'text': piece})
+        remaining -= len(piece)
+    parts[:] = retained
+
+
 class GenerationStore:
     def __init__(self, database: Any):
         self.database = database
@@ -87,6 +111,7 @@ class GenerationStore:
         if client_request_id is not None and (not isinstance(client_request_id, str) or
                                                not 1 <= len(client_request_id) <= 160):
             raise ValueError("Invalid client request id")
+        manual_compaction = payload.get('compact') is True
         # These idempotency namespaces are host-generated only. A browser can
         # see a task handle and must not be able to preoccupy its continuation
         # key with an unrelated generation before the child settles.
@@ -99,6 +124,12 @@ class GenerationStore:
                 raise ValueError("Internal Agent Trigger idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")
         new_conversation = raw_conversation_id in (None, "", "new", "new_conversation")
+        if manual_compaction:
+            anchor = payload.get('parentMessageId')
+            if new_conversation or not isinstance(anchor, str) or not anchor or anchor == '00000000-0000-0000-0000-000000000000':
+                raise ValueError('Compaction requires an existing conversation and a parent message')
+            if any(payload.get(key) for key in ('isContinued', 'isRegenerate', 'editedContent', 'responseMessageId')):
+                raise ValueError('Compaction cannot be combined with an edit, regenerate, or continue')
         if raw_conversation_id is not None and not isinstance(raw_conversation_id, str):
             raise ValueError("Invalid conversation id")
         project_id = payload.get("projectId", payload.get("chatProjectId")) if new_conversation else None
@@ -118,9 +149,11 @@ class GenerationStore:
         conversation_id = (trusted_new_conversation_id or str(uuid.uuid4())) \
             if new_conversation else raw_conversation_id
         prompt = payload.get("text")
-        if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
+        if manual_compaction:
+            prompt = ''
+        if not manual_compaction and (not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
             raise ValueError("A non-empty text message is required (max 128 KiB)")
-        user_message_id = str(payload.get("messageId") or uuid.uuid4())
+        user_message_id = str(payload.get('parentMessageId') if manual_compaction else (payload.get('messageId') or uuid.uuid4()))
         response_message_id = str(uuid.uuid4())
         run_id = "run_" + secrets.token_hex(16)
         now = _now()
@@ -134,6 +167,7 @@ class GenerationStore:
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
+            'manualCompaction': manual_compaction,
             "artifactsMode": artifact_mode(payload, agent),
         }
         # Internal trigger delivery supplies its already-locked SQLite
@@ -165,6 +199,11 @@ class GenerationStore:
             elif not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                                 (conversation_id, owner)).fetchone():
                 raise KeyError("Conversation not found")
+            if manual_compaction and not db.execute(
+                'SELECT 1 FROM messages WHERE id=? AND conversation_id=?',
+                (user_message_id, conversation_id),
+            ).fetchone():
+                raise KeyError('Compaction anchor not found')
             active = db.execute(
                 "SELECT * FROM runs WHERE conversation_id=? AND status IN ('running','requires_action') "
                 "ORDER BY created_at DESC LIMIT 1", (conversation_id,),
@@ -189,12 +228,13 @@ class GenerationStore:
                 "endpoint": str(payload.get("endpoint") or "agents"),
                 "files": files,
             }
-            db.execute(
-                "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?)",
-                (user_message_id, conversation_id, parent_id, "user", prompt,
-                 _json(payload.get("content") or {}), _json(user_metadata), now, now),
-            )
+            if not manual_compaction:
+                db.execute(
+                    "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?)",
+                    (user_message_id, conversation_id, parent_id, "user", prompt,
+                     _json(payload.get("content") or {}), _json(user_metadata), now, now),
+                )
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
             db.execute("INSERT INTO runs(id,conversation_id,agent_id,status,state,created_at,updated_at) "
                        "VALUES(?,?,?,?,?,?,?)",
@@ -216,6 +256,9 @@ class GenerationStore:
                     "isCreatedByUser": True,
                 },
             }
+            if manual_compaction:
+                created['message'] = {'messageId': user_message_id,
+                    'conversationId': conversation_id, 'text': '', 'compact': True}
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(created)))
         return Generation(run_id, conversation_id, stamp_ms, response_message_id,
                           user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id"), protocol_version), True
@@ -404,14 +447,31 @@ class GenerationStore:
             previous = marker.get("stage")
             if stage == "dispatching" and previous != "claimed":
                 raise PermissionError("OAuth Action was already dispatched")
+            if stage == "completed" and previous == "completed":
+                # A resumed, already-authorized approval may replay the cached
+                # ToolNode result after a crash. Re-acknowledging that result is
+                # safe ONLY if the authoritative host completion survived in
+                # the same run; the HTTP dispatch fence stays closed.
+                recorded = db.execute(
+                    "SELECT 1 FROM generation_events WHERE run_id=? AND "
+                    "json_extract(data,'$.event')='on_run_step_completed' AND "
+                    "json_extract(data,'$.data.result.tool_call.id')=? LIMIT 1",
+                    (run_id, call_id),
+                ).fetchone()
+                if recorded is not None:
+                    return
             if stage == "completed" and previous != "dispatching":
                 raise PermissionError("OAuth Action HTTP completion has no dispatch record")
             if stage == "cleared" and previous not in {"completed", "claimed"}:
                 raise PermissionError("OAuth Action cannot clear unverified dispatch")
             if stage == "cleared":
                 state.pop("oauthResume", None)
-                state.pop("resumeHistory", None)
-                state.pop("partialText", None)
+                # A human resume claim may still need this exact approved
+                # continuation after a crash. OAuth's tool replay fence and
+                # human approval replay evidence have different lifetimes.
+                if not isinstance(state.get("resumeClaim"), dict):
+                    state.pop("resumeHistory", None)
+                    state.pop("partialText", None)
             else:
                 marker["stage"] = stage
             db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?", (_json(state), _now(), run_id))
@@ -431,8 +491,9 @@ class GenerationStore:
             if not isinstance(marker, dict) or marker.get("stage") not in {"claimed", "completed"}:
                 return False
             state.pop("oauthResume")
-            state.pop("resumeHistory", None)
-            state.pop("partialText", None)
+            if not isinstance(state.get("resumeClaim"), dict):
+                state.pop("resumeHistory", None)
+                state.pop("partialText", None)
             db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?", (_json(state), _now(), run_id))
             return True
 
@@ -585,7 +646,9 @@ class GenerationStore:
         active = active_run_ids or set()
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            rows = db.execute("SELECT r.id,r.state FROM runs r WHERE r.status='running'").fetchall()
+            rows = db.execute("SELECT r.id,r.state,r.conversation_id,c.owner FROM runs r "
+                              "JOIN conversations c ON c.id=r.conversation_id "
+                              "WHERE r.status='running'").fetchall()
             recovered = 0
             for row in rows:
                 if row["id"] in active:
@@ -600,6 +663,31 @@ class GenerationStore:
                 state["pendingAction"] = pending
                 db.execute("UPDATE runs SET state=?,status='requires_action',updated_at=? WHERE id=?",
                            (_json(state), _now(), row["id"]))
+                # Rewind to the text prefix in the *latest durable model
+                # checkpoint*, not the older human-pause state. A continuation
+                # can complete more model/tool turns before crashing, and those
+                # saved turns must remain visible on reconnect.
+                preserved = state.get('partialText', '')
+                namespace = pending.get('namespace', '')
+                checkpoint_ns = row['id'] + ('|' + namespace if namespace else '')
+                latest = None
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                              "AND name='agent_checkpoints'").fetchone():
+                    latest = db.execute(
+                        "SELECT checkpoint FROM agent_checkpoints WHERE owner=? "
+                        "AND thread_id=? AND checkpoint_ns=? AND checkpoint IS NOT NULL "
+                        "AND expires_at>? ORDER BY checkpoint_id DESC LIMIT 1",
+                        (row['owner'], row['conversation_id'], checkpoint_ns, time.time()),
+                    ).fetchone()
+                if latest is not None:
+                    saved = json.loads(latest['checkpoint']).get('channel_values') or {}
+                    checkpoint_text = saved.get('partial_text')
+                    if (isinstance(preserved, str) and isinstance(checkpoint_text, str)
+                            and checkpoint_text.startswith(preserved)):
+                        preserved = checkpoint_text
+                db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
+                           (row['id'], _json({'event': 'on_content_rewind', 'data': {
+                               'preserveText': preserved}})))
                 db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                            (row["id"], _json({"event": "on_pending_action",
                                                "data": self.client_pending_action(pending)})))
@@ -692,74 +780,6 @@ class GenerationStore:
             self._record_completed_arguments(db, run_id, event, full_arguments)
             return int(cursor.lastrowid)
 
-    def resume_snapshot(self, owner: str, run_id: str) -> tuple[dict, int]:
-        """Source React SSE resumeState projection from one SQLite read view.
-
-        The cursor and content are captured together; events added after this
-        transaction are streamed by their seq and cannot be lost on reload.
-        This is the existing generation event log, not a second runtime.
-        """
-        with self.database.connect() as db:
-            db.execute("BEGIN")
-            row = db.execute(
-                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
-                "WHERE r.id=? AND c.owner=?", (run_id, owner),
-            ).fetchone()
-            if row is None:
-                raise KeyError("Generation not found")
-            generation = self._run(row)
-            state = json.loads(row["state"])
-            user = db.execute(
-                "SELECT id,parent_id,text FROM messages WHERE id=? AND conversation_id=?",
-                (generation.user_message_id, generation.conversation_id),
-            ).fetchone()
-            entries = db.execute(
-                "SELECT seq,data FROM generation_events WHERE run_id=? ORDER BY seq",
-                (run_id,),
-            ).fetchall()
-            max_seq = entries[-1]["seq"] if entries else 0
-        steps = {}
-        content_parts: list[dict] = []
-        for entry in entries:
-            item = json.loads(entry["data"])
-            event, data = item.get("event"), item.get("data") or {}
-            if event == "on_run_step" and isinstance(data, dict) and isinstance(data.get("id"), str):
-                steps[data["id"]] = data
-            elif event == "on_run_step_closed" and data.get("id") in steps:
-                steps[data["id"]] = {**steps[data["id"]], **{
-                    key: data[key] for key in ("status", "closed_at") if key in data}}
-            elif event == "on_message_delta":
-                content = (data.get("delta") or {}).get("content") or {}
-                if content.get("type") == "text" and isinstance(content.get("text"), str) and content["text"]:
-                    if content_parts and content_parts[-1].get("type") == "text":
-                        content_parts[-1]["text"] += content["text"]
-                    else:
-                        content_parts.append({"type": "text", "text": content["text"],
-                                              "phase": "final_answer"})
-            elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
-                content_parts.append(data["part"])
-        pending = state.get("pendingAction")
-        initial = content_parts
-        pending_steers = (state.get("steering") or {}).get("queue", [])
-        from .steering import _public
-
-        result = {
-            "runSteps": list(steps.values()),
-            "aggregatedContent": initial,
-            "pendingSteers": [_public(item) for item in pending_steers],
-            "userMessage": {
-                "messageId": generation.user_message_id,
-                "conversationId": generation.conversation_id,
-                "text": user["text"] if user else "",
-                **({"parentMessageId": user["parent_id"]} if user and user["parent_id"] else {}),
-            },
-            "responseMessageId": generation.response_message_id,
-            "conversationId": generation.conversation_id,
-            "sender": "Assistant",
-            "model": state.get("model") or "",
-            **({"pendingAction": self.client_pending_action(pending)} if pending else {}),
-        }
-        return result, max_seq
     def append_tool_completion(self, owner: str, run_id: str, event: dict,
                                tool_call_id: str, file_ids: list[str],
                                *, actor_lease=None, full_arguments: dict | None = None) -> int:
@@ -821,6 +841,129 @@ class GenerationStore:
                     continue
             return int(cursor.lastrowid)
 
+    def resume_snapshot(self, owner: str, run_id: str) -> tuple[dict, int]:
+        """Source React SSE resumeState projection from one SQLite read view.
+
+        The cursor and content are captured together; events added after this
+        transaction are streamed by their seq and cannot be lost on reload.
+        This is the existing generation event log, not a second runtime.
+        """
+        with self.database.connect() as db:
+            db.execute("BEGIN")
+            row = db.execute(
+                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError("Generation not found")
+            generation = self._run(row)
+            state = json.loads(row["state"])
+            user = db.execute(
+                "SELECT id,parent_id,text FROM messages WHERE id=? AND conversation_id=?",
+                (generation.user_message_id, generation.conversation_id),
+            ).fetchone()
+            entries = db.execute(
+                "SELECT seq,data FROM generation_events WHERE run_id=? ORDER BY seq",
+                (run_id,),
+            ).fetchall()
+            max_seq = entries[-1]["seq"] if entries else 0
+        steps = {}
+        content_parts: list[dict] = []
+        tool_slot_by_step: dict[str, int] = {}
+        text_slot_by_step: dict[str, int] = {}
+        for entry in entries:
+            item = json.loads(entry["data"])
+            event, data = item.get("event"), item.get("data") or {}
+            if event == "on_run_step" and isinstance(data, dict) and isinstance(data.get("id"), str):
+                steps[data["id"]] = data
+                if (data.get("type") == "message_creation" and
+                        data.get("id") not in text_slot_by_step and
+                        data.get("index") == len(content_parts)):
+                    # React allocates a content slot at the opening step, even
+                    # if its first text chunk arrives after a completed tool.
+                    text_slot_by_step[data["id"]] = len(content_parts)
+                    content_parts.append({"type": "text", "text": "", "phase": "final_answer"})
+            elif event == "on_run_step_closed" and data.get("id") in steps:
+                steps[data["id"]] = {**steps[data["id"]], **{
+                    key: data[key] for key in ("status", "closed_at") if key in data}}
+            elif event == "on_run_step_completed":
+                result = data.get("result") or {}
+                tool_call = result.get("tool_call")
+                if isinstance(tool_call, dict):
+                    step_id = result.get('id')
+                    part = {'type': 'tool_call', 'tool_call': {
+                        **tool_call, 'stepId': step_id}}
+                    if isinstance(step_id, str) and step_id in tool_slot_by_step:
+                        # Crash recovery can replay the same cached completion.
+                        # React updates by step ID, so the snapshot must update
+                        # that slot instead of adding another content element.
+                        content_parts[tool_slot_by_step[step_id]] = part
+                    else:
+                        if isinstance(step_id, str):
+                            tool_slot_by_step[step_id] = len(content_parts)
+                        content_parts.append(part)
+            elif event == "on_message_delta":
+                content = (data.get("delta") or {}).get("content") or {}
+                if content.get("type") == "text" and isinstance(content.get("text"), str) and content["text"]:
+                    slot = text_slot_by_step.get(data.get("id"))
+                    if slot is not None and slot < len(content_parts):
+                        content_parts[slot]["text"] += content["text"]
+                    elif content_parts and content_parts[-1].get("type") == "text":
+                        content_parts[-1]["text"] += content["text"]
+                    else:
+                        content_parts.append({"type": "text", "text": content["text"],
+                                              "phase": "final_answer"})
+            elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
+                content_parts.append(data["part"])
+            elif event == 'on_content_rewind':
+                _rewind_uncheckpointed_text(content_parts, data.get('preserveText', ''))
+        pending = state.get("pendingAction")
+        oauth_prompts = []
+        if isinstance(pending, dict) and (pending.get('payload') or {}).get('type') == 'action_oauth':
+            payload = pending['payload']
+            step_id = payload.get('step_id')
+            tool_call_id = payload.get('tool_call_id')
+            for entry in reversed(entries):
+                event = json.loads(entry['data'])
+                data = event.get('data') or {}
+                delta = data.get('delta') or {}
+                if (event.get('event') == 'on_run_step_delta' and data.get('id') == step_id
+                        and isinstance(delta.get('auth'), str) and delta['auth']
+                        and any(call.get('id') == tool_call_id for call in delta.get('tool_calls') or [])):
+                    step = steps.get(step_id) or {}
+                    oauth_prompts.append({'stepId': step_id,
+                                          'runId': step.get('runId', generation.response_message_id),
+                                          'index': step.get('index', 0),
+                                          'toolCallId': tool_call_id,
+                                          'toolName': payload.get('tool_name', ''),
+                                          'authURL': delta['auth'],
+                                          'expiresAt': delta.get('expires_at')})
+                    break
+        initial = content_parts
+        steering = state.get("steering") or {}
+        pending_steers = steering.get("queue", []) or (steering.get("leftovers", [])
+                                                           if generation.status in _TERMINAL else [])
+        from .steering import _public
+
+        result = {
+            "runSteps": list(steps.values()),
+            "aggregatedContent": initial,
+            "pendingSteers": [_public(item) for item in pending_steers],
+            "userMessage": {
+                "messageId": generation.user_message_id,
+                "conversationId": generation.conversation_id,
+                "text": user["text"] if user else "",
+                **({"parentMessageId": user["parent_id"]} if user and user["parent_id"] else {}),
+            },
+            "responseMessageId": generation.response_message_id,
+            "conversationId": generation.conversation_id,
+            "sender": "Assistant",
+            "model": state.get("model") or "",
+            **({"pendingAction": self.client_pending_action(pending)} if pending else {}),
+            **({"pendingOAuthPrompts": oauth_prompts} if oauth_prompts else {}),
+        }
+        return result, max_seq
+
     def events(self, owner: str, run_id: str, after: int = 0, limit: int = 200) -> list[tuple[int, dict]]:
         with self.database.connect() as db:
             rows = db.execute(
@@ -830,6 +973,226 @@ class GenerationStore:
                 (owner, run_id, after, min(200, max(1, limit))),
             ).fetchall()
             return [(int(row[0]), json.loads(row[1])) for row in rows]
+
+    def fading_tier(self, owner: str, run_id: str, agent_id: str,
+                    provider: str, model: str) -> dict | None:
+        """Read the source v2 hysteresis tier, owned and scoped by Agent/model."""
+        import hashlib
+
+        from .fading import is_fading_tier
+
+        key = hashlib.sha256((agent_id + '\x00' + provider + '\x00' + model).encode()).hexdigest()
+        with self.database.connect() as db:
+            row = db.execute('SELECT r.state,c.metadata FROM runs r '
+                             'JOIN conversations c ON c.id=r.conversation_id '
+                             'WHERE r.id=? AND c.owner=?', (run_id, owner)).fetchone()
+        if row is None:
+            raise KeyError('Generation not found or unauthorized')
+        state = json.loads(row['state'])
+        metadata = json.loads(row['metadata'])
+        for source in (state, metadata):
+            values = source.get('fadingTiers') if isinstance(source, dict) else None
+            if isinstance(values, dict) and key in values:
+                value = values[key]
+                return dict(value) if is_fading_tier(value) else None
+        return None
+
+    def record_fading_tier(self, owner: str, run_id: str, agent_id: str,
+                           provider: str, model: str, tier: dict) -> None:
+        """Save a bounded tier in the run and conversation in one transaction."""
+        import hashlib
+
+        from .fading import is_fading_tier
+
+        if not is_fading_tier(tier):
+            raise ValueError('Expected a valid source fading tier')
+        key = hashlib.sha256((agent_id + '\x00' + provider + '\x00' + model).encode()).hexdigest()
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT r.state,c.id AS conversation_id,c.metadata '
+                             'FROM runs r JOIN conversations c ON c.id=r.conversation_id '
+                             "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner)).fetchone()
+            if row is None:
+                raise KeyError('Generation not active or unauthorized')
+            run_state = json.loads(row['state'])
+            conversation = json.loads(row['metadata'])
+            for state in (run_state, conversation):
+                entries = state.get('fadingTiers')
+                entries = dict(entries) if isinstance(entries, dict) else {}
+                entries[key] = dict(tier)
+                if len(entries) > 32:
+                    for stale in list(entries)[:-32]:
+                        entries.pop(stale, None)
+                state['fadingTiers'] = entries
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(run_state), _now(), run_id))
+            db.execute('UPDATE conversations SET metadata=?,updated_at=? WHERE id=? AND owner=?',
+                       (_json(conversation), _now(), row['conversation_id'], owner))
+
+    def token_calibration(self, owner: str, run_id: str, provider: str, model: str):
+        """Read source-style calibration by owner, model and active run.
+
+        A new generation seeds from conversation metadata; a resumed
+        generation always prefers its own run state, preserving the last
+        confirmed token observation after controller restart.
+        """
+        import hashlib
+
+        from .context_calibration import TokenCalibration
+
+        key = hashlib.sha256((provider + '\x00' + model).encode()).hexdigest()
+        with self.database.connect() as db:
+            row = db.execute(
+                'SELECT r.state,c.metadata FROM runs r JOIN conversations c ON c.id=r.conversation_id '
+                'WHERE r.id=? AND c.owner=?', (run_id, owner),
+            ).fetchone()
+        if row is None:
+            raise KeyError('Generation not found or unauthorized')
+        state = json.loads(row['state'])
+        conversation = json.loads(row['metadata'])
+        for source in (state, conversation):
+            entries = source.get('tokenCalibrations') if isinstance(source, dict) else None
+            if isinstance(entries, dict) and key in entries:
+                return TokenCalibration.from_dict(entries[key])
+        return TokenCalibration()
+
+    def record_token_calibration(self, owner: str, run_id: str, provider: str, model: str,
+                                 calibration) -> None:
+        """Atomically persist confirmed provider calibration with the conversation."""
+        import hashlib
+
+        from .context_calibration import TokenCalibration
+
+        if not isinstance(calibration, TokenCalibration):
+            raise TypeError('A token calibration snapshot is required')
+        key = hashlib.sha256((provider + '\x00' + model).encode()).hexdigest()
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute(
+                'SELECT r.state,c.id AS conversation_id,c.metadata FROM runs r '
+                'JOIN conversations c ON c.id=r.conversation_id '
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError('Generation not active or unauthorized')
+            state = json.loads(row['state'])
+            metadata = json.loads(row['metadata'])
+            for record in (state, metadata):
+                entries = record.get('tokenCalibrations')
+                entries = dict(entries) if isinstance(entries, dict) else {}
+                entries[key] = calibration.to_dict()
+                if len(entries) > 32:
+                    for expired in list(entries)[:-32]:
+                        entries.pop(expired, None)
+                record['tokenCalibrations'] = entries
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(state), _now(), run_id))
+            db.execute('UPDATE conversations SET metadata=?,updated_at=? WHERE id=? AND owner=?',
+                       (_json(metadata), _now(), row['conversation_id'], owner))
+
+    def record_context_usage(self, owner: str, run_id: str, snapshot: dict) -> int:
+        """Commit a visible context snapshot to run state and the SSE replay log.
+
+        Like the upstream contextUsageSink, the last pre-invoke snapshot wins;
+        the same transaction ensures process recovery can replay what users saw.
+        """
+        event = {'event': 'on_context_usage', 'data': snapshot}
+        encoded = _json(event)
+        if len(encoded.encode('utf-8')) > 256 * 1024:
+            raise ValueError('Context usage event exceeds 256 KiB')
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError('Generation not active or unauthorized')
+            count = db.execute('SELECT count(*) FROM generation_events WHERE run_id=?',
+                               (run_id,)).fetchone()[0]
+            if count >= _EVENT_LIMIT:
+                raise ValueError('Generation event retention limit reached')
+            state = json.loads(row['state'])
+            state['contextUsage'] = snapshot
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(state), _now(), run_id))
+            event_row = db.execute('INSERT INTO generation_events(run_id,data) VALUES(?,?)',
+                                   (run_id, encoded))
+            return int(event_row.lastrowid)
+
+    def stage_summary(self, owner: str, run_id: str, summary_text: str, token_count: int,
+                      *, boundary: int = 0, manual: bool = False,
+                      retained_tail: list[dict] | None = None,
+                      covered_tool_call_ids: list[str] | None = None,
+                      covered_steer_ids: list[str] | None = None,
+                      visible_text_boundary: int | None = None,
+                      model_history_start: int | None = None) -> None:
+        """Atomic candidate checkpoint in the *existing run state*, no deletion.
+
+        The final assistant content and terminal run status commit together in
+        finish(). A crash before that commit leaves all original messages.
+        """
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            raise ValueError('A completed summary must contain text')
+        if token_count < 0:
+            raise ValueError('Invalid summary token count')
+        if visible_text_boundary is not None and (
+                type(visible_text_boundary) is not int or visible_text_boundary < 0):
+            raise ValueError('Invalid visible summary text boundary')
+        if model_history_start is not None and (
+                type(model_history_start) is not int or model_history_start < 0):
+            raise ValueError('Invalid post-compaction model-history boundary')
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id '
+                             "WHERE r.id=? AND c.owner=? AND r.status=\'running\'",
+                             (run_id, owner)).fetchone()
+            if row is None:
+                raise KeyError('Generation no longer active')
+            state = json.loads(row['state'])
+            previous = state.get('summaryCheckpoint') or {}
+            prior_ids = previous.get('coveredToolCallIds') if isinstance(previous, dict) else None
+            if covered_tool_call_ids is not None or isinstance(prior_ids, list):
+                covered_tool_call_ids = sorted({
+                    call_id for call_id in [*(prior_ids or []), *(covered_tool_call_ids or [])]
+                    if isinstance(call_id, str) and call_id
+                })
+            prior_steers = previous.get('coveredSteerIds') if isinstance(previous, dict) else None
+            if covered_steer_ids is not None or isinstance(prior_steers, list):
+                covered_steer_ids = sorted({
+                    ident for ident in [*(prior_steers or []), *(covered_steer_ids or [])]
+                    if isinstance(ident, str) and ident
+                })
+            state['summaryCheckpoint'] = {'type': 'summary', 'content': [{'type': 'text', 'text': summary_text}],
+                'boundary': {'messageIndex': boundary}, 'tokenCount': token_count,
+                **({'initiatedBy': 'user'} if manual else {}),
+                **({'retainedTail': retained_tail} if retained_tail is not None else {}),
+                **({'coveredToolCallIds': covered_tool_call_ids} if covered_tool_call_ids is not None else {}),
+                **({'coveredSteerIds': covered_steer_ids} if covered_steer_ids is not None else {}),
+                **({'visibleTextBoundary': visible_text_boundary} if visible_text_boundary is not None else {})}
+            if model_history_start is not None:
+                # The original user prompt may no longer exist in the live
+                # model history after compaction. Persist the replacement
+                # boundary atomically with the summary checkpoint.
+                state['modelHistoryStart'] = model_history_start
+                state['postCompactionHistoryStart'] = model_history_start
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?', (_json(state), _now(), run_id))
+
+    def compacted_model_history_boundary(self, owner: str, run_id: str) -> int | None:
+        with self.database.connect() as db:
+            row = db.execute('SELECT r.state FROM runs r JOIN conversations c '
+                             'ON c.id=r.conversation_id WHERE r.id=? AND c.owner=?',
+                             (run_id, owner)).fetchone()
+        if row is None:
+            raise KeyError('Generation not found')
+        value = json.loads(row['state']).get('postCompactionHistoryStart')
+        return value if type(value) is int and value >= 0 else None
+
+    def manual_compaction(self, owner: str, run_id: str) -> bool:
+        with self.database.connect() as db:
+            row = db.execute('SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id '
+                             'WHERE r.id=? AND c.owner=?', (run_id, owner)).fetchone()
+        return bool(row and json.loads(row['state']).get('manualCompaction'))
 
     def accumulated_text(self, owner: str, run_id: str) -> str:
         """Reassemble already-streamed deltas for a restarted owner-bound run.
@@ -851,9 +1214,13 @@ class GenerationStore:
                 value = content.get("text") if isinstance(content, dict) else None
                 if isinstance(value, str):
                     chunks.append(value)
+            elif event.get('event') == 'on_content_rewind':
+                preserved = (event.get('data') or {}).get('preserveText')
+                if isinstance(preserved, str):
+                    chunks = [preserved]
         return "".join(chunks)
 
-    def history(self, owner: str, conversation_id: str, max_messages: int = 50,
+    def history(self, owner: str, conversation_id: str, max_messages: int | None = None,
                 *, message_id: str | None = None) -> list[dict]:
         """Walk the conversation branch and replay exact saved model steps.
 
@@ -861,7 +1228,51 @@ class GenerationStore:
         server-only runs.state; UI `tool_call.output` is *never* model history.
         Earlier LibreChat-format rows use the source-format fallback.
         """
+        from .compaction import (
+            build_summary_carrier_text,
+            find_checkpoint_summary_part,
+            get_summary_part_text,
+        )
         from .message_dto import format_agent_messages
+
+        def legacy_steps(content, display_text, metadata):
+            """Backwards-compatible reconstruction for pre-canonical turns.
+
+            Their only durable tool results were in the old UI content parts.
+            New runs with modelSteps use exact canonical model history above.
+            """
+            if not isinstance(content, list):
+                return [{'role': 'assistant', 'content': display_text}]
+            tools = [part.get('tool_call') for part in content if isinstance(part, dict)
+                     and part.get('type') == 'tool_call' and isinstance(part.get('tool_call'), dict)]
+            pairs = [call for call in tools if isinstance(call.get('id'), str)
+                     and isinstance(call.get('name'), str) and 'output' in call]
+            text_chunks = [part['text'] for part in content if isinstance(part, dict)
+                           and part.get('type') == 'text' and isinstance(part.get('text'), str)]
+            thinking = [part.get('text') or part.get('thinking') for part in content
+                        if isinstance(part, dict) and part.get('type') in {'think', 'thinking', 'reasoning'}]
+            result = []
+            if pairs:
+                result.append({'role': 'assistant', 'content': None, 'tool_calls': [
+                    {'id': call['id'], 'type': 'function', 'function': {
+                        'name': call['name'], 'arguments': _json(call.get('args', {}))}}
+                    for call in pairs]})
+                result.extend({'role': 'tool', 'tool_call_id': call['id'],
+                               'content': str(call['output'])} for call in pairs)
+            nontext = [part for part in content if isinstance(part, dict)
+                       and part.get('type') in {'image', 'image_url', 'file'}]
+            if not pairs and nontext:
+                try:
+                    result.extend(format_agent_messages([{'role': 'assistant',
+                        'content': content, 'metadata': metadata}]))
+                except ValueError:
+                    result.append({'role': 'assistant', 'content': display_text})
+            elif text_chunks or not pairs:
+                message = {'role': 'assistant', 'content': ''.join(text_chunks) if text_chunks else display_text}
+                if thinking:
+                    message['reasoning_content'] = '\n'.join(str(chunk) for chunk in thinking if chunk)
+                result.append(message)
+            return result
 
         with self.database.connect() as db:
             if not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
@@ -887,23 +1298,124 @@ class GenerationStore:
                     metadata = json.loads(row["metadata"])
                     content = json.loads(row["content"])
                     if row["role"] == "assistant":
+                        summary = find_checkpoint_summary_part(content) if isinstance(content, list) else None
+                        if summary is not None:
+                            # Model context is cut at the most recent complete
+                            # compaction. Keep the original UI transcript but
+                            # never replay summarized tool output into the next
+                            # model request.
+                            prefix = {'role': 'system', 'content': build_summary_carrier_text(
+                                get_summary_part_text(summary))}
+                            recent = summary.get('retainedTail')
+                            recent = [message for message in recent if isinstance(message, dict)
+                                      and message.get('role') in {'user', 'assistant', 'tool'}] \
+                                if isinstance(recent, list) else []
+                            boundary = summary.get('visibleTextBoundary')
+                            text = row['text'] or ''
+                            if type(boundary) is int and boundary >= 0:
+                                text = text[boundary:]
+                            # This response may have a short unsummarized tail
+                            # after the saved text boundary.
+                            group = [prefix, *recent]
+                            previous = db.execute(
+                                "SELECT state FROM runs WHERE conversation_id=? "
+                                "AND json_extract(state,'$.responseMessageId')=? "
+                                "ORDER BY created_at DESC LIMIT 1",
+                                (conversation_id, row['id']),
+                            ).fetchone()
+                            state = json.loads(previous['state']) if previous else {}
+                            steps = state.get('modelSteps')
+                            consumed_text = 0
+                            if isinstance(steps, list):
+                                # Summary coverage is cumulative across
+                                # checkpoints. Only new canonical tool exchanges
+                                # belong after the summary, never the already
+                                # summarized or retained-tail exchanges.
+                                covered = set(summary.get('coveredToolCallIds') or [])
+                                retained_calls = {call.get('id') for message in recent
+                                    for call in (message.get('tool_calls') or []) if isinstance(call, dict)}
+                                retained_results = {message.get('tool_call_id') for message in recent
+                                                    if message.get('role') == 'tool'}
+                                covered_steers = set(summary.get('coveredSteerIds') or [])
+                                retained_steers = {message.get('steerId') for message in recent
+                                                   if message.get('role') == 'user'
+                                                   and message.get('source') == 'steer'}
+                                replayed_steers = set(retained_steers)
+                                new_calls: set[str] = set()
+                                # The saved visible text has the checkpointed
+                                # prefix removed. Match canonical assistant
+                                # segments against that suffix in stream order
+                                # instead of appending them after later steers.
+                                for message in steps:
+                                    if not isinstance(message, dict):
+                                        continue
+                                    role = message.get('role')
+                                    if role == 'user' and message.get('source') == 'steer':
+                                        ident = message.get('steerId')
+                                        if (isinstance(ident, str) and ident not in covered_steers
+                                                and ident not in replayed_steers):
+                                            group.append(message)
+                                            replayed_steers.add(ident)
+                                    elif role == 'assistant':
+                                        candidate = message.get('content')
+                                        visible = (isinstance(candidate, str) and bool(candidate)
+                                                   and text.startswith(candidate, consumed_text))
+                                        if isinstance(message.get('tool_calls'), list):
+                                            calls = [call for call in message['tool_calls']
+                                                     if isinstance(call, dict) and isinstance(call.get('id'), str)
+                                                     and call['id'] not in covered and call['id'] not in retained_calls]
+                                            if calls:
+                                                new_calls.update(call['id'] for call in calls)
+                                                group.append({**message,
+                                                              'content': candidate if visible else None,
+                                                              'tool_calls': calls})
+                                                if visible:
+                                                    consumed_text += len(candidate)
+                                        elif visible:
+                                            group.append(message)
+                                            consumed_text += len(candidate)
+                                    elif role == 'tool' and isinstance(message.get('tool_call_id'), str):
+                                        ident = message['tool_call_id']
+                                        if (ident not in covered and ident not in retained_results
+                                                and ident in (new_calls | retained_calls)):
+                                            group.append(message)
+                                            retained_results.add(ident)
+                            if consumed_text < len(text):
+                                group.append({'role': 'assistant', 'content': text[consumed_text:]})
+                            groups.append(group)
+                            break
                         previous = db.execute(
                             "SELECT state FROM runs WHERE conversation_id=? AND json_extract(state,'$.responseMessageId')=? "
                             "ORDER BY created_at DESC LIMIT 1", (conversation_id, row["id"]),
                         ).fetchone()
                         persisted = json.loads(previous["state"]) if previous else {}
-                        if "modelSteps" in persisted:
-                            # Empty is a legitimate run (e.g. a cancellation).
-                            groups.append(persisted["modelSteps"])
+                        if persisted.get('modelSteps') or (
+                                'modelSteps' in persisted and not row['text'] and not content):
+                            # A canonical run never reads preview-truncated UI
+                            # outputs as tool evidence. Empty cancelled runs
+                            # remain empty; old runs and empty tool-less stubs
+                            # still reconstruct from their display text.
+                            groups.append(persisted['modelSteps'])
                         else:
                             legacy = {"role": "assistant", "content": content if isinstance(content, list) else row["text"],
                                       "metadata": metadata}
                             try:
-                                legacy_steps = format_agent_messages([legacy])
+                                if (isinstance(content, list) and
+                                        any(isinstance(part, dict) and part.get('type') == 'tool_call'
+                                            for part in content)):
+                                    formatted_steps = legacy_steps(content, row['text'], metadata)
+                                else:
+                                    formatted_steps = format_agent_messages([legacy])
+                                # Source legacy DTO only carries the plain steer
+                                # string. On model replay retain quoted context
+                                # from the durable steer part without modifying
+                                # the upstream display-formatting contract.
                                 if isinstance(content, list):
                                     from .steering import merged_text
-                                    steers = iter(p for p in content if isinstance(p, dict) and p.get('type') == 'steer')
-                                    for step in legacy_steps:
+
+                                    steers = iter(part for part in content if isinstance(part, dict)
+                                                  and part.get('type') == 'steer')
+                                    for step in formatted_steps:
                                         if step.get('source') == 'steer':
                                             part = next(steers, None)
                                             if part is not None:
@@ -915,12 +1427,22 @@ class GenerationStore:
                                 # while history API originally exposed its text.
                                 # Keep the scalar-text contract when no media or
                                 # tool anchors exist, without losing rich blocks.
-                                for step in legacy_steps:
+                                for step in formatted_steps:
                                     parts = step.get("content")
                                     if (step.get("role") == "assistant" and isinstance(parts, list)
                                             and all(isinstance(p, dict) and p.get("type") == "text" for p in parts)):
                                         step["content"] = "".join(p.get("text", "") for p in parts)
-                                groups.append(legacy_steps)
+                                if isinstance(content, list):
+                                    reasoning = [part.get('text') or part.get('thinking') for part in content
+                                                 if isinstance(part, dict) and
+                                                 part.get('type') in {'think', 'thinking', 'reasoning'}]
+                                    if reasoning:
+                                        last_assistant = next((step for step in reversed(formatted_steps)
+                                                               if step.get('role') == 'assistant'), None)
+                                        if last_assistant is not None:
+                                            last_assistant['reasoning_content'] = '\n'.join(
+                                                str(chunk) for chunk in reasoning if chunk)
+                                groups.append(formatted_steps)
                             except ValueError:
                                 groups.append([{"role": "assistant", "content": row["text"]}])
                     else:
@@ -949,7 +1471,7 @@ class GenerationStore:
                             else:
                                 value += "\n\n" + note
                         groups.append([{"role": "user", "content": value}])
-                if len(groups) >= max(1, max_messages):
+                if max_messages is not None and len(groups) >= max(1, max_messages):
                     break
                 message_id = row["parent_id"]
         return [step for group in reversed(groups) for step in group]
@@ -1034,9 +1556,13 @@ class GenerationStore:
                     return False
             generation = self._run(row)
             now = _now()
+            run_state = json.loads(row['state'])
+            staged = run_state.get('summaryCheckpoint')
+            from .compaction import is_usable_summary_part, mark_compaction_outcome
+
             # Preserve source React tool-call parts in history and final SSE,
             # rather than erasing them when the assistant text is committed.
-            tool_parts = {}
+            tool_positions = {}
             content = []
             attachments = {}
             for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
@@ -1051,9 +1577,14 @@ class GenerationStore:
                 if kind == "on_run_step_completed":
                     result = data.get("result", {})
                     if isinstance(result.get("tool_call"), dict):
-                        tool_parts[result["id"]] = {"type": "tool_call", "tool_call": {
+                        part = {"type": "tool_call", "tool_call": {
                             **result["tool_call"], "stepId": result["id"],
                         }}
+                        if result['id'] in tool_positions:
+                            content[tool_positions[result['id']]] = part
+                        else:
+                            tool_positions[result['id']] = len(content)
+                            content.append(part)
                 elif kind == "on_message_delta":
                     delta = (data.get("delta") or {}).get("content") or {}
                     if delta.get("type") == "text" and isinstance(delta.get("text"), str) and delta["text"]:
@@ -1063,7 +1594,10 @@ class GenerationStore:
                             content.append({"type": "text", "text": delta["text"], "phase": "final_answer"})
                 elif kind == "on_steer_applied" and isinstance(data.get("part"), dict):
                     content.append(data["part"])
-            if not content and text:
+                elif kind == 'on_content_rewind':
+                    _rewind_uncheckpointed_text(content, data.get('preserveText', ''))
+            if text and not any(isinstance(part, dict) and part.get('type') == 'text'
+                                for part in content):
                 content.append({"type": "text", "text": text, "phase": "final_answer"})
             # The source ON_RUN_STEP_CLOSED event is the authoritative status
             # and duration even after reconnect; never infer a stop from the
@@ -1074,7 +1608,7 @@ class GenerationStore:
                 if value.get("event") != "on_run_step_closed":
                     continue
                 closed = value.get("data") or {}
-                part = tool_parts.get(closed.get("id"))
+                part = (content[tool_positions[closed["id"]]] if closed.get("id") in tool_positions else None)
                 if not part or closed.get("status") not in {"completed", "failed", "cancelled"}:
                     continue
                 tool = part["tool_call"]
@@ -1085,7 +1619,6 @@ class GenerationStore:
                     tool["runStepClosedAt"] = closed_at
                     if type(opened_at) in (int, float):
                         tool["runStepDurationMs"] = closed_at - opened_at
-            content += list(tool_parts.values())
             # LibreChat agents/client.js emits ContentTypes.ERROR as a content
             # part. A top-level final.error alone is ignored by finalHandler.
             # Persist the same part so the error survives history reload too.
@@ -1115,11 +1648,21 @@ class GenerationStore:
                     if key is not None:
                         attachment_positions[key] = len(attachments)
                     attachments.append(attachment)
+            if is_usable_summary_part(staged):
+                content.insert(0, dict(staged))
+            if run_state.get('manualCompaction'):
+                mark_compaction_outcome(content, aborted=False)
             from .tool_attachments import response_attachments, visible_response_attachments
             verified = response_attachments(db, owner, [generation.response_message_id])[
                 generation.response_message_id]
             attachments = visible_response_attachments(verified, attachments)
+            response_metadata = {"sender": "Assistant", "isCreatedByUser": False,
+                                 "unfinished": status != "complete",
+                                 **({"attachments": attachments} if attachments else {})}
+            if isinstance(run_state.get('contextUsage'), dict):
+                response_metadata['metadata'] = {'contextUsage': run_state['contextUsage']}
             response_message = {
+                **({'metadata': response_metadata['metadata']} if 'metadata' in response_metadata else {}),
                 **({"attachments": attachments} if attachments else {}),
                 "messageId": generation.response_message_id,
                 "conversationId": generation.conversation_id,
@@ -1136,9 +1679,7 @@ class GenerationStore:
                     "VALUES(?,?,?,?,?,?,?,?,?)",
                     (generation.response_message_id, generation.conversation_id, generation.user_message_id,
                      "assistant", text, _json(response_message["content"]),
-                     _json({"sender": "Assistant", "isCreatedByUser": False,
-                            "unfinished": status != "complete",
-                            **({"attachments": attachments} if attachments else {})}), now, now),
+                     _json(response_metadata), now, now),
                 )
             run_state = json.loads(row["state"])
             if model_steps is not None:

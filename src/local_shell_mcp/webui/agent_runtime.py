@@ -11,7 +11,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .providers import ModelThought, ModelToolCall, ProviderConfig
+from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
+from .semantic_index import SemanticSnapshot
 
 
 class RuntimeSafetyError(PermissionError):
@@ -30,6 +31,8 @@ class AgentContext:
     recursion_limit: int = 50
     tool_end: bool = False
     agent: dict | None = None
+    compaction_semantic_index: SemanticSnapshot | None = None
+    fading_tier: dict | None = None
 
 
 @dataclass
@@ -42,6 +45,7 @@ class AgentLoopState:
     tool_step_started: bool = False
     completed: bool = False
     graph_commands: list[dict] = field(default_factory=list)
+    provider_projection: list[dict] | None = None
 
 
 @dataclass
@@ -60,6 +64,10 @@ async def run_agent_loop(
     dispatch: Callable[[list[ModelToolCall], AgentLoopState], Awaitable[ToolBatchOutput]],
     on_text: Callable[[str], Awaitable[None]],
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
+    before_model: Callable[[AgentLoopState], Awaitable[None]] | None = None,
+    on_model_usage: Callable[[ModelUsage, AgentLoopState], Awaitable[None]] | None = None,
+    project_messages: Callable[[AgentLoopState], list[dict]] | None = None,
+    preflight_calls: Callable[[list[ModelToolCall], AgentLoopState], list[ModelToolCall]] | None = None,
     inject_controls: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
     should_preempt: Callable[[], bool] | None = None,
     on_boundary: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
@@ -87,20 +95,24 @@ async def run_agent_loop(
             state.pending_calls = []
             state.tool_step_started = False
             state.graph_commands = output.graph_commands
+            # Detached task controls can arrive while a tool is running. Apply
+            # them at the durable post-tool boundary before deciding whether
+            # end_after_tools terminates the child.
+            control_applied = await inject_controls(state, "tool") if inject_controls else False
             state.completed = bool(output.graph_commands) or (
-                output.next_context is None and context.tool_end and not injected
+                output.next_context is None and context.tool_end and not injected and not control_applied
             )
             if save_state is not None:
                 await save_state(state, [])
             if state.completed:
                 return state.messages
-            if inject_controls is not None:
-                await inject_controls(state, "tool")
             continue
         if inject_controls is not None:
             await inject_controls(state, "tool")
         if state.step >= state.context.recursion_limit:
             raise ValueError("Recursion limit reached without hitting a stop condition")
+        if before_model is not None:
+            await before_model(state)
         context = state.context
         state.step += 1
         state.model_turn += 1
@@ -119,14 +131,19 @@ async def run_agent_loop(
         calls: list[ModelToolCall] = []
         text_parts: list[str] = []
         reasoning: list[dict] = []
-        source = stream_tools(context.profile, state.messages, tools=context.tools,
+        projected = project_messages(state) if project_messages else state.messages
+        state.provider_projection = projected
+        source = stream_tools(context.profile, projected, tools=context.tools,
                               **sampling) if context.tools else \
-            stream_text(context.profile, state.messages, **sampling)
+            stream_text(context.profile, projected, **sampling)
         preempted = False
         try:
             async for item in source:
                 if isinstance(item, ModelToolCall):
                     calls.append(item)
+                elif isinstance(item, ModelUsage):
+                    if on_model_usage is not None:
+                        await on_model_usage(item, state)
                 elif isinstance(item, ModelThought):
                     if item.kind == 'thinking':
                         if reasoning and reasoning[-1].get('type') == 'thinking' and not reasoning[-1].get('signature'):
@@ -167,6 +184,9 @@ async def run_agent_loop(
                 await inject_controls(state, "preempt")
             continue
 
+        if calls and preflight_calls is not None:
+            # Reject protected tool arguments before the model turn is saved.
+            calls = preflight_calls(calls, state)
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if reasoning:
             message["reasoning"] = reasoning

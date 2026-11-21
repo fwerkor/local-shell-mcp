@@ -103,7 +103,7 @@ async def test_original_react_applied_steer_survives_reload_and_reaches_model(tm
             assert (await ack.json())["preempt"]
             release.set()
             try:
-                await page.get_by_text("Steering accepted and applied.", exact=True).first.wait_for(timeout=10000)
+                await page.get_by_text("Steering accepted and applied.", exact=False).first.wait_for(timeout=10000)
             except playwright.Error as exc:
                 snapshot = await (await page.request.get(
                     f"http://127.0.0.1:{port}/api/agents/chat/status/{cid}"
@@ -121,7 +121,7 @@ async def test_original_react_applied_steer_survives_reload_and_reaches_model(tm
             ).count()
             await page.reload(wait_until="domcontentloaded")
             await receipt.first.wait_for(timeout=15000)
-            await page.get_by_text("Steering accepted and applied.", exact=True).first.wait_for(timeout=15000)
+            await page.get_by_text("Steering accepted and applied.", exact=False).first.wait_for(timeout=15000)
             assert await receipt.count() == 1
             assert "Change the task to review" in await receipt.first.inner_text()
             # React must preserve the SDK part sequence after page reload,

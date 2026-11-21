@@ -1,0 +1,16 @@
+{
+  "librechat": {
+    "commit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+    "file": "packages/api/src/agents/compaction.ts",
+    "sha256": "a8ba0ef364731835c437f1b9feb6e4eeb3f92390f7d3d67fede8bf65255b5b50"
+  },
+  "agents": {
+    "commit": "c4ffb9b1b78421bf63eba3e56993017f922387f3",
+    "file": "src/summarization/shared.ts",
+    "sha256": "567a7a5d497acda8390b2f48f03869039434bfc13ac0ae3ca6648abfbd011d1c"
+  },
+  "compiled": {
+    "compaction_reference.cjs": "e1e0f108dc248817f1daf60ed873f802d2944f2afda780861b319073b8f98156",
+    "summary_shared_reference.cjs": "15e76951bce7a5ae5901167bef7383ecd4576d2b7f0b35d1e2f13085d3a3ff95"
+  }
+}

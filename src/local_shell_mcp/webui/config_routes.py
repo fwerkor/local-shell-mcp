@@ -31,7 +31,7 @@ def _endpoint_models() -> dict[str, list[str]]:
     return available
 
 
-def _endpoint_info() -> dict:
+def _endpoint_info(*, memory_available: bool = False) -> dict:
     from .provider_profiles import all_profiles
 
     configs = _endpoint_models()
@@ -40,7 +40,7 @@ def _endpoint_info() -> dict:
             "order": 0, "type": "agents", "name": "Agents",
             "modelDisplayLabel": "Agent", "allowedProviders": list(configs),
             "maxSubagents": 10,
-            "capabilities": ["tools", "subagents", "chain", "ask_user_question", "end_after_tools"],
+            "capabilities": ["tools", "subagents", "chain", "ask_user_question", "end_after_tools", *(["memory"] if memory_available else [])],
             "availableTools": [],
         },
     }
@@ -106,6 +106,8 @@ async def startup_config(request: Request):
         _owner(request)
     except HTTPException:
         return JSONResponse(settings)
+    from .memory import memory_enabled
+    has_memory = memory_enabled(_repo(), _owner(request))
     settings.update({
         "interface": {
             "modelSelect": True,
@@ -118,8 +120,8 @@ async def startup_config(request: Request):
             "mcpServers": {"use": True, "create": True, "share": False, "public": False},
             "webSearch": False,
             "fileSearch": False,
-            "contextUsage": False,
-            "memories": False,
+            "contextUsage": True,
+            "memories": has_memory,
             "marketplace": {"use": False},
             "peoplePicker": {"users": False, "groups": False, "roles": False},
             "remoteAgents": {"use": False},
@@ -131,8 +133,10 @@ async def startup_config(request: Request):
 
 
 async def endpoint_configs(request: Request):
-    _owner(request)
-    return JSONResponse(_endpoint_info())
+    from .memory import memory_enabled
+
+    owner = _owner(request)
+    return JSONResponse(_endpoint_info(memory_available=memory_enabled(_repo(), owner, tools=True)))
 
 
 async def models(request: Request):

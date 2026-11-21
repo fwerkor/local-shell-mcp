@@ -41,6 +41,7 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
         alice = {"x-test-owner": "alice"}
         startup = (await client.get("/api/config", headers=alice)).json()
         assert startup["interface"]["agents"]["use"] is True
+        assert startup["interface"]["contextUsage"] is True
         endpoints = (await client.get("/api/endpoints", headers=alice)).json()
         assert endpoints["agents"]["type"] == "agents"
         assert "openAI" in endpoints
