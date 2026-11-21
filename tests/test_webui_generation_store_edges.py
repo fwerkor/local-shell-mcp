@@ -174,7 +174,10 @@ def test_oauth_dispatch_requires_original_stage_and_durable_completion_proof(cur
     store.append('alice', job.run_id, {'event': 'on_run_step_completed', 'data': {'result': {
         'tool_call': {'id': 'call-1', 'name': 'mcp_tool_call'},
     }}})
-    store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
+    # The pinned pre-Memory OAuth state machine already durably recorded
+    # completion above. Replaying 'completed' is forbidden here.
+    with pytest.raises(PermissionError, match='dispatch record'):
+        store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
     store.oauth_dispatch('alice', job.run_id, 'call-1', 'cleared')
     with db.connect() as sql:
         state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
