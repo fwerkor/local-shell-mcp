@@ -789,43 +789,6 @@ async def test_concurrent_child_thread_continuations_return_structured_busy_reje
 
 
 @pytest.mark.asyncio
-async def test_foreground_reattach_never_launches_a_task_owned_child_generation(
-        host_environment, monkeypatch):
-    from local_shell_mcp.webui import generation_actor_lease, generation_routes
-
-    async def unused(*args, **kwargs):
-        yield 'not executed'
-
-    host, invocation = await start_task(host_environment, unused, start=False)
-
-    async def no_launch(_task_id):
-        return None
-
-    monkeypatch.setattr(host, '_ensure_active', no_launch)
-    task_id = json.loads(await host.start(invocation))['background_task_id']
-    task = host._get(task_id)
-    db, repo, store, child, parent, generation = host_environment
-    child_generation, _ = store.begin('local', {'text': 'detached prompt'}, child,
-                                      trusted_new_conversation_id=task['child_conversation_id'])
-    with db.connect() as sql:
-        sql.execute('UPDATE subagent_tasks SET child_run_id=? WHERE id=?',
-                    (child_generation.run_id, task_id))
-
-    monkeypatch.setattr(generation_routes, '_database', lambda: db)
-    monkeypatch.setattr(generation_actor_lease, 'active_run_ids', lambda _: set())
-
-    async def forbidden_start(*args, **kwargs):
-        raise AssertionError('Detached child must only resume through its task owner')
-
-    monkeypatch.setattr(generation_routes, '_start_task', forbidden_start)
-    # The forbidden request does not need browser authorization: it must
-    # return before entering the foreground resume path.
-    assert await generation_routes._reattach_running_actor(None, 'local', child_generation) is None
-    assert store.get('local', child_generation.run_id).status == 'running'
-    await shutdown_subagent_tasks()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize('task_status,expected_run_status', [
     ('completed', 'complete'), ('cancelled', 'aborted'), ('error', 'error'),
 ])
@@ -991,4 +954,41 @@ async def test_child_registration_crash_window_recovers_exact_parent_or_rejects_
         assert result['status'] == 'running'
         if task_id in _TASKS:
             await asyncio.wait_for(_TASKS[task_id], 5)
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_foreground_reattach_never_launches_a_task_owned_child_generation(
+        host_environment, monkeypatch):
+    from local_shell_mcp.webui import generation_actor_lease, generation_routes
+
+    async def unused(*args, **kwargs):
+        yield 'not executed'
+
+    host, invocation = await start_task(host_environment, unused, start=False)
+
+    async def no_launch(_task_id):
+        return None
+
+    monkeypatch.setattr(host, '_ensure_active', no_launch)
+    task_id = json.loads(await host.start(invocation))['background_task_id']
+    task = host._get(task_id)
+    db, repo, store, child, parent, generation = host_environment
+    child_generation, _ = store.begin('local', {'text': 'detached prompt'}, child,
+                                      trusted_new_conversation_id=task['child_conversation_id'])
+    with db.connect() as sql:
+        sql.execute('UPDATE subagent_tasks SET child_run_id=? WHERE id=?',
+                    (child_generation.run_id, task_id))
+
+    monkeypatch.setattr(generation_routes, '_database', lambda: db)
+    monkeypatch.setattr(generation_actor_lease, 'active_run_ids', lambda _: set())
+
+    async def forbidden_start(*args, **kwargs):
+        raise AssertionError('Detached child must only resume through its task owner')
+
+    monkeypatch.setattr(generation_routes, '_start_task', forbidden_start)
+    # The forbidden request does not need browser authorization: it must
+    # return before entering the foreground resume path.
+    assert await generation_routes._reattach_running_actor(None, 'local', child_generation) is None
+    assert store.get('local', child_generation.run_id).status == 'running'
     await shutdown_subagent_tasks()

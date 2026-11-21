@@ -18,6 +18,7 @@ from .agent_runtime import (
 )
 from .agents import AgentRepository
 from .approval_runtime import (
+    ApprovalBatch,
     approval_policy_decision,
     ask_user_approval_policy,
     build_approval_payload,
@@ -49,7 +50,7 @@ class AgentRunner:
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
                  on_injected=None, wakeup_lease=None, event_delivery_lease=None,
-                 actor_lease=None, recovery_steers=False):
+                 actor_lease=None, recovery_steers=False, on_tool_completed=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -68,6 +69,7 @@ class AgentRunner:
         self.event_delivery_lease = event_delivery_lease
         self.actor_lease = actor_lease
         self.recovery_steers = recovery_steers
+        self.on_tool_completed = on_tool_completed
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
@@ -334,6 +336,9 @@ class AgentRunner:
 
         if is_action_tool(call.name) and executed:
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
+        callback = getattr(self, "on_tool_completed", None)
+        if callback is not None:
+            await callback(call)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
@@ -638,6 +643,56 @@ class AgentRunner:
             raise RuntimeSafetyError("Handoff commands require an active StateGraph node")
         return ToolBatchOutput(messages, graph_commands=combined)
 
+    @staticmethod
+    def _steer_message(item):
+        content = merged_text(item)
+        if item.get("files"):
+            content += "\n\nController attachments (use authorized LSM file tools): " + json.dumps(
+                item["files"], ensure_ascii=False,
+            )
+        return {"role": "user", "content": content, "source": "steer",
+                "files": item.get("files") or [], "quotes": item.get("quotes") or [],
+                **({'steerId': item['steerId'], 'id': 'steer:' + item['steerId']}
+                   if isinstance(item.get('steerId'), str) else {})}
+
+    def _reconcile_drained_steers(self, state):
+        """Recover durable applied steers not yet included in a model checkpoint.
+
+        drain() records an applied receipt before the graph snapshot. A crash
+        in that window must not silently lose the accepted user instruction.
+        Match stable steer identities, never the text of older user turns.
+        If the interrupted checkpoint ends in pending tool calls, queue
+        recovered steers until those tool results have been appended.
+        """
+        if self.namespace:
+            return
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'",
+                (self.generation.run_id, self.owner),
+            ).fetchone()
+        if row is None:
+            return
+        parts = json.loads(row["state"]).get("steerParts") or []
+        checkpoint_ids = {m.get('steerId') for m in state.messages
+                          if isinstance(m, dict) and m.get('source') == 'steer'
+                          and isinstance(m.get('steerId'), str)}
+        missing = []
+        for part in parts:
+            if (not isinstance(part, dict) or not isinstance(part.get('steer'), str)
+                    or not isinstance(part.get('steerId'), str)):
+                continue
+            if part['steerId'] not in checkpoint_ids:
+                missing.append(self._steer_message(part))
+                checkpoint_ids.add(part['steerId'])
+        if state.pending_calls:
+            self._pending_recovered_steers = missing
+        else:
+            state.messages.extend(missing)
+            if missing:
+                state.completed = False
+
     async def run(self, history, *, recursion_limit=None):
         from .graph_topology import admit_agent_graph
 
@@ -678,6 +733,9 @@ class AgentRunner:
         # never create a second public steer part.
         is_foreground = (not self.namespace or
                          (self.graph_node and self.namespace.startswith("/graph:")))
+        self._pending_recovered_steers = []
+        if is_foreground and not self.recovery_steers:
+            self._reconcile_drained_steers(state)
         if is_foreground and self.recovery_steers:
             existing_steers = {message.get("steerId") for message in state.messages
                                if isinstance(message, dict)}
@@ -697,6 +755,26 @@ class AgentRunner:
         if review and review.get("namespace", "") == self.namespace:
             self.resume_namespace = self.namespace
             self.approved_batch = self.store.approved_batch(self.owner, self.generation.run_id)
+        if self.approved_batch is not None and self.resume_namespace == self.namespace:
+            pending_ids = {call.call_id for call in state.pending_calls}
+            remaining = tuple(entry for entry in self.approved_batch.entries
+                              if entry.call_id in pending_ids)
+            if not remaining:
+                # The persisted checkpoint already passed ToolNode and model
+                # execution resumed. Retiring the proof prevents a subsequent
+                # restart from re-running tools that are no longer pending.
+                completed_ids = {m.get('tool_call_id') for m in state.messages
+                                 if isinstance(m, dict) and m.get('role') == 'tool'}
+                expected_ids = {entry.call_id for entry in self.approved_batch.entries}
+                if not expected_ids.issubset(completed_ids):
+                    raise RuntimeSafetyError('Approved tool checkpoint is missing persisted outcomes')
+                if review:
+                    self.store.complete_approval_batch(self.owner, self.generation.run_id,
+                                                       review['actionId'], state.messages, self.partial_text)
+                self.approved_batch = None
+                review = None
+            else:
+                self.approved_batch = ApprovalBatch(remaining)
         if self.approved_batch is not None and self.resume_namespace == self.namespace:
             # LibreChat ToolNode approval can precede a browser OAuth login.
             # Resolve all Action credentials before executing *any* reviewed
@@ -755,11 +833,15 @@ class AgentRunner:
             # BEGIN IMMEDIATE drain elects one consumer in parallel fan-out.
             if self.namespace and not (self.graph_node and self.namespace.startswith("/graph:")):
                 return False
+            recovered = self._pending_recovered_steers if boundary == "post_tools" else []
+            if recovered:
+                self._pending_recovered_steers = []
             applied = self.steers.drain(self.owner, self.generation.run_id, boundary=boundary,
                                         actor_lease=self.actor_lease,
                                         recipient_namespace=self.namespace)
-            if applied and self.on_injected is not None:
+            if (recovered or applied) and self.on_injected is not None:
                 await self.on_injected()
+            current.messages.extend(recovered)
             for item in applied:
                 # The graph checkpoint contains only durable owned references.
                 # Encode actual media per provider request, never persist base64.
@@ -767,7 +849,7 @@ class AgentRunner:
                                          "source": "steer", "steerId": item["steerId"],
                                          "id": "steer:" + item["steerId"],
                                          "files": item.get("files", [])})
-            return bool(applied)
+            return bool(recovered or applied)
 
         async def should_seal_stream():
             # Check even tool-only provider chunks: they produce no on_text

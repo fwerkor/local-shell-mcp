@@ -144,6 +144,27 @@ class AttachmentDeletionStore:
                 + placeholders + ")", ids,
             ).fetchall()
             shared.update(row["file_id"] for row in rows if row["file_id"])
+        ids = sorted(requested - shared)
+        if ids:
+            # Steer uploads are referenced in the run's durable queue and
+            # subsequently in steerParts / leftover receipts. A resource
+            # unlink must not delete the physical blob while that reference
+            # remains in the conversation; the same BEGIN IMMEDIATE fence
+            # serializes steer enqueue/drain with deletion.
+            placeholders = ','.join('?' for _ in ids)
+            for path in ('$.steering.queue', '$.steerParts', '$.steering.leftovers'):
+                rows = db.execute(
+                    "SELECT DISTINCT json_extract(f.value,'$.file_id') AS file_id "
+                    "FROM runs r JOIN json_each(r.state,?) AS item "
+                    "JOIN json_each(item.value,'$.files') AS f "
+                    "WHERE json_extract(f.value,'$.file_id') IN (" + placeholders + ")",
+                    (path, *ids),
+                ).fetchall()
+                shared.update(row['file_id'] for row in rows if row['file_id'])
+                ids = sorted(requested - shared)
+                if not ids:
+                    break
+                placeholders = ','.join('?' for _ in ids)
         return shared
 
     @staticmethod

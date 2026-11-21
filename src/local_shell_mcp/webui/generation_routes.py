@@ -149,7 +149,23 @@ async def _run_model(
     params = parameters or {}
     step_id = "step_" + generation.run_id
     step_index = 0
+    needs_post_tool_step = False
     now_ms = int(time.time() * 1000)
+    if resume_history is not None:
+        # A human continuation must append into the last text step, which may
+        # have been advanced past a STEER part before suspension.
+        with _database().connect() as db:
+            prior = db.execute(
+                "SELECT data FROM generation_events WHERE run_id=? "
+                "AND json_extract(data,'$.event')='on_run_step' ORDER BY seq DESC LIMIT 1",
+                (generation.run_id,),
+            ).fetchone()
+        if prior:
+            saved = json.loads(prior['data']).get('data') or {}
+            if saved.get('type') == 'message_creation' and isinstance(saved.get('id'), str):
+                step_id = saved['id']
+                step_index = saved.get('index', 0)
+                now_ms = saved.get('created_at', now_ms)
 
     def check_wakeup_lease():
         if actor_lease is not None:
@@ -191,9 +207,13 @@ async def _run_model(
             }, actor_lease=actor_lease)
 
         async def append_text(chunk):
+            nonlocal needs_post_tool_step
             check_wakeup_lease()
             if not chunk:
                 return
+            if needs_post_tool_step:
+                needs_post_tool_step = False
+                await _open_followup_step('after_tool')
             text_parts.append(chunk)
             repo.append(owner, generation.run_id, {
                 "event": "on_message_delta", "data": {
@@ -203,9 +223,14 @@ async def _run_model(
                 },
             }, actor_lease=actor_lease)
 
-        async def on_injected():
-            nonlocal step_id, step_index, now_ms
+        async def _open_followup_step(reason):
+            nonlocal step_id, step_index, now_ms, needs_post_tool_step
             check_wakeup_lease()
+            needs_post_tool_step = False
+            # Upstream reserves an absolute content slot per message_creation.
+            # Once a STEER part occupies the next slot, subsequent provider
+            # text must use a *new* runStep index or useStepHandler appends it
+            # into the old text block before the visible steer.
             closed_at = int(time.time() * 1000)
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step_closed", "data": {
@@ -216,7 +241,7 @@ async def _run_model(
             }, actor_lease=actor_lease)
             snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
             step_index = len(snapshot["aggregatedContent"])
-            step_id = f"step_{generation.run_id}_after_steer_{step_index}"
+            step_id = f"step_{generation.run_id}_{reason}_{step_index}"
             now_ms = closed_at
             repo.append(owner, generation.run_id, {
                 "event": "on_run_step", "data": {
@@ -230,6 +255,16 @@ async def _run_model(
                 },
             }, actor_lease=actor_lease)
 
+        async def on_injected():
+            await _open_followup_step('after_steer')
+
+        async def on_tool_completed(_call):
+            nonlocal needs_post_tool_step
+            # The Controller's tool-completion event is already durable. Only
+            # the *next provider text* opens another text slot, avoiding empty
+            # message steps on tool-only turns and keeping React indices exact.
+            needs_post_tool_step = True
+
         runner = AgentRunner(owner, generation, _database(), repo,
                              scopes=granted_scopes, grant_expires=grant_expires,
                              stream_tools=stream_model_with_tools, stream_text=stream_model,
@@ -237,7 +272,8 @@ async def _run_model(
                              parameters=params, ask_user_enabled=ask_user_enabled,
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
-approved_batch=approved_batch, on_injected=on_injected,
+                             approved_batch=approved_batch, on_injected=on_injected,
+                             on_tool_completed=on_tool_completed,
                              wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
                              actor_lease=actor_lease, recovery_steers=recovery_steers)
         # Only the first entry determines this run's prefix. After human
@@ -325,7 +361,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       wakeup_lease: tuple[str, str] | None = None,
                       event_delivery_lease: tuple[str, str] | None = None,
                       recovery_steers: bool = False,
-                      oauth_claim: tuple[str, str, int, bool] | None = None) -> bool:
+                      oauth_claim: tuple[str, str, int, bool] | None = None,
+                      checkpoint_text: str | None = None) -> bool:
     from .generation_actor_lease import ActorLease
 
     previous = _TASKS.get(generation.run_id)
@@ -349,6 +386,13 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
         actor_lease = ActorLease.claim(_database(), owner, generation.run_id)
         if actor_lease is None:
             return False
+        if checkpoint_text is not None:
+            try:
+                _generation_store().rewind_running_to_checkpoint(
+                    owner, generation.run_id, checkpoint_text, actor_lease=actor_lease)
+            except Exception:
+                actor_lease.release()
+                raise
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
                        instructions=agent_instructions(agent, profile.provider, artifacts_mode),
@@ -590,6 +634,33 @@ async def _events(owner: str, generation: Generation, after: int = 0,
             "sync": True, "resumeState": snapshot, "pendingEvents": [],
             "generationProtocolVersion": generation.protocol_version,
         }, ensure_ascii=False, separators=(",", ":")) + "\n\n").encode()
+        # The React resumeState projection restores text/tool cards, while
+        # attachmentHandler consumes independent SSE attachment events. A
+        # disconnected browser has none of these attachments in memory.
+        # Reproject owner-bound attachments at the captured watermark before
+        # live replay; leave the sequence cursor unchanged to avoid rollback.
+        cursor = 0
+        while cursor < watermark:
+            batch = store.events(owner, generation.run_id, cursor)
+            if not batch:
+                break
+            for seq, item in batch:
+                if seq > watermark:
+                    break
+                if item.get('event') == 'attachment' and isinstance(item.get('data'), dict):
+                    yield ('data: ' + json.dumps(item, ensure_ascii=False,
+                           separators=(',', ':')) + '\n\n').encode()
+                cursor = seq
+            if cursor >= watermark:
+                break
+        # The sync snapshot does not signal terminal completion to React.
+        # Re-send a final event already included in the cursor watermark.
+        if watermark > after:
+            finished = store.events(owner, generation.run_id, watermark - 1, limit=1)
+            if finished and finished[0][1].get("final"):
+                seq, value = finished[0]
+                yield (f"id: {seq}\ndata: " + json.dumps(value, ensure_ascii=False,
+                      separators=(",", ":")) + "\n\n").encode()
     last_heartbeat = time.monotonic()
     while True:
         results = store.events(owner, generation.run_id, last)
@@ -655,9 +726,16 @@ async def generation_status(request: Request):
     store = _generation_store()
     pending = store.client_pending_action(store.pending_action(owner, generation.run_id))
     resume_state, _ = store.resume_snapshot(owner, generation.run_id)
+    from .steering import _public
+
+    with _database().connect() as db:
+        row = db.execute("SELECT state FROM runs WHERE id=?", (generation.run_id,)).fetchone()
+    run_state = json.loads(row["state"]) if row else {}
+    leftovers = (run_state.get("steering") or {}).get("leftovers") or []
     return JSONResponse({
         "active": active,
         "status": generation.status,
+        **({"unrecoveredSteers": [_public(item) for item in leftovers]} if leftovers else {}),
         **({"pendingAction": pending} if pending is not None else {}),
         "resumeState": resume_state,
         "aggregatedContent": resume_state["aggregatedContent"],
@@ -826,6 +904,9 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     agent = AgentRepository(_database()).get(owner, row["agent_id"]) if row["agent_id"] else None
     if row["agent_id"] and agent is None:
         raise HTTPException(404, detail="Agent no longer available")
+    checkpoint_text = checkpoint["checkpoint"]["channel_values"].get("partial_text") if checkpoint else None
+    if checkpoint_text is not None and not isinstance(checkpoint_text, str):
+        raise HTTPException(409, detail="Invalid recoverable text checkpoint")
     await _start_task(
         owner, generation, profile, agent,
         native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
@@ -833,9 +914,11 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
         ask_user_enabled=bool(state.get("askUserEnabled")),
         mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
         resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
-        partial_text=_generation_store().accumulated_text(owner, generation.run_id),
+        partial_text=(checkpoint_text if checkpoint_text is not None
+                      else _generation_store().accumulated_text(owner, generation.run_id)),
         granted_scopes=frozenset(scopes), grant_expires=expiry,
         recovery_steers=True,
+        checkpoint_text=checkpoint_text,
     )
 
 
@@ -910,8 +993,23 @@ async def resume_generation(request: Request):
             payload["model"] != state["model"]):
             raise HTTPException(409, detail="Model identity mismatch")
         paused_task = _TASKS.get(generation.run_id)
+        if claim is not None and paused_task is not None and not paused_task.done():
+            # A retry after an accepted human decision is an acknowledgment,
+            # not a wait on a potentially long-running model continuation.
+            submission = ({"decisions": payload.get("decisions")}
+                          if pending.get("payload", {}).get("type") == "tool_approval"
+                          else {key: payload[key] for key in ("answer", "answers") if key in payload})
+            if json.dumps(claim.get("submission"), sort_keys=True, ensure_ascii=False) != \
+                    json.dumps(submission, sort_keys=True, ensure_ascii=False):
+                raise HTTPException(409, detail="Conflicting human action retry")
+            return JSONResponse(_generation_body(generation, status="resumed", resumed=True,
+                                                 protocol_version=protocol),
+                                headers=_generator_headers(protocol))
         if paused_task and not paused_task.done():
-            await asyncio.wait_for(asyncio.shield(paused_task), timeout=5)
+            try:
+                await asyncio.wait_for(asyncio.shield(paused_task), timeout=5)
+            except TimeoutError as exc:
+                raise HTTPException(409, detail="Previous generation is still settling") from exc
         approval = pending.get("payload", {}).get("type") == "tool_approval"
         approved_batch = None
         resume_namespace = pending.get("namespace", "")

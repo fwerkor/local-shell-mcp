@@ -542,6 +542,12 @@ class SQLiteSubagentTaskHost:
                 subagent_depth=options.get("remaining_depth", 0),
             )
             initial = json.loads(row["initial_messages"])
+            if not agent.get("edges"):
+                from .attachments import with_agent_context
+
+                # Match the foreground child path: reference documents belong
+                # in the model input even if the detached child has no file tools.
+                initial = with_agent_context(self.db, self.owner, agent, initial)
             result = await asyncio.wait_for(runner.run(
                 initial, recursion_limit=options.get("recursion_limit")
             ), timeout=_TIMEOUT_SECONDS)

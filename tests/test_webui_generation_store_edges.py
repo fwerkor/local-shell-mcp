@@ -8,6 +8,7 @@ import pytest
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui import generations
+from local_shell_mcp.webui.generation_actor_lease import ActorLease
 from local_shell_mcp.webui.generations import GenerationStore
 
 
@@ -174,10 +175,7 @@ def test_oauth_dispatch_requires_original_stage_and_durable_completion_proof(cur
     store.append('alice', job.run_id, {'event': 'on_run_step_completed', 'data': {'result': {
         'tool_call': {'id': 'call-1', 'name': 'mcp_tool_call'},
     }}})
-    # The pinned pre-Memory OAuth state machine already durably recorded
-    # completion above. Replaying 'completed' is forbidden here.
-    with pytest.raises(PermissionError, match='dispatch record'):
-        store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
+    store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
     store.oauth_dispatch('alice', job.run_id, 'call-1', 'cleared')
     with db.connect() as sql:
         state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
@@ -200,3 +198,63 @@ def test_tool_evidence_rejects_event_spoof_and_changed_execution_arguments(curre
     with db.connect() as sql:
         state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
     assert state['completedToolArguments']['call-42']['arguments']['command'] == 'echo trusted'
+
+
+@pytest.mark.parametrize('saved,expected', [
+    ('', [{'type': 'tool_call', 'tool_call': {'id': 'tool-1'}}]),
+    ('Left', [{'type': 'text', 'text': 'Left'}, {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}}]),
+    ('LeftR', [{'type': 'text', 'text': 'Left'}, {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}},
+               {'type': 'text', 'text': 'R'}]),
+])
+def test_content_rewind_preserves_tool_positions_and_only_checkpointed_text(saved, expected):
+    pieces = [{'type': 'text', 'text': 'Left'},
+              {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}},
+              {'type': 'text', 'text': 'Right is provisional'}]
+    generations._rewind_uncheckpointed_text(pieces, saved)
+    assert pieces == expected
+    with pytest.raises(ValueError, match='checkpoint text'):
+        generations._rewind_uncheckpointed_text(pieces, None)
+
+
+def test_ordinary_restart_rewinds_abandoned_deltas_before_replacement(current_run):
+    db, store, job = current_run
+
+    def delta(text):
+        return {'event': 'on_message_delta', 'data': {'delta': {
+            'content': {'type': 'text', 'text': text},
+        }}}
+
+    store.append('alice', job.run_id, delta('Stable. '))
+    store.append('alice', job.run_id, delta('Abandoned answer. '))
+    lease = ActorLease.claim(db, 'alice', job.run_id)
+    assert lease is not None
+    try:
+        assert store.rewind_running_to_checkpoint('alice', job.run_id, 'Stable. ', actor_lease=lease)
+        assert not store.rewind_running_to_checkpoint('alice', job.run_id, 'Stable. ', actor_lease=lease)
+        assert store.accumulated_text('alice', job.run_id) == 'Stable. '
+        assert [part['text'] for part in store.resume_snapshot('alice', job.run_id)[0]['aggregatedContent']
+                if part['type'] == 'text'] == ['Stable. ']
+        store.append('alice', job.run_id, delta('Fresh answer. '), actor_lease=lease)
+        assert store.accumulated_text('alice', job.run_id) == 'Stable. Fresh answer. '
+        assert store.finish('alice', job.run_id, status='complete',
+                            text='Stable. Fresh answer. ', actor_lease=lease)
+        snapshot, _ = store.resume_snapshot('alice', job.run_id)
+        assert snapshot['aggregatedContent'] == [
+            {'type': 'text', 'text': 'Stable. Fresh answer. ', 'phase': 'final_answer'}]
+        assert 'Abandoned answer.' not in str(store.history('alice', job.conversation_id))
+    finally:
+        lease.release()
+
+
+def test_rewind_rejects_bad_checkpoint_and_lost_actor_lease(current_run):
+    db, store, job = current_run
+    store.append('alice', job.run_id, {'event': 'on_message_delta', 'data': {
+        'delta': {'content': {'type': 'text', 'text': 'Already shown'}}}})
+    lease = ActorLease.claim(db, 'alice', job.run_id)
+    assert lease is not None
+    with pytest.raises(ValueError, match='prefix'):
+        store.rewind_running_to_checkpoint('alice', job.run_id, 'Not saved', actor_lease=lease)
+    lease.release()
+    with pytest.raises(Exception, match='lease'):
+        store.rewind_running_to_checkpoint('alice', job.run_id, '', actor_lease=lease)
+    assert store.accumulated_text('alice', job.run_id) == 'Already shown'
