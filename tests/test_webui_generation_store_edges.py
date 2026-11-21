@@ -174,10 +174,9 @@ def test_oauth_dispatch_requires_original_stage_and_durable_completion_proof(cur
     store.append('alice', job.run_id, {'event': 'on_run_step_completed', 'data': {'result': {
         'tool_call': {'id': 'call-1', 'name': 'mcp_tool_call'},
     }}})
-    # The pinned pre-Memory OAuth state machine already durably recorded
-    # completion above. Replaying 'completed' is forbidden here.
-    with pytest.raises(PermissionError, match='dispatch record'):
-        store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
+    # A confirmed tool completion is durable evidence for an idempotent
+    # replay after process recovery, but never for a fresh dispatch.
+    store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
     store.oauth_dispatch('alice', job.run_id, 'call-1', 'cleared')
     with db.connect() as sql:
         state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
@@ -200,3 +199,19 @@ def test_tool_evidence_rejects_event_spoof_and_changed_execution_arguments(curre
     with db.connect() as sql:
         state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
     assert state['completedToolArguments']['call-42']['arguments']['command'] == 'echo trusted'
+
+
+@pytest.mark.parametrize('saved,expected', [
+    ('', [{'type': 'tool_call', 'tool_call': {'id': 'tool-1'}}]),
+    ('Left', [{'type': 'text', 'text': 'Left'}, {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}}]),
+    ('LeftR', [{'type': 'text', 'text': 'Left'}, {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}},
+               {'type': 'text', 'text': 'R'}]),
+])
+def test_content_rewind_preserves_tool_positions_and_only_checkpointed_text(saved, expected):
+    pieces = [{'type': 'text', 'text': 'Left'},
+              {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}},
+              {'type': 'text', 'text': 'Right is provisional'}]
+    generations._rewind_uncheckpointed_text(pieces, saved)
+    assert pieces == expected
+    with pytest.raises(ValueError, match='checkpoint text'):
+        generations._rewind_uncheckpointed_text(pieces, None)

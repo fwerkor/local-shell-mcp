@@ -56,15 +56,19 @@ def _shadcn_prompt(*, xml: bool) -> str:
           """
         blocks.append(_dedent(block))
     joined = "\n\n".join(blocks)
-    return _dedent(f"""
+    prompt = _dedent(f"""
     ## Additional Artifact Instructions for React Components: "application/vnd.react"
-    
+
     There are some prestyled components (primitives) available for use. Please use your best judgement to use any of these components if the app calls for one.
 
     Here are the components that are available, along with how to import them, and how to use them:
 
     {joined}
   """)
+    # The pinned dedent@1.7.0 tag preserves two spaces on this blank line.
+    # Python's generic dedent removes them, breaking exact source-template parity.
+    marker = '## Additional Artifact Instructions for React Components: "application/vnd.react"\n\n'
+    return prompt.replace(marker, marker[:-1] + '  \n', 1)
 
 
 def generate_artifacts_prompt(endpoint: str, mode: str | None) -> str | None:

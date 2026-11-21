@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import logging
@@ -263,7 +264,7 @@ class SQLiteSubagentTaskHost:
                     ).fetchone()
                     if busy:
                         return _json({"status": "rejected", "tool": "subagent", "message":
-                                      "This subagent thread is already running. Wait for its current task to finish."})
+                                      "This subagent thread is busy (already running). Wait for its current task to finish."})
                     prior_messages = json.loads(thread["messages"])
                 task_id = "subtask_" + secrets.token_hex(16)
                 reserved_child_id = str(uuid.uuid4())
@@ -415,21 +416,22 @@ class SQLiteSubagentTaskHost:
                     # Cancellation arrived after our pre-terminal registration
                     # check. Leave it pending for the next guarded admission.
                     return
-                db.execute("UPDATE subagent_tasks SET status='cancelled', error=?, updated_at=? "
-                           "WHERE id=?", ("Detached subagent task cancelled by its parent.", now, task_id))
+                reason = "Detached subagent task cancelled by its parent."
                 if row['child_run_id']:
                     GenerationStore(self.db).finish(self.owner, row['child_run_id'],
-                                                    status='aborted', _connection=db)
+                                                    status='aborted', error=reason, _connection=db)
+                db.execute("UPDATE subagent_tasks SET status='cancelled', error=?, updated_at=? "
+                           "WHERE id=?", (reason, now, task_id))
                 terminal = True
             elif row["grant_expires"] is not None and row["grant_expires"] <= time.time():
                 if not pre_expired:
                     return
-                db.execute("UPDATE subagent_tasks SET status='error', error=?,updated_at=? WHERE id=?",
-                           ("Authentication grant expired", now, task_id))
+                reason = "Authentication grant expired"
                 if row['child_run_id']:
                     GenerationStore(self.db).finish(self.owner, row['child_run_id'],
-                                                    status='error', error='Authentication grant expired',
-                                                    _connection=db)
+                                                    status='error', error=reason, _connection=db)
+                db.execute("UPDATE subagent_tasks SET status='error', error=?,updated_at=? WHERE id=?",
+                           (reason, now, task_id))
                 terminal = True
             else:
                 lease = _PROCESS_ID + ":" + secrets.token_hex(12)
@@ -542,10 +544,23 @@ class SQLiteSubagentTaskHost:
                 subagent_depth=options.get("remaining_depth", 0),
             )
             initial = json.loads(row["initial_messages"])
+            if not agent.get("edges"):
+                from .attachments import with_agent_context
+
+                # Match the foreground child path: reference documents belong
+                # in the model input even if the detached child has no file tools.
+                initial = with_agent_context(self.db, self.owner, agent, initial)
+            # AgentRunner mutates history in place; capture the invocation
+            # boundary before it appends tool calls and assistant replies.
+            invocation_input = copy.deepcopy(initial)
             result = await asyncio.wait_for(runner.run(
                 initial, recursion_limit=options.get("recursion_limit")
             ), timeout=_TIMEOUT_SECONDS)
-            final_text = _limited(filter_subagent_result(result), _MAX_RESULT)
+            # A continued thread carries previous assistant answers in its
+            # input history. Those must never become this invocation's result.
+            new_messages = (result[len(invocation_input):]
+                            if result[:len(invocation_input)] == invocation_input else result)
+            final_text = _limited(filter_subagent_result(new_messages), _MAX_RESULT)
             # For graph teams the tool result is deliberately only the designated
             # sink. Their whole thread transcript remains inside graph checkpoint.
             canonical = result
@@ -879,9 +894,20 @@ def active_child_generations(database: Any) -> set[str]:
     with database.connect() as db:
         rows = db.execute("SELECT child_run_id FROM subagent_tasks "
                           "WHERE status='running' AND child_run_id IS NOT NULL").fetchall()
+        # Generation.begin() commits the reserved conversation and its
+        # clientRequestId before the task's child_run_id update. Recover the
+        # orphan-window run by its durable reserved identity as well.
+        reserved = db.execute(
+            "SELECT r.id AS child_run_id FROM subagent_tasks t "
+            "JOIN conversations c ON c.id=t.child_conversation_id AND c.owner=t.owner "
+            "JOIN runs r ON r.conversation_id=c.id "
+            "WHERE t.status='running' AND r.status IN ('running','requires_action')"
+        ).fetchall()
         wakeup_runs = db.execute("SELECT run_id FROM subagent_wakeups "
                                  "WHERE status='dispatched' AND run_id IS NOT NULL").fetchall()
-    return {row["child_run_id"] for row in rows} | {row["run_id"] for row in wakeup_runs}
+    return ({row["child_run_id"] for row in rows} |
+            {row["child_run_id"] for row in reserved} |
+            {row["run_id"] for row in wakeup_runs})
 
 
 async def recover_subagent_tasks(database: Any, *, stream_tools: Callable, stream_text: Callable) -> int:

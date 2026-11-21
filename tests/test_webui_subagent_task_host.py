@@ -372,3 +372,53 @@ async def test_cancel_running_child_settles_without_claiming_unfinished_result(r
     assert claimed["status"] == "cancelled" and "cancelled" in claimed["error"]
     assert json.loads(await host.check({"background_task_id": task_id}))["status"] == "claimed"
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_same_background_thread_busy_and_reserved_child_survives_orphan_scan(runtime):
+    from local_shell_mcp.webui.subagent_task_host import active_child_generations
+    from local_shell_mcp.webui.subagents import build_subagent_configs, invoke_subagent
+
+    database, _, store, child, parent = runtime
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def model(profile, history, **kwargs):
+        if profile.model == 'child':
+            entered.set()
+            await release.wait()
+            yield 'child finished'
+        else:
+            yield 'parent finished'
+
+    runner, generation = make_runner(runtime, model)
+    host = SQLiteSubagentTaskHost(database, 'local', generation.conversation_id,
+                                  stream_tools=model, stream_text=model)
+    configs = build_subagent_configs('local', parent, database)
+    kw = {'execute_child': runner._child,
+          'start_background': lambda invocation, thread: host.start(invocation, thread_id=thread),
+          'owner': 'local', 'conversation_id': generation.conversation_id,
+          'parent_run_id': generation.run_id, 'database': database,
+          'scopes': frozenset(), 'grant_expires': None}
+    args = {'subagent_type': child['id'], 'description': 'Long-running work',
+            'run_in_background': True}
+    first = json.loads(await invoke_subagent(ModelToolCall('first-task', 'subagent', args), configs, **kw))
+    await asyncio.wait_for(entered.wait(), timeout=9)
+    second = json.loads(await invoke_subagent(ModelToolCall('second-task', 'subagent', {
+        **args, 'subagent_thread_id': first['subagent_thread_id'],
+    }), configs, **kw))
+    assert second['status'] == 'rejected' and 'busy' in second['message']
+    task = host._get(first['background_task_id'])
+    with database.connect() as sql:
+        # Reproduce a crash exactly after Generation.begin, before the task
+        # references its child_run_id. Orphan finalization must not kill it.
+        sql.execute('UPDATE subagent_tasks SET child_run_id=NULL WHERE id=?',
+                    (first['background_task_id'],))
+    active = active_child_generations(database)
+    assert task['child_run_id'] in active
+    assert store.recover_orphans(active | {generation.run_id}) == 0
+    with database.connect() as sql:
+        sql.execute('UPDATE subagent_tasks SET child_run_id=? WHERE id=?',
+                    (task['child_run_id'], first['background_task_id']))
+    release.set()
+    await poll_until(host, first['background_task_id'])
+    await shutdown_subagent_tasks()

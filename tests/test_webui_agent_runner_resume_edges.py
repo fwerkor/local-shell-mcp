@@ -72,7 +72,7 @@ async def test_durable_recovery_reuses_owned_completed_tool_result_without_invoc
     result=await obj.run([{'role':'user','content':'ignored on restore'}],recursion_limit=23)
     assert len(observed)==1
     assert obj.partial_text=='partial'
-    assert obj.cache and obj.active_config['configurable']['checkpoint_id']=='source-recovered-checkpoint' 
+    assert obj.cache and obj.active_config['configurable']['checkpoint_id']=='source-recovered-checkpoint'
     assert isinstance(result,list)
 
 
@@ -95,7 +95,12 @@ async def test_reviewed_tool_batch_recovery_uses_same_resumed_call_and_finalizes
         }},'pendingWrites':[],
     }
     monkeypatch.setattr(obj.store,'approved_review',lambda *args:{'namespace':'','actionId':'approval-id'})
-    monkeypatch.setattr(obj.store,'approved_batch',lambda *args:SimpleNamespace())
+    from local_shell_mcp.webui.approval_runtime import ApprovalBatch, ApprovalEntry
+    reviewed = ApprovalBatch((ApprovalEntry(
+        call_id=pending.call_id, name=pending.name,
+        arguments_json='{"action":"list"}', decision_json='{"type":"approve"}',
+    ),))
+    monkeypatch.setattr(obj.store, 'approved_batch', lambda *args: reviewed)
     completed=[]
     monkeypatch.setattr(obj.store,'complete_approval_batch',lambda *a,**kw:completed.append(True))
     invoked=[]

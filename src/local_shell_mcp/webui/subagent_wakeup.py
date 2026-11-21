@@ -254,7 +254,7 @@ def _input(db: Any, task: Any, anchor: str) -> str:
     # The existing GenerationStore enforces a 128 KiB UTF-8 prompt limit.
     # Bound the UTF-8 payload itself, not Python characters (CJK text can use
     # three bytes per code point); leave room for the orchestration snapshot.
-    raw = (task["result"] if status == "completed" else task["error"] or "")
+    raw = (task["result"] if status == "completed" else task["child_error"] or "")
     bounded = raw.encode("utf-8")[:48 * 1024].decode("utf-8", "ignore")
     return "\n".join([
         f"A detached subagent task has {status}. Continue the parent task using its durable result below.",
@@ -340,7 +340,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT w.*,t.status AS child_status,t.result_claimed,t.result_claim_key,"
-                "t.granted_scopes,t.grant_expires,t.thread_id,t.subagent_type,t.result,t.error,"
+                "t.granted_scopes,t.grant_expires,t.thread_id,t.subagent_type,t.result,t.error AS child_error,"
                 "t.id,t.child_conversation_id,t.child_run_id,t.parent_tool_call_id "
                 "FROM subagent_wakeups w JOIN subagent_tasks t ON t.id=w.task_id "
                 "WHERE w.task_id=? AND w.owner=t.owner AND w.parent_conversation_id=t.parent_conversation_id "

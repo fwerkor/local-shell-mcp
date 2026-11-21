@@ -193,6 +193,9 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             parameters=parent.initial_parameters,
             ask_user_enabled=foreground_member and ask_user_requested(member, {}),
             mcp_enabled=parent.mcp_enabled,
+            # LangGraph assigns a durable task UUID per node activation.
+            # Revisiting A after A -> B -> A must not load A's old terminal
+            # node checkpoint; a restart of this activation uses the same ID.
             namespace=parent.namespace + "/graph:" + agent_id + ":" + activation_id,
             child_configs=parent.child_configs, selected_tools=parent.selected_tools if agent_id == source_id else None,
             resume_history=parent.resume_history, resume_namespace=parent.resume_namespace,

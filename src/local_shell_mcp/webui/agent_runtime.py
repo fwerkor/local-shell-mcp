@@ -87,15 +87,17 @@ async def run_agent_loop(
             state.pending_calls = []
             state.tool_step_started = False
             state.graph_commands = output.graph_commands
+            # Detached task controls can arrive while a tool is running. Apply
+            # them at the durable post-tool boundary before deciding whether
+            # end_after_tools terminates the child.
+            control_applied = await inject_controls(state, "tool") if inject_controls else False
             state.completed = bool(output.graph_commands) or (
-                output.next_context is None and context.tool_end and not injected
+                output.next_context is None and context.tool_end and not injected and not control_applied
             )
             if save_state is not None:
                 await save_state(state, [])
             if state.completed:
                 return state.messages
-            if inject_controls is not None:
-                await inject_controls(state, "tool")
             continue
         if inject_controls is not None:
             await inject_controls(state, "tool")

@@ -285,3 +285,191 @@ async def test_steer_http_requires_current_machine_grants_and_agent_ownership(co
             "text": "Do something", "clientSteerId": "new-attempt",
         })
         assert denied.status_code == 403 and denied.json()["code"] == "FORBIDDEN"
+
+
+def test_applied_steer_is_replayed_after_crash_before_checkpoint_without_duplicates(context):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    generations, steering, job, _ = context
+    first = _enqueue(steering, job, 'recovery-1', 'Use the new direction')
+    second = _enqueue(steering, job, 'recovery-2', 'Use the new direction')
+    assert len(steering.drain('local', job.run_id, boundary='terminal')) == 2
+    assert first['steerId'] != second['steerId']
+    reopened = SQLiteDatabase(steering.database.root)
+    profile = ProviderConfig('openai', 'fake', 'https://example.invalid', '')
+
+    async def fake_stream(*args, **kwargs):
+        yield 'model response'
+
+    async def noop(_):
+        return None
+
+    runner = AgentRunner('local', job, reopened, GenerationStore(reopened),
+                         scopes=set(), grant_expires=None, stream_tools=fake_stream,
+                         stream_text=fake_stream, on_text=noop, profile=profile)
+    # The graph checkpoint predates drain(), while the durable run-state
+    # receipt already says applied. The instruction must still reach the model.
+    state = AgentLoopState(AgentContext(profile, []), [{'role': 'user', 'content': 'original'}])
+    runner._reconcile_drained_steers(state)
+    assert [m['content'] for m in state.messages if m.get('source') == 'steer'] == [
+        'Use the new direction', 'Use the new direction']
+    runner._reconcile_drained_steers(state)
+    assert len([m for m in state.messages if m.get('source') == 'steer']) == 2
+
+
+def test_steer_identity_recovery_does_not_consume_identical_prior_turn(context):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    generations, steering, job, _ = context
+    db = generations.database
+    ack = _enqueue(steering, job, 'new-receipt', 'Be concise')
+    assert len(steering.drain('local', job.run_id, boundary='terminal')) == 1
+    profile = ProviderConfig('openai', 'stub', 'https://example.invalid', '')
+    runner = AgentRunner('local', job, db, generations, scopes=set(), grant_expires=None,
+                         stream_tools=None, stream_text=None, on_text=None, profile=profile)
+    state = AgentLoopState(AgentContext(profile, []), [
+        {'role': 'user', 'content': 'Be concise', 'source': 'steer', 'steerId': 'older-run'},
+        {'role': 'user', 'content': 'Current query'},
+    ])
+    runner._reconcile_drained_steers(state)
+    assert [msg['steerId'] for msg in state.messages if msg.get('source') == 'steer'] == [
+        'older-run', ack['steerId']]
+    runner._reconcile_drained_steers(state)
+    assert len([msg for msg in state.messages if msg.get('steerId') == ack['steerId']]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('recovery_steers', [False, True])
+async def test_post_tool_crash_recovered_steer_follows_cached_tool_result(context, recovery_steers):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState, ToolBatchOutput
+    from local_shell_mcp.webui.providers import ModelToolCall
+
+    generations, steering, job, profile = context
+    db = generations.database
+    pending = ModelToolCall('call-pending', 'run_shell', {'command': 'echo done'})
+    original = [{'role': 'user', 'content': 'Run command'},
+                {'role': 'assistant', 'content': None, 'tool_calls': [
+                    {'id': 'call-pending', 'type': 'function',
+                     'function': {'name': 'run_shell', 'arguments': '{"command":"echo done"'}}]}]
+
+    async def unused(*args, **kwargs):
+        yield 'done'
+
+    async def noop(_):
+        return None
+
+    before = AgentRunner('local', job, db, generations, scopes=set(), grant_expires=None,
+                         stream_tools=unused, stream_text=unused, on_text=noop, profile=profile)
+    state = AgentLoopState(AgentContext(profile, []), original,
+                           step=2, pending_calls=[pending], tool_step_started=True)
+    before.saver.put(before.config, {
+        'v': 1, 'id': '00000000000000000001',
+        'channel_values': before._snapshot(state),
+        'channel_versions': {'messages': 2}, 'versions_seen': {},
+    }, {'source': 'loop', 'step': 2})
+    new = _enqueue(steering, job, 'crash-recovery', 'Change next reply')
+    assert steering.drain('local', job.run_id, boundary='post_tools')[0]['steerId'] == new['steerId']
+    presented = []
+
+    async def model(_profile, messages, **kwargs):
+        presented.extend(messages)
+        yield 'All finished.'
+
+    resumed = AgentRunner('local', job, db, generations, scopes=set(), grant_expires=None,
+                          stream_tools=model, stream_text=model, on_text=noop, profile=profile,
+                          recovery_steers=recovery_steers)
+
+    async def dispatch(_calls, _state):
+        return ToolBatchOutput([{'role': 'tool', 'tool_call_id': 'call-pending', 'content': 'done'}])
+
+    resumed._dispatch = dispatch
+    await resumed.run(original)
+    roles = [msg['role'] for msg in presented]
+    assert roles[:4] == ['user', 'assistant', 'tool', 'user']
+    assert presented[3]['steerId'] == new['steerId']
+
+
+@pytest.mark.asyncio
+async def test_preempt_cancelled_during_provider_close_cannot_finalize_partial_answer():
+    from local_shell_mcp.webui.agent_runtime import (
+        AgentContext,
+        AgentLoopState,
+        ToolBatchOutput,
+        run_agent_loop,
+    )
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    still_queued = [True]
+    invocations = []
+    texts = []
+
+    class Stream:
+        def __init__(self, index):
+            self.index = index
+            self.emitted = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.emitted:
+                raise StopAsyncIteration
+            self.emitted = True
+            return 'Partial' if self.index == 0 else ' continued.'
+
+        async def aclose(self):
+            if self.index == 0:
+                # Cancellation wins the race after seal but before drain.
+                still_queued[0] = False
+
+    def stream(*args, **kwargs):
+        invocations.append(list(args[1]))
+        return Stream(len(invocations) - 1)
+
+    async def text(value):
+        texts.append(value)
+
+    async def preempt():
+        return still_queued[0]
+
+    async def drain(_state, boundary):
+        assert boundary in {'stream', 'terminal'}
+        return False
+
+    async def dispatch(_calls, _state):
+        return ToolBatchOutput([])
+
+    profile = ProviderConfig('openai', 'test', 'https://example.invalid', '')
+    state = AgentLoopState(AgentContext(profile, []), [{'role': 'user', 'content': 'Write a reply'}])
+    final = await run_agent_loop(state, stream_tools=stream, stream_text=stream,
+                                 dispatch=dispatch, on_text=text, on_boundary=drain,
+                                 on_stream_chunk=preempt)
+    assert len(invocations) == 2
+    assert texts == ['Partial', ' continued.']
+    assert final[-1]['content'] == ' continued.'
+    assert final[-2]['content'] == 'Partial'
+
+
+def test_replayed_tool_completion_keeps_steer_index_equal_to_snapshot(context):
+    generations, steering, job, _ = context
+    generations.append('local', job.run_id, {'event': 'on_message_delta', 'data': {
+        'id': 'intro', 'delta': {'content': {'type': 'text', 'text': 'Before'}}}})
+    completion = {'event': 'on_run_step_completed', 'data': {'result': {
+        'id': 'tool-step-one', 'type': 'tool_call',
+        'tool_call': {'id': 'call-1', 'name': 'read', 'output': 'ready'}}}}
+    generations.append('local', job.run_id, completion)
+    generations.append('local', job.run_id, completion)
+    before, _ = generations.resume_snapshot('local', job.run_id)
+    assert [part['type'] for part in before['aggregatedContent']] == ['text', 'tool_call']
+    queued = _enqueue(steering, job, 'replayed-completion', 'Interpret the result')
+    assert steering.drain('local', job.run_id, boundary='post_tools')[0]['steerId'] == queued['steerId']
+    events = [e['data'] for _, e in generations.events('local', job.run_id)
+              if e.get('event') == 'on_steer_applied']
+    assert events[-1]['index'] == len(before['aggregatedContent']) == 2
+    current, _ = generations.resume_snapshot('local', job.run_id)
+    assert current['aggregatedContent'][2]['steerId'] == queued['steerId']

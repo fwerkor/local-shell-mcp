@@ -267,3 +267,47 @@ async def test_controller_reclaims_claimed_action_on_restart(configured_generati
     assert store.recover_orphans() == 0
     assert store.pending_action("alice", job.run_id) == pending
     assert store.recover_claimed_resumes() == 0
+
+
+@pytest.mark.asyncio
+async def test_terminal_sse_resume_replays_final_after_sync_watermark(configured_generation_routes):
+    store = generation_routes._generation_store()
+    run, _ = store.begin("alice", {"text": "Return a final answer"})
+    assert store.finish("alice", run.run_id, status="complete", text="Verified answer")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=configured_generation_routes),
+                                base_url="http://test") as client:
+        root = f"/api/agents/chat/stream/{run.conversation_id}"
+        headers = {"x-owner": "alice"}
+        response = await client.get(root + "?resume=true", headers=headers)
+        assert response.status_code == 200, response.text
+        assert '"sync":true' in response.text
+        assert '"final":true' in response.text
+        assert 'Verified answer' in response.text
+        wrong_epoch = await client.get(root + "?generationCreatedAt=-123", headers=headers)
+        assert wrong_epoch.status_code == 409
+        malformed_epoch = await client.get(root + "?generationCreatedAt=invalid", headers=headers)
+        assert malformed_epoch.status_code == 400
+        malformed_cursor = await client.get(root + "?after=bogus", headers=headers)
+        assert malformed_cursor.status_code == 400
+        legacy_replay = await client.get(root + "?after=0", headers=headers)
+        assert legacy_replay.status_code == 200 and '"final":true' in legacy_replay.text
+        assert (await client.get("/api/agents/chat/status/does-not-exist", headers=headers)).json() == {
+            "active": False, "generationProtocolVersion": 1,
+        }
+
+
+@pytest.mark.asyncio
+async def test_resume_without_action_rejects_paused_or_mismatched_epoch(configured_generation_routes):
+    store = generation_routes._generation_store()
+    run, _ = store.begin("alice", {"text": "Await user"})
+    pending = {"actionId": "need-answer", "payload": {
+        "type": "ask_user_question", "tool_call_id": "ask", "question": {"question": "Where?"}}}
+    assert store.pause_for_question("alice", run.run_id, pending, [], "")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=configured_generation_routes),
+                                base_url="http://test") as client:
+        url = "/api/agents/chat/resume"
+        user = {"x-owner": "alice"}
+        denied = await client.post(url, json={"conversationId": run.conversation_id}, headers=user)
+        assert denied.status_code == 409
+        assert (await client.post(url, json={"conversationId": run.conversation_id,
+                                             "actionId": []}, headers=user)).status_code == 400
