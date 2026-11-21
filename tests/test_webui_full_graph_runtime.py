@@ -521,3 +521,89 @@ async def test_graph_members_receive_complete_artifact_prompts_and_root_ephemera
     assert len(seen['artifact-child']) == 1
     assert 'Child only guidance' in seen['artifact-child'][0]
     assert 'Additional Artifact Instructions for React Components' in seen['artifact-child'][0]
+
+
+@pytest.mark.asyncio
+async def test_parallel_direct_prompt_branches_keep_destination_specific_inputs(context):
+    repo, store, _ = context
+    parent, left, right = [create(repo, label) for label in ('source', 'left', 'right')]
+    parent = repo.update('local', parent['id'], {'edges': [
+        {'from': parent['id'], 'to': left['id'], 'edgeType': 'direct',
+         'prompt': 'Only left may see this: {results}', 'excludeResults': True},
+        {'from': parent['id'], 'to': right['id'], 'edgeType': 'direct',
+         'prompt': 'Only right may see this: {results}', 'excludeResults': True},
+    ]})
+    contexts = {}
+
+    async def model(profile, history, **kwargs):
+        contexts[profile.model] = [m.get('content') for m in history]
+        yield 'output:' + profile.model
+
+    obj, job = runner(context, parent, model)
+    await obj.run(store.history('local', job.conversation_id))
+    assert 'Only left may see this' in ' '.join(str(x) for x in contexts['left'])
+    assert 'Only right may see this' not in ' '.join(str(x) for x in contexts['left'])
+    assert 'Only right may see this' in ' '.join(str(x) for x in contexts['right'])
+    assert 'Only left may see this' not in ' '.join(str(x) for x in contexts['right'])
+
+
+@pytest.mark.asyncio
+async def test_nonpreemptive_steer_after_handoff_reaches_both_send_recipients(context, monkeypatch):
+    from local_shell_mcp.webui.steering import SteeringStore
+
+    repo, store, db = context
+    parent, left, right = [create(repo, label) for label in ('parent', 'left', 'right')]
+    parent = repo.update('local', parent['id'], {'edges': [
+        {'from': parent['id'], 'to': left['id'], 'edgeType': 'handoff'},
+        {'from': parent['id'], 'to': right['id'], 'edgeType': 'handoff'},
+    ]})
+    seen = {}
+    obj, job = runner(context, parent, None)
+
+    async def model(profile, history, **kwargs):
+        seen[profile.model] = list(history)
+        if profile.model == 'parent':
+            yield ModelToolCall('to-left', 'transfer_to_' + left['id'], {})
+            yield ModelToolCall('to-right', 'transfer_to_' + right['id'], {})
+        else:
+            yield 'result:' + profile.model
+
+    obj.stream_tools = obj.stream_text = model
+    original_dispatch = AgentRunner._dispatch
+    applied = []
+
+    async def dispatch(self, calls, state):
+        result = await original_dispatch(self, calls, state)
+        if self.graph_node and self.root_agent['id'] == parent['id'] and result.graph_commands:
+            SteeringStore(db).enqueue('local', {
+                'conversationId': job.conversation_id,
+                'generationCreatedAt': job.generation_created_at,
+                'clientSteerId': 'correction', 'text': 'Use the corrected assumption',
+                'preempt': False,
+            }, preempt_capable=True)
+            applied.append(True)
+        return result
+
+    monkeypatch.setattr(AgentRunner, '_dispatch', dispatch)
+    await obj.run(store.history('local', job.conversation_id))
+    assert applied == [True]
+    for target in ('left', 'right'):
+        assert sum(m.get('source') == 'steer' for m in seen[target]) == 1
+        assert any('corrected assumption' in str(m.get('content')) for m in seen[target])
+
+
+@pytest.mark.asyncio
+async def test_detached_graph_returns_designated_member_instead_of_last_member(context):
+    repo, store, db = context
+    root, child = [create(repo, label) for label in ('designated', 'later')]
+    root = repo.update('local', root['id'], {'resultAgentId': root['id'], 'edges': [
+        {'from': root['id'], 'to': child['id'], 'edgeType': 'direct'}]})
+
+    async def model(profile, history, **kwargs):
+        yield 'answer:' + profile.model
+
+    obj, job = runner(context, root, model)
+    obj.background_deny = True  # Durable detached graph owns its output.
+    result = await obj.run(store.history('local', job.conversation_id))
+    assert len(result) == 1
+    assert result[0]['content'] == 'answer:designated'
