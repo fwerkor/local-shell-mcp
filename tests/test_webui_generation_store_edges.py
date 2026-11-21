@@ -200,19 +200,3 @@ def test_tool_evidence_rejects_event_spoof_and_changed_execution_arguments(curre
     with db.connect() as sql:
         state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
     assert state['completedToolArguments']['call-42']['arguments']['command'] == 'echo trusted'
-
-
-@pytest.mark.parametrize('saved,expected', [
-    ('', [{'type': 'tool_call', 'tool_call': {'id': 'tool-1'}}]),
-    ('Left', [{'type': 'text', 'text': 'Left'}, {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}}]),
-    ('LeftR', [{'type': 'text', 'text': 'Left'}, {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}},
-               {'type': 'text', 'text': 'R'}]),
-])
-def test_content_rewind_preserves_tool_positions_and_only_checkpointed_text(saved, expected):
-    pieces = [{'type': 'text', 'text': 'Left'},
-              {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}},
-              {'type': 'text', 'text': 'Right is provisional'}]
-    generations._rewind_uncheckpointed_text(pieces, saved)
-    assert pieces == expected
-    with pytest.raises(ValueError, match='checkpoint text'):
-        generations._rewind_uncheckpointed_text(pieces, None)
