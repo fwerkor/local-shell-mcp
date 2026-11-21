@@ -944,7 +944,13 @@ class AgentRunner:
                                  retained_tail=retained_tail,
                                  covered_tool_call_ids=sorted(covered_calls),
                                  covered_steer_ids=sorted(covered_steers),
-                                 visible_text_boundary=len(self.partial_text))
+                                 visible_text_boundary=len(self.partial_text),
+                                 model_history_start=(
+                                     sum(1 for message in messages if message.get('role') == 'system'
+                                         and not (isinstance(message.get('content'), str)
+                                                  and message['content'].startswith('<summary>\n')))
+                                     + 1 + len(retained_tail))
+                                 if retained_tail is not None and not manual and not self.namespace else None)
         if not self.namespace:
             import secrets
             identity = 'summary_' + secrets.token_hex(8)

@@ -1125,7 +1125,8 @@ class GenerationStore:
                       retained_tail: list[dict] | None = None,
                       covered_tool_call_ids: list[str] | None = None,
                       covered_steer_ids: list[str] | None = None,
-                      visible_text_boundary: int | None = None) -> None:
+                      visible_text_boundary: int | None = None,
+                      model_history_start: int | None = None) -> None:
         """Atomic candidate checkpoint in the *existing run state*, no deletion.
 
         The final assistant content and terminal run status commit together in
@@ -1138,6 +1139,9 @@ class GenerationStore:
         if visible_text_boundary is not None and (
                 type(visible_text_boundary) is not int or visible_text_boundary < 0):
             raise ValueError('Invalid visible summary text boundary')
+        if model_history_start is not None and (
+                type(model_history_start) is not int or model_history_start < 0):
+            raise ValueError('Invalid post-compaction model-history boundary')
         with self.database.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id '
@@ -1166,7 +1170,23 @@ class GenerationStore:
                 **({'coveredToolCallIds': covered_tool_call_ids} if covered_tool_call_ids is not None else {}),
                 **({'coveredSteerIds': covered_steer_ids} if covered_steer_ids is not None else {}),
                 **({'visibleTextBoundary': visible_text_boundary} if visible_text_boundary is not None else {})}
+            if model_history_start is not None:
+                # The original user prompt may no longer exist in the live
+                # model history after compaction. Persist the replacement
+                # boundary atomically with the summary checkpoint.
+                state['modelHistoryStart'] = model_history_start
+                state['postCompactionHistoryStart'] = model_history_start
             db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?', (_json(state), _now(), run_id))
+
+    def compacted_model_history_boundary(self, owner: str, run_id: str) -> int | None:
+        with self.database.connect() as db:
+            row = db.execute('SELECT r.state FROM runs r JOIN conversations c '
+                             'ON c.id=r.conversation_id WHERE r.id=? AND c.owner=?',
+                             (run_id, owner)).fetchone()
+        if row is None:
+            raise KeyError('Generation not found')
+        value = json.loads(row['state']).get('postCompactionHistoryStart')
+        return value if type(value) is int and value >= 0 else None
 
     def manual_compaction(self, owner: str, run_id: str) -> bool:
         with self.database.connect() as db:
@@ -1305,6 +1325,7 @@ class GenerationStore:
                             ).fetchone()
                             state = json.loads(previous['state']) if previous else {}
                             steps = state.get('modelSteps')
+                            consumed_text = 0
                             if isinstance(steps, list):
                                 # Summary coverage is cumulative across
                                 # checkpoints. Only new canonical tool exchanges
@@ -1321,6 +1342,10 @@ class GenerationStore:
                                                    and message.get('source') == 'steer'}
                                 replayed_steers = set(retained_steers)
                                 new_calls: set[str] = set()
+                                # The saved visible text has the checkpointed
+                                # prefix removed. Match canonical assistant
+                                # segments against that suffix in stream order
+                                # instead of appending them after later steers.
                                 for message in steps:
                                     if not isinstance(message, dict):
                                         continue
@@ -1331,21 +1356,32 @@ class GenerationStore:
                                                 and ident not in replayed_steers):
                                             group.append(message)
                                             replayed_steers.add(ident)
-                                    elif role == 'assistant' and isinstance(message.get('tool_calls'), list):
-                                        calls = [call for call in message['tool_calls']
-                                                 if isinstance(call, dict) and isinstance(call.get('id'), str)
-                                                 and call['id'] not in covered and call['id'] not in retained_calls]
-                                        if calls:
-                                            new_calls.update(call['id'] for call in calls)
-                                            group.append({**message, 'content': None, 'tool_calls': calls})
+                                    elif role == 'assistant':
+                                        candidate = message.get('content')
+                                        visible = (isinstance(candidate, str) and bool(candidate)
+                                                   and text.startswith(candidate, consumed_text))
+                                        if isinstance(message.get('tool_calls'), list):
+                                            calls = [call for call in message['tool_calls']
+                                                     if isinstance(call, dict) and isinstance(call.get('id'), str)
+                                                     and call['id'] not in covered and call['id'] not in retained_calls]
+                                            if calls:
+                                                new_calls.update(call['id'] for call in calls)
+                                                group.append({**message,
+                                                              'content': candidate if visible else None,
+                                                              'tool_calls': calls})
+                                                if visible:
+                                                    consumed_text += len(candidate)
+                                        elif visible:
+                                            group.append(message)
+                                            consumed_text += len(candidate)
                                     elif role == 'tool' and isinstance(message.get('tool_call_id'), str):
                                         ident = message['tool_call_id']
                                         if (ident not in covered and ident not in retained_results
                                                 and ident in (new_calls | retained_calls)):
                                             group.append(message)
                                             retained_results.add(ident)
-                            if text:
-                                group.append({'role': 'assistant', 'content': text})
+                            if consumed_text < len(text):
+                                group.append({'role': 'assistant', 'content': text[consumed_text:]})
                             groups.append(group)
                             break
                         previous = db.execute(

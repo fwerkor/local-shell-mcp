@@ -373,7 +373,12 @@ async def _run_model(
         # A handoff may replace system instructions, changing the context
         # prefix length. Locate the original request within the final graph
         # state so the response is not discarded by a stale numeric offset.
-        if history_start > 0:
+        post_compaction_start = repo.compacted_model_history_boundary(owner, generation.run_id)
+        if post_compaction_start is not None:
+            # The original prompt can be removed by a successful summary. The
+            # new model-history boundary is committed with that checkpoint.
+            history_start = post_compaction_start
+        elif history_start > 0:
             source_user = next((message for message in reversed(history[:history_start])
                                 if message.get('role') == 'user'), None)
             if source_user is not None:

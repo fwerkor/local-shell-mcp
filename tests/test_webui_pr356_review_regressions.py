@@ -185,3 +185,92 @@ async def test_summarizer_prepares_owned_steering_text_and_rechecks_policy(tmp_p
         assert len(messages_seen) == 1
     finally:
         get_settings.cache_clear()
+
+
+def test_post_checkpoint_steering_keeps_interleaved_assistant_text_order(tmp_path):
+    store = GenerationStore(SQLiteDatabase(tmp_path / 'db'))
+    run, _ = store.begin('local', {'text': 'Pick a destination'})
+    store.stage_summary('local', run.run_id, 'Earlier research.', 8,
+                        retained_tail=[], visible_text_boundary=0)
+    steps = [
+        {'role': 'assistant', 'content': 'I selected Paris'},
+        {'role': 'user', 'source': 'steer', 'steerId': 'switch',
+         'content': 'Instead of Paris use Rome', 'files': [{'file_id': 'reference'}]},
+        {'role': 'assistant', 'content': 'I selected Rome'},
+    ]
+    assert store.finish('local', run.run_id, status='complete',
+                        text='I selected ParisI selected Rome', model_steps=steps)
+    followup, _ = store.begin('local', {'text': 'Which city?',
+        'conversationId': run.conversation_id, 'parentMessageId': run.response_message_id})
+    replay = store.history('local', run.conversation_id, message_id=followup.user_message_id)
+    assert replay[0]['role'] == 'system'
+    assert replay[1:4] == steps
+    assert replay[-1]['content'] == 'Which city?'
+
+
+@pytest.mark.asyncio
+async def test_compaction_producer_uses_new_boundary_for_post_summary_tool_calls(
+        tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.webui import agent_runner, generation_routes, memory_agent
+    from local_shell_mcp.webui.compaction import build_summary_carrier_text
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / 'state'))
+    get_settings.cache_clear()
+    try:
+        db = SQLiteDatabase(tmp_path / 'state')
+        store = GenerationStore(db)
+        prior, _ = store.begin('local', {'text': 'Prior request'})
+        assert store.finish('local', prior.run_id, text='Prior answer', status='complete')
+        run, _ = store.begin('local', {'text': 'What did the tool find?',
+            'conversationId': prior.conversation_id,
+            'parentMessageId': prior.response_message_id})
+        profile = ProviderConfig('openai', 'mock', 'https://example.invalid', '')
+        call = {'id': 'new-tool', 'type': 'function',
+                'function': {'name': 'lookup', 'arguments': '{}'}}
+
+        class CompactedRunner:
+            def __init__(self, owner, generation, database, repository, **kwargs):
+                self.owner = owner
+                self.generation = generation
+                self.repository = repository
+                self.partial_text = 'Tool says 42.'
+
+            async def run(self, original):
+                # The pre-compaction prompt has three messages, but the new
+                # summary + tool pair + answer is longer. A stale index would
+                # silently omit the tool pair from saved modelSteps.
+                assert len(original) == 3
+                self.repository.stage_summary(self.owner, self.generation.run_id,
+                    'Earlier messages summarized.', 12, retained_tail=[],
+                    covered_tool_call_ids=[], visible_text_boundary=0,
+                    model_history_start=1)
+                return [
+                    {'role': 'system', 'content': build_summary_carrier_text(
+                        'Earlier messages summarized.')},
+                    {'role': 'assistant', 'content': None, 'tool_calls': [call]},
+                    {'role': 'tool', 'tool_call_id': 'new-tool', 'content': '42'},
+                    {'role': 'assistant', 'content': 'Tool says 42.'},
+                ]
+
+        async def no_memory(*args, **kwargs):
+            return 0
+
+        monkeypatch.setattr(agent_runner, 'AgentRunner', CompactedRunner)
+        monkeypatch.setattr(generation_routes, '_database', lambda: db)
+        monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+        monkeypatch.setattr(memory_agent, 'run_automatic_memory', no_memory)
+        await generation_routes._run_model('local', run, profile)
+        assert store.get('local', run.run_id).status == 'complete'
+        with db.connect() as connection:
+            state = json.loads(connection.execute('SELECT state FROM runs WHERE id=?',
+                                                    (run.run_id,)).fetchone()['state'])
+        assert state['modelHistoryStart'] == 1
+        assert [m['role'] for m in state['modelSteps']] == ['assistant', 'tool', 'assistant']
+        replay = store.history('local', run.conversation_id)
+        assert any(m.get('role') == 'tool' and m.get('content') == '42' for m in replay)
+        assert replay[-1] == {'role': 'assistant', 'content': 'Tool says 42.'}
+    finally:
+        get_settings.cache_clear()
