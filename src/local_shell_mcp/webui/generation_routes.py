@@ -970,19 +970,20 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     from .machine_permissions import require_machine_scope, resolve_access
     from .routes import _repo
 
+    # Detached subagent child generations are owned by their task host.
+    # Foreground reconnect may observe SSE, but never claim their actor lease.
+    with _database().connect() as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                      "AND name='subagent_tasks'").fetchone():
+            child = db.execute(
+                "SELECT 1 FROM subagent_tasks WHERE owner=? AND child_run_id=? LIMIT 1",
+                (owner, generation.run_id)).fetchone()
+            if child is not None:
+                raise HTTPException(409, detail="Detached subagent runs require task-host recovery")
     current = _TASKS.get(generation.run_id)
     if current is not None and not current.done():
         return
     if generation.run_id in active_run_ids(_database()):
-        return
-    # Detached child generations are exclusively owned by their durable
-    # subagent task/lease, not by the foreground GenerationActor registry.
-    # A browser reconnect may stream their events but must never launch a
-    # competing model execution with a weaker authorization context.
-    with _database().connect() as db:
-        child = db.execute("SELECT 1 FROM subagent_tasks WHERE owner=? AND child_run_id=? LIMIT 1",
-                           (owner, generation.run_id)).fetchone()
-    if child is not None:
         return
     cid = generation.conversation_id
     saver = SQLiteCheckpointSaver(_database(), owner)

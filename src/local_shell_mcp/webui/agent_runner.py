@@ -879,13 +879,15 @@ class AgentRunner:
         summary_messages = [*messages, instruction]
         # Compaction must see the exact owner-scoped steering attachments that
         # ordinary generation sends; otherwise the checkpoint drops their text.
-        from ..settings import get_settings
         from .content_filters import inspect_content, model_message_fragments
         from .steer_media import stamp_model_messages
         from .storage import WorkspaceRepository
 
+        # The database and its attachment storage share the same state root.
+        # Do not initialize global settings while summarizing: detached/test
+        # runtimes can have a different workspace (or no writable /workspace).
         summary_messages = await stamp_model_messages(
-            self.database, self.owner, summary_messages, get_settings().state_dir)
+            self.database, self.owner, summary_messages, self.database.root)
         policy = configured_filters(WorkspaceRepository(self.database), self.owner)
         if inspect_content(model_message_fragments(summary_messages), policy) is not None:
             raise RuntimeSafetyError('Summary context was blocked by content protection')

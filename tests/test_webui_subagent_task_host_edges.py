@@ -820,7 +820,11 @@ async def test_foreground_reattach_never_launches_a_task_owned_child_generation(
     monkeypatch.setattr(generation_routes, '_start_task', forbidden_start)
     # The forbidden request does not need browser authorization: it must
     # return before entering the foreground resume path.
-    assert await generation_routes._reattach_running_actor(None, 'local', child_generation) is None
+    from starlette.exceptions import HTTPException
+
+    with pytest.raises(HTTPException) as blocked:
+        await generation_routes._reattach_running_actor(None, 'local', child_generation)
+    assert blocked.value.status_code == 409
     assert store.get('local', child_generation.run_id).status == 'running'
     await shutdown_subagent_tasks()
 
