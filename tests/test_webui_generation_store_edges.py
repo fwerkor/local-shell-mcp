@@ -143,3 +143,73 @@ def test_generation_creation_validates_boundaries_before_writing(current_run, pa
         return
     with pytest.raises((ValueError, KeyError), match=error):
         store.begin('alice', payload)
+
+
+def test_oauth_dispatch_requires_original_stage_and_durable_completion_proof(current_run):
+    db, store, job = current_run
+    with pytest.raises(ValueError, match='stage'):
+        store.oauth_dispatch('alice', job.run_id, 'call-1', 'unrecognized')
+    with pytest.raises(PermissionError, match='no longer active'):
+        store.oauth_dispatch('other', job.run_id, 'call-1', 'completed')
+    assert store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed') is None
+
+    with db.connect() as sql:
+        state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
+        state['oauthResume'] = {'stage': 'claimed', 'tool_call_id': 'call-1'}
+        state['partialText'] = 'Saved prefix'
+        state['resumeHistory'] = [{'role': 'user', 'content': 'initial'}]
+        sql.execute('UPDATE runs SET state=? WHERE id=?', (json.dumps(state), job.run_id))
+
+    store.oauth_dispatch('alice', job.run_id, 'another-call', 'dispatching')
+    with pytest.raises(PermissionError, match='dispatch record'):
+        store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
+    store.oauth_dispatch('alice', job.run_id, 'call-1', 'dispatching')
+    with pytest.raises(PermissionError, match='clear unverified'):
+        store.oauth_dispatch('alice', job.run_id, 'call-1', 'cleared')
+    with pytest.raises(PermissionError, match='already dispatched'):
+        store.oauth_dispatch('alice', job.run_id, 'call-1', 'dispatching')
+    store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
+    with pytest.raises(PermissionError, match='dispatch record'):
+        store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
+    store.append('alice', job.run_id, {'event': 'on_run_step_completed', 'data': {'result': {
+        'tool_call': {'id': 'call-1', 'name': 'mcp_tool_call'},
+    }}})
+    store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
+    store.oauth_dispatch('alice', job.run_id, 'call-1', 'cleared')
+    with db.connect() as sql:
+        state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
+    assert 'oauthResume' not in state and 'resumeHistory' not in state
+    assert 'partialText' not in state
+
+
+def test_tool_evidence_rejects_event_spoof_and_changed_execution_arguments(current_run):
+    db, store, job = current_run
+    with pytest.raises(ValueError, match='completed tool evidence'):
+        store.append('alice', job.run_id, {'event': 'on_message_delta', 'data': {}},
+                     full_arguments={'command': 'not executed'})
+    event = {'event': 'on_run_step_completed', 'data': {'result': {'tool_call': {
+        'id': 'call-42', 'name': 'run_shell', 'args': {'_truncated': True},
+    }}}}
+    store.append('alice', job.run_id, event, full_arguments={'command': 'echo trusted'})
+    store.append('alice', job.run_id, event, full_arguments={'command': 'echo trusted'})
+    with pytest.raises(ValueError, match='Cannot change completed tool arguments'):
+        store.append('alice', job.run_id, event, full_arguments={'command': 'echo tampered'})
+    with db.connect() as sql:
+        state = json.loads(sql.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
+    assert state['completedToolArguments']['call-42']['arguments']['command'] == 'echo trusted'
+
+
+@pytest.mark.parametrize('saved,expected', [
+    ('', [{'type': 'tool_call', 'tool_call': {'id': 'tool-1'}}]),
+    ('Left', [{'type': 'text', 'text': 'Left'}, {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}}]),
+    ('LeftR', [{'type': 'text', 'text': 'Left'}, {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}},
+               {'type': 'text', 'text': 'R'}]),
+])
+def test_content_rewind_preserves_tool_positions_and_only_checkpointed_text(saved, expected):
+    pieces = [{'type': 'text', 'text': 'Left'},
+              {'type': 'tool_call', 'tool_call': {'id': 'tool-1'}},
+              {'type': 'text', 'text': 'Right is provisional'}]
+    generations._rewind_uncheckpointed_text(pieces, saved)
+    assert pieces == expected
+    with pytest.raises(ValueError, match='checkpoint text'):
+        generations._rewind_uncheckpointed_text(pieces, None)
