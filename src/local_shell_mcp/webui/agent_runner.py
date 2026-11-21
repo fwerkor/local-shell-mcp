@@ -714,11 +714,6 @@ class AgentRunner:
         if self._publishes_tool_steps():
             for call in unresolved:
                 self._tool_step(call)
-        asking = [call for call in unresolved if call.name == "ask_user_question" and not self._blocked_call(call)]
-        if asking:
-            if len(calls) != 1:
-                raise ValueError("Ask User cannot run in parallel with another tool")
-            await self._pause(build_ask_user_payload(asking[0].arguments, asking[0].call_id), state)
         endpoints = _repo().setting(self.owner, "endpoints", {}) or {}
         policy = (endpoints.get("agents") or {}).get("toolApproval")
         ask = []
