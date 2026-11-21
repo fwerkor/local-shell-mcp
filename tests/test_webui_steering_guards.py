@@ -343,7 +343,8 @@ def test_steer_identity_recovery_does_not_consume_identical_prior_turn(context):
 
 
 @pytest.mark.asyncio
-async def test_post_tool_crash_recovered_steer_follows_cached_tool_result(context):
+@pytest.mark.parametrize('recovery_steers', [False, True])
+async def test_post_tool_crash_recovered_steer_follows_cached_tool_result(context, recovery_steers):
     from local_shell_mcp.webui.agent_runner import AgentRunner
     from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState, ToolBatchOutput
     from local_shell_mcp.webui.providers import ModelToolCall
@@ -380,7 +381,8 @@ async def test_post_tool_crash_recovered_steer_follows_cached_tool_result(contex
         yield 'All finished.'
 
     resumed = AgentRunner('local', job, db, generations, scopes=set(), grant_expires=None,
-                          stream_tools=model, stream_text=model, on_text=noop, profile=profile)
+                          stream_tools=model, stream_text=model, on_text=noop, profile=profile,
+                          recovery_steers=recovery_steers)
 
     async def dispatch(_calls, _state):
         return ToolBatchOutput([{'role': 'tool', 'tool_call_id': 'call-pending', 'content': 'done'}])

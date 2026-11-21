@@ -228,7 +228,7 @@ async def _run_model(
                 if not already_visible.startswith(partial_text):
                     raise RuntimeError('Recovered checkpoint text conflicts with streamed reply')
                 repo.append(owner, generation.run_id, {'event': 'on_content_rewind',
-                    'data': {'preserveText': partial_text}}, actor_lease=actor_lease)
+                    'data': {'preserveText': partial_text, 'runId': generation.response_message_id}}, actor_lease=actor_lease)
         history = resume_history if resume_history is not None else repo.history(
             owner, generation.conversation_id, message_id=generation.user_message_id,
         )

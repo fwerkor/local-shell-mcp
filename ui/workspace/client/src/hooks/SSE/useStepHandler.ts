@@ -79,7 +79,8 @@ type TStepEvent =
   | { event: StepEvents.ON_SUMMARIZE_COMPLETE; data: Agents.SummarizeCompleteEvent }
   | { event: StepEvents.ON_SUBAGENT_UPDATE; data: SubagentUpdateEvent }
   | { event: StepEvents.ON_SANDBOX_STARTING; data: SandboxStartingEvent }
-  | { event: StepEvents.ON_PTC_TOOL_CALL; data: PtcToolCallEvent };
+  | { event: StepEvents.ON_PTC_TOOL_CALL; data: PtcToolCallEvent }
+  | { event: 'on_content_rewind'; data: { preserveText: string; runId?: string } };
 
 type MessageDeltaUpdate = {
   type: ContentTypes.TEXT;
@@ -159,6 +160,30 @@ const isOAuthToolCallContent = (part?: Partial<TMessageContentParts>) => {
   const name = toolCall != null && 'name' in toolCall ? toolCall.name : undefined;
   return isOAuthToolCallName(name);
 };
+
+/** Match GenerationStore's checkpoint rewind: only provisional text is cut;
+ * tool cards and steer parts retain their relative order. Iterate Unicode
+ * scalars to mirror Python string slicing (including astral characters). */
+export function rewindStreamContent(content: TMessageContentParts[], preserved: string): TMessageContentParts[] {
+  let remaining = Array.from(preserved).length;
+  const retained: TMessageContentParts[] = [];
+  for (const part of content) {
+    if (part.type !== ContentTypes.TEXT) {
+      retained.push(part);
+      continue;
+    }
+    if (remaining <= 0) continue;
+    if (typeof part.text !== 'string') {
+      retained.push(part);
+      continue;
+    }
+    const chars = Array.from(part.text);
+    const kept = chars.slice(0, remaining).join('');
+    remaining -= Math.min(remaining, chars.length);
+    if (kept) retained.push({ ...part, text: kept });
+  }
+  return retained;
+}
 
 export default function useStepHandler({
   setMessages,
@@ -900,6 +925,32 @@ export default function useStepHandler({
       if (submission?.editedContent != null && submission?.editPrefixCleared !== true) {
         initialContent = submission?.initialResponse?.content ?? initialContent;
         editPrefixOffset = submission?.editPrefixLength ?? initialContent.length;
+      }
+
+      if (stepEvent.event === 'on_content_rewind') {
+        const { preserveText, runId } = stepEvent.data;
+        if (typeof preserveText !== 'string') return;
+        const latestStepId = [...stepMap.current.values()].at(-1)?.runId;
+        const responseId = runId || latestStepId || submission.initialResponse?.messageId;
+        if (!responseId) return;
+        const response = messageMap.current.get(responseId) ??
+          messages.find((message) => message.messageId === responseId);
+        if (!response) return;
+
+        // An already scheduled frame may still contain discarded tokens.
+        // Cancel it before replacing BOTH the rendered message and delta cache.
+        if (messageDeltaRaf.current != null) {
+          cancelAnimationFrame(messageDeltaRaf.current);
+          messageDeltaRaf.current = null;
+        }
+        deltaFlushScheduled.current = false;
+        pendingDeltaFlushRef.current = null;
+        pendingDeltaFlushIds.current.clear();
+        pendingDeltaBuffer.current.clear();
+        const updated = { ...response, content: rewindStreamContent(response.content ?? [], preserveText) };
+        messageMap.current.set(responseId, updated);
+        setMessages(mergeResponseMessage(messages, updated, responseId, { ensureUserMessage: true }));
+        return;
       }
 
       if (stepEvent.event === StepEvents.ON_RUN_STEP) {

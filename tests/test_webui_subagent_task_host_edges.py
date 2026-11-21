@@ -767,6 +767,32 @@ async def test_child_guard_settlement_rejects_wrong_lease_and_unregistered_task(
 
 
 @pytest.mark.asyncio
+async def test_continued_thread_never_returns_an_earlier_invocation_answer(host_environment):
+    calls = 0
+
+    async def model(profile, history, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            yield 'OLDER RESULT'
+        # Second invocation has no assistant answer. Its task result must
+        # never scan backward into the previous thread's assistant response.
+
+    first_host, first = await start_task(host_environment, model, call_id='first-call')
+    await settle(first_host, first['background_task_id'])
+    second_host, second = await start_task(
+        host_environment, model, call_id='second-call',
+        thread_id=first['subagent_thread_id'],
+    )
+    await settle(second_host, second['background_task_id'])
+    result = json.loads(await second_host.check({'background_task_id': second['background_task_id']}))
+    assert result['status'] == 'completed'
+    assert result['result'] == 'Task completed'
+    assert 'OLDER RESULT' not in result['result']
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
 async def test_concurrent_child_thread_continuations_return_structured_busy_rejection(host_environment):
     ready, release = asyncio.Event(), asyncio.Event()
 
@@ -820,7 +846,9 @@ async def test_foreground_reattach_never_launches_a_task_owned_child_generation(
     monkeypatch.setattr(generation_routes, '_start_task', forbidden_start)
     # The forbidden request does not need browser authorization: it must
     # return before entering the foreground resume path.
-    assert await generation_routes._reattach_running_actor(None, 'local', child_generation) is None
+    with pytest.raises(generation_routes.HTTPException) as rejected:
+        await generation_routes._reattach_running_actor(None, 'local', child_generation)
+    assert rejected.value.status_code == 409
     assert store.get('local', child_generation.run_id).status == 'running'
     await shutdown_subagent_tasks()
 

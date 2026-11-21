@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import logging
@@ -549,10 +550,17 @@ class SQLiteSubagentTaskHost:
                 # Match the foreground child path: reference documents belong
                 # in the model input even if the detached child has no file tools.
                 initial = with_agent_context(self.db, self.owner, agent, initial)
+            # AgentRunner mutates history in place; capture the invocation
+            # boundary before it appends tool calls and assistant replies.
+            invocation_input = copy.deepcopy(initial)
             result = await asyncio.wait_for(runner.run(
                 initial, recursion_limit=options.get("recursion_limit")
             ), timeout=_TIMEOUT_SECONDS)
-            final_text = _limited(filter_subagent_result(result), _MAX_RESULT)
+            # A continued thread carries previous assistant answers in its
+            # input history. Those must never become this invocation's result.
+            new_messages = (result[len(invocation_input):]
+                            if result[:len(invocation_input)] == invocation_input else result)
+            final_text = _limited(filter_subagent_result(new_messages), _MAX_RESULT)
             # For graph teams the tool result is deliberately only the designated
             # sink. Their whole thread transcript remains inside graph checkpoint.
             canonical = result
