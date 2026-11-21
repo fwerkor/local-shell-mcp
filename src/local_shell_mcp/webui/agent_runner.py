@@ -1313,19 +1313,31 @@ class AgentRunner:
                                (self.graph_node and self.namespace.startswith("/graph:")))
             return owns_user_queue and self.steers.has_preempt(self.owner, self.generation.run_id)
 
-        async def stream_tools_with_media(profile, messages, **kwargs):
+        async def prepared_provider_messages(messages):
             from ..settings import get_settings
+            from .content_filters import inspect_content, model_message_fragments
             from .steer_media import stamp_model_messages
+            from .storage import WorkspaceRepository
 
-            prepared = await stamp_model_messages(self.database, self.owner, messages, get_settings().state_dir)
+            prepared = await stamp_model_messages(self.database, self.owner, messages,
+                                                  get_settings().state_dir)
+            # Before-model inspection covers canonical checkpoint messages, but
+            # steer_media can add text from an owned file only at provider time.
+            # Check the exact expanded request before either provider stream.
+            if any(message.get('role') == 'user' and message.get('source') == 'steer'
+                   and message.get('files') for message in messages):
+                policy = configured_filters(WorkspaceRepository(self.database), self.owner)
+                if inspect_content(model_message_fragments(prepared), policy) is not None:
+                    raise RuntimeSafetyError('Assembled model context was blocked by content protection')
+            return prepared
+
+        async def stream_tools_with_media(profile, messages, **kwargs):
+            prepared = await prepared_provider_messages(messages)
             async for event in self.stream_tools(profile, prepared, **kwargs):
                 yield event
 
         async def stream_text_with_media(profile, messages, **kwargs):
-            from ..settings import get_settings
-            from .steer_media import stamp_model_messages
-
-            prepared = await stamp_model_messages(self.database, self.owner, messages, get_settings().state_dir)
+            prepared = await prepared_provider_messages(messages)
             async for event in self.stream_text(profile, prepared, **kwargs):
                 yield event
 
