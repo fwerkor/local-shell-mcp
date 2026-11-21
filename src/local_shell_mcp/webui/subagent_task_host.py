@@ -263,7 +263,7 @@ class SQLiteSubagentTaskHost:
                     ).fetchone()
                     if busy:
                         return _json({"status": "rejected", "tool": "subagent", "message":
-                                      "This subagent thread is already running. Wait for its current task to finish."})
+                                      "This subagent thread is busy (already running). Wait for its current task to finish."})
                     prior_messages = json.loads(thread["messages"])
                 task_id = "subtask_" + secrets.token_hex(16)
                 reserved_child_id = str(uuid.uuid4())
