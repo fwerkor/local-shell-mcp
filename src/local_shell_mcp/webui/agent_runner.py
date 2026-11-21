@@ -336,8 +336,9 @@ class AgentRunner:
 
         if is_action_tool(call.name) and executed:
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
-        if self.on_tool_completed is not None:
-            await self.on_tool_completed(call)
+        callback = getattr(self, "on_tool_completed", None)
+        if callback is not None:
+            await callback(call)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
