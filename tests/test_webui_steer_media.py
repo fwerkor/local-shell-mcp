@@ -274,9 +274,11 @@ async def test_steer_without_file_and_plain_untouched_history(context):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('sensitive', [False, True])
+@pytest.mark.parametrize('sensitive,with_tools', [(False, False), (True, False),
+                                                       (False, True), (True, True)])
 async def test_assembled_context_policy_checks_inlined_text_steer_before_provider(
-        context, monkeypatch, sensitive):
+        context, monkeypatch, sensitive, with_tools):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
     from local_shell_mcp.webui.storage import WorkspaceRepository
 
     db, store, job, root = context
@@ -304,7 +306,18 @@ async def test_assembled_context_policy_checks_inlined_text_steer_before_provide
         else:
             yield 'Examined attached note.'
 
-    monkeypatch.setattr(generation_routes, 'stream_model_with_tools', provider)
+    if with_tools:
+        monkeypatch.setattr(generation_routes, 'stream_model_with_tools', provider)
+    else:
+        original_context = AgentRunner._context
+
+        def context_without_tools(self, *args, **kwargs):
+            result = original_context(self, *args, **kwargs)
+            result.tools = []
+            return result
+
+        monkeypatch.setattr(AgentRunner, '_context', context_without_tools)
+        monkeypatch.setattr(generation_routes, 'stream_model', provider)
     await generation_routes._run_model('local', job, ProviderConfig('openai', 'mock',
                                                    'https://example.invalid/model', ''))
     if sensitive:
