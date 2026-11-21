@@ -46,6 +46,20 @@ def approval_policy_decision(policy: Mapping | None, tool_name: str) -> dict | N
     return result
 
 
+def ask_user_approval_policy(policy: Mapping | None) -> Mapping | None:
+    """Port LibreChat policy.ts:exemptAskUserQuestionFromApproval.
+
+    The tool remains optional; a configured exact ask/deny/allow entry wins
+    over the default bypass added for a side-effect-free question.
+    """
+    if policy is None:
+        return None
+    name = "ask_user_question"
+    if any(name in (policy.get(key) or []) for key in ("allow", "ask", "deny")):
+        return policy
+    return {**policy, "allow": [*(policy.get("allow") or []), name]}
+
+
 def build_approval_payload(calls: Sequence[ModelToolCall], *,
                            decisions_by_tool_name: Mapping[str, Sequence[str]] | None = None,
                            descriptions: Mapping[str, str] | None = None) -> dict:

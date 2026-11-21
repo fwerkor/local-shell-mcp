@@ -86,6 +86,13 @@ async def _data_frames(response) -> AsyncIterator[str]:
         yield "\n".join(data)
 
 
+def _openai_messages(messages: list[dict]) -> list[dict]:
+    """Return the model wire DTO without steer-only UI metadata."""
+    from .mcp_projection import openai_wire_messages
+
+    return openai_wire_messages(messages)
+
+
 def _messages_for_google(messages: list[dict]) -> tuple[list[dict], str]:
     from .provider_tool_protocols import native_messages
 

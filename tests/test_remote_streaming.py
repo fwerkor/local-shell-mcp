@@ -904,7 +904,7 @@ async def test_worker_stream_put_cancellation_kills_curl(tmp_path, monkeypatch):
             started.set()
 
         def communicate(self):
-            assert killed.wait(2)
+            assert killed.wait(15)
             self.returncode = -9
             return b"", b"cancelled"
 
@@ -923,7 +923,16 @@ async def test_worker_stream_put_cancellation_kills_curl(tmp_path, monkeypatch):
             60,
         )
     )
-    assert await asyncio.to_thread(started.wait, 2)
+    # Windows thread-pool startup may be delayed under the complete CI suite.
+    # Detect an early transfer failure rather than hiding it behind a short
+    # unrelated Event.wait timeout or stranding a blocking worker thread.
+    for _ in range(150):
+        if started.is_set():
+            break
+        if task.done():
+            await task  # Surface the real transport failure.
+        await asyncio.sleep(0.1)
+    assert started.is_set(), "Cancellable upload never dispatched to curl"
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

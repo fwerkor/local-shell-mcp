@@ -77,6 +77,16 @@ def test_generation_rejects_bad_prompt_and_keeps_clean_database(database):
         assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
 
 
+def test_client_cannot_preoccupy_trusted_child_or_wakeup_idempotency_namespace(database):
+    store = GenerationStore(database)
+    for key in ("subagent:subtask_opaque", "subagent-wakeup:subtask_opaque"):
+        with pytest.raises(ValueError, match="Internal"):
+            store.begin("alice", {"text": "Spoof an internal turn", "clientRequestId": key})
+    with database.connect() as db:
+        assert db.execute("SELECT count(*) FROM generation_requests").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+
+
 def test_crashed_generation_is_marked_interrupted_and_replayable(database):
     store = GenerationStore(database)
     job, _ = store.begin("alice", {"text": "a pending question"})

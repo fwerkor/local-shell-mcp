@@ -8,15 +8,18 @@ owned by the Controller's event loop, not by the browser connection.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import logging
 import secrets
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from .approval_runtime import ApprovalBatch, prepare_approval_batch
+from .artifact_prompts import artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
@@ -44,6 +47,30 @@ class GenerationConflict(Exception):
     def __init__(self, existing: Generation):
         self.existing = existing
         super().__init__("Conversation already has an active generation")
+
+
+def _rewind_uncheckpointed_text(parts: list[dict], saved: str) -> None:
+    """Remove incomplete provider text after the last durable human checkpoint.
+
+    Preserve the placement of tool calls and steers; only assistant text is
+    provisional while a model stream is in flight. The exact checkpointed
+    prefix is retained even when it spans several independent text parts.
+    """
+    if not isinstance(saved, str):
+        raise ValueError('Invalid checkpoint text prefix')
+    remaining = len(saved)
+    retained = []
+    for part in parts:
+        if part.get('type') != 'text':
+            retained.append(part)
+            continue
+        if remaining <= 0:
+            continue
+        piece = part['text'][:remaining]
+        if piece:
+            retained.append({**part, 'text': piece})
+        remaining -= len(piece)
+    parts[:] = retained
 
 
 class GenerationStore:
@@ -77,12 +104,24 @@ class GenerationStore:
             return self._run(row) if row else None
 
     def begin(self, owner: str, payload: dict, agent: dict | None = None, *,
-              protocol_version: int = 2) -> tuple[Generation, bool]:
+              protocol_version: int = 2,
+              trusted_new_conversation_id: str | None = None,
+              _connection: Any | None = None) -> tuple[Generation, bool]:
         client_request_id = payload.get("clientRequestId")
         if client_request_id is not None and (not isinstance(client_request_id, str) or
                                                not 1 <= len(client_request_id) <= 160):
             raise ValueError("Invalid client request id")
         manual_compaction = payload.get('compact') is True
+        # These idempotency namespaces are host-generated only. A browser can
+        # see a task handle and must not be able to preoccupy its continuation
+        # key with an unrelated generation before the child settles.
+        if isinstance(client_request_id, str):
+            if client_request_id.startswith("subagent-wakeup:") and _connection is None:
+                raise ValueError("Internal completion idempotency key cannot be submitted")
+            if client_request_id.startswith("subagent:") and trusted_new_conversation_id is None:
+                raise ValueError("Internal child idempotency key cannot be submitted")
+            if client_request_id.startswith("trigger_") and _connection is None:
+                raise ValueError("Internal Agent Trigger idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")
         new_conversation = raw_conversation_id in (None, "", "new", "new_conversation")
         if manual_compaction:
@@ -96,7 +135,19 @@ class GenerationStore:
         project_id = payload.get("projectId", payload.get("chatProjectId")) if new_conversation else None
         if project_id is not None and (not isinstance(project_id, str) or not project_id):
             raise ValueError("Invalid project id")
-        conversation_id = str(uuid.uuid4()) if new_conversation else raw_conversation_id
+        # Internal-only allocation for a host-reserved subagent child. No HTTP
+        # field can select this value; the host registered its trusted lineage
+        # before this conversation becomes externally observable.
+        if trusted_new_conversation_id is not None:
+            if not new_conversation or not isinstance(trusted_new_conversation_id, str):
+                raise ValueError("A reserved child conversation must be a new conversation")
+            try:
+                if str(uuid.UUID(trusted_new_conversation_id)) != trusted_new_conversation_id:
+                    raise ValueError("Invalid reserved child conversation identity")
+            except ValueError as exc:
+                raise ValueError("Invalid reserved child conversation identity") from exc
+        conversation_id = (trusted_new_conversation_id or str(uuid.uuid4())) \
+            if new_conversation else raw_conversation_id
         prompt = payload.get("text")
         if manual_compaction:
             prompt = ''
@@ -117,9 +168,15 @@ class GenerationStore:
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
             'manualCompaction': manual_compaction,
+            "artifactsMode": artifact_mode(payload, agent),
         }
-        with self.database.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        # Internal trigger delivery supplies its already-locked SQLite
+        # transaction. The generation and a one-shot child result claim must
+        # commit or roll back together; ordinary HTTP admission is unchanged.
+        with (contextlib.nullcontext(_connection) if _connection is not None
+              else self.database.connect()) as db:
+            if _connection is None:
+                db.execute("BEGIN IMMEDIATE")
             if client_request_id:
                 prior = db.execute(
                     "SELECT r.* FROM generation_requests gr JOIN runs r ON r.id=gr.run_id "
@@ -206,6 +263,30 @@ class GenerationStore:
         return Generation(run_id, conversation_id, stamp_ms, response_message_id,
                           user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id"), protocol_version), True
 
+    @staticmethod
+    def action_expired(pending: dict) -> bool:
+        expires = pending.get("expiresAt")
+        return type(expires) in (int, float) and expires <= time.time() * 1000
+
+    def resume_claim(self, owner: str, run_id: str) -> dict | None:
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status IN ('running','requires_action')",
+                (run_id, owner),
+            ).fetchone()
+        return json.loads(row["state"]).get("resumeClaim") if row is not None else None
+
+    @staticmethod
+    def client_pending_action(pending: dict | None) -> dict | None:
+        """Source policy.ts:toClientPendingAction; server replay state stays private."""
+        if pending is None:
+            return None
+        return {key: value for key, value in pending.items() if key not in {
+            "requestFingerprint", "requestFingerprintV2",
+            "resumeContext", "codeExecutionBinding",
+        }}
+
     def pending_action(self, owner: str, run_id: str) -> dict | None:
         with self.database.connect() as db:
             row = db.execute(
@@ -217,9 +298,11 @@ class GenerationStore:
         return json.loads(row["state"]).get("pendingAction")
 
     def pause_for_question(self, owner: str, run_id: str, pending: dict,
-                           history: list[dict], partial_text: str) -> bool:
+                           history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -228,16 +311,22 @@ class GenerationStore:
                 return False
             state = json.loads(row["state"])
             state["pendingAction"] = pending
+            # An approved ask-user tool causes a second, question-shaped
+            # interrupt. Retire the prior approval in the same transaction as
+            # the new pause so a crash cannot replay the approval stage.
+            state.pop("approvedToolBatch", None)
+            state.pop("resumeClaim", None)
             state["resumeHistory"] = history
             state["partialText"] = partial_text
             db.execute("UPDATE runs SET state=?,status='requires_action',updated_at=? WHERE id=?",
                        (_json(state), _now(), run_id))
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
-                       (run_id, _json({"event": "on_pending_action", "data": pending})))
+                       (run_id, _json({"event": "on_pending_action",
+                                        "data": self.client_pending_action(pending)})))
             return True
 
     def pause_for_oauth(self, owner: str, run_id: str, pending: dict,
-                        history: list[dict], partial_text: str, auth_delta: dict) -> bool:
+                        history: list[dict], partial_text: str, auth_delta: dict, *, actor_lease=None) -> bool:
         """Park a model-selected OAuth tool without any live Python waiter.
 
         The original React sign-in delta and the durable interrupt are written
@@ -266,6 +355,8 @@ class GenerationStore:
             raise ValueError("Action OAuth continuation too large")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -356,14 +447,31 @@ class GenerationStore:
             previous = marker.get("stage")
             if stage == "dispatching" and previous != "claimed":
                 raise PermissionError("OAuth Action was already dispatched")
+            if stage == "completed" and previous == "completed":
+                # A resumed, already-authorized approval may replay the cached
+                # ToolNode result after a crash. Re-acknowledging that result is
+                # safe ONLY if the authoritative host completion survived in
+                # the same run; the HTTP dispatch fence stays closed.
+                recorded = db.execute(
+                    "SELECT 1 FROM generation_events WHERE run_id=? AND "
+                    "json_extract(data,'$.event')='on_run_step_completed' AND "
+                    "json_extract(data,'$.data.result.tool_call.id')=? LIMIT 1",
+                    (run_id, call_id),
+                ).fetchone()
+                if recorded is not None:
+                    return
             if stage == "completed" and previous != "dispatching":
                 raise PermissionError("OAuth Action HTTP completion has no dispatch record")
             if stage == "cleared" and previous not in {"completed", "claimed"}:
                 raise PermissionError("OAuth Action cannot clear unverified dispatch")
             if stage == "cleared":
                 state.pop("oauthResume", None)
-                state.pop("resumeHistory", None)
-                state.pop("partialText", None)
+                # A human resume claim may still need this exact approved
+                # continuation after a crash. OAuth's tool replay fence and
+                # human approval replay evidence have different lifetimes.
+                if not isinstance(state.get("resumeClaim"), dict):
+                    state.pop("resumeHistory", None)
+                    state.pop("partialText", None)
             else:
                 marker["stage"] = stage
             db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?", (_json(state), _now(), run_id))
@@ -383,8 +491,9 @@ class GenerationStore:
             if not isinstance(marker, dict) or marker.get("stage") not in {"claimed", "completed"}:
                 return False
             state.pop("oauthResume")
-            state.pop("resumeHistory", None)
-            state.pop("partialText", None)
+            if not isinstance(state.get("resumeClaim"), dict):
+                state.pop("resumeHistory", None)
+                state.pop("partialText", None)
             db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?", (_json(state), _now(), run_id))
             return True
 
@@ -407,6 +516,8 @@ class GenerationStore:
             pending = state.get("pendingAction")
             if not isinstance(pending, dict) or pending.get("actionId") != action_id:
                 raise ValueError("Stale or mismatched human action")
+            if self.action_expired(pending):
+                raise ValueError("Human action expired")
             if pending.get("payload", {}).get("type") != "ask_user_question":
                 raise ValueError("An Ask User answer is required")
             resolution = resolve_ask_user_question_resume(pending["payload"], body)
@@ -419,16 +530,23 @@ class GenerationStore:
             call_id = pending["payload"]["tool_call_id"]
             history.append({"role": "tool", "tool_call_id": call_id, "content": output})
             partial_text = state.get("partialText", "")
+            state["resumeClaim"] = {
+                "actionId": action_id, "pendingAction": pending, "kind": "ask",
+                "submission": body,
+            }
             state.pop("pendingAction", None)
-            state.pop("resumeHistory", None)
-            state.pop("partialText", None)
+            # Keep the resolved continuation until the model reaches a terminal
+            # boundary. An ACK can be lost or the Controller can restart.
+            state["resumeHistory"] = history
+            state["partialText"] = partial_text
             db.execute("UPDATE runs SET state=?,status='running',updated_at=? WHERE id=?",
                        (_json(state), _now(), run_id))
             return self._run(row), history, partial_text
 
     def pause_for_approval(self, owner: str, run_id: str, pending: dict,
-                           history: list[dict], partial_text: str) -> bool:
-        return self.pause_for_question(owner, run_id, pending, history, partial_text)
+                           history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
+        return self.pause_for_question(owner, run_id, pending, history, partial_text,
+                                       actor_lease=actor_lease)
 
     def claim_approval(self, owner: str, run_id: str, action_id: str,
                        decisions: list[dict]) -> tuple[Generation, list[dict], str, ApprovalBatch]:
@@ -445,6 +563,8 @@ class GenerationStore:
             pending = state.get("pendingAction")
             if not isinstance(pending, dict) or pending.get("actionId") != action_id:
                 raise ValueError("Stale tool approval action")
+            if self.action_expired(pending):
+                raise ValueError("Human action expired")
             payload = pending.get("payload") or {}
             if payload.get("type") != "tool_approval":
                 raise ValueError("Unexpected approval format")
@@ -456,6 +576,10 @@ class GenerationStore:
             if not isinstance(history, list):
                 raise ValueError("Missing model continuation history")
             prior = state.get("partialText", "")
+            state["resumeClaim"] = {
+                "actionId": action_id, "pendingAction": pending, "kind": "approval",
+                "submission": {"decisions": decisions},
+            }
             state["approvedToolBatch"] = {
                 "actionId": action_id,
                 "namespace": pending.get("namespace", ""),
@@ -469,6 +593,106 @@ class GenerationStore:
                        (_json(state), _now(), run_id))
             resumed = self._run({**dict(row), "status": "running"})
             return resumed, history, prior, batch
+
+    def restart_claimed_resume(self, owner: str, run_id: str, action_id: str,
+                               submission: dict) -> tuple[Generation, list[dict], str, ApprovalBatch | None, str]:
+        """CAS-restart a previously accepted action; changed retries fail closed.
+
+        A lost HTTP ACK and process restart must never authorize a DIFFERENT
+        decision for the same action. SQLite stores the original answer/decision
+        and the original interrupt identity in the same transaction.
+        """
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status IN ('running','requires_action')",
+                (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError("No resumable generation")
+            state = json.loads(row["state"])
+            claim = state.get("resumeClaim")
+            if not isinstance(claim, dict) or claim.get("actionId") != action_id:
+                raise ValueError("Stale human action")
+            if (not isinstance(submission, dict) or
+                json.dumps(claim.get("submission"), sort_keys=True, ensure_ascii=False) !=
+                json.dumps(submission, sort_keys=True, ensure_ascii=False)):
+                raise ValueError("Conflicting human action retry")
+            history = state.get("resumeHistory")
+            if not isinstance(history, list):
+                raise ValueError("Missing saved continuation history")
+            batch = (prepare_approval_batch(state["approvedToolBatch"]["payload"],
+                                            state["approvedToolBatch"]["resolutions"])
+                     if state.get("approvedToolBatch") else None)
+            if row["status"] == "requires_action":
+                pending = state.get("pendingAction")
+                if pending is None or pending.get("actionId") != action_id:
+                    raise ValueError("Lost recovery action identity")
+                state.pop("pendingAction")
+                db.execute("UPDATE runs SET state=?,status='running',updated_at=? WHERE id=?",
+                           (_json(state), _now(), run_id))
+            return (self._run({**dict(row), "status": "running"}), history,
+                    state.get("partialText", ""), batch,
+                    claim["pendingAction"].get("namespace", ""))
+
+    def recover_claimed_resumes(self, active_run_ids: set[str] | None = None) -> int:
+        """Return crash-stranded claimed actions to the same client interrupt.
+
+        Never execute tools at boot without an authenticated fresh request.
+        The React client can re-submit the original answer, which matches the
+        immutable SQLite claim and uses the graph's saved checkpoint.
+        """
+        active = active_run_ids or set()
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("SELECT r.id,r.state,r.conversation_id,c.owner FROM runs r "
+                              "JOIN conversations c ON c.id=r.conversation_id "
+                              "WHERE r.status='running'").fetchall()
+            recovered = 0
+            for row in rows:
+                if row["id"] in active:
+                    continue
+                state = json.loads(row["state"])
+                claim = state.get("resumeClaim")
+                if not isinstance(claim, dict):
+                    continue
+                pending = claim.get("pendingAction")
+                if not isinstance(pending, dict) or pending.get("actionId") != claim.get("actionId"):
+                    continue
+                state["pendingAction"] = pending
+                db.execute("UPDATE runs SET state=?,status='requires_action',updated_at=? WHERE id=?",
+                           (_json(state), _now(), row["id"]))
+                # Rewind to the text prefix in the *latest durable model
+                # checkpoint*, not the older human-pause state. A continuation
+                # can complete more model/tool turns before crashing, and those
+                # saved turns must remain visible on reconnect.
+                preserved = state.get('partialText', '')
+                namespace = pending.get('namespace', '')
+                checkpoint_ns = row['id'] + ('|' + namespace if namespace else '')
+                latest = None
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                              "AND name='agent_checkpoints'").fetchone():
+                    latest = db.execute(
+                        "SELECT checkpoint FROM agent_checkpoints WHERE owner=? "
+                        "AND thread_id=? AND checkpoint_ns=? AND checkpoint IS NOT NULL "
+                        "AND expires_at>? ORDER BY checkpoint_id DESC LIMIT 1",
+                        (row['owner'], row['conversation_id'], checkpoint_ns, time.time()),
+                    ).fetchone()
+                if latest is not None:
+                    saved = json.loads(latest['checkpoint']).get('channel_values') or {}
+                    checkpoint_text = saved.get('partial_text')
+                    if (isinstance(preserved, str) and isinstance(checkpoint_text, str)
+                            and checkpoint_text.startswith(preserved)):
+                        preserved = checkpoint_text
+                db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
+                           (row['id'], _json({'event': 'on_content_rewind', 'data': {
+                               'preserveText': preserved}})))
+                db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
+                           (row["id"], _json({"event": "on_pending_action",
+                                               "data": self.client_pending_action(pending)})))
+                recovered += 1
+            return recovered
 
     def approved_review(self, owner: str, run_id: str) -> dict | None:
         """Load owner-bound server review proof for crash/restart continuation."""
@@ -494,10 +718,12 @@ class GenerationStore:
         return prepare_approval_batch(review["payload"], review["resolutions"]) if review else None
 
     def complete_approval_batch(self, owner: str, run_id: str, action_id: str,
-                                history: list[dict], partial_text: str) -> bool:
+                                history: list[dict], partial_text: str, *, actor_lease=None) -> bool:
         """Retire approval proof only after checkpointed tool results are saved."""
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -515,11 +741,33 @@ class GenerationStore:
                        (_json(state), _now(), run_id))
             return True
 
-    def append(self, owner: str, run_id: str, event: dict) -> int:
+    @staticmethod
+    def _record_completed_arguments(db, run_id: str, event: dict, full_arguments: dict | None):
+        """Owner-verified, durable tool evidence outside truncated SSE previews."""
+        if full_arguments is None:
+            return
+        tool = ((event.get('data') or {}).get('result') or {}).get('tool_call') or {}
+        if (event.get('event') != 'on_run_step_completed' or not isinstance(tool.get('id'), str)
+                or not isinstance(tool.get('name'), str) or not isinstance(full_arguments, dict)):
+            raise ValueError('Invalid completed tool evidence')
+        row = db.execute('SELECT state FROM runs WHERE id=?', (run_id,)).fetchone()
+        state = json.loads(row['state'])
+        proofs = state.setdefault('completedToolArguments', {})
+        proof = {'name': tool['name'], 'arguments': full_arguments}
+        if tool['id'] in proofs and proofs[tool['id']] != proof:
+            raise ValueError('Cannot change completed tool arguments')
+        proofs[tool['id']] = proof
+        db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?', (_json(state), _now(), run_id))
+
+    def append(self, owner: str, run_id: str, event: dict, *, actor_lease=None,
+               full_arguments: dict | None = None) -> int:
         encoded = _json(event)
         if len(encoded.encode("utf-8")) > 256 * 1024:
             raise ValueError("Generation event exceeds 256 KiB")
         with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             if not db.execute(
                 "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -529,10 +777,12 @@ class GenerationStore:
             if count >= _EVENT_LIMIT:
                 raise ValueError("Generation event retention limit reached")
             cursor = db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, encoded))
+            self._record_completed_arguments(db, run_id, event, full_arguments)
             return int(cursor.lastrowid)
 
     def append_tool_completion(self, owner: str, run_id: str, event: dict,
-                               tool_call_id: str, file_ids: list[str]) -> int:
+                               tool_call_id: str, file_ids: list[str],
+                               *, actor_lease=None, full_arguments: dict | None = None) -> int:
         """Commit a tool completion and its file attachments atomically."""
         from .tool_attachments import link_tool_attachment
 
@@ -543,6 +793,8 @@ class GenerationStore:
             raise ValueError("Tool attachment count exceeds limit")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             if not db.execute(
                 "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
@@ -578,6 +830,7 @@ class GenerationStore:
                 raise ValueError("Generation event retention limit reached")
             cursor = db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
                                 (run_id, encoded))
+            self._record_completed_arguments(db, run_id, event, full_arguments)
             for ident in file_ids:
                 try:
                     link_tool_attachment(
@@ -587,6 +840,118 @@ class GenerationStore:
                     # Remote file IDs are not Controller-published blobs.
                     continue
             return int(cursor.lastrowid)
+
+    def resume_snapshot(self, owner: str, run_id: str) -> tuple[dict, int]:
+        """Source React SSE resumeState projection from one SQLite read view.
+
+        The cursor and content are captured together; events added after this
+        transaction are streamed by their seq and cannot be lost on reload.
+        This is the existing generation event log, not a second runtime.
+        """
+        with self.database.connect() as db:
+            db.execute("BEGIN")
+            row = db.execute(
+                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError("Generation not found")
+            generation = self._run(row)
+            state = json.loads(row["state"])
+            user = db.execute(
+                "SELECT id,parent_id,text FROM messages WHERE id=? AND conversation_id=?",
+                (generation.user_message_id, generation.conversation_id),
+            ).fetchone()
+            entries = db.execute(
+                "SELECT seq,data FROM generation_events WHERE run_id=? ORDER BY seq",
+                (run_id,),
+            ).fetchall()
+            max_seq = entries[-1]["seq"] if entries else 0
+        steps = {}
+        content_parts: list[dict] = []
+        tool_slot_by_step: dict[str, int] = {}
+        for entry in entries:
+            item = json.loads(entry["data"])
+            event, data = item.get("event"), item.get("data") or {}
+            if event == "on_run_step" and isinstance(data, dict) and isinstance(data.get("id"), str):
+                steps[data["id"]] = data
+            elif event == "on_run_step_closed" and data.get("id") in steps:
+                steps[data["id"]] = {**steps[data["id"]], **{
+                    key: data[key] for key in ("status", "closed_at") if key in data}}
+            elif event == "on_run_step_completed":
+                result = data.get("result") or {}
+                tool_call = result.get("tool_call")
+                if isinstance(tool_call, dict):
+                    step_id = result.get('id')
+                    part = {'type': 'tool_call', 'tool_call': {
+                        **tool_call, 'stepId': step_id}}
+                    if isinstance(step_id, str) and step_id in tool_slot_by_step:
+                        # Crash recovery can replay the same cached completion.
+                        # React updates by step ID, so the snapshot must update
+                        # that slot instead of adding another content element.
+                        content_parts[tool_slot_by_step[step_id]] = part
+                    else:
+                        if isinstance(step_id, str):
+                            tool_slot_by_step[step_id] = len(content_parts)
+                        content_parts.append(part)
+            elif event == "on_message_delta":
+                content = (data.get("delta") or {}).get("content") or {}
+                if content.get("type") == "text" and isinstance(content.get("text"), str) and content["text"]:
+                    if content_parts and content_parts[-1].get("type") == "text":
+                        content_parts[-1]["text"] += content["text"]
+                    else:
+                        content_parts.append({"type": "text", "text": content["text"],
+                                              "phase": "final_answer"})
+            elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
+                content_parts.append(data["part"])
+            elif event == 'on_content_rewind':
+                _rewind_uncheckpointed_text(content_parts, data.get('preserveText', ''))
+        pending = state.get("pendingAction")
+        oauth_prompts = []
+        if isinstance(pending, dict) and (pending.get('payload') or {}).get('type') == 'action_oauth':
+            payload = pending['payload']
+            step_id = payload.get('step_id')
+            tool_call_id = payload.get('tool_call_id')
+            for entry in reversed(entries):
+                event = json.loads(entry['data'])
+                data = event.get('data') or {}
+                delta = data.get('delta') or {}
+                if (event.get('event') == 'on_run_step_delta' and data.get('id') == step_id
+                        and isinstance(delta.get('auth'), str) and delta['auth']
+                        and any(call.get('id') == tool_call_id for call in delta.get('tool_calls') or [])):
+                    step = steps.get(step_id) or {}
+                    oauth_prompts.append({'stepId': step_id,
+                                          'runId': step.get('runId', generation.response_message_id),
+                                          'index': step.get('index', 0),
+                                          'toolCallId': tool_call_id,
+                                          'toolName': payload.get('tool_name', ''),
+                                          'authURL': delta['auth'],
+                                          'expiresAt': delta.get('expires_at')})
+                    break
+        initial = content_parts
+        steering = state.get("steering") or {}
+        pending_steers = steering.get("queue", []) or (steering.get("leftovers", [])
+                                                           if generation.status in _TERMINAL else [])
+        from .steering import _public
+
+        result = {
+            "runSteps": list(steps.values()),
+            "aggregatedContent": initial,
+            "pendingSteers": [_public(item) for item in pending_steers],
+            "userMessage": {
+                "messageId": generation.user_message_id,
+                "conversationId": generation.conversation_id,
+                "text": user["text"] if user else "",
+                **({"parentMessageId": user["parent_id"]} if user and user["parent_id"] else {}),
+            },
+            "responseMessageId": generation.response_message_id,
+            "conversationId": generation.conversation_id,
+            "sender": "Assistant",
+            "model": state.get("model") or "",
+            **({"pendingAction": self.client_pending_action(pending)} if pending else {}),
+            **({"pendingOAuthPrompts": oauth_prompts} if oauth_prompts else {}),
+        }
+        return result, max_seq
 
     def events(self, owner: str, run_id: str, after: int = 0, limit: int = 200) -> list[tuple[int, dict]]:
         with self.database.connect() as db:
@@ -790,6 +1155,32 @@ class GenerationStore:
                              'WHERE r.id=? AND c.owner=?', (run_id, owner)).fetchone()
         return bool(row and json.loads(row['state']).get('manualCompaction'))
 
+    def accumulated_text(self, owner: str, run_id: str) -> str:
+        """Reassemble already-streamed deltas for a restarted owner-bound run.
+
+        A resumed StateGraph must not lose previous assistant text, and must not
+        reemit old SSE chunks. This uses the existing generation event contract.
+        """
+        with self.database.connect() as db:
+            rows = db.execute(
+                "SELECT ge.data FROM generation_events ge JOIN runs r ON r.id=ge.run_id "
+                "JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE c.owner=? AND ge.run_id=? ORDER BY ge.seq", (owner, run_id),
+            ).fetchall()
+        chunks = []
+        for row in rows:
+            event = json.loads(row["data"])
+            if event.get("event") == "on_message_delta":
+                content = event.get("data", {}).get("delta", {}).get("content", {})
+                value = content.get("text") if isinstance(content, dict) else None
+                if isinstance(value, str):
+                    chunks.append(value)
+            elif event.get('event') == 'on_content_rewind':
+                preserved = (event.get('data') or {}).get('preserveText')
+                if isinstance(preserved, str):
+                    chunks = [preserved]
+        return "".join(chunks)
+
     def history(self, owner: str, conversation_id: str, max_messages: int | None = None,
                 *, message_id: str | None = None) -> list[dict]:
         """Walk the conversation branch and replay exact saved model steps.
@@ -940,7 +1331,54 @@ class GenerationStore:
                             # still reconstruct from their display text.
                             groups.append(persisted['modelSteps'])
                         else:
-                            groups.append(legacy_steps(content, row['text'], metadata))
+                            legacy = {"role": "assistant", "content": content if isinstance(content, list) else row["text"],
+                                      "metadata": metadata}
+                            try:
+                                if (isinstance(content, list) and
+                                        any(isinstance(part, dict) and part.get('type') == 'tool_call'
+                                            for part in content)):
+                                    formatted_steps = legacy_steps(content, row['text'], metadata)
+                                else:
+                                    formatted_steps = format_agent_messages([legacy])
+                                # Source legacy DTO only carries the plain steer
+                                # string. On model replay retain quoted context
+                                # from the durable steer part without modifying
+                                # the upstream display-formatting contract.
+                                if isinstance(content, list):
+                                    from .steering import merged_text
+
+                                    steers = iter(part for part in content if isinstance(part, dict)
+                                                  and part.get('type') == 'steer')
+                                    for step in formatted_steps:
+                                        if step.get('source') == 'steer':
+                                            part = next(steers, None)
+                                            if part is not None:
+                                                step['content'] = merged_text(part)
+                                                step['files'] = part.get('files', [])
+                                                step['quotes'] = part.get('quotes', [])
+                                                step['steerId'] = part.get('steerId')
+                                # Legacy React artifact edits store a text block
+                                # while history API originally exposed its text.
+                                # Keep the scalar-text contract when no media or
+                                # tool anchors exist, without losing rich blocks.
+                                for step in formatted_steps:
+                                    parts = step.get("content")
+                                    if (step.get("role") == "assistant" and isinstance(parts, list)
+                                            and all(isinstance(p, dict) and p.get("type") == "text" for p in parts)):
+                                        step["content"] = "".join(p.get("text", "") for p in parts)
+                                if isinstance(content, list):
+                                    reasoning = [part.get('text') or part.get('thinking') for part in content
+                                                 if isinstance(part, dict) and
+                                                 part.get('type') in {'think', 'thinking', 'reasoning'}]
+                                    if reasoning:
+                                        last_assistant = next((step for step in reversed(formatted_steps)
+                                                               if step.get('role') == 'assistant'), None)
+                                        if last_assistant is not None:
+                                            last_assistant['reasoning_content'] = '\n'.join(
+                                                str(chunk) for chunk in reasoning if chunk)
+                                groups.append(formatted_steps)
+                            except ValueError:
+                                groups.append([{"role": "assistant", "content": row["text"]}])
                     else:
                         value = row["text"]
                         if isinstance(content, list):
@@ -1026,40 +1464,100 @@ class GenerationStore:
         return completed_model_steps(messages, boundary)
 
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
-               error: str | None = None, model_steps: list[dict] | None = None) -> bool:
+               error: str | None = None, expired_action_id: str | None = None,
+               actor_lease=None, _connection: Any | None = None,
+               model_steps: list[dict] | None = None) -> bool:
         if status not in _TERMINAL:
             raise ValueError("Only terminal statuses can finish a generation")
-        with self.database.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        with (contextlib.nullcontext(_connection) if _connection is not None
+              else self.database.connect()) as db:
+            if _connection is None:
+                db.execute("BEGIN IMMEDIATE")
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "WHERE r.id=? AND c.owner=?", (run_id, owner),
             ).fetchone()
             if not row or row["status"] in _TERMINAL:
                 return False
+            if expired_action_id is not None:
+                pending = json.loads(row["state"]).get("pendingAction")
+                if (row["status"] != "requires_action" or
+                    not isinstance(pending, dict) or
+                    pending.get("actionId") != expired_action_id or
+                    not self.action_expired(pending)):
+                    return False
             generation = self._run(row)
-            state = json.loads(row["state"])
-            if model_steps is not None:
-                # Store canonical messages separately from the React preview.
-                # No tool result is truncated on this storage path.
-                state["modelSteps"] = model_steps
-                db.execute("UPDATE runs SET state=? WHERE id=?", (_json(state), run_id))
             now = _now()
-            # Preserve source React tool-call parts in history and final SSE,
-            # rather than erasing them when the assistant text is committed.
-            tool_parts = {}
-            for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
-                value = json.loads(event["data"])
-                if value.get("event") == "on_run_step_completed":
-                    result = value.get("data", {}).get("result", {})
-                    if isinstance(result.get("tool_call"), dict):
-                        tool_parts[result["id"]] = {"type": "tool_call", "tool_call": {
-                            **result["tool_call"], "stepId": result["id"],
-                        }}
             run_state = json.loads(row['state'])
             staged = run_state.get('summaryCheckpoint')
             from .compaction import is_usable_summary_part, mark_compaction_outcome
 
+            # Preserve source React tool-call parts in history and final SSE,
+            # rather than erasing them when the assistant text is committed.
+            tool_positions = {}
+            content = []
+            attachments = {}
+            for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
+                value = json.loads(event["data"])
+                kind = value.get("event")
+                data = value.get("data") or {}
+                if kind == "attachment":
+                    attachment = data
+                    if (isinstance(attachment, dict) and isinstance(attachment.get("file_id"), str)
+                            and attachment.get("messageId") == generation.response_message_id):
+                        attachments[attachment["file_id"]] = attachment
+                if kind == "on_run_step_completed":
+                    result = data.get("result", {})
+                    if isinstance(result.get("tool_call"), dict):
+                        part = {"type": "tool_call", "tool_call": {
+                            **result["tool_call"], "stepId": result["id"],
+                        }}
+                        if result['id'] in tool_positions:
+                            content[tool_positions[result['id']]] = part
+                        else:
+                            tool_positions[result['id']] = len(content)
+                            content.append(part)
+                elif kind == "on_message_delta":
+                    delta = (data.get("delta") or {}).get("content") or {}
+                    if delta.get("type") == "text" and isinstance(delta.get("text"), str) and delta["text"]:
+                        if content and content[-1].get("type") == "text":
+                            content[-1]["text"] += delta["text"]
+                        else:
+                            content.append({"type": "text", "text": delta["text"], "phase": "final_answer"})
+                elif kind == "on_steer_applied" and isinstance(data.get("part"), dict):
+                    content.append(data["part"])
+                elif kind == 'on_content_rewind':
+                    _rewind_uncheckpointed_text(content, data.get('preserveText', ''))
+            if text and not any(isinstance(part, dict) and part.get('type') == 'text'
+                                for part in content):
+                content.append({"type": "text", "text": text, "phase": "final_answer"})
+            # The source ON_RUN_STEP_CLOSED event is the authoritative status
+            # and duration even after reconnect; never infer a stop from the
+            # absence of a live streaming task or the event's unstable index.
+            for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq",
+                                    (run_id,)):
+                value = json.loads(event["data"])
+                if value.get("event") != "on_run_step_closed":
+                    continue
+                closed = value.get("data") or {}
+                part = (content[tool_positions[closed["id"]]] if closed.get("id") in tool_positions else None)
+                if not part or closed.get("status") not in {"completed", "failed", "cancelled"}:
+                    continue
+                tool = part["tool_call"]
+                tool["runStepStatus"] = closed["status"]
+                opened_at, closed_at = closed.get("created_at"), closed.get("closed_at")
+                if (type(closed_at) in (int, float) and closed_at > 0 and
+                    (type(opened_at) not in (int, float) or opened_at <= closed_at)):
+                    tool["runStepClosedAt"] = closed_at
+                    if type(opened_at) in (int, float):
+                        tool["runStepDurationMs"] = closed_at - opened_at
+            # LibreChat agents/client.js emits ContentTypes.ERROR as a content
+            # part. A top-level final.error alone is ignored by finalHandler.
+            # Persist the same part so the error survives history reload too.
+            if status in {"error", "interrupted"}:
+                content.append({"type": "error", "error": error or "Generation failed"})
             attachments: list[dict] = []
             attachment_positions: dict[tuple, int] = {}
             for event_row in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
@@ -1084,19 +1582,11 @@ class GenerationStore:
                     if key is not None:
                         attachment_positions[key] = len(attachments)
                     attachments.append(attachment)
-            content = ([dict(staged)] if is_usable_summary_part(staged) else []) + (
-                ([{"type": "text", "text": text, "phase": "final_answer"}] if text else [])
-                + list(tool_parts.values())
-            )
-            # LibreChat agents/client.js emits ContentTypes.ERROR as a content
-            # part. A top-level final.error alone is ignored by finalHandler.
-            # Persist the same part so the error survives history reload too.
-            if status in {"error", "interrupted"}:
-                content.append({"type": "error", "error": error or "Generation failed"})
             if run_state.get('manualCompaction'):
                 mark_compaction_outcome(content, aborted=False)
+            if is_usable_summary_part(staged):
+                content.insert(0, dict(staged))
             from .tool_attachments import response_attachments, visible_response_attachments
-
             verified = response_attachments(db, owner, [generation.response_message_id])[
                 generation.response_message_id]
             attachments = visible_response_attachments(verified, attachments)
@@ -1107,14 +1597,15 @@ class GenerationStore:
                 response_metadata['metadata'] = {'contextUsage': run_state['contextUsage']}
             response_message = {
                 **({'metadata': response_metadata['metadata']} if 'metadata' in response_metadata else {}),
+                **({"attachments": attachments} if attachments else {}),
                 "messageId": generation.response_message_id,
                 "conversationId": generation.conversation_id,
                 "parentMessageId": generation.user_message_id,
                 "sender": "Assistant", "isCreatedByUser": False,
                 "text": text,
                 "content": content,
-                "unfinished": status != "complete",
                 **({"attachments": attachments} if attachments else {}),
+                "unfinished": status != "complete",
             }
             if content or attachments or model_steps:
                 db.execute(
@@ -1124,7 +1615,17 @@ class GenerationStore:
                      "assistant", text, _json(response_message["content"]),
                      _json(response_metadata), now, now),
                 )
-            db.execute("UPDATE runs SET status=?, updated_at=? WHERE id=?", (status, now, run_id))
+            run_state = json.loads(row["state"])
+            if model_steps is not None:
+                run_state['modelSteps'] = model_steps
+            from .steering import SteeringStore
+
+            pending_steers = SteeringStore.settle_leftovers(run_state)
+            if status != "interrupted":
+                run_state.pop("resumeClaim", None)
+                run_state.pop("approvedToolBatch", None)
+            db.execute("UPDATE runs SET status=?,state=?,updated_at=? WHERE id=?",
+                       (status, _json(run_state), now, run_id))
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, generation.conversation_id))
             final = {
                 "final": True,
@@ -1133,6 +1634,7 @@ class GenerationStore:
                 "responseMessage": response_message,
                 **({"aborted": True} if status == "aborted" else {}),
                 **({"error": error or "Generation failed"} if status in {"error", "interrupted"} else {}),
+                **({"pendingSteers": pending_steers} if pending_steers else {}),
             }
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(final)))
             return True

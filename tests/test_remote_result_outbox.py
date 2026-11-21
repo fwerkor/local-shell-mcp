@@ -161,7 +161,10 @@ async def test_spooled_result_retains_reset_generation_and_mutation_preservation
             await asyncio.sleep(0.01)
 
     try:
-        await asyncio.wait_for(wait_until_drained(), 3)
+        # Native Windows runners can spend multiple seconds in worker IO
+        # scheduling. Wait for a real drained outbox instead of assuming that
+        # three retries must always fit within three wall-clock seconds.
+        await asyncio.wait_for(wait_until_drained(), 20)
     finally:
         sender.cancel()
         with pytest.raises(asyncio.CancelledError):

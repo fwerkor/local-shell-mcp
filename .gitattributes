@@ -5,3 +5,13 @@ ui/workspace/** linguist-vendored whitespace=-blank-at-eol
 # Source-oracle hashes must not change with checkout platform defaults.
 tests/fixtures/librechat/*.cjs text eol=lf
 tests/fixtures/librechat/*.json text eol=lf
+
+# Original-source parity fixtures are SHA-pinned; Windows must not rewrite their bytes.
+tests/fixtures/librechat/*.ts text eol=lf
+tests/fixtures/librechat/*.tsx text eol=lf
+tests/fixtures/librechat/*.mjs text eol=lf
+
+# Byte-locked upstream TypeScript oracle sources (including nested trigger files).
+# Explicit LF on Windows preserves the SHA-256 manifest and Bun source parity.
+tests/fixtures/librechat/original_agent_triggers/*.ts text eol=lf
+tests/fixtures/librechat/original_agent_triggers/triggers/*.ts text eol=lf

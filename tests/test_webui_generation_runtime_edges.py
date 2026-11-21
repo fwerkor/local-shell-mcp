@@ -218,6 +218,67 @@ async def test_agent_without_machine_access_still_has_session_tools(active_gener
     assert store.latest("local", generation.conversation_id).status == "complete"
     assert store.events("local", generation.run_id)[-1][1]["responseMessage"]["text"] == "Plain chat works."
 
+@pytest.mark.asyncio
+async def test_resume_after_steer_uses_latest_message_creation_step(active_generation, monkeypatch):
+    database, store, profile = active_generation
+    generation, _ = store.begin("local", {"text": "Question"})
+    old_step = "step_" + generation.run_id
+    steer_step = old_step + "_after_steer_2"
+    for index, ident in enumerate((old_step, steer_step)):
+        store.append("local", generation.run_id, {"event": "on_run_step", "data": {
+            "type": "message_creation", "id": ident, "index": index * 2, "created_at": 1234,
+        }})
+    monkeypatch.setattr(generation_routes, "_generation_store", lambda: store)
+    monkeypatch.setattr(generation_routes, "_database", lambda: database)
+
+    class FakeRunner:
+        def __init__(self, *args, on_text, **kwargs):
+            self.on_text = on_text
+            self.partial_text = "resumed"
+
+        async def run(self, history):
+            assert history == [{"role": "user", "content": "Question"}]
+            await self.on_text("resumed")
+
+    monkeypatch.setattr(agent_runner, "AgentRunner", FakeRunner)
+    await generation_routes._run_model("local", generation, profile,
+                                      resume_history=[{"role": "user", "content": "Question"}])
+    events = [event for _, event in store.events("local", generation.run_id)]
+    assert any(event.get("event") == "on_message_delta" and event["data"]["id"] == steer_step
+               for event in events)
+    assert any(event.get("event") == "on_run_step_closed" and event["data"]["index"] == 2
+               for event in events)
+
+
+@pytest.mark.asyncio
+async def test_terminal_resume_replays_final_after_snapshot_watermark(active_generation, monkeypatch):
+    _, store, _ = active_generation
+    generation, _ = store.begin("local", {"text": "What happened?"})
+    assert store.finish("local", generation.run_id, status="complete", text="Done")
+    monkeypatch.setattr(generation_routes, "_generation_store", lambda: store)
+    packets = [packet.decode() async for packet in generation_routes._events(
+        "local", generation, resume=True)]
+    assert any('"sync":true' in packet for packet in packets)
+    assert any('"final":true' in packet for packet in packets)
+
+
+def test_terminal_content_preserves_completed_tool_before_later_steer_and_text(active_generation):
+    _, store, _ = active_generation
+    generation, _ = store.begin('local', {'text': 'First execute, then change direction'})
+    assert store.append('local', generation.run_id, {'event': 'on_run_step_completed', 'data': {
+        'result': {'id': 'step-tool', 'tool_call': {'id': 'call-exec', 'name': 'file_read',
+                                                  'args': {}, 'output': 'Old tool result'}}}})
+    assert store.append('local', generation.run_id, {'event': 'on_steer_applied',
+                     'data': {'part': {'type': 'steer', 'steerId': 'steer-1',
+                                       'steer': 'Now take a new direction'}}})
+    assert store.append('local', generation.run_id, {'event': 'on_message_delta',
+                     'data': {'delta': {'content': {'type': 'text', 'text': 'Updated answer'}}}})
+    snapshot, _ = store.resume_snapshot('local', generation.run_id)
+    assert [item['type'] for item in snapshot['aggregatedContent']] == ['tool_call', 'steer', 'text']
+    assert store.finish('local', generation.run_id, status='complete', text='Updated answer')
+    final = store.events('local', generation.run_id)[-1][1]['responseMessage']['content']
+    assert [item['type'] for item in final] == ['tool_call', 'steer', 'text']
+
 
 @pytest.mark.asyncio
 async def test_structured_content_must_pass_submission_policy_before_admission(active_generation, monkeypatch):
@@ -297,3 +358,26 @@ def test_aborted_checkpoint_replay_does_not_duplicate_already_saved_assistant_pr
 
     assert _recovered_terminal_steps(StubStore(), 'owner', 'run', 'Partial answer') == [
         {'role': 'assistant', 'content': 'Partial answer'}]
+
+
+@pytest.mark.asyncio
+async def test_resume_replays_attachments_consumed_outside_aggregated_content(active_generation, monkeypatch):
+    _, store, _ = active_generation
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    generation, _ = store.begin('local', {'text': 'Create a resource'})
+    store.append('local', generation.run_id, {'event': 'on_message_delta',
+        'data': {'id': 'step', 'delta': {'content': {'type': 'text', 'text': 'Prepared'}}}})
+    attachment = {'type': 'ui_resources', 'messageId': generation.response_message_id,
+                  'toolCallId': 'tool-1', 'ui_resources': [{'resourceId': 'resource-1'}]}
+    store.append('local', generation.run_id, {'event': 'attachment', 'data': attachment})
+    store.append('local', generation.run_id, {'event': 'on_pending_action',
+        'data': {'actionId': 'ask-1'}})
+    emitted = []
+    stream = generation_routes._events('local', generation, resume=True)
+    for _ in range(2):
+        emitted.append((await anext(stream)).decode())
+    await stream.aclose()
+    decoded = [json.loads(packet.partition('data: ')[2].split('\n\n', 1)[0]) for packet in emitted]
+    assert decoded[0]['sync'] is True
+    assert decoded[1] == {'event': 'attachment', 'data': attachment}
+    assert decoded[0]['resumeState']['aggregatedContent'][0]['text'] == 'Prepared'
