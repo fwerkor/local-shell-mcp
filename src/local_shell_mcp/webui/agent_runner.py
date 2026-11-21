@@ -788,7 +788,7 @@ class AgentRunner:
                 record = {"proposal": {"name": original.name, "args": copy.deepcopy(original.arguments)}, "output": result.raw_content if result.raw_content is not None else result.content}
                 self.cache[replay_key(original, state.pending_calls.index(original))] = record
                 await self._completed(result.call, record,
-                                      executed=result.decision in {"approve", "edit"})
+                                      executed=getattr(result, "decision", "approve") in {"approve", "edit"})
 
             async def reviewed_dispatch(call):
                 original = next(item for item in state.pending_calls if item.call_id == call.call_id)
