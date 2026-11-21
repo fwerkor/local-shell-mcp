@@ -870,11 +870,19 @@ class GenerationStore:
         steps = {}
         content_parts: list[dict] = []
         tool_slot_by_step: dict[str, int] = {}
+        text_slot_by_step: dict[str, int] = {}
         for entry in entries:
             item = json.loads(entry["data"])
             event, data = item.get("event"), item.get("data") or {}
             if event == "on_run_step" and isinstance(data, dict) and isinstance(data.get("id"), str):
                 steps[data["id"]] = data
+                if (data.get("type") == "message_creation" and
+                        data.get("id") not in text_slot_by_step and
+                        data.get("index") == len(content_parts)):
+                    # React allocates a content slot at the opening step, even
+                    # if its first text chunk arrives after a completed tool.
+                    text_slot_by_step[data["id"]] = len(content_parts)
+                    content_parts.append({"type": "text", "text": "", "phase": "final_answer"})
             elif event == "on_run_step_closed" and data.get("id") in steps:
                 steps[data["id"]] = {**steps[data["id"]], **{
                     key: data[key] for key in ("status", "closed_at") if key in data}}
@@ -897,7 +905,10 @@ class GenerationStore:
             elif event == "on_message_delta":
                 content = (data.get("delta") or {}).get("content") or {}
                 if content.get("type") == "text" and isinstance(content.get("text"), str) and content["text"]:
-                    if content_parts and content_parts[-1].get("type") == "text":
+                    slot = text_slot_by_step.get(data.get("id"))
+                    if slot is not None and slot < len(content_parts):
+                        content_parts[slot]["text"] += content["text"]
+                    elif content_parts and content_parts[-1].get("type") == "text":
                         content_parts[-1]["text"] += content["text"]
                     else:
                         content_parts.append({"type": "text", "text": content["text"],

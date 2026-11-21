@@ -254,8 +254,9 @@ class AgentRunner:
         # Graph members run inside a shared parent generation. A foreground
         # graph node can publish its tool cards; an isolated subagent (or
         # detached task) must keep its internal steps checkpoint-only.
-        return not (self.background_deny or
-                    (self.namespace and (not self.graph_node or '/subagent:' in self.namespace)))
+        return not (getattr(self, "background_deny", False) or
+                    (self.namespace and (not getattr(self, "graph_node", False)
+                                         or '/subagent:' in self.namespace)))
 
     def _tool_step(self, call):
         checkpoint = self.active_config["configurable"].get("checkpoint_id", "")
@@ -341,6 +342,7 @@ class AgentRunner:
                 }
                 if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= 240_000:
                     self.store.append(self.owner, self.generation.run_id, payload)
+        artifacts = getattr(self, "memory_artifacts", {})
         end_at = int(time.time() * 1000)
         event = {
             "event": "on_run_step_completed", "data": {"result": {
@@ -348,7 +350,7 @@ class AgentRunner:
                 "type": "tool_call", "tool_call": {
                     "id": call.call_id, "name": call.name, "args": self._visible_tool_args(call),
                     "type": "tool_call", "output": preview, "progress": 1,
-                    **({'artifact': self.memory_artifacts[call.call_id]} if call.call_id in self.memory_artifacts else {}),
+                    **({'artifact': artifacts[call.call_id]} if call.call_id in artifacts else {}),
                     **({"executed": False} if not executed else {}),
                 },
             }},
@@ -394,8 +396,9 @@ class AgentRunner:
 
         if is_action_tool(call.name) and executed:
             self.store.oauth_dispatch(self.owner, self.generation.run_id, call.call_id, "completed")
-        if self.on_tool_completed is not None:
-            await self.on_tool_completed(call)
+        callback = getattr(self, "on_tool_completed", None)
+        if callback is not None:
+            await callback(call)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool
