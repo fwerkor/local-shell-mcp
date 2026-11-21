@@ -789,7 +789,9 @@ class AgentRunner:
                 item["files"], ensure_ascii=False,
             )
         return {"role": "user", "content": content, "source": "steer",
-                **({'steerId': item['steerId']} if isinstance(item.get('steerId'), str) else {})}
+                "files": item.get("files") or [], "quotes": item.get("quotes") or [],
+                **({'steerId': item['steerId'], 'id': 'steer:' + item['steerId']}
+                   if isinstance(item.get('steerId'), str) else {})}
 
     def _reconcile_drained_steers(self, state):
         """Recover durable applied steers not yet included in a model checkpoint.
