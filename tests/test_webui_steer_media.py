@@ -271,3 +271,49 @@ async def test_steer_without_file_and_plain_untouched_history(context):
                {'role': 'user', 'source': 'steer', 'content': 'New request'},
                {'role': 'assistant', 'content': 'Previous answer'}]
     assert await stamp_model_messages(db, 'local', history, root) == history
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('sensitive', [False, True])
+async def test_assembled_context_policy_checks_inlined_text_steer_before_provider(
+        context, monkeypatch, sensitive):
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
+    db, store, job, root = context
+    secret = 'PROTECTED-ATTACHMENT-NEVER-SEND'
+    body = secret if sensitive else 'ordinary attached notes'
+    owned = insert_file(db, root, 'owned-context.txt', body.encode('utf-8'), 'text/plain')
+    WorkspaceRepository(db).save_setting('local', 'webui.filters.config', {
+        'messages': {'pii': {
+            'action': 'block', 'fields': ['assembled_context'],
+            'customPatterns': [{'id': 'secret-marker', 'label': 'sensitive notes', 'regex': secret}],
+        }},
+    })
+    exposed = []
+
+    async def provider(profile, messages, **kwargs):
+        exposed.append(messages)
+        if len(exposed) == 1:
+            SteeringStore(db).enqueue('local', {
+                'conversationId': job.conversation_id,
+                'generationCreatedAt': job.generation_created_at,
+                'clientSteerId': 'attached-text-policy',
+                'text': 'Review this harmless note', 'files': [owned],
+            }, preempt_capable=True)
+            yield 'Safe initial answer.'
+        else:
+            yield 'Examined attached note.'
+
+    monkeypatch.setattr(generation_routes, 'stream_model_with_tools', provider)
+    await generation_routes._run_model('local', job, ProviderConfig('openai', 'mock',
+                                                   'https://example.invalid/model', ''))
+    if sensitive:
+        # No provider invocation may contain the inlined prohibited file, and
+        # the checkpoint/error record must not echo that file's contents.
+        assert len(exposed) == 1
+        assert store.get('local', job.run_id).status == 'error'
+        assert secret not in json.dumps(store.resume_snapshot('local', job.run_id)[0])
+    else:
+        assert len(exposed) == 2
+        assert body in str(exposed[-1])
+        assert store.get('local', job.run_id).status == 'complete'
