@@ -858,3 +858,100 @@ async def test_cancelled_before_coroutine_entry_releases_exact_child_task_lease(
     assert task_id not in module._ACTIVE_LEASES
     assert task_id not in module._TASKS
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_detached_controls_require_checkpoint_ack_and_reject_invalid_or_unknown_receipts(
+        host_environment, monkeypatch):
+    db, repo, store, child, parent, job = host_environment
+
+    async def unused(*args, **kwargs):
+        yield 'not started'
+
+    host, invocation = await start_task(host_environment, unused, start=False)
+
+    async def no_launch(_task_id):
+        return None
+
+    monkeypatch.setattr(host, '_ensure_active', no_launch)
+    task_id = json.loads(await host.start(invocation))['background_task_id']
+    assert host.has_interrupt(task_id) is False
+    assert host.has_interrupt('subtask_missing') is False
+    assert host.pending(task_id, 'turn', set()) == []
+    assert json.loads(await host._check_once({'action': 'steer'}))['status'] == 'invalid'
+    assert json.loads(await host._check_once({'background_task_id': 'x' * 257}))['status'] == 'invalid'
+    assert json.loads(await host._check_once({'background_task_id': 'subtask_missing'}))['status'] == 'not_found'
+    assert json.loads(await host._check_once({'background_task_id': task_id,
+                                              'action': 'cancel_message', 'control_id': ''}))['status'] == 'invalid'
+    assert json.loads(await host._check_once({'background_task_id': task_id,
+                                              'action': 'cancel_message', 'control_id': 'not-present'}))['status'] == 'control_not_found'
+    assert json.loads(await host._check_once({'background_task_id': task_id,
+                                              'action': 'steer', 'message': '  '}))['status'] == 'invalid'
+    assert json.loads(await host._check_once({'background_task_id': task_id,
+                                              'action': 'steer', 'message': 'X' * (65536 + 1)}))['status'] == 'invalid'
+    accepted = json.loads(await host._check_once({'background_task_id': task_id,
+                                                 'action': 'interrupt', 'message': 'Stop and reconsider'}))
+    assert accepted['status'] == 'accepted'
+    assert host.has_interrupt(task_id) is True
+    assert host.pending(task_id, 'preempt', set())[0]['content'] == 'Stop and reconsider'
+    control_id = accepted['control_id']
+    host.acknowledge(task_id, 'tool', set())
+    assert len(host.pending(task_id, 'preempt', set())) == 1
+    host.acknowledge(task_id, 'tool', {control_id})
+    assert host.pending(task_id, 'preempt', set()) == []
+    assert not host.has_interrupt(task_id)
+    assert json.loads(await host._check_once({'background_task_id': task_id,
+                                              'action': 'cancel_message', 'control_id': control_id}))['status'] == 'control_not_found'
+    with db.connect() as sql:
+        assert sql.execute('SELECT status,boundary FROM subagent_task_controls WHERE id=?',
+                           (control_id,)).fetchone()['status'] == 'applied'
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('recovery', ['registered', 'revoked_parent', 'legacy_without_guard'])
+async def test_child_registration_crash_window_recovers_exact_parent_or_rejects_revocation(
+        host_environment, monkeypatch, recovery):
+    from local_shell_mcp.webui.subagent_task_host import _TASKS
+
+    db, repo, store, child, parent, parent_run = host_environment
+
+    async def unused(*args, **kwargs):
+        yield 'not executed'
+
+    host, invocation = await start_task(host_environment, unused, start=False)
+
+    async def no_launch(_task_id):
+        return None
+
+    monkeypatch.setattr(host, '_ensure_active', no_launch)
+    task_id = json.loads(await host.start(invocation))['background_task_id']
+    prior = host._get(task_id)
+    assert prior['child_registered']
+    assert prior['parent_run_id'] == parent_run.run_id
+
+    with db.connect() as sql:
+        sql.execute('UPDATE subagent_tasks SET child_registered=0,created_at=?,lease_owner=NULL,'
+                    'lease_until=NULL WHERE id=?', (int(time.time()*1000) - 5000, task_id))
+    if recovery == 'revoked_parent':
+        assert store.finish('local', parent_run.run_id, status='complete', text='Parent ended')
+    if recovery == 'legacy_without_guard':
+        monkeypatch.setattr(host, '_child_activity', lambda: None)
+
+    async def no_exec(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(host, '_execute', no_exec)
+    monkeypatch.setattr(host, '_ensure_active', SQLiteSubagentTaskHost._ensure_active.__get__(host))
+    await host._ensure_active(task_id)
+    result = host._get(task_id)
+    if recovery == 'revoked_parent':
+        assert result['status'] == 'error'
+        assert 'registration' in result['error'].lower()
+        assert task_id not in _TASKS
+    else:
+        assert result['child_registered'] == 1
+        assert result['status'] == 'running'
+        if task_id in _TASKS:
+            await asyncio.wait_for(_TASKS[task_id], 5)
+    await shutdown_subagent_tasks()
