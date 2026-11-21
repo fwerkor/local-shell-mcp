@@ -786,3 +786,75 @@ async def test_concurrent_child_thread_continuations_return_structured_busy_reje
     release.set()
     await settle(host, original['background_task_id'])
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('task_status,expected_run_status', [
+    ('completed', 'complete'), ('cancelled', 'aborted'), ('error', 'error'),
+])
+async def test_restart_repairs_terminal_task_with_still_running_child_atomically(
+        host_environment, monkeypatch, task_status, expected_run_status):
+    from local_shell_mcp.webui import subagent_wakeup
+    from local_shell_mcp.webui.subagent_task_host import (
+        active_child_generations,
+        recover_subagent_tasks,
+    )
+
+    db, repo, store, child, parent, parent_run = host_environment
+
+    async def unused(*args, **kwargs):
+        yield 'no model should execute on terminal recovery'
+
+    host, invocation = await start_task(host_environment, unused, start=False)
+
+    async def prevent_launch(_task_id):
+        pass
+
+    monkeypatch.setattr(host, '_ensure_active', prevent_launch)
+    task_id = json.loads(await host.start(invocation))['background_task_id']
+    record = host._get(task_id)
+    child_run, _ = store.begin('local', {'text': 'recover terminal child'}, child,
+                               trusted_new_conversation_id=record['child_conversation_id'])
+    with db.connect() as sql:
+        sql.execute('UPDATE subagent_tasks SET child_run_id=?, status=?, result=?, error=? WHERE id=?',
+                    (child_run.run_id, task_status, 'verified' if task_status == 'completed' else None,
+                     'failure marker' if task_status == 'error' else None, task_id))
+    async def no_wakeup(_database):
+        pass
+
+    monkeypatch.setattr(subagent_wakeup, 'start_wakeup_worker', no_wakeup)
+    assert await recover_subagent_tasks(db, stream_tools=unused, stream_text=unused) == 0
+    recovered = store.get('local', child_run.run_id)
+    assert recovered.status == expected_run_status
+    assert child_run.run_id not in active_child_generations(db)
+    await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_before_coroutine_entry_releases_exact_child_task_lease(host_environment, monkeypatch):
+    from local_shell_mcp.webui import subagent_task_host as module
+
+    async def unused(*args, **kwargs):
+        yield 'never launched'
+
+    host, invocation = await start_task(host_environment, unused, start=False)
+
+    async def no_launch(_task_id):
+        pass
+
+    monkeypatch.setattr(host, '_ensure_active', no_launch)
+    task_id = json.loads(await host.start(invocation))['background_task_id']
+    token = 'this-controller:before-entry'
+    with host.db.connect() as sql:
+        sql.execute('UPDATE subagent_tasks SET cancel_requested=1,lease_owner=?,lease_until=? '
+                    'WHERE id=?', (token, int(time.time() * 1000) + 120000, task_id))
+    scheduled = asyncio.create_task(asyncio.sleep(60))
+    module._TASKS[task_id] = scheduled
+    module._ACTIVE_LEASES[task_id] = token
+    scheduled.cancel()
+    await asyncio.gather(scheduled, return_exceptions=True)
+    host._task_done(task_id, token, scheduled)
+    assert host._get(task_id)['status'] == 'cancelled'
+    assert task_id not in module._ACTIVE_LEASES
+    assert task_id not in module._TASKS
+    await shutdown_subagent_tasks()
