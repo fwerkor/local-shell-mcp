@@ -5474,7 +5474,9 @@ async def test_gui_action_rejects_expiry_during_native_preparation(tmp_path, mon
 
         async def focus_window(self, window):
             del window
-            await asyncio.sleep(0.03)
+            # Windows event loops may wake a 30 ms sleep one clock tick early;
+            # exceed the 20 ms TTL by several ticks to test the real deadline.
+            await asyncio.sleep(0.10)
 
         async def perform_action(self, window, locator, action):
             del window, locator, action

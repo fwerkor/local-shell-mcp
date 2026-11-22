@@ -285,7 +285,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pyinstaller typer
+          python -m pip install -e '.[webui]' pyinstaller typer
           PYINSTALLER_ARGS=(
             --clean
             --onefile
@@ -296,6 +296,7 @@ jobs:
             --collect-all fastapi
             --collect-all starlette
             --collect-all zstandard
+            --collect-all tiktoken
             --exclude-module cryptography
             --exclude-module playwright
             --add-data ui/workspace/frontend.tar.gz:local_shell_mcp/webui

@@ -175,6 +175,7 @@ def test_oauth_dispatch_requires_original_stage_and_durable_completion_proof(cur
     store.append('alice', job.run_id, {'event': 'on_run_step_completed', 'data': {'result': {
         'tool_call': {'id': 'call-1', 'name': 'mcp_tool_call'},
     }}})
+    # Durable tool evidence now authorizes idempotent completion replay.
     store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
     store.oauth_dispatch('alice', job.run_id, 'call-1', 'cleared')
     with db.connect() as sql:
@@ -258,3 +259,39 @@ def test_rewind_rejects_bad_checkpoint_and_lost_actor_lease(current_run):
     with pytest.raises(Exception, match='lease'):
         store.rewind_running_to_checkpoint('alice', job.run_id, '', actor_lease=lease)
     assert store.accumulated_text('alice', job.run_id) == 'Already shown'
+
+
+def test_concurrent_tool_completion_keeps_reserved_reconnect_indices(current_run):
+    _, store, job = current_run
+    store.append('alice', job.run_id, {'event': 'on_run_step', 'data': {
+        'id': 'text-step', 'index': 0, 'type': 'message_creation',
+        'runId': job.response_message_id}})
+    store.append('alice', job.run_id, {'event': 'on_message_delta', 'data': {
+        'id': 'text-step', 'delta': {'content': {'type': 'text', 'text': 'Before tools'}}}})
+    for index, name in [(1, 'A'), (2, 'B')]:
+        store.append('alice', job.run_id, {'event': 'on_run_step', 'data': {
+            'id': f'step-{name}', 'index': index, 'type': 'tool_calls',
+            'runId': job.response_message_id, 'status': 'in_progress',
+            'stepDetails': {'type': 'tool_calls', 'tool_calls': [{
+                'id': f'call-{name}', 'name': f'tool-{name}', 'args': {}}]},
+        }})
+
+    def finish_tool(name):
+        store.append('alice', job.run_id, {'event': 'on_run_step_completed', 'data': {
+            'result': {'id': f'step-{name}', 'tool_call': {
+                'id': f'call-{name}', 'name': f'tool-{name}', 'output': f'output-{name}'}}}})
+
+    finish_tool('B')
+    snapshot, watermark = store.resume_snapshot('alice', job.run_id)
+    assert len(snapshot['aggregatedContent']) == 3
+    assert snapshot['aggregatedContent'][0]['text'] == 'Before tools'
+    assert snapshot['aggregatedContent'][1]['tool_call']['id'] == 'call-A'
+    assert snapshot['aggregatedContent'][2]['tool_call']['id'] == 'call-B'
+    assert snapshot['aggregatedContent'][2]['tool_call']['output'] == 'output-B'
+    assert 'output' not in snapshot['aggregatedContent'][1]['tool_call']
+
+    finish_tool('A')
+    final, next_watermark = store.resume_snapshot('alice', job.run_id)
+    assert next_watermark > watermark
+    assert [item['tool_call']['output'] for item in final['aggregatedContent'][1:]] == [
+        'output-A', 'output-B']
