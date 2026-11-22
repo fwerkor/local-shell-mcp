@@ -445,7 +445,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       wakeup_lease: tuple[str, str] | None = None,
                       event_delivery_lease: tuple[str, str] | None = None,
                       recovery_steers: bool = False,
-                      oauth_claim: tuple[str, str, int, bool] | None = None) -> bool:
+                      oauth_claim: tuple[str, str, int, bool] | None = None,
+                      checkpoint_text: str | None = None) -> bool:
     from .generation_actor_lease import ActorLease
 
     previous = _TASKS.get(generation.run_id)
@@ -469,6 +470,13 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
         actor_lease = ActorLease.claim(_database(), owner, generation.run_id)
         if actor_lease is None:
             return False
+        if checkpoint_text is not None:
+            try:
+                _generation_store().rewind_running_to_checkpoint(
+                    owner, generation.run_id, checkpoint_text, actor_lease=actor_lease)
+            except Exception:
+                actor_lease.release()
+                raise
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
                        instructions=agent_instructions(agent, profile.provider, artifacts_mode),
@@ -1018,6 +1026,9 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     agent = AgentRepository(_database()).get(owner, row["agent_id"]) if row["agent_id"] else None
     if row["agent_id"] and agent is None:
         raise HTTPException(404, detail="Agent no longer available")
+    checkpoint_text = checkpoint["checkpoint"]["channel_values"].get("partial_text") if checkpoint else None
+    if checkpoint_text is not None and not isinstance(checkpoint_text, str):
+        raise HTTPException(409, detail="Invalid recoverable text checkpoint")
     await _start_task(
         owner, generation, profile, agent,
         native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
@@ -1025,12 +1036,11 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
         ask_user_enabled=bool(state.get("askUserEnabled")),
         mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
         resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
-        partial_text=(checkpoint['checkpoint']['channel_values'].get('partial_text')
-                      if checkpoint is not None and isinstance(
-                          checkpoint['checkpoint']['channel_values'].get('partial_text'), str)
+        partial_text=(checkpoint_text if checkpoint_text is not None
                       else _generation_store().accumulated_text(owner, generation.run_id)),
         granted_scopes=frozenset(scopes), grant_expires=expiry,
         recovery_steers=True,
+        checkpoint_text=checkpoint_text,
     )
 
 

@@ -883,6 +883,27 @@ class GenerationStore:
                     # if its first text chunk arrives after a completed tool.
                     text_slot_by_step[data["id"]] = len(content_parts)
                     content_parts.append({"type": "text", "text": "", "phase": "final_answer"})
+                elif data.get("type") == "tool_calls" and data["id"] not in tool_slot_by_step:
+                    calls = (data.get("stepDetails") or {}).get("tool_calls") or []
+                    if calls and isinstance(calls[0], dict):
+                        call = calls[0]
+                        part = {"type": "tool_call", "tool_call": {
+                            "id": call.get("id", ""), "name": call.get("name", ""),
+                            "args": call.get("args", {}), "stepId": data["id"],
+                        }}
+                        index = data.get("index")
+                        if type(index) is not int or index < 0:
+                            index = len(content_parts)
+                        # React reserves this index at ON_RUN_STEP, not when
+                        # the tool finishes. A later tool can complete first;
+                        # its result must never occupy the earlier tool's slot.
+                        while len(content_parts) < index:
+                            content_parts.append({"type": "text", "text": "", "phase": "final_answer"})
+                        if index == len(content_parts):
+                            content_parts.append(part)
+                        else:
+                            content_parts[index] = part
+                        tool_slot_by_step[data["id"]] = index
             elif event == "on_run_step_closed" and data.get("id") in steps:
                 steps[data["id"]] = {**steps[data["id"]], **{
                     key: data[key] for key in ("status", "closed_at") if key in data}}
@@ -917,6 +938,13 @@ class GenerationStore:
                 content_parts.append(data["part"])
             elif event == 'on_content_rewind':
                 _rewind_uncheckpointed_text(content_parts, data.get('preserveText', ''))
+                tool_slot_by_step = {
+                    part["tool_call"]["stepId"]: index for index, part in enumerate(content_parts)
+                    if part.get("type") == "tool_call" and isinstance(part.get("tool_call"), dict)
+                    and isinstance(part["tool_call"].get("stepId"), str)
+                }
+                text_slot_by_step = {step_id: index for step_id, index in text_slot_by_step.items()
+                                     if index < len(content_parts) and content_parts[index].get("type") == "text"}
         pending = state.get("pendingAction")
         oauth_prompts = []
         if isinstance(pending, dict) and (pending.get('payload') or {}).get('type') == 'action_oauth':
@@ -1194,18 +1222,8 @@ class GenerationStore:
                              'WHERE r.id=? AND c.owner=?', (run_id, owner)).fetchone()
         return bool(row and json.loads(row['state']).get('manualCompaction'))
 
-    def accumulated_text(self, owner: str, run_id: str) -> str:
-        """Reassemble already-streamed deltas for a restarted owner-bound run.
-
-        A resumed StateGraph must not lose previous assistant text, and must not
-        reemit old SSE chunks. This uses the existing generation event contract.
-        """
-        with self.database.connect() as db:
-            rows = db.execute(
-                "SELECT ge.data FROM generation_events ge JOIN runs r ON r.id=ge.run_id "
-                "JOIN conversations c ON c.id=r.conversation_id "
-                "WHERE c.owner=? AND ge.run_id=? ORDER BY ge.seq", (owner, run_id),
-            ).fetchall()
+    @staticmethod
+    def _text_from_events(rows) -> str:
         chunks = []
         for row in rows:
             event = json.loads(row["data"])
@@ -1214,11 +1232,43 @@ class GenerationStore:
                 value = content.get("text") if isinstance(content, dict) else None
                 if isinstance(value, str):
                     chunks.append(value)
-            elif event.get('event') == 'on_content_rewind':
-                preserved = (event.get('data') or {}).get('preserveText')
-                if isinstance(preserved, str):
-                    chunks = [preserved]
+            elif event.get("event") == "on_content_rewind":
+                chunks = [event["data"]["preserveText"]]
         return "".join(chunks)
+
+    def accumulated_text(self, owner: str, run_id: str) -> str:
+        """Reassemble visible text, including crash-recovery rewinds."""
+        with self.database.connect() as db:
+            rows = db.execute(
+                "SELECT ge.data FROM generation_events ge JOIN runs r ON r.id=ge.run_id "
+                "JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE c.owner=? AND ge.run_id=? ORDER BY ge.seq", (owner, run_id),
+            ).fetchall()
+        return self._text_from_events(rows)
+
+    def rewind_running_to_checkpoint(self, owner: str, run_id: str, preserved: str,
+                                     *, actor_lease) -> bool:
+        """Discard abandoned SSE text before restarting a checkpointed actor.
+
+        The newly claimed actor lease fences this transaction against another
+        Controller. Repeated reconnects must not add redundant rewind events.
+        """
+        if not isinstance(preserved, str):
+            raise ValueError("Invalid checkpoint text prefix")
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            actor_lease.assert_current(db)
+            rows = db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq",
+                              (run_id,)).fetchall()
+            visible = self._text_from_events(rows)
+            if visible == preserved:
+                return False
+            if not visible.startswith(preserved):
+                raise ValueError("Streamed text does not match durable checkpoint prefix")
+            db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
+                       (run_id, _json({"event": "on_content_rewind",
+                                        "data": {"preserveText": preserved}})))
+            return True
 
     def history(self, owner: str, conversation_id: str, max_messages: int | None = None,
                 *, message_id: str | None = None) -> list[dict]:

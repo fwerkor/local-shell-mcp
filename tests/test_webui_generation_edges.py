@@ -152,6 +152,53 @@ async def test_generation_model_failure_is_durable_and_redacted(configured_gener
     await generation_routes.shutdown_generations()
 
 
+@pytest.mark.asyncio
+async def test_ordinary_http_reattach_rewinds_abandoned_provider_text(
+    configured_generation_routes, monkeypatch,
+):
+    from local_shell_mcp.webui.checkpoints import SQLiteCheckpointSaver
+
+    store = generation_routes._generation_store()
+    job, _ = store.begin('alice', {'text': 'Continue after a crash', 'model': 'local'})
+    saver = SQLiteCheckpointSaver(generation_routes._database(), 'alice')
+    saver.put(saver.config(job.conversation_id, job.run_id, event_actor=True), {
+        'v': 1, 'id': '00000000000000000001', 'channel_values': {
+            'messages': [{'role': 'user', 'content': 'Continue after a crash'},
+                         {'role': 'assistant', 'content': 'Stable. '}],
+            'step': 1, 'model_turn': 1, 'pending_calls': [],
+            'tool_step_started': False, 'completed': False,
+            'partial_text': 'Stable. ',
+        }, 'channel_versions': {}, 'versions_seen': {},
+    }, {'source': 'loop', 'step': 1})
+    for text in ('Stable. ', 'Abandoned answer. '):
+        store.append('alice', job.run_id, {'event': 'on_message_delta', 'data': {
+            'id': 'step_' + job.run_id,
+            'delta': {'content': {'type': 'text', 'text': text, 'phase': 'final_answer'}}}})
+
+    async def replacement_provider(*_args, **_kwargs):
+        yield 'Fresh answer.'
+
+    monkeypatch.setattr(generation_routes, 'stream_model_with_tools', replacement_provider)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=configured_generation_routes),
+                                base_url='http://test') as client:
+        resumed = await client.post('/api/agents/chat/resume',
+                                    json={'conversationId': job.conversation_id},
+                                    headers={'x-owner': 'alice'})
+        assert resumed.status_code == 200, resumed.text
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if store.get('alice', job.run_id).status != 'running':
+                break
+        assert store.get('alice', job.run_id).status == 'complete'
+        assert sum(event.get('event') == 'on_content_rewind'
+                   for _, event in store.events('alice', job.run_id)) == 1
+        assert store.accumulated_text('alice', job.run_id) == 'Stable. Fresh answer.'
+        snapshot, _ = store.resume_snapshot('alice', job.run_id)
+        assert ''.join(part['text'] for part in snapshot['aggregatedContent']
+                       if part['type'] == 'text') == 'Stable. Fresh answer.'
+    await generation_routes.shutdown_generations()
+
+
 
 @pytest.mark.asyncio
 async def test_http_human_resume_claim_retry_and_identity_boundaries(

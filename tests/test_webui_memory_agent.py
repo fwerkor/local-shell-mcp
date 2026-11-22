@@ -39,7 +39,7 @@ async def test_disabled_or_missing_memory_agent_never_starts_model(memory_run):
 
     async def blocked(*args, **kwargs):
         raise AssertionError('Automatic memory model must be opt-in')
-        yield 'unreachable' 
+        yield 'unreachable'
 
     history = store.history('alice', job.conversation_id)
     assert await memory_agent.run_automatic_memory('alice', job, db, history,
