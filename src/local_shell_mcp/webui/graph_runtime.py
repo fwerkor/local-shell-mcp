@@ -94,8 +94,14 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
     # The originating HTTP request may override its Agent's artifact mode.
     # _run_model already constructed the complete root instructions, including
     # this ephemeral override; preserve that system content at root activation.
+    # Conversation checkpoints are shared history, unlike root-only Agent
+    # instructions. Keep their system carriers across graph handoffs.
+    summary_carriers = [copy.deepcopy(m) for m in source_history
+                        if m.get('role') == 'system' and isinstance(m.get('content'), str)
+                        and m['content'].startswith('<summary>\n')]
     source_system = [m.get('content') for m in source_history
-                     if m.get('role') == 'system' and isinstance(m.get('content'), str)]
+                     if m.get('role') == 'system' and isinstance(m.get('content'), str)
+                     and not m['content'].startswith('<summary>\n')]
     initial_count = len(source_history)
     graph = StateGraph(MultiAgentState)
     handoff_sources = topology.handoff_sources
@@ -156,6 +162,8 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                         else agent_instructions(member, selected_provider({}, member)))
         if instructions:
             incoming.insert(0, {"role": "system", "content": instructions})
+        if summary_carriers:
+            incoming[1 if instructions else 0:1 if instructions else 0] = copy.deepcopy(summary_carriers)
         from .attachments import with_agent_context
 
         incoming = with_agent_context(parent.database, parent.owner, member, incoming)

@@ -187,6 +187,7 @@ async def _run_model(
     step_index = 0
     needs_post_tool_step = False
     now_ms = int(time.time() * 1000)
+    memory_task: asyncio.Task | None = None
     if resume_history is not None:
         # A human continuation must append into the last text step, which may
         # have been advanced past a STEER part before suspension.
@@ -340,9 +341,25 @@ async def _run_model(
             owner, generation.run_id, initial=original_boundary,
         )
         try:
+            if resume_history is None and not repo.manual_compaction(owner, generation.run_id):
+                from .memory_agent import run_automatic_memory
+
+                memory_task = asyncio.create_task(run_automatic_memory(
+                    owner, generation, _database(), history, root_agent=parent_agent,
+                    stream_tools=stream_model_with_tools,
+                    grant_expires=grant_expires),
+                    name='webui-memory-' + generation.run_id)
             finished_messages = await runner.run(history)
         except AgentSuspended:
             return
+        if memory_task is not None:
+            try:
+                await memory_task
+            except Exception as exc:
+                # The original AgentClient.runMemory isolates extraction
+                # failures: a misconfigured opt-in memory model must never
+                # discard the user's successful primary answer.
+                log.warning("Automatic Memory extraction failed (%s)", type(exc).__name__)
         check_wakeup_lease()
         repo.append(owner, generation.run_id, {
             "event": "on_run_step_closed", "data": {
@@ -356,10 +373,18 @@ async def _run_model(
         # A handoff may replace system instructions, changing the context
         # prefix length. Locate the original request within the final graph
         # state so the response is not discarded by a stale numeric offset.
-        if history_start > 0:
+        post_compaction_start = repo.compacted_model_history_boundary(owner, generation.run_id)
+        if post_compaction_start is not None:
+            # The original prompt can be removed by a successful summary. The
+            # new model-history boundary is committed with that checkpoint.
+            history_start = post_compaction_start
+        elif history_start > 0:
             source_user = next((message for message in reversed(history[:history_start])
-                                if message.get("role") == "user"), None)
+                                if message.get('role') == 'user'), None)
             if source_user is not None:
+                # The runner can prepend a memory system message after this
+                # boundary is calculated. Anchor on the actual submitted user
+                # message, even when the output list grew by exactly one.
                 matched = [index for index, message in enumerate(finished_messages)
                            if message == source_user]
                 if matched:
@@ -395,6 +420,10 @@ async def _run_model(
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
                                                              "".join(text_parts)), actor_lease=actor_lease)
     finally:
+        if memory_task is not None and not memory_task.done():
+            memory_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await memory_task
         if heartbeat is not None:
             heartbeat.cancel()
             await asyncio.gather(heartbeat, return_exceptions=True)
@@ -623,6 +652,36 @@ async def start_generation(request: Request):
             raise HTTPException(404, detail="Agent not found")
     kind = selected_provider(payload, agent)
     model = (agent or {}).get("model") or payload.get("model")
+    # Apply configured source-specific policy before SQLite claims a run or
+    # emits SSE. Bad content is never persisted or sent to the model.
+    from .content_filters import (
+        ContentFilterBlocked,
+        validate_agent_instructions,
+        validate_message_submission,
+        validate_model_parameters,
+    )
+    from .memory_protection import configured_filters
+    from .storage import WorkspaceRepository
+
+    filters = configured_filters(WorkspaceRepository(_database()), owner)
+    try:
+        if isinstance(payload.get('text'), str):
+            validate_message_submission(payload['text'], filters)
+        # History prefers structured content parts to the top-level text.
+        # Enforce the same submission policy before the run is admitted.
+        projected_text_parts = []
+        for part in payload.get('content') if isinstance(payload.get('content'), list) else []:
+            if isinstance(part, dict) and part.get('type') == 'text' and isinstance(part.get('text'), str):
+                validate_message_submission(part['text'], filters)
+                projected_text_parts.append(part['text'])
+        if projected_text_parts:
+            validate_message_submission(''.join(projected_text_parts), filters)
+        validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
+        params = (agent or {}).get('model_parameters') or payload.get('model_parameters')
+        if isinstance(params, dict):
+            validate_model_parameters({'model_parameters': params}, filters)
+    except ContentFilterBlocked as blocked:
+        return JSONResponse(blocked.response(), status_code=400)
     # Permission inheritance is resolved against SQLite at the start and
     # rechecked before every tool. The initial OAuth grant cannot be elevated
     # by modifying defaults while a generation is in progress.
@@ -916,31 +975,20 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     from .machine_permissions import require_machine_scope, resolve_access
     from .routes import _repo
 
-    # Detached tasks have their own durable executor/lease and no foreground
-    # grant. A browser reconnect must never create a second actor for the same
-    # child run, including when that executor is on another Controller process.
+    # Detached subagent child generations are owned by their task host.
+    # Foreground reconnect may observe SSE, but never claim their actor lease.
     with _database().connect() as db:
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
                       "AND name='subagent_tasks'").fetchone():
-            detached = db.execute(
+            child = db.execute(
                 "SELECT 1 FROM subagent_tasks WHERE owner=? AND child_run_id=? LIMIT 1",
-                (owner, generation.run_id),
-            ).fetchone()
-            if detached is not None:
+                (owner, generation.run_id)).fetchone()
+            if child is not None:
                 raise HTTPException(409, detail="Detached subagent runs require task-host recovery")
     current = _TASKS.get(generation.run_id)
     if current is not None and not current.done():
         return
     if generation.run_id in active_run_ids(_database()):
-        return
-    # Detached child generations are exclusively owned by their durable
-    # subagent task/lease, not by the foreground GenerationActor registry.
-    # A browser reconnect may stream their events but must never launch a
-    # competing model execution with a weaker authorization context.
-    with _database().connect() as db:
-        child = db.execute("SELECT 1 FROM subagent_tasks WHERE owner=? AND child_run_id=? LIMIT 1",
-                           (owner, generation.run_id)).fetchone()
-    if child is not None:
         return
     cid = generation.conversation_id
     saver = SQLiteCheckpointSaver(_database(), owner)
@@ -1118,7 +1166,11 @@ async def resume_generation(request: Request):
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
     except (ValueError, KeyError) as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+        # A changed retry is a conflict with a previously committed one-shot
+        # action, not a malformed new payload. Keep validation errors at 400.
+        detail = str(exc)
+        conflict = detail in {"Conflicting human action retry", "Stale human action"}
+        raise HTTPException(409 if conflict else 400, detail=detail) from exc
     from .routes import _repo
 
     await _start_task(owner, resumed, profile, agent,

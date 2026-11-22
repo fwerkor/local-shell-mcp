@@ -196,7 +196,8 @@ async def test_http_human_resume_claim_retry_and_identity_boundaries(
         assert identical.status_code == 200, identical.text
         assert identical.json()["status"] == "resuming"
         changed = await client.post(url, json={**body, "answer": "json"}, headers=user)
-        assert changed.status_code == 400
+        # An already-committed one-shot answer cannot be replaced on retry.
+        assert changed.status_code == 409
         assert len(started) == 2
         assert started[0][1]["resume_history"] == started[1][1]["resume_history"]
         assert store.get("alice", job.run_id).status == "running"
@@ -239,7 +240,8 @@ async def test_http_approval_restart_claim_and_expiration_routes(
         changed = await client.post(url, json={**body, "decisions": [
             {"tool_call_id": "call-1", "decision": "approve"},
         ]}, headers=headers)
-        assert changed.status_code == 400
+        # Replacing an earlier approval is a durable one-shot conflict.
+        assert changed.status_code == 409
 
         expired, _ = store.begin("alice", {"text": "An expired question"})
         stale = {"actionId": "ask-expired", "expiresAt": 1, "payload": {

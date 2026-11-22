@@ -135,6 +135,11 @@ def _owner(request: Request) -> tuple[str, str, int]:
 
 
 def _frontend_user(session: WebSession) -> dict:
+    from ..sqlite_store import shared_database
+    from .storage import WorkspaceRepository
+
+    repo = WorkspaceRepository(shared_database(get_settings().state_dir))
+    memories = repo.setting(session.owner, 'user.memories', True) is not False
     owner_id = hashlib.sha256(session.owner.encode("utf-8")).hexdigest()[:24]
     return {
         "id": owner_id, "_id": owner_id, "username": "workspace", "name": "local-shell-mcp",
@@ -142,7 +147,7 @@ def _frontend_user(session: WebSession) -> dict:
         "role": "ADMIN" if (get_settings().auth_mode == "none" and session.owner == "local")
         or "admin:config" in session.scopes.split() else "USER",
         "provider": "local-shell-mcp",
-        "emailVerified": True, "avatar": "", "personalization": {},
+        "emailVerified": True, "avatar": "", "personalization": {"memories": memories},
     }
 
 
