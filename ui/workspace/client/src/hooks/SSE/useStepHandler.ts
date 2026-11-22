@@ -166,21 +166,18 @@ const isOAuthToolCallContent = (part?: Partial<TMessageContentParts>) => {
  * scalars to mirror Python string slicing (including astral characters). */
 export function rewindStreamContent(content: TMessageContentParts[], preserved: string): TMessageContentParts[] {
   let remaining = Array.from(preserved).length;
-  const retained: TMessageContentParts[] = [];
-  for (const part of content) {
-    if (part.type !== ContentTypes.TEXT) {
-      retained.push(part);
-      continue;
-    }
-    if (remaining <= 0) continue;
-    if (typeof part.text !== 'string') {
-      retained.push(part);
-      continue;
-    }
+  // Live content is indexed by server RunStep.index, not an append-only
+  // packed array. Preserve holes and empty message placeholders so a tool
+  // completion at index 1 remains at index 1 after stream recovery.
+  const retained = [...content];
+  for (let index = 0; index < content.length; index++) {
+    const part = content[index];
+    if (part == null || part.type !== ContentTypes.TEXT) continue;
+    if (typeof part.text !== 'string') continue;
     const chars = Array.from(part.text);
     const kept = chars.slice(0, remaining).join('');
     remaining -= Math.min(remaining, chars.length);
-    if (kept) retained.push({ ...part, text: kept });
+    retained[index] = { ...part, text: kept };
   }
   return retained;
 }
