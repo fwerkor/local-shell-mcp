@@ -153,14 +153,21 @@ class AgentRunner:
         admit_agent_graph(self.owner, self.graph_definition, self.repository)
         selected = set(selected_tools if selected_tools is not None else (agent or {}).get("tools") or [])
         unrestricted = agent is None and selected_tools is None
+        # Legacy agents retain their per-tool allowlist. Agents configured in
+        # the new builder expose all audited native tools allowed by both ACLs.
+        machine_policy = (agent or {}).get("machine_permissions")
+        machine_configured = isinstance(machine_policy, dict)
         native = available_tools(self.owner, self.authorization_conversation_id,
-                                 scopes=set(self.scopes), expires=self.grant_expires)
-        tools = [tool for tool in native if unrestricted or tool["function"]["name"] in selected
+                                 scopes=set(self.scopes), expires=self.grant_expires,
+                                 agent_permissions=machine_policy if machine_configured else None)
+        tools = [tool for tool in native if unrestricted or (machine_configured and selected_tools is None)
+                 or tool["function"]["name"] in selected
                  or tool["function"]["name"] in {"session_manage", "plan_manage"}]
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
-                      if unrestricted or tool["function"]["name"] in selected]
+                      if unrestricted or (machine_configured and selected_tools is None)
+                      or tool["function"]["name"] in selected]
         from .storage import WorkspaceRepository
         settings = WorkspaceRepository(self.database)
         from .content_filters import validate_agent_instructions, validate_model_parameters
@@ -558,7 +565,8 @@ class AgentRunner:
             return await call_tool(self.owner, self.generation.conversation_id, call,
                                    granted_scopes=set(self.scopes), grant_expires=self.grant_expires,
                                    run_id=self.generation.run_id,
-                                   authorization_conversation_id=self.authorization_conversation_id)
+                                   authorization_conversation_id=self.authorization_conversation_id,
+                                   agent_id=(state.context.agent or {}).get("id"))
         except PermissionError as error:
             raise RuntimeSafetyError(str(error)) from error
         except Exception as error:

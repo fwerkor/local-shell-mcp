@@ -162,6 +162,10 @@ function AgentSelect({
           formValues[name] = value;
           return;
         }
+        if (name === 'machine_permissions' && typeof value === 'object' && value !== null) {
+          formValues[name] = value;
+          return;
+        }
 
         if (!keys.has(name)) {
           return;

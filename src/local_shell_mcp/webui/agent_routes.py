@@ -30,7 +30,12 @@ async def list_or_create(request: Request):
         except ValueError as exc:
             raise HTTPException(400, detail=str(exc)) from exc
     try:
-        return JSONResponse(repository.create(owner, await _body(request)), status_code=201)
+        body = await _body(request)
+        if "machine_permissions" in body:
+            from .machine_permissions import _checked, validate_access_map
+
+            _checked(request, validate_access_map(body["machine_permissions"]))
+        return JSONResponse(repository.create(owner, body), status_code=201)
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
     except ValueError as exc:
@@ -46,10 +51,22 @@ async def detail(request: Request):
     elif request.method == "DELETE":
         if not repository.delete(owner, agent_id):
             _not_found()
+        from .durable_tasks import mark_revoked
+
+        mark_revoked(owner)
         return JSONResponse({}, status_code=200)
     else:
         try:
-            result = repository.update(owner, agent_id, await _body(request))
+            body = await _body(request)
+            if "machine_permissions" in body:
+                from .machine_permissions import _checked, validate_access_map
+
+                _checked(request, validate_access_map(body["machine_permissions"]))
+            result = repository.update(owner, agent_id, body)
+            if "machine_permissions" in body:
+                from .durable_tasks import mark_revoked
+
+                mark_revoked(owner)
         except PermissionError as exc:
             raise HTTPException(403, detail=str(exc)) from exc
         except ValueError as exc:
@@ -100,42 +117,48 @@ async def revert(request: Request):
     return JSONResponse(result)
 
 
-def _native_tool_catalog() -> list[dict]:
-    from .lsm_tool_registry import _operation, _registry
-
-    entries = []
-    for tool in _registry()._tool_manager.list_tools():
-        # Authoring exposes the audited registry independently of the current
-        # machine ACL. Native dispatch remains the execution permission gate.
-        if tool.name not in {"mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call"}:
-            try:
-                _operation(tool)
-            except PermissionError:
-                continue
-        entries.append({"name": tool.name, "pluginKey": tool.name,
-                        "description": tool.description or "", "agentsOnly": True,
-                        "authConfig": [], "authenticated": True})
-    return entries
-
-
 async def tool_catalog(request: Request):
     _owner(request)
     from .ask_user_tools import ASK_USER_MANIFEST
 
-    # The original manifest and PluginController authentication shape are
-    # reused. Availability does not enable a saved or ephemeral Agent's tool.
-    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}, *_native_tool_catalog()])
+    # Native LSM tools are controlled by machine ACLs, not a per-tool picker.
+    # Keep only app-specific features such as Ask User in the LibreChat catalog.
+    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}])
 
 
 async def tool_auth(request: Request):
     _owner(request)
     from .ask_user_tools import ASK_USER_QUESTION_TOOL_NAME
 
-    if request.path_params["tool_id"] != ASK_USER_QUESTION_TOOL_NAME and not any(
-        item["pluginKey"] == request.path_params["tool_id"] for item in _native_tool_catalog()
-    ):
+    if request.path_params["tool_id"] != ASK_USER_QUESTION_TOOL_NAME:
         _not_found()
     return JSONResponse({"authenticated": True})
+
+
+async def external_mcp_servers(request: Request):
+    """Expose the *LSM* dynamic registry, never credentials or startup arguments.
+
+    LibreChat's separate MCP server registry is not the source of truth for
+    servers registered through LSM mcp_manage.
+    """
+    _owner(request)
+    from .machine_permissions import _principal_scopes
+    if "shell:read" not in _principal_scopes(request):
+        raise HTTPException(403, detail="shell:read permission is required")
+    from ..dynamic_mcp import DynamicMCPManager
+    from ..settings import get_settings
+
+    settings = get_settings()
+    manager = DynamicMCPManager(settings.state_dir, max_timeout_s=settings.max_timeout_s)
+    try:
+        result = await manager.manage(action="list")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(503, detail="Unable to read external MCP registry") from exc
+    return JSONResponse({"servers": [
+        {"name": item["name"], "transport": item["transport"],
+         "enabled": item["enabled"], "tool_count": item["tool_count"]}
+        for item in result["servers"]
+    ]})
 
 
 def agent_routes() -> list[Route]:
@@ -143,6 +166,7 @@ def agent_routes() -> list[Route]:
 
     return [
         *action_routes(),
+        Route("/api/lsm/mcp/servers", external_mcp_servers, methods=["GET"]),
         Route("/api/agents/tools", tool_catalog, methods=["GET"]),
         Route("/api/agents/tools/{tool_id}/auth", tool_auth, methods=["GET"]),
         Route("/api/agents", list_or_create, methods=["GET", "POST"]),

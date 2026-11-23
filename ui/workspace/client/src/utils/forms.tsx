@@ -48,6 +48,8 @@ export const getDefaultAgentFormValues = (
   statefulCodeEnvironment: StatefulCodeEnvironment = 'user',
 ) => ({
   ...defaultAgentFormValues,
+  // Absence on an existing Agent preserves its legacy per-tool allowlist until
+  // the owner explicitly configures machine permissions in the new builder.
   stateful_code_environment: statefulCodeEnvironment,
   avatar_file: null,
   avatar_preview: '',

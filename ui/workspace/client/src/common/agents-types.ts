@@ -40,6 +40,7 @@ export type AgentForm = {
   model: string | null;
   model_parameters: AgentModelParameters;
   tools?: string[];
+  machine_permissions?: Record<string, 'none' | 'read' | 'write'>;
   /** Per-tool configuration options (deferred loading, allowed callers, etc.) */
   tool_options?: AgentToolOptions;
   skills?: string[];
