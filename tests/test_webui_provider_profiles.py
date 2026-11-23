@@ -353,3 +353,33 @@ async def test_rename_and_legacy_reset_protect_saved_agent_references(setup_prof
                                 "provider": "openAI", "model": "legacy-m"})
         assert (await client.delete("/api/lsm/providers?legacy_provider=openai")).status_code == 409
         assert provider_config("openai").url == "https://legacy.invalid/v1/chat/completions"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy,reference", [
+    ("openai", "OpenAI"),
+    ("openai", "OPENAI-COMPATIBLE"),
+    ("openai", "OlLaMa"),
+    ("openai", "CUSTOM"),
+    ("openai", "AzureOpenAI"),
+    ("anthropic", "Anthropic"),
+    ("google", "GEMINI"),
+    ("google", "GOOGLE"),
+])
+async def test_legacy_reset_protects_case_insensitive_runtime_aliases(setup_profiles, legacy, reference):
+    _, app = setup_profiles
+    from local_shell_mcp.webui.agents import AgentRepository
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        body = {"provider": legacy, "base_url": "https://model-gateway.invalid/v1",
+                "models": ["m"], "api_key": "saved-secret"}
+        assert (await client.put("/api/lsm/providers", json=body)).status_code == 200
+        agent = AgentRepository(routes._repo().database).create("owner", {
+            "name": "Case-sensitive legacy reference", "description": "",
+            "provider": reference, "model": "m",
+        })
+        assert agent["provider"] == reference
+        result = await client.delete(f"/api/lsm/providers?legacy_provider={legacy}")
+        assert result.status_code == 409, result.text
+        assert provider_config(reference).token == "saved-secret"

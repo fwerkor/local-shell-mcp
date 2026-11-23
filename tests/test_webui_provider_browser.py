@@ -161,7 +161,10 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     assert (await inventory.json())["Secondary Research"] == ["independent-model"]
                     endpoint = await page.request.get(f"http://127.0.0.1:{port}/api/endpoints")
                     assert (await endpoint.json())["Secondary Research"]["type"] == "openAI"
-                    await page.get_by_role("link", name="Start a new chat and select a model").click()
+                    # Deleting the temporary channel clears the save notice.
+                    # Navigate via the stable route instead of its conditional link.
+                    await page.goto(f"http://127.0.0.1:{port}/c/new", wait_until="domcontentloaded")
+                    await page.get_by_test_id("text-input").wait_for()
                     await page.get_by_test_id("model-selector-button").click()
                     await page.locator("#model-search").fill("independent-model")
                     await page.get_by_text("independent-model", exact=True).first.click()

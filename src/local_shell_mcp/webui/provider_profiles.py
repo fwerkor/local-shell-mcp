@@ -25,6 +25,13 @@ _DEFAULTS = {
     "anthropic": ("https://api.anthropic.com/v1", "claude-sonnet-4-6"),
     "google": ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
 }
+# Built-in provider aliases resolve case-insensitively via profile(). Use the
+# same aliases when checking references before resetting saved credentials.
+_LEGACY_ALIASES = {
+    "openai": ("openai", "openai-compatible", "ollama", "azureopenai", "custom"),
+    "anthropic": ("anthropic",),
+    "google": ("google", "gemini"),
+}
 # LibreChat endpointSchema.name must not collide with EModelEndpoint values.
 _RESERVED = frozenset({"agents", "openai", "anthropic", "google", "gemini", "custom", "azureopenai",
                        "assistants", "azureassistants", "bedrock", "gptplugins", "chatgptbrowser", "ollama", "openai-compatible"})
@@ -56,10 +63,10 @@ def profile(channel: str) -> dict:
     if not isinstance(channel, str):
         raise ValueError("Invalid model channel")
     normalized = channel.strip().lower()
-    if normalized in {"openai-compatible", "ollama", "azureopenai", "custom"}:
-        normalized = "openai"
-    if normalized == "gemini":
-        normalized = "google"
+    for kind, aliases in _LEGACY_ALIASES.items():
+        if normalized in aliases:
+            normalized = kind
+            break
     if normalized in _DEFAULTS:
         saved = _repo().setting(_OWNER, _PREFIX + normalized)
         return saved if isinstance(saved, dict) else _default_profile(normalized)
@@ -161,15 +168,28 @@ def _access(request):
         require_scopes(request.state.principal, ["admin:config"])
 
 
-def _is_referenced(db, name: str) -> bool:
+def _is_referenced(db, name: str, *, legacy: bool = False) -> bool:
     # Existing Agents, revisions, conversations and persisted runs must not be
-    # orphaned by destructive operations or a rename.
-    return any((
-        db.execute("SELECT 1 FROM agents WHERE json_extract(config,'$.provider')=? LIMIT 1", (name,)).fetchone(),
-        db.execute("SELECT 1 FROM runs WHERE json_extract(state,'$.provider')=? LIMIT 1", (name,)).fetchone(),
-        db.execute("SELECT 1 FROM conversations WHERE endpoint=? LIMIT 1", (name,)).fetchone(),
-        db.execute("SELECT 1 FROM agent_versions WHERE json_extract(snapshot,'$.provider')=? LIMIT 1", (name,)).fetchone(),
-    ))
+    # orphaned by destructive operations or a rename. Named channels are
+    # case-sensitive; built-in aliases follow profile()'s strip/lower rules.
+    references = (
+        ("agents", "json_extract(config,'$.provider')"),
+        ("runs", "json_extract(state,'$.provider')"),
+        ("conversations", "endpoint"),
+        ("agent_versions", "json_extract(snapshot,'$.provider')"),
+    )
+    aliases = _LEGACY_ALIASES[name] if legacy else ()
+    for table, field in references:
+        if legacy:
+            placeholders = ",".join("?" for _ in aliases)
+            query = f"SELECT 1 FROM {table} WHERE LOWER(TRIM({field})) IN ({placeholders}) LIMIT 1"
+            params = aliases
+        else:
+            query = f"SELECT 1 FROM {table} WHERE {field}=? LIMIT 1"
+            params = (name,)
+        if db.execute(query, params).fetchone():
+            return True
+    return False
 
 
 async def provider_profiles(request):
@@ -183,17 +203,13 @@ async def provider_profiles(request):
             if legacy not in _DEFAULTS:
                 raise HTTPException(400, detail="Invalid legacy channel")
             key = _PREFIX + legacy
-            aliases = ("openai", "openAI", "openai-compatible", "custom", "ollama",
-                       "azureopenai") if legacy == "openai" else (
-                           ("google", "gemini") if legacy == "google" else ("anthropic",))
         else:
             if not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or name.lower() in _RESERVED:
                 raise HTTPException(400, detail="Invalid named channel")
             key = _CHANNEL_PREFIX + name
-            aliases = (name,)
         with _repo().database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if any(_is_referenced(db, alias) for alias in aliases):
+            if _is_referenced(db, legacy or name, legacy=legacy is not None):
                 raise HTTPException(409, detail="Channel is referenced by saved conversations or Agents")
             db.execute("DELETE FROM settings WHERE owner=? AND key=?", (_OWNER, key))
     elif request.method == "PUT":

@@ -270,6 +270,14 @@ jobs:
           bun run typecheck
           bun run build
 
+      # Browser regressions in the coverage suite need the current React bundle;
+      # otherwise the server falls back to the older frontend.tar.gz.
+      - name: Build React workspace for browser coverage
+        working-directory: ui/workspace
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
       - name: Collect combined branch coverage
         run: bash scripts/run-coverage.sh
 
