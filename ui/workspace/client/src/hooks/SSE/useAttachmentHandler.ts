@@ -29,6 +29,43 @@ const searchSnapshotKeyOf = (attachment: TAttachment): string | undefined => {
   return `${Tools.web_search}:${agentId}:${toolCallId}:${turn ?? 0}:${stepId}`;
 };
 
+/** MCP UI resources are immutable identities within a tool occurrence. The
+ * server replays them when reconstructing attachments for a fresh browser, but
+ * an already-open tab retains its previous attachments across SSE reconnects.
+ * Without an upsert, each reconnect adds duplicate interactive resource cards. */
+export const uiResourceSnapshotKeyOf = (attachment: TAttachment): string | undefined => {
+  if (attachment.type !== Tools.ui_resources) {
+    return undefined;
+  }
+  const item = attachment as TAttachment & {
+    toolCallId?: string;
+    agentId?: string;
+    stepId?: string;
+    ui_resources?: { resourceId?: string }[];
+  };
+  if (!Array.isArray(item.ui_resources) || item.ui_resources.length === 0) {
+    return undefined;
+  }
+  const ids = item.ui_resources.map((resource) => resource?.resourceId);
+  if (ids.some((id) => typeof id !== 'string' || !id)) {
+    return undefined;
+  }
+  return JSON.stringify([item.toolCallId ?? '', item.agentId ?? '', item.stepId ?? '', ids]);
+};
+
+export const upsertUiResourceSnapshot = (
+  existing: TAttachment[],
+  incoming: TAttachment,
+): TAttachment[] | null => {
+  const key = uiResourceSnapshotKeyOf(incoming);
+  if (!key) return null;
+  const index = existing.findIndex((attachment) => uiResourceSnapshotKeyOf(attachment) === key);
+  if (index < 0) return null;
+  const updated = [...existing];
+  updated[index] = incoming;
+  return updated;
+};
+
 export default function useAttachmentHandler(queryClient?: QueryClient) {
   const setAttachmentsMap = useSetRecoilState(store.messageAttachmentsMap);
 
@@ -177,6 +214,10 @@ export default function useAttachmentHandler(queryClient?: QueryClient) {
           merged[existingIndex] = data;
           return { ...prevMap, [messageId]: merged };
         }
+      }
+      const updatedUiResources = upsertUiResourceSnapshot(messageAttachments, data);
+      if (updatedUiResources) {
+        return { ...prevMap, [messageId]: updatedUiResources };
       }
       return {
         ...prevMap,

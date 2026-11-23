@@ -8,6 +8,7 @@ import pytest
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui import generations
+from local_shell_mcp.webui.generation_actor_lease import ActorLease
 from local_shell_mcp.webui.generations import GenerationStore
 
 
@@ -214,3 +215,83 @@ def test_content_rewind_preserves_tool_positions_and_only_checkpointed_text(save
     assert pieces == expected
     with pytest.raises(ValueError, match='checkpoint text'):
         generations._rewind_uncheckpointed_text(pieces, None)
+
+
+def test_ordinary_restart_rewinds_abandoned_deltas_before_replacement(current_run):
+    db, store, job = current_run
+
+    def delta(text):
+        return {'event': 'on_message_delta', 'data': {'delta': {
+            'content': {'type': 'text', 'text': text},
+        }}}
+
+    store.append('alice', job.run_id, delta('Stable. '))
+    store.append('alice', job.run_id, delta('Abandoned answer. '))
+    lease = ActorLease.claim(db, 'alice', job.run_id)
+    assert lease is not None
+    try:
+        assert store.rewind_running_to_checkpoint('alice', job.run_id, 'Stable. ', actor_lease=lease)
+        assert not store.rewind_running_to_checkpoint('alice', job.run_id, 'Stable. ', actor_lease=lease)
+        assert store.accumulated_text('alice', job.run_id) == 'Stable. '
+        assert [part['text'] for part in store.resume_snapshot('alice', job.run_id)[0]['aggregatedContent']
+                if part['type'] == 'text'] == ['Stable. ']
+        store.append('alice', job.run_id, delta('Fresh answer. '), actor_lease=lease)
+        assert store.accumulated_text('alice', job.run_id) == 'Stable. Fresh answer. '
+        assert store.finish('alice', job.run_id, status='complete',
+                            text='Stable. Fresh answer. ', actor_lease=lease)
+        snapshot, _ = store.resume_snapshot('alice', job.run_id)
+        assert snapshot['aggregatedContent'] == [
+            {'type': 'text', 'text': 'Stable. Fresh answer. ', 'phase': 'final_answer'}]
+        assert 'Abandoned answer.' not in str(store.history('alice', job.conversation_id))
+    finally:
+        lease.release()
+
+
+def test_rewind_rejects_bad_checkpoint_and_lost_actor_lease(current_run):
+    db, store, job = current_run
+    store.append('alice', job.run_id, {'event': 'on_message_delta', 'data': {
+        'delta': {'content': {'type': 'text', 'text': 'Already shown'}}}})
+    lease = ActorLease.claim(db, 'alice', job.run_id)
+    assert lease is not None
+    with pytest.raises(ValueError, match='prefix'):
+        store.rewind_running_to_checkpoint('alice', job.run_id, 'Not saved', actor_lease=lease)
+    lease.release()
+    with pytest.raises(Exception, match='lease'):
+        store.rewind_running_to_checkpoint('alice', job.run_id, '', actor_lease=lease)
+    assert store.accumulated_text('alice', job.run_id) == 'Already shown'
+
+
+def test_concurrent_tool_completion_keeps_reserved_reconnect_indices(current_run):
+    _, store, job = current_run
+    store.append('alice', job.run_id, {'event': 'on_run_step', 'data': {
+        'id': 'text-step', 'index': 0, 'type': 'message_creation',
+        'runId': job.response_message_id}})
+    store.append('alice', job.run_id, {'event': 'on_message_delta', 'data': {
+        'id': 'text-step', 'delta': {'content': {'type': 'text', 'text': 'Before tools'}}}})
+    for index, name in [(1, 'A'), (2, 'B')]:
+        store.append('alice', job.run_id, {'event': 'on_run_step', 'data': {
+            'id': f'step-{name}', 'index': index, 'type': 'tool_calls',
+            'runId': job.response_message_id, 'status': 'in_progress',
+            'stepDetails': {'type': 'tool_calls', 'tool_calls': [{
+                'id': f'call-{name}', 'name': f'tool-{name}', 'args': {}}]},
+        }})
+
+    def finish_tool(name):
+        store.append('alice', job.run_id, {'event': 'on_run_step_completed', 'data': {
+            'result': {'id': f'step-{name}', 'tool_call': {
+                'id': f'call-{name}', 'name': f'tool-{name}', 'output': f'output-{name}'}}}})
+
+    finish_tool('B')
+    snapshot, watermark = store.resume_snapshot('alice', job.run_id)
+    assert len(snapshot['aggregatedContent']) == 3
+    assert snapshot['aggregatedContent'][0]['text'] == 'Before tools'
+    assert snapshot['aggregatedContent'][1]['tool_call']['id'] == 'call-A'
+    assert snapshot['aggregatedContent'][2]['tool_call']['id'] == 'call-B'
+    assert snapshot['aggregatedContent'][2]['tool_call']['output'] == 'output-B'
+    assert 'output' not in snapshot['aggregatedContent'][1]['tool_call']
+
+    finish_tool('A')
+    final, next_watermark = store.resume_snapshot('alice', job.run_id)
+    assert next_watermark > watermark
+    assert [item['tool_call']['output'] for item in final['aggregatedContent'][1:]] == [
+        'output-A', 'output-B']
