@@ -68,7 +68,8 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 textarea = page.get_by_test_id("text-input")
                 await textarea.fill("Keep my draft while I configure a model.", timeout=15000)
                 assert await textarea.input_value() == "Keep my draft while I configure a model."
-                await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                await page.get_by_test_id("model-selector-button").click()
+                await page.get_by_test_id("model-selector-settings").click()
                 await page.get_by_role("heading", name="Channels & models / 渠道与模型").wait_for()
                 await page.get_by_text("No channels added yet", exact=False).wait_for()
                 await page.get_by_role("button", name="Add channel").click()
@@ -104,7 +105,8 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 if reject_provider:
                     # Correcting an invalid credential must recover without a
                     # server restart and without rewriting old conversations.
-                    await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                    await page.get_by_test_id("model-selector-button").click()
+                    await page.get_by_test_id("model-selector-settings").click()
                     await page.get_by_role("button", name="Edit Primary Research").click()
                     await page.get_by_label("Model API key").fill("recovered-test-token")
                     await page.get_by_label("Model identifiers").fill("recovered-model")
@@ -119,7 +121,8 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     # Two OpenAI-compatible profiles with independent credentials
                     # must remain distinct through the actual original React
                     # model selector and Python streaming call, not just storage.
-                    await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                    await page.get_by_test_id("model-selector-button").click()
+                    await page.get_by_test_id("model-selector-settings").click()
                     await page.get_by_role("button", name="Add channel").click()
                     await page.get_by_label("Channel name").fill("Secondary Research")
                     await page.get_by_label("Model provider").select_option("openai")
