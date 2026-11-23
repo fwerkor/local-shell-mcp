@@ -28,8 +28,13 @@ const channelLabel = (profile: Profile) => profile.name ?? protocolLabel(profile
 const channelId = (profile: Profile) => profile.name ?? 'legacy:' + profile.provider;
 const newDraft = (): Draft => ({ name: '', provider: 'openai', base: kinds[0].defaultUrl, models: '', apiKey: '' });
 const errorMessage = (reason: unknown) => {
-  const error = reason as { response?: { data?: { detail?: string } }; message?: string };
-  return error?.response?.data?.detail || error?.message || String(reason);
+  const error = reason as { response?: { data?: { detail?: string } | string }; message?: string };
+  const data = error?.response?.data;
+  // Starlette may return plain text for HTTPException rather than JSON.
+  if (typeof data === 'string' && data.trim() && !data.trim().startsWith('<') && data.length <= 512) {
+    return data.trim();
+  }
+  return (typeof data === 'object' ? data?.detail : undefined) || error?.message || String(reason);
 };
 
 /** Channel instances are distinct from provider protocols; defaults aren't saved channels. */

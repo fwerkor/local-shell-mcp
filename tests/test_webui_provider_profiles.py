@@ -223,6 +223,47 @@ async def test_named_channels_same_provider_are_independent_and_survive_restart(
 
 
 @pytest.mark.asyncio
+async def test_unicode_channel_name_create_rename_and_delete(setup_profiles):
+    _, app = setup_profiles
+    from local_shell_mcp.webui.provider_profiles import profile
+
+    channel = {"name": "DeepSeek开放平台", "provider": "openai",
+               "base_url": "https://api.deepseek.com/v1",
+               "models": ["deepseek-chat"], "api_key": "unicode-secret"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        created = await client.put("/api/lsm/providers", json=channel)
+        assert created.status_code == 200, created.text
+        assert profile(channel["name"])["api_key"] == "unicode-secret"
+        assert provider_config(channel["name"]).model == "deepseek-chat"
+        assert channel["name"] in (await client.get("/api/models")).json()
+
+        # Duplicate names remain case-insensitive, including non-ASCII letters.
+        duplicate = await client.put("/api/lsm/providers", json={**channel, "name": "deepseek开放平台"})
+        assert duplicate.status_code == 409, duplicate.text
+        for bad in ("中文/模型", "中文\\模型", "中文\n模型", "中文 ", "1号模型"):
+            result = await client.put("/api/lsm/providers", json={**channel, "name": bad})
+            assert result.status_code == 400, (bad, result.text)
+
+        renamed_name = "深度求索 Research"
+        renamed = await client.put("/api/lsm/providers", json={
+            **channel, "name": renamed_name, "previous_name": channel["name"],
+            "models": ["deepseek-reasoner"], "api_key": "",
+        })
+        assert renamed.status_code == 200, renamed.text
+        assert profile(renamed_name)["api_key"] == "unicode-secret"
+        assert provider_config(renamed_name).model == "deepseek-reasoner"
+        assert renamed_name in (await client.get("/api/models")).json()
+        assert channel["name"] not in (await client.get("/api/models")).json()
+
+        deleted = await client.delete("/api/lsm/providers", params={"name": renamed_name})
+        assert deleted.status_code == 200, deleted.text
+        assert renamed_name not in (await client.get("/api/models")).json()
+        with pytest.raises(ValueError, match="Unknown model channel"):
+            profile(renamed_name)
+
+
+@pytest.mark.asyncio
 async def test_named_channel_protocols_validation_and_delete_protection(setup_profiles):
     _, app = setup_profiles
     from local_shell_mcp.webui.agents import AgentRepository
