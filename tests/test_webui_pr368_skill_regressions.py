@@ -314,3 +314,62 @@ async def test_manual_skill_selection_respects_user_invocable_flag(state):
     with pytest.raises(ValueError):
         GenerationStore(repo.database).begin('alice',
                                             {'text': 'Try it', 'manualSkills': ['auto-only']}, None)
+
+
+def test_skill_runtime_manual_and_deployment_guard_branches(state, monkeypatch):
+    from local_shell_mcp.webui import skill_runtime
+
+    _, repo = state
+    db = repo.database
+    disabled = {'id': 'disabled', 'skills_enabled': True, 'skills_scope': 'none'}
+    assert active_skills(db, 'alice', disabled) == []
+    assert skill_runtime.manual_context(db, 'alice', disabled, []) == ''
+    with pytest.raises(ValueError, match='Use the Skill name'):
+        load(db, 'alice', None, 'unknown', path='SKILL.md')
+
+    monkeypatch.setattr(skill_runtime, 'list_installed_skills',
+                        lambda: {'skills': [{'name': 'deployed', 'description': 'test deployment'}]})
+    monkeypatch.setattr(skill_runtime, 'load_installed_skill',
+                        lambda name: {'content': 'Deployed documentation'})
+    monkeypatch.setattr(skill_runtime, 'read_installed_skill_file',
+                        lambda name, path: {'content': 'Supporting deployment text'})
+    assert load(db, 'alice', None, 'deployed') == 'Deployed documentation'
+    assert load(db, 'alice', None, 'deployed',
+                path='references/guide.md') == 'Supporting deployment text'
+    assert 'Deployed documentation' in skill_runtime.manual_context(
+        db, 'alice', None, ['deployment:deployed'])
+
+    repo.save_setting('alice', 'webui.skill.states', {'deployment:deployed': False})
+    assert all(item['id'] != 'deployment:deployed' for item in active_skills(db, 'alice', None))
+    repo.save_setting('alice', 'webui.skill.states', {})
+    allowed = skill_runtime._policy_allows
+    monkeypatch.setattr(skill_runtime, '_policy_allows',
+                        lambda filters, **kwargs: False if (
+                            'deployment' in kwargs.get('description', '') or
+                            kwargs.get('body', '') == 'Deployed documentation'
+                        ) else allowed(filters, **kwargs))
+    assert all(item['id'] != 'deployment:deployed' for item in active_skills(db, 'alice', None))
+    monkeypatch.setattr(skill_runtime, '_policy_allows', allowed)
+    monkeypatch.setattr(skill_runtime, 'inspect_content',
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            skill_runtime.ContentFilterBlocked('skill', 'body')))
+    assert skill_runtime._policy_allows({}) is False
+
+
+@pytest.mark.asyncio
+async def test_managed_supporting_file_binary_content_cannot_inject(state):
+    from local_shell_mcp.webui import skill_runtime
+
+    server, repo = state
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
+                                 base_url='http://example.test') as c:
+        sid = (await c.post('/api/skills', json={
+            'name': 'binary-check', 'description': 'binary check', 'body': 'Safe',
+        })).json()['_id']
+        posted = await c.post(f'/api/skills/{sid}/files',
+                              data={'relativePath': 'references/binary.dat'},
+                              files={'file': ('binary.dat', b'\xff\xfe', 'application/octet-stream')})
+        assert posted.status_code == 200
+    with pytest.raises(ValueError, match='binary'):
+        skill_runtime.load(repo.database, 'alice', None, 'binary-check',
+                           path='references/binary.dat')
