@@ -63,7 +63,7 @@ export type AgentForm = {
   edges?: GraphEdge[];
   subagents?: AgentSubagentsConfig;
   [AgentCapabilities.artifacts]?: ArtifactModes | string;
-  recursion_limit?: number;
+  recursion_limit?: number | null;
   support_contact?: SupportContact;
   category: string;
   // Avatar management fields

@@ -28,7 +28,7 @@ class AgentContext:
     profile: ProviderConfig
     tools: list[dict]
     parameters: dict = field(default_factory=dict)
-    recursion_limit: int = 50
+    recursion_limit: int | None = None
     tool_end: bool = False
     agent: dict | None = None
     compaction_semantic_index: SemanticSnapshot | None = None
@@ -79,7 +79,7 @@ async def run_agent_loop(
         if state.pending_calls:
             context = state.context
             if not state.tool_step_started:
-                if state.step >= context.recursion_limit:
+                if context.recursion_limit is not None and state.step >= context.recursion_limit:
                     raise ValueError("Recursion limit reached without hitting a stop condition")
                 state.step += 1
                 state.tool_step_started = True
@@ -109,7 +109,7 @@ async def run_agent_loop(
             continue
         if inject_controls is not None:
             await inject_controls(state, "tool")
-        if state.step >= state.context.recursion_limit:
+        if state.context.recursion_limit is not None and state.step >= state.context.recursion_limit:
             raise ValueError("Recursion limit reached without hitting a stop condition")
         if before_model is not None:
             await before_model(state)
@@ -117,15 +117,19 @@ async def run_agent_loop(
         state.step += 1
         state.model_turn += 1
         params = context.parameters
-        max_tokens = max(1, min(int(next((params[key] for key in ("max_tokens", "maxTokens", "max_output_tokens", "maxOutputTokens")
-                                          if params.get(key) is not None), 2048)), 16384))
+        # Missing max tokens means no application-imposed output limit.
+        max_tokens = next((params[key] for key in ("max_tokens", "maxTokens", "max_output_tokens", "maxOutputTokens")
+                           if params.get(key) is not None), None)
+        max_tokens = int(max_tokens) if isinstance(max_tokens, (int, float)) and not isinstance(max_tokens, bool) and max_tokens > 0 else None
         temperature = params.get("temperature")
         if temperature is not None:
             temperature = max(0.0, min(float(temperature), 2.0))
         top_p = next((params[key] for key in ("top_p", "topP") if params.get(key) is not None), None)
         if top_p is not None:
             top_p = max(0.0, min(float(top_p), 1.0))
-        sampling = {"max_tokens": max_tokens, "temperature": temperature}
+        sampling = {"temperature": temperature}
+        if max_tokens is not None:
+            sampling["max_tokens"] = max_tokens
         if top_p is not None:
             sampling["top_p"] = top_p
         calls: list[ModelToolCall] = []

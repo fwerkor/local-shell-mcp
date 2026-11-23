@@ -1041,7 +1041,7 @@ export type Agent = {
   /** Non-secret Git authorship injected into this agent's sandboxed commands. */
   git_identity?: AgentGitIdentity | null;
   artifacts?: ArtifactModes;
-  recursion_limit?: number;
+  recursion_limit?: number | null;
   isPublic?: boolean;
   /**
    * Whether the requesting user holds EDIT on this agent, so a single VIEW-scoped fetch can

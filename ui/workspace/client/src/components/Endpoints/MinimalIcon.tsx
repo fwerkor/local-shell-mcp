@@ -20,7 +20,7 @@ const MinimalIcon: React.FC<IconProps> = (props) => {
     endpointsConfig,
   } = props;
   const endpoint = typeof props.endpoint === 'string' ? props.endpoint : '';
-  const { provider, imageURL } = useProviderIcon({ endpoint, iconURL, endpointsConfig });
+  const { provider } = useProviderIcon({ endpoint, iconURL, endpointsConfig });
 
   const renderWrapper = (icon: React.ReactNode, name: string) => (
     <div
@@ -58,13 +58,6 @@ const MinimalIcon: React.FC<IconProps> = (props) => {
 
   const def = getProviderIconDef(provider, model);
   const name = modelLabel ?? chatGptLabel ?? (provider != null ? def.label : endpoint || def.label);
-
-  if (imageURL != null) {
-    return renderWrapper(
-      <img className={cn('icon-sm', iconClassName)} src={imageURL} alt={`${endpoint} Icon`} />,
-      name,
-    );
-  }
 
   return renderWrapper(
     <ProviderIcon

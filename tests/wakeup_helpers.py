@@ -52,7 +52,7 @@ async def make_task(env, *, call_id="sub-1", slow=False):
     invocation = SubagentInvocation(
         agent=config.agent, messages=[{"role": "user", "content": "research"}],
         selected_tools=(), max_turns=config.max_turns,
-        recursion_limit=config.max_turns * 3, remaining_depth=0,
+        recursion_limit=config.max_turns * 3 if config.max_turns is not None else None, remaining_depth=0,
         scopes=frozenset(), grant_expires=None,
         owner="local", conversation_id=generation.conversation_id,
         parent_run_id=generation.run_id, parent_tool_call_id=call_id,

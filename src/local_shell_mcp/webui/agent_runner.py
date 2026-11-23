@@ -214,7 +214,7 @@ class AgentRunner:
 
                 tools += check_background_task_tools()
         override = (agent or {}).get("recursion_limit")
-        limit = override if type(override) in (int, float) and override > 0 else 50
+        limit = int(override) if type(override) in (int, float) and override > 0 else None
         return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
                             tools, (agent or {}).get("model_parameters") or self.initial_parameters,
                             recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent,
