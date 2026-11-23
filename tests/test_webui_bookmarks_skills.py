@@ -8,8 +8,8 @@ import httpx
 import pytest
 from starlette.applications import Starlette
 
-from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.settings import get_settings
+from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui import skill_routes, skill_tree_routes, tag_routes
 from local_shell_mcp.webui.skill_runtime import catalog, load
 from local_shell_mcp.webui.storage import WorkspaceRepository
