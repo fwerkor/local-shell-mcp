@@ -17,12 +17,14 @@ from pathlib import PurePosixPath
 import yaml
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from ..agent_bridge.skills import validate_skill_file_path
 from ..skill_ops import list_installed_skills, load_installed_skill, read_installed_skill_file
 from .auth import _same_origin
+from .content_filters import ContentFilterBlocked, ContentFragment, inspect_content
+from .memory_protection import configured_filters
 from .routes import _body, _owner, _repo
 from .storage import _json, _now, _stamp
 
@@ -54,6 +56,19 @@ def _validate(payload):
     if type(payload.get('alwaysApply', False)) is not bool:
         raise HTTPException(400, detail='Invalid alwaysApply')
     return payload
+
+
+def _enforce_skill_policy(repo, owner, *, description='', body='', references=()):
+    filters = configured_filters(repo, owner)
+    parts = [ContentFragment('skill', 'description', description),
+             ContentFragment('skill', 'body', body)]
+    parts += [ContentFragment('skill', 'body', content) for content in references]
+    try:
+        blocked = inspect_content(parts, filters)
+    except ContentFilterBlocked:
+        blocked = True
+    if blocked:
+        raise HTTPException(422, detail='Skill content blocked by configured content policy')
 
 
 def _row(row, *, detail=False, file_count=0):
@@ -150,6 +165,7 @@ async def skills(request: Request):
         after = str(offset + limit) if offset + limit < len(entries) else None
         return JSONResponse({'skills': page, 'has_more': after is not None, 'after': after})
     data = _validate(await _body(request))
+    _enforce_skill_policy(repo, owner, description=data['description'], body=data['body'])
     now = _now()
     identity = str(uuid.uuid4())
     try:
@@ -196,6 +212,7 @@ async def skill(request: Request):
             if field in patch:
                 record[field] = patch[field]
         _validate(record)
+        _enforce_skill_policy(repo, owner, description=record['description'], body=record['body'])
         try:
             db.execute('UPDATE webui_skills SET name=?,record=?,version=version+1,updated_at=? '
                        'WHERE id=? AND owner=?', (record['name'], _json(record), _now(), sid, owner))
@@ -265,6 +282,12 @@ async def files(request: Request):
     raw = await blob.read(_MAX_UPLOAD + 1)
     if len(raw) > _MAX_UPLOAD:
         raise HTTPException(413, detail='Skill file too large')
+    try:
+        reference_text = raw.decode('utf-8')
+    except UnicodeError:
+        reference_text = None
+    if reference_text is not None:
+        _enforce_skill_policy(repo, owner, references=[reference_text])
     expected = form.get('expectedFileId')
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
@@ -303,6 +326,9 @@ async def file_by_path(request: Request):
             loaded = read_installed_skill_file(sid[len('deployment:'):], path)
         except (ValueError, OSError) as exc:
             raise HTTPException(404, detail='File not found') from exc
+        if request.query_params.get('raw') in {'true', '1'}:
+            return Response(loaded['content'].encode('utf-8'), media_type='text/plain',
+                            headers={'X-Content-Type-Options': 'nosniff'})
         return JSONResponse({'content': loaded['content'], 'mimeType': 'text/plain'})
     repo = _repo()
     with repo.database.connect() as db:
@@ -315,6 +341,14 @@ async def file_by_path(request: Request):
         if request.method == 'DELETE':
             db.execute('DELETE FROM webui_skill_files WHERE id=?', (row['id'],))
             return JSONResponse({'skillId': sid, 'relativePath': path, 'deleted': True})
+        if request.query_params.get('raw') in {'true', '1'}:
+            # Avoid scriptable assets executing in the application origin.
+            mime = row['mime'] if row['mime'] in {'image/png', 'image/jpeg', 'image/gif',
+                      'image/webp', 'image/avif'} else 'application/octet-stream'
+            disposition = 'inline' if mime.startswith('image/') else 'attachment'
+            return Response(row['data'], media_type=mime,
+                            headers={'X-Content-Type-Options': 'nosniff',
+                                     'Content-Disposition': disposition})
         try:
             content = row['data'].decode('utf-8')
         except UnicodeError:
@@ -334,6 +368,11 @@ def _parse_skill_text(text, fallback):
     name = fm.pop('name', fallback)
     description = fm.pop('description', 'Imported Skill')
     data = dict(name=name, description=description, body=body, frontmatter=fm)
+    always_apply = fm.get('always-apply')
+    if type(always_apply) is not bool:
+        always_apply = fm.get('alwaysApply')
+    if type(always_apply) is bool:
+        data['alwaysApply'] = always_apply
     return _validate(data)
 
 
@@ -382,6 +421,14 @@ async def import_skill(request: Request):
     now = _now()
     sid = str(uuid.uuid4())
     repo = _repo()
+    reference_texts = []
+    for content in parts.values():
+        try:
+            reference_texts.append(content.decode('utf-8'))
+        except UnicodeError:
+            continue
+    _enforce_skill_policy(repo, owner, description=data['description'], body=data['body'],
+                          references=reference_texts)
     try:
         with repo.database.connect() as db:
             db.execute('BEGIN IMMEDIATE')

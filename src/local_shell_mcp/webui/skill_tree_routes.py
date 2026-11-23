@@ -17,7 +17,7 @@ from starlette.routing import Route
 
 from .auth import _same_origin
 from .routes import _body, _owner, _repo
-from .skill_routes import _MAX_BODY, _owned, _path
+from .skill_routes import _MAX_BODY, _enforce_skill_policy, _owned, _path
 from .storage import _now, _stamp
 
 
@@ -124,6 +124,13 @@ async def tree(request: Request):
         raise HTTPException(400, detail='Invalid node type')
     if len(content) > _MAX_BODY:
         raise HTTPException(413, detail='Skill node file too large')
+    if kind == 'file':
+        try:
+            reference_text = content.decode('utf-8')
+        except UnicodeError:
+            reference_text = None
+        if reference_text is not None:
+            _enforce_skill_policy(_repo(), owner, references=[reference_text])
     order = data.get('order', 0)
     if type(order) is not int or not 0 <= order <= 100_000:
         raise HTTPException(400, detail='Invalid node order')
@@ -163,11 +170,14 @@ async def node(request: Request):
         table = 'webui_skill_folders' if kind == 'folder' else 'webui_skill_files'
         if request.method == 'DELETE':
             if kind == 'folder':
-                prefix = row['path'] + '/%'
-                db.execute('DELETE FROM webui_skill_files WHERE skill_id=? AND path LIKE ?',
-                           (sid, prefix))
+                # LIKE treats literal underscores and percent signs in folder names
+                # as wildcards. Match exact path bytes before deleting descendants.
+                prefix = row['path'] + '/'
+                db.execute('DELETE FROM webui_skill_files WHERE skill_id=? '
+                           'AND substr(path,1,?)=?', (sid, len(prefix), prefix))
                 db.execute('DELETE FROM webui_skill_folders WHERE skill_id=? AND '
-                           '(path=? OR path LIKE ?)', (sid, row['path'], prefix))
+                           '(path=? OR substr(path,1,?)=?)',
+                           (sid, row['path'], len(prefix), prefix))
             else:
                 db.execute('DELETE FROM webui_skill_files WHERE id=? AND owner=?', (nid, owner))
             return JSONResponse({'deleted': True})
@@ -241,6 +251,7 @@ async def node_content(request: Request):
         value = payload.get('content')
         if not isinstance(value, str) or len(value.encode('utf-8')) > _MAX_BODY:
             raise HTTPException(400, detail='Invalid file content')
+        _enforce_skill_policy(_repo(), owner, references=[value])
         db.execute('UPDATE webui_skill_files SET data=?,updated_at=? WHERE id=? AND owner=?',
                    (value.encode('utf-8'), _now(), nid, owner))
         result = db.execute('SELECT * FROM webui_skill_files WHERE id=?', (nid,)).fetchone()

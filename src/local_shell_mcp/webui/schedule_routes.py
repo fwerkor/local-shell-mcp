@@ -11,7 +11,7 @@ import json
 import logging
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from starlette.exceptions import HTTPException
@@ -140,6 +140,32 @@ def next_run(cadence, timezone, *, after_ms, min_interval_minutes=5):
     raise HTTPException(400, detail='Schedule has no occurrence within one year')
 
 
+def _validate_cadence_interval(cadence):
+    """Reject cron expressions with occurrences closer than the 5-minute limit.
+
+    This validates the cadence itself; next_run can then advance from a due
+    time without padding each occurrence by the scheduler's polling latency.
+    """
+    parsed = _parse_cadence(cadence)
+    if parsed[0] != 'cron':
+        return
+    minutes, hours, *_ = parsed[1]
+    times = sorted(hour * 60 + minute for hour in hours for minute in minutes)
+    minimum = _LIMITS['minIntervalMinutes']
+    if any(right - left < minimum for left, right in zip(times, times[1:], strict=False)):
+        raise HTTPException(400, detail='Schedule interval must be at least five minutes')
+    if 1440 + times[0] - times[-1] >= minimum:
+        return
+    # Inter-day gaps matter only when the cron day predicate matches both
+    # adjacent dates. A Monday-only 23:59/00:00 cadence is not too frequent.
+    day = datetime.now(UTC).replace(hour=min(hours),
+                                   minute=min(minutes), second=0, microsecond=0)
+    for offset in range(370):
+        current = day + timedelta(days=offset)
+        if _matches(current, parsed) and _matches(current + timedelta(days=1), parsed):
+            raise HTTPException(400, detail='Schedule interval must be at least five minutes')
+
+
 def _validate(owner, repo, data, *, partial=False):
     required = {'name', 'prompt', 'agent_id', 'cadence', 'timezone', 'clientRequestId'}
     if not partial and not required.issubset(data):
@@ -167,7 +193,7 @@ def _validate(owner, repo, data, *, partial=False):
             and (not isinstance(data['chatProjectId'], str) or not repo.project(owner, data['chatProjectId']))):
         raise HTTPException(404, detail='Schedule project not found')
     if 'cadence' in data:
-        _parse_cadence(data['cadence'])
+        _validate_cadence_interval(data['cadence'])
     if 'timezone' in data:
         _zone(data['timezone'])
 
@@ -268,8 +294,13 @@ async def schedule(request: Request):
             config[key] = payload[key]
     _validate(owner, repo, config, partial=True)
     enabled = payload.get('enabled', bool(row['enabled']))
-    next_at = next_run(config['cadence'], config['timezone'],
-                       after_ms=int(time.time() * 1000)) if enabled else None
+    timing_changed = (config['cadence'] != json.loads(row['config'])['cadence']
+                      or config['timezone'] != json.loads(row['config'])['timezone'])
+    if enabled and (timing_changed or not row['enabled']):
+        next_at = next_run(config['cadence'], config['timezone'],
+                           after_ms=int(time.time() * 1000))
+    else:
+        next_at = row['next_run'] if enabled else None
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         latest = db.execute('SELECT revision FROM webui_schedules WHERE id=? AND owner=?',
@@ -288,7 +319,7 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
     now = int(time.time() * 1000)
     with database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        where = ['enabled=1']
+        where = [] if manual else ['enabled=1']
         values = []
         if owner is not None:
             where.append('owner=?')
@@ -299,6 +330,9 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
         if not manual:
             where.append('next_run<=?')
             values.append(now)
+        where.append("NOT EXISTS (SELECT 1 FROM webui_schedule_runs r "
+                     "WHERE r.schedule_id=webui_schedules.id AND "
+                     "r.status IN ('claimed','started'))")
         rows = db.execute('SELECT * FROM webui_schedules WHERE ' + ' AND '.join(where) +
                           ' ORDER BY next_run LIMIT ?', (*values, 25)).fetchall()
         claimed = []
@@ -315,8 +349,10 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
                                       'AND created_at>?', (row['id'], _now() - 60_000_000)).fetchone()
                 if previous:
                     continue
+            # Anchor recurrence to the scheduled due minute, never to polling
+            # latency. The creation/edit path already enforces the initial delay.
             next_at = next_run(config['cadence'], config['timezone'],
-                               after_ms=max(now, due)) if not manual else row['next_run']
+                               after_ms=due, min_interval_minutes=0) if not manual else row['next_run']
             run_id = str(uuid.uuid4())
             db.execute('INSERT INTO webui_schedule_runs(id,owner,schedule_id,due_at,status,created_at,updated_at) '
                        'VALUES(?,?,?,?,?,?,?)',

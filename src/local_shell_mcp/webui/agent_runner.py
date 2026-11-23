@@ -429,7 +429,7 @@ class AgentRunner:
             from .skill_runtime import load
 
             return load(self.database, self.owner, state.context.agent,
-                        call.arguments.get('name'))
+                        call.arguments.get('name'), path=call.arguments.get('path'))
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
@@ -1202,11 +1202,16 @@ class AgentRunner:
             return await run_multi_agent_graph(self, history, topology, recursion_limit=recursion_limit)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
-        if not self.namespace or (self.graph_node and self.namespace.startswith('/graph:')):
+        if (not self.namespace or
+                (self.graph_node and self.namespace.startswith('/graph:')) or
+                '/subagent:' in self.namespace):
             from .skill_runtime import catalog
 
             skills_text = catalog(self.database, self.owner, self.root_agent)
-            memory_text = self._memory_context(self.root_agent)
+            # Personal memory remains scoped to the main agent; delegated Agents
+            # must independently receive their own selected Skill catalog.
+            memory_text = self._memory_context(self.root_agent) if (
+                not self.namespace or self.graph_node) else ''
             supplementary = []
             if memory_text:
                 supplementary.append({'role': 'system', 'content': memory_text})

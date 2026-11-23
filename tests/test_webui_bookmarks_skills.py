@@ -187,7 +187,7 @@ def test_skill_activation_scope_and_deployment_source(app, monkeypatch):
     assert skill_runtime.load(repo.database, 'alice', None, 'server-skill') == 'Server instructions'
     assert skill_runtime.active_skills(repo.database, 'alice', {'skills_scope': 'none'}) == []
     selected = skill_runtime.active_skills(repo.database, 'alice', {
-        'skills_scope': 'selected', 'skills': ['owner-skill'],
+        'skills_enabled': True, 'skills_scope': 'selected', 'skills': ['owner-skill'],
     })
     assert len(selected) == 1 and selected[0]['name'] == 'owner-skill'
     assert skill_runtime.active_skills(repo.database, 'alice', {'skills_enabled': False}) == []
