@@ -140,9 +140,12 @@ def _frontend_user(session: WebSession) -> dict:
 
     repo = WorkspaceRepository(shared_database(get_settings().state_dir))
     memories = repo.setting(session.owner, 'user.memories', True) is not False
+    display_name = repo.setting(session.owner, 'user.display_name', '')
+    if not isinstance(display_name, str):
+        display_name = ''
     owner_id = hashlib.sha256(session.owner.encode("utf-8")).hexdigest()[:24]
     return {
-        "id": owner_id, "_id": owner_id, "username": "workspace", "name": "local-shell-mcp",
+        "id": owner_id, "_id": owner_id, "username": "workspace", "name": display_name,
         "email": "workspace@local-shell-mcp.invalid",
         "role": "ADMIN" if (get_settings().auth_mode == "none" and session.owner == "local")
         or "admin:config" in session.scopes.split() else "USER",
@@ -292,6 +295,25 @@ async def logout(request: Request) -> Response:
 
 async def current_user(request: Request) -> Response:
     owner, scopes, grant = _owner(request)
+    if request.method == "PATCH":
+        import unicodedata
+
+        from .routes import _body
+
+        _same_origin(request)
+        body = await _body(request)
+        name = body.get("name")
+        if not isinstance(name, str):
+            raise HTTPException(400, detail="Display name must be a string")
+        name = name.strip()
+        if len(name) > 80 or any(unicodedata.category(char).startswith("C") for char in name):
+            raise HTTPException(400, detail="Display name must be at most 80 characters without control characters")
+        from ..sqlite_store import shared_database
+        from .storage import WorkspaceRepository
+
+        WorkspaceRepository(shared_database(get_settings().state_dir)).save_setting(
+            owner, "user.display_name", name,
+        )
     return JSONResponse(_frontend_user(WebSession(owner, scopes, grant)))
 
 
@@ -302,5 +324,5 @@ def auth_routes() -> list[Route]:
         Route("/api/auth/lsm", authenticate, methods=["POST"]),
         Route("/api/auth/refresh", refresh, methods=["POST"]),
         Route("/api/auth/logout", logout, methods=["POST"]),
-        Route("/api/user", current_user, methods=["GET"]),
+        Route("/api/user", current_user, methods=["GET", "PATCH"]),
     ]

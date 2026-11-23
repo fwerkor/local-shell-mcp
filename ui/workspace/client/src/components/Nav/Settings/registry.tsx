@@ -45,12 +45,21 @@ import CodeEnvironments from './CodeEnvironments';
 import About from '../SettingsTabs/About/About';
 import ApiKeys from '../SettingsTabs/ApiKeys';
 import MemoryToggle from './MemoryToggle';
+import UserDisplayName from './UserDisplayName';
 import { TTSEndpoints } from '~/common';
 import store from '~/store';
 
 const { GENERAL, CHAT, SPEECH, DATA, ABOUT } = SettingsTabValues;
 
 export const registry: SettingEntry[] = [
+  {
+    id: 'displayName',
+    tab: GENERAL,
+    section: 'profile',
+    labelKey: 'com_ui_display_name',
+    keywords: ['display name', 'nickname', '称呼', '昵称', 'name'],
+    Component: UserDisplayName,
+  },
   // General · Appearance
   {
     id: 'theme',

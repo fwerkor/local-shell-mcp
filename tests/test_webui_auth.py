@@ -104,3 +104,43 @@ async def test_controller_without_auth_opens_react_without_second_login(tmp_path
         assert second.status_code == 200
         assert first.json()["user"]["id"] == second.json()["user"]["id"]
         assert "set-cookie" not in first.headers
+
+@pytest.mark.asyncio
+async def test_display_name_is_private_persistent_and_optional(tmp_path, monkeypatch) -> None:
+    settings = SimpleNamespace(auth_mode="oauth", state_dir=tmp_path,
+                               public_base_url="https://lsm.example.test")
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+    app = Starlette(routes=auth.auth_routes())
+
+    async def authorized(scope, receive, send):
+        if scope.get("type") == "http" and b"x-owner" in dict(scope.get("headers", [])):
+            owner = dict(scope["headers"])[b"x-owner"].decode()
+            scope.setdefault("state", {})["principal"] = SimpleNamespace(
+                subject=owner, claims={"auth": "oauth", "scope": "shell:read", "exp": int(time.time()) + 900}
+            )
+        await app(scope, receive, send)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=authorized),
+                                base_url="https://lsm.example.test") as client:
+        headers = {"x-owner": "alice", "Origin": "https://lsm.example.test"}
+        initial = await client.get("/api/user", headers=headers)
+        assert initial.status_code == 200
+        assert initial.json()["name"] == ""
+        updated = await client.patch("/api/user", json={"name": "  小航  "}, headers=headers)
+        assert updated.status_code == 200
+        assert updated.json()["name"] == "小航"
+        assert updated.json()["id"] == initial.json()["id"]
+        assert (await client.get("/api/user", headers=headers)).json()["name"] == "小航"
+        assert auth._frontend_user(auth.WebSession("alice", "shell:read", int(time.time()) + 900))["name"] == "小航"
+        assert (await client.get("/api/user", headers={"x-owner": "bob"})).json()["name"] == ""
+        for invalid in (None, 42, "x" * 81, "a\nb", "hello\x00"):
+            rejected = await client.patch("/api/user", json={"name": invalid}, headers=headers)
+            assert rejected.status_code == 400
+        assert (await client.get("/api/user", headers=headers)).json()["name"] == "小航"
+        forged = await client.patch("/api/user", json={"name": "evil"}, headers={
+            "x-owner": "alice", "Origin": "https://attacker.example"})
+        assert forged.status_code == 403
+        assert (await client.patch("/api/user", json={"name": "Anonymous"})).status_code == 401
+        reset = await client.patch("/api/user", json={"name": "  "}, headers=headers)
+        assert reset.status_code == 200
+        assert reset.json()["name"] == ""
