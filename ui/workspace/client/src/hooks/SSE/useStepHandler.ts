@@ -164,13 +164,17 @@ const isOAuthToolCallContent = (part?: Partial<TMessageContentParts>) => {
 /** Match GenerationStore's checkpoint rewind: only provisional text is cut;
  * tool cards and steer parts retain their relative order. Iterate Unicode
  * scalars to mirror Python string slicing (including astral characters). */
-export function rewindStreamContent(content: TMessageContentParts[], preserved: string): TMessageContentParts[] {
+export function rewindStreamContent(
+  content: TMessageContentParts[],
+  preserved: string,
+  editPrefixOffset = 0,
+): TMessageContentParts[] {
   let remaining = Array.from(preserved).length;
   // Live content is indexed by server RunStep.index, not an append-only
-  // packed array. Preserve holes and empty message placeholders so a tool
-  // completion at index 1 remains at index 1 after stream recovery.
-  const retained = [...content];
-  for (let index = 0; index < content.length; index++) {
+  // packed array. Preserve sparse slots and the retained edit prefix: the
+  // checkpoint only covers text emitted by the current generation.
+  const retained = content.slice();
+  for (let index = editPrefixOffset; index < content.length; index++) {
     const part = content[index];
     if (part == null || part.type !== ContentTypes.TEXT) continue;
     if (typeof part.text !== 'string') continue;
@@ -944,7 +948,10 @@ export default function useStepHandler({
         pendingDeltaFlushRef.current = null;
         pendingDeltaFlushIds.current.clear();
         pendingDeltaBuffer.current.clear();
-        const updated = { ...response, content: rewindStreamContent(response.content ?? [], preserveText) };
+        const updated = {
+          ...response,
+          content: rewindStreamContent(response.content ?? [], preserveText, editPrefixOffset),
+        };
         messageMap.current.set(responseId, updated);
         setMessages(mergeResponseMessage(messages, updated, responseId, { ensureUserMessage: true }));
         return;
