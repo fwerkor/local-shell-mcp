@@ -272,6 +272,8 @@ async def test_skill_tree_invalid_moves_and_binary_guard(app):
         assert (await c.post(base, json={'type': 'folder', 'name': 'a',
                                          'order': -5})).status_code == 400
         assert (await c.post(base, json={'type': 'file', 'name': '../escape'})).status_code == 400
+        assert (await c.post(base, json={'type': 'file', 'name': 'a',
+                                         'parentId': []})).status_code == 400
         first = await c.post(base, json={'type': 'file', 'name': 'readme.md'})
         assert first.status_code == 201, first.text
         file_id = first.json()['_id']
@@ -291,6 +293,10 @@ async def test_skill_tree_invalid_moves_and_binary_guard(app):
         assert (await c.get(base + '/does-not-exist/content')).status_code == 404
         assert (await c.patch(base + '/' + file_id,
                               json={'order': -1})).status_code == 400
+        assert (await c.patch(base + '/' + file_id,
+                              json={'name': 42})).status_code == 400
+        assert (await c.patch(base + '/' + file_id,
+                              json={'parentId': []})).status_code == 400
         assert (await c.patch(base + '/does-not-exist',
                               json={'name': 'x'})).status_code == 404
         assert (await c.patch(base + '/' + file_id,

@@ -422,8 +422,13 @@ async def _dispatch(occurrence, database):
             if not started:
                 _settle(database, occurrence_id, 'interrupted',
                         conversation_id=generation.conversation_id, error='generation_not_started')
-    except (ValueError, KeyError, PermissionError, ContentFilterBlocked, RuntimeError) as exc:
-        reason = str(exc)[:256] if not isinstance(exc, ContentFilterBlocked) else 'content_filter'
+    except Exception as exc:
+        # Only stable user-facing validation errors may be echoed into the run
+        # record. Unexpected provider exceptions can contain credential data.
+        reason = str(exc)[:256] if isinstance(
+            exc, (ValueError, KeyError, PermissionError, RuntimeError)) else type(exc).__name__
+        if isinstance(exc, ContentFilterBlocked):
+            reason = 'content_filter'
         _settle(database, occurrence_id, 'error', error=reason)
         log.warning('Scheduled chat could not start: %s', type(exc).__name__)
 

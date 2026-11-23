@@ -64,6 +64,8 @@ def _node(db, owner, sid, nid):
 def _parent_path(db, owner, sid, parent_id):
     if parent_id is None:
         return ''
+    if not isinstance(parent_id, str) or not 1 <= len(parent_id) <= 128:
+        raise HTTPException(400, detail='Invalid parent id')
     kind, row = _node(db, owner, sid, parent_id)
     if kind != 'folder':
         raise HTTPException(400, detail='Parent must be a folder')
@@ -180,6 +182,8 @@ async def node(request: Request):
         else:
             parent_path = _parent_path(db, owner, sid, parent)
         name = payload.get('name', PurePosixPath(old).name)
+        if not isinstance(name, str) or not name or '/' in name or '\\' in name:
+            raise HTTPException(400, detail='Invalid node name')
         candidate = _path((parent_path + '/' if parent_path else '') + name)
         if kind == 'folder' and (candidate.startswith(old + '/') or candidate == old + '/' or
                                  parent_path.startswith(old + '/') or parent_path == old):
