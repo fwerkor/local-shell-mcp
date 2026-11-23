@@ -54,6 +54,10 @@ from .semantic_index import (
 from .steering import SteeringStore, merged_text
 from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
 
+# The hosted Agent has an owner/Agent-aware Skill tool. Native MCP aliases
+# bypass per-user activation and must remain exclusive to external MCP clients.
+_HOSTED_SKILL_ALIASES = frozenset({'skill_list', 'skill_load', 'skill_read'})
+
 
 class AgentRunner:
     def __init__(self, owner, generation, database, store, *, scopes, grant_expires,
@@ -140,7 +144,8 @@ class AgentRunner:
         formatted = MemoryRepository(self.database).formatted(
             self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
         if formatted.get('readFailed'):
-            return ''
+            # Never lose the mutation consent rule when Memory reads fail.
+            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
         explicit_memory_tool = bool(agent and 'memory' in ((agent or {}).get('tools') or []))
         endpoints = settings.setting(self.owner, 'endpoints', {})
         explicit_memory_config = (
@@ -149,10 +154,10 @@ class AgentRunner:
         )
         if (not explicit_memory_tool and not explicit_memory_config
                 and not (formatted.get('withKeys') or formatted.get('withoutKeys'))):
-            # An empty default-enabled Memory store should not alter ordinary
-            # prompts. Preserve legacy context when memory is explicitly
-            # configured or an Agent explicitly selected its memory tool.
-            return ''
+            # An empty default-enabled store needs no memory-list preamble,
+            # but the mutation consent rule must remain visible to the model
+            # whenever its Memory tools are offered.
+            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
         return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
 
@@ -167,8 +172,9 @@ class AgentRunner:
         unrestricted = agent is None and selected_tools is None
         native = available_tools(self.owner, self.authorization_conversation_id,
                                  scopes=set(self.scopes), expires=self.grant_expires)
-        tools = [tool for tool in native if unrestricted or tool["function"]["name"] in selected
-                 or tool["function"]["name"] in {"session_manage", "plan_manage"}]
+        tools = [tool for tool in native if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
+                 and (unrestricted or tool["function"]["name"] in selected
+                      or tool["function"]["name"] in {"session_manage", "plan_manage"})]
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
@@ -423,6 +429,10 @@ class AgentRunner:
         from .nested_mcp import approved_call, discover
 
         self._check_grant()
+        # A restored checkpoint may still contain a pre-upgrade native schema.
+        # Reject these aliases at dispatch as well as filtering them from prompts.
+        if call.name in _HOSTED_SKILL_ALIASES:
+            raise RuntimeSafetyError("Use the hosted skill tool for enabled Skills")
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
         if call.name == 'skill':

@@ -87,6 +87,61 @@ async def test_raw_binary_and_runtime_supporting_files(state):
 
 
 @pytest.mark.asyncio
+async def test_main_skill_document_is_readable_but_not_writable(state):
+    server, _ = state
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
+                                 base_url='http://example.test') as c:
+        created = await c.post('/api/skills', json={
+            'name': 'main-file', 'description': 'Visible source',
+            'body': 'Main instructions\n', 'alwaysApply': True,
+        })
+        assert created.status_code == 201
+        sid = created.json()['_id']
+        # The file viewer renders SKILL.md even when other resources exist.
+        upload = await c.post(f'/api/skills/{sid}/files',
+                              data={'relativePath': 'references/readme.md'},
+                              files={'file': ('readme.md', b'Reference', 'text/markdown')})
+        assert upload.status_code == 200
+        url = f'/api/skills/{sid}/files/SKILL.md'
+        response = await c.get(url)
+        assert response.status_code == 200
+        assert response.json()['mimeType'] == 'text/markdown'
+        source = response.json()['content']
+        assert source.startswith('---\n')
+        assert 'name: main-file' in source
+        assert 'description: Visible source' in source
+        assert 'always-apply: true' in source
+        assert source.endswith('Main instructions\n')
+        raw = await c.get(url + '?raw=true')
+        assert raw.status_code == 200
+        assert raw.text == source
+        assert raw.headers['x-content-type-options'] == 'nosniff'
+        assert raw.headers['content-type'].startswith('text/markdown')
+        assert (await c.get(url, headers={'x-owner': 'bob'})).status_code == 404
+        assert (await c.delete(url)).status_code == 400
+        assert (await c.post(url, data={'relativePath': 'SKILL.md'},
+                             files={'file': ('SKILL.md', b'overwrite')})).status_code == 400
+        assert (await c.get(url)).json()['content'] == source
+
+
+@pytest.mark.asyncio
+async def test_deployment_main_skill_document_uses_installed_loader(state, monkeypatch):
+    server, _ = state
+    monkeypatch.setattr(skill_routes, 'load_installed_skill',
+                        lambda name: {'content': '# Deployment instructions' + name})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
+                                 base_url='http://example.test') as c:
+        url = '/api/skills/deployment:example/files/SKILL.md'
+        response = await c.get(url)
+        assert response.status_code == 200
+        assert response.json()['content'] == '# Deployment instructionsexample'
+        raw = await c.get(url + '?raw=true')
+        assert raw.status_code == 200
+        assert raw.text == '# Deployment instructionsexample'
+        assert (await c.delete(url)).status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_imported_frontmatter_and_disabled_model_invocation(state):
     server, repo = state
     archive = io.BytesIO()

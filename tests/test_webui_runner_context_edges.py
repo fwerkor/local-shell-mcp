@@ -40,7 +40,9 @@ def runtime(tmp_path):
 
 def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, monkeypatch):
     db, _, repo, profile, runner = runtime
-    assert runner._memory_context(None) == ''
+    # With default Memory tools, even an empty store must retain consent.
+    assert 'Only use the `set_memory`' in runner._memory_context(None)
+    assert runner._memory_context({'id': 'plain', 'tools': []}) == ''
     repo.save_setting('a', 'endpoints', {'memory': {'tokenLimit': 100},
                                        'agents': {'capabilities': ['memory']}})
     assert 'Persistent memory is available' in runner._memory_context(None)

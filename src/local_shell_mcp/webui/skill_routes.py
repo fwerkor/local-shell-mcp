@@ -243,12 +243,12 @@ async def states(request: Request):
     return JSONResponse(values)
 
 
-def _path(raw):
+def _path(raw, *, allow_main=False):
     try:
         result = validate_skill_file_path(raw).as_posix()
     except ValueError as exc:
         raise HTTPException(400, detail='Invalid file path') from exc
-    if result == 'SKILL.md':
+    if result == 'SKILL.md' and not allow_main:
         raise HTTPException(400, detail='Edit the main skill body instead')
     return result
 
@@ -316,6 +316,20 @@ async def files(request: Request):
         return JSONResponse(_file_meta(row))
 
 
+def _main_document(record):
+    # The main file is stored as structured metadata plus body; reconstruct
+    # a normal SKILL.md for the read-only file viewer.
+    front = {'name': record['name'], 'description': record['description']}
+    front.update(record.get('frontmatter') or {})
+    if 'always-apply' in front:
+        front['always-apply'] = bool(record.get('alwaysApply', False))
+    elif 'alwaysApply' in front:
+        front['alwaysApply'] = bool(record.get('alwaysApply', False))
+    elif record.get('alwaysApply'):
+        front['always-apply'] = True
+    return '---\n' + yaml.safe_dump(front, allow_unicode=True, sort_keys=False) + '---\n' + record['body']
+
+
 async def file_by_path(request: Request):
     if request.method != 'GET':
         _same_origin(request)
@@ -323,12 +337,13 @@ async def file_by_path(request: Request):
         return await files(request)
     owner = _owner(request)
     sid = request.path_params['id']
-    path = _path(request.path_params['path'])
+    path = _path(request.path_params['path'], allow_main=request.method == 'GET')
     if sid.startswith('deployment:'):
         if request.method != 'GET':
             raise HTTPException(403, detail='Deployment Skills are read-only')
         try:
-            loaded = read_installed_skill_file(sid[len('deployment:'):], path)
+            loaded = (load_installed_skill(sid[len('deployment:'):]) if path == 'SKILL.md'
+                      else read_installed_skill_file(sid[len('deployment:'):], path))
         except (ValueError, OSError) as exc:
             raise HTTPException(404, detail='File not found') from exc
         if request.query_params.get('raw') in {'true', '1'}:
@@ -338,7 +353,13 @@ async def file_by_path(request: Request):
     repo = _repo()
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        _owned(db, owner, sid)
+        skill = _owned(db, owner, sid)
+        if path == 'SKILL.md':
+            document = _main_document(json.loads(skill['record']))
+            if request.query_params.get('raw') in {'true', '1'}:
+                return Response(document.encode('utf-8'), media_type='text/markdown',
+                                headers={'X-Content-Type-Options': 'nosniff'})
+            return JSONResponse({'content': document, 'mimeType': 'text/markdown'})
         row = db.execute('SELECT * FROM webui_skill_files WHERE owner=? AND skill_id=? AND path=?',
                          (owner, sid, path)).fetchone()
         if row is None:
