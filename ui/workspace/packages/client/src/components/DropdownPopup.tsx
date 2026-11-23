@@ -16,6 +16,8 @@ interface DropdownProps {
   itemClassName?: string;
   sameWidth?: boolean;
   anchor?: { x: string; y: string };
+  /** Use a virtual anchor for pointer-triggered context menus. */
+  getAnchorRect?: () => DOMRect | null;
   gutter?: number;
   modal?: boolean;
   portal?: boolean;
