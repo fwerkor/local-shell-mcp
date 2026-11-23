@@ -1458,6 +1458,14 @@ def test_live_workspace_is_hidden_when_feature_is_disabled(tmp_path, monkeypatch
 
     from local_shell_mcp.webui.frontend import frontend_routes
 
+    # This suite runs on the Python-only CI matrix, which intentionally does
+    # not compile the React application.  Exercise the SPA route with a tiny
+    # fixture instead of relying on a previously committed frontend archive.
+    frontend_dir = tmp_path / "frontend"
+    frontend_dir.mkdir()
+    (frontend_dir / "index.html").write_text('<div id="root"></div>', encoding="utf-8")
+    monkeypatch.setattr("local_shell_mcp.webui.frontend.bundled_frontend", lambda: frontend_dir)
+
     app = _build_mcp_http_app(mcp)
     app.router.routes[-1:-1] = frontend_routes()
     with TestClient(app, base_url="http://testserver") as client:
