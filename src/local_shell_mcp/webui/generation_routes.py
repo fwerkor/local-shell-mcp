@@ -186,6 +186,7 @@ async def _run_model(
     step_id = "step_" + generation.run_id
     step_index = 0
     needs_post_tool_step = False
+    current_content_type: str | None = None
     now_ms = int(time.time() * 1000)
     memory_task: asyncio.Task | None = None
     if resume_history is not None:
@@ -244,6 +245,14 @@ async def _run_model(
         if recovered_step is not None:
             step_id, step_index, created = recovered_step
             now_ms = created if isinstance(created, int) else now_ms
+            snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
+            parts = snapshot['aggregatedContent']
+            if step_index < len(parts):
+                part = parts[step_index]
+                if part.get('type') == 'think' and part.get('think'):
+                    current_content_type = 'think'
+                elif part.get('type') == 'text' and part.get('text'):
+                    current_content_type = 'text'
         else:
             if resume_history is not None:
                 snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
@@ -263,13 +272,16 @@ async def _run_model(
             }, actor_lease=actor_lease)
 
         async def append_text(chunk):
-            nonlocal needs_post_tool_step
+            nonlocal needs_post_tool_step, current_content_type
             check_wakeup_lease()
             if not chunk:
                 return
             if needs_post_tool_step:
                 needs_post_tool_step = False
                 await _open_followup_step('after_tool')
+            elif current_content_type == 'think':
+                await _open_followup_step('after_reasoning')
+            current_content_type = 'text'
             text_parts.append(chunk)
             repo.append(owner, generation.run_id, {
                 "event": "on_message_delta", "data": {
@@ -279,10 +291,27 @@ async def _run_model(
                 },
             }, actor_lease=actor_lease)
 
-        async def _open_followup_step(reason):
-            nonlocal step_id, step_index, now_ms, needs_post_tool_step
+        async def append_thought(chunk):
+            nonlocal needs_post_tool_step, current_content_type
+            check_wakeup_lease()
+            if not chunk:
+                return
+            if needs_post_tool_step:
+                await _open_followup_step('after_tool', content_type='think')
+            elif current_content_type == 'text':
+                await _open_followup_step('after_text', content_type='think')
+            current_content_type = 'think'
+            repo.append(owner, generation.run_id, {
+                'event': 'on_reasoning_delta', 'data': {
+                    'id': step_id, 'delta': {'content': {'type': 'think', 'think': chunk}},
+                },
+            }, actor_lease=actor_lease)
+
+        async def _open_followup_step(reason, *, content_type='text'):
+            nonlocal step_id, step_index, now_ms, needs_post_tool_step, current_content_type
             check_wakeup_lease()
             needs_post_tool_step = False
+            current_content_type = None
             # Upstream reserves an absolute content slot per message_creation.
             # Once a STEER part occupies the next slot, subsequent provider
             # text must use a *new* runStep index or useStepHandler appends it
@@ -306,7 +335,7 @@ async def _run_model(
                     "created_at": now_ms, "status": "in_progress",
                     "stepDetails": {"type": "message_creation", "message_creation": {
                         "message_id": generation.response_message_id,
-                        "content_type": "text", "phase": "final_answer",
+                        "content_type": content_type, "phase": "final_answer",
                     }},
                 },
             }, actor_lease=actor_lease)
@@ -324,7 +353,8 @@ async def _run_model(
         runner = AgentRunner(owner, generation, _database(), repo,
                              scopes=granted_scopes, grant_expires=grant_expires,
                              stream_tools=stream_model_with_tools, stream_text=stream_model,
-                             on_text=append_text, agent=parent_agent, profile=profile,
+                             on_text=append_text, on_thought=append_thought,
+                             agent=parent_agent, profile=profile,
                              parameters=params, ask_user_enabled=ask_user_enabled,
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,

@@ -938,6 +938,20 @@ class GenerationStore:
                     else:
                         content_parts.append({"type": "text", "text": content["text"],
                                               "phase": "final_answer"})
+            elif event == 'on_reasoning_delta':
+                part = (data.get('delta') or {}).get('content') or {}
+                if part.get('type') == 'think' and isinstance(part.get('think'), str) and part['think']:
+                    slot = text_slot_by_step.get(data.get('id'))
+                    if slot is not None and slot < len(content_parts):
+                        existing = content_parts[slot]
+                        if existing.get('type') == 'text' and not existing.get('text'):
+                            content_parts[slot] = {'type': 'think', 'think': part['think']}
+                        elif existing.get('type') == 'think':
+                            existing['think'] += part['think']
+                    elif content_parts and content_parts[-1].get('type') == 'think':
+                        content_parts[-1]['think'] += part['think']
+                    else:
+                        content_parts.append({'type': 'think', 'think': part['think']})
             elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
                 content_parts.append(data["part"])
             elif event == 'on_content_rewind':
@@ -1649,6 +1663,13 @@ class GenerationStore:
                             content[-1]["text"] += delta["text"]
                         else:
                             content.append({"type": "text", "text": delta["text"], "phase": "final_answer"})
+                elif kind == 'on_reasoning_delta':
+                    delta = (data.get('delta') or {}).get('content') or {}
+                    if delta.get('type') == 'think' and isinstance(delta.get('think'), str) and delta['think']:
+                        if content and content[-1].get('type') == 'think':
+                            content[-1]['think'] += delta['think']
+                        else:
+                            content.append({'type': 'think', 'think': delta['think']})
                 elif kind == "on_steer_applied" and isinstance(data.get("part"), dict):
                     content.append(data["part"])
                 elif kind == 'on_content_rewind':

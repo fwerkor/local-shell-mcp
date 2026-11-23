@@ -57,7 +57,7 @@ from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subage
 
 class AgentRunner:
     def __init__(self, owner, generation, database, store, *, scopes, grant_expires,
-                 stream_tools, stream_text, on_text, agent=None, profile=None,
+                 stream_tools, stream_text, on_text, on_thought=None, agent=None, profile=None,
                  parameters=None, ask_user_enabled=False, mcp_enabled=False,
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
@@ -70,6 +70,7 @@ class AgentRunner:
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
+        self.on_thought = on_thought
         self.root_agent, self.initial_profile = agent, profile
         self.graph_definition = graph_definition if graph_definition is not None else agent
         self.graph_node = graph_node
@@ -1374,7 +1375,8 @@ class AgentRunner:
 
         result = await run_agent_loop(
             state, stream_tools=stream_tools_with_media, stream_text=stream_text_with_media,
-            dispatch=self._dispatch, on_text=emit, save_state=self._save,
+            dispatch=self._dispatch, on_text=emit, on_thought=self.on_thought,
+            save_state=self._save,
             before_model=self._before_model, on_model_usage=self._observe_model_usage,
             project_messages=self._project_model_messages,
             preflight_calls=self._preflight_model_calls,

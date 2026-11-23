@@ -63,6 +63,7 @@ async def run_agent_loop(
     stream_text: Callable[..., AsyncIterator[str]],
     dispatch: Callable[[list[ModelToolCall], AgentLoopState], Awaitable[ToolBatchOutput]],
     on_text: Callable[[str], Awaitable[None]],
+    on_thought: Callable[[str], Awaitable[None]] | None = None,
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
     before_model: Callable[[AgentLoopState], Awaitable[None]] | None = None,
     on_model_usage: Callable[[ModelUsage, AgentLoopState], Awaitable[None]] | None = None,
@@ -154,6 +155,8 @@ async def run_agent_loop(
                             reasoning[-1]['thinking'] += item.text
                         else:
                             reasoning.append({'type': 'thinking', 'thinking': item.text})
+                        if item.text and on_thought is not None:
+                            await on_thought(item.text)
                     elif item.kind == 'signature':
                         if reasoning and reasoning[-1].get('type') == 'thinking':
                             reasoning[-1]['signature'] = item.signature
@@ -177,7 +180,10 @@ async def run_agent_loop(
                               (on_stream_chunk is not None and await on_stream_chunk())):
             preempted = True
         if preempted:
-            state.messages.append({"role": "assistant", "content": "".join(text_parts) or None})
+            interrupted = {"role": "assistant", "content": "".join(text_parts) or None}
+            if reasoning:
+                interrupted["reasoning"] = reasoning
+            state.messages.append(interrupted)
             state.pending_calls = []
             state.completed = False
             if on_boundary is not None:
