@@ -29,6 +29,8 @@ def state(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_folder_delete_matches_literal_underscore_and_percent(state):
     server, repo = state
+    from local_shell_mcp.webui.auth import public_owner_id
+
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
                                  base_url='http://example.test') as c:
         sid = (await c.post('/api/skills', json={
@@ -40,6 +42,7 @@ async def test_folder_delete_matches_literal_underscore_and_percent(state):
                 'type': 'folder', 'name': folder_name,
             })
             assert result.status_code == 201, result.text
+            assert result.json()['author'] == public_owner_id('alice')
             folders[folder_name] = result.json()['_id']
             saved = await c.post(f'/api/skills/{sid}/tree', json={
                 'type': 'file', 'name': 'one.txt', 'parentId': folders[folder_name],

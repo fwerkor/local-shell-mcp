@@ -15,7 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from .auth import _same_origin
+from .auth import _same_origin, public_owner_id
 from .routes import _body, _owner, _repo
 from .skill_routes import _MAX_BODY, _enforce_skill_policy, _owned, _path
 from .storage import _now, _stamp
@@ -25,7 +25,7 @@ def _format(row, kind, parent):
     item = {
         '_id': row['id'], 'skillId': row['skill_id'],
         'parentId': parent, 'type': kind, 'name': PurePosixPath(row['path']).name,
-        'order': row['position'], 'author': row['owner'],
+        'order': row['position'], 'author': public_owner_id(row['owner']),
         'createdAt': _stamp(row['created_at'] / 1_000_000),
         'updatedAt': _stamp(row['updated_at'] / 1_000_000),
     }

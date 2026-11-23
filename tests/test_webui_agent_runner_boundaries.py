@@ -14,11 +14,17 @@ from local_shell_mcp.webui.routes import _repo
 
 @pytest.fixture
 def runner_parts(tmp_path, monkeypatch):
+    from local_shell_mcp.webui import machine_permissions
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
     monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
     monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.state'))
     monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'none')
     get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path / '.state')
+    # Machine permissions resolve through the shared HTTP repository by
+    # default. Keep their lookup on the test database holding this run.
+    monkeypatch.setattr(machine_permissions, '_repo', lambda: WorkspaceRepository(db))
     store = GenerationStore(db)
     run, _ = store.begin('local', {'text': 'Test boundaries'})
     yield db, store, run
