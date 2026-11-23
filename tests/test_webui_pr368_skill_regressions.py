@@ -391,3 +391,53 @@ async def test_managed_supporting_file_binary_content_cannot_inject(state):
     with pytest.raises(ValueError, match='binary'):
         skill_runtime.load(repo.database, 'alice', None, 'binary-check',
                            path='references/binary.dat')
+
+
+@pytest.mark.asyncio
+async def test_deployment_list_scans_once_outside_request_loop(state, monkeypatch):
+    server, _ = state
+    scans = []
+
+    def installed():
+        scans.append(True)
+        return {'skills': [{'name': f'deployed-{i}', 'description': 'Demo',
+                            'related_files': []} for i in range(100)]}
+
+    monkeypatch.setattr(skill_routes, 'list_installed_skills', installed)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
+                                 base_url='http://example.test') as c:
+        result = await c.get('/api/skills?limit=1')
+    assert result.status_code == 200
+    assert result.json()['has_more'] is True
+    assert len(result.json()['skills']) == 1
+    assert len(scans) == 1
+
+
+@pytest.mark.asyncio
+async def test_colliding_deployment_and_managed_skills_are_both_loadable(state, monkeypatch):
+    from local_shell_mcp.webui import skill_runtime
+
+    server, repo = state
+    monkeypatch.setattr(skill_runtime, 'list_installed_skills',
+                        lambda: {'skills': [{'name': 'collision', 'description': 'Deployed version'}]})
+    monkeypatch.setattr(skill_runtime, 'load_installed_skill',
+                        lambda name: {'content': 'Deployment-specific instructions'})
+    monkeypatch.setattr(skill_runtime, 'read_installed_skill_file',
+                        lambda name, path: {'content': 'Deployment reference'})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
+                                 base_url='http://example.test') as c:
+        created = await c.post('/api/skills', json={
+            'name': 'collision', 'description': 'Managed version',
+            'body': 'Managed-specific instructions',
+        })
+        assert created.status_code == 201
+        managed_id = created.json()['_id']
+    listing = catalog(repo.database, 'alice', None)
+    assert managed_id + ': Managed version' in listing
+    assert 'deployment:collision: Deployed version' in listing
+    assert load(repo.database, 'alice', None, managed_id) == 'Managed-specific instructions'
+    assert load(repo.database, 'alice', None, 'deployment:collision') == 'Deployment-specific instructions'
+    assert load(repo.database, 'alice', None, 'deployment:collision',
+                path='references/guide.md') == 'Deployment reference'
+    with pytest.raises(ValueError, match='Ambiguous'):
+        load(repo.database, 'alice', None, 'collision')

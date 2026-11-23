@@ -5,6 +5,7 @@ original read-only filesystem ownership and are loaded via LSM's secure scanner.
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import mimetypes
@@ -89,13 +90,14 @@ def _row(row, *, detail=False, file_count=0):
     return data
 
 
-def _deployment(name, *, detail=False):
+def _deployment(name, *, detail=False, entry=None):
     try:
         loaded = load_installed_skill(name) if detail else None
     except (ValueError, OSError):
         return None
-    all_skills = list_installed_skills()['skills']
-    entry = next((item for item in all_skills if item['name'] == name), None)
+    if entry is None:
+        entry = next((item for item in list_installed_skills()['skills']
+                      if item['name'] == name), None)
     if entry is None:
         return None
     timestamp = '1970-01-01T00:00:00.000Z'
@@ -157,7 +159,10 @@ async def skills(request: Request):
                 'SELECT skill_id,COUNT(*) total FROM webui_skill_files WHERE owner=? GROUP BY skill_id',
                 (owner,)).fetchall()}
         entries = [_row(r, file_count=counts.get(r['id'], 0)) for r in rows]
-        entries += [_deployment(item['name']) for item in list_installed_skills()['skills']]
+        # Do not rescan the filesystem for every item. The registry scan is
+        # blocking IO, so keep it off the async request loop as well.
+        deployed = await asyncio.to_thread(list_installed_skills)
+        entries += [_deployment(item['name'], entry=item) for item in deployed['skills']]
         entries = [e for e in entries if e is not None and
                    (not category or e.get('category') == category) and
                    (not query or query in (e['name'] + ' ' + e['description'] + ' ' + e.get('displayTitle', '')).lower())]
