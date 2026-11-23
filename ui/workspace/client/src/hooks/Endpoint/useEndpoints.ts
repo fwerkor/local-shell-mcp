@@ -32,7 +32,7 @@ const providerArtClassName = 'icon-md shrink-0';
 
 const createEndpointIcon = (
   endpoint: string,
-  { provider, imageURL }: ProviderIconResolution,
+  { provider }: ProviderIconResolution,
 ): React.ReactNode => {
   if (endpoint === EModelEndpoint.agents) {
     return React.createElement(Feather, { size: artSize, className: artClassName });
@@ -40,14 +40,6 @@ const createEndpointIcon = (
 
   if (endpoint === EModelEndpoint.assistants || endpoint === EModelEndpoint.azureAssistants) {
     return React.createElement(Sparkles, { className: artClassName });
-  }
-
-  if (imageURL != null) {
-    return React.createElement('img', {
-      src: imageURL,
-      alt: `${endpoint} Icon`,
-      className: artClassName,
-    });
   }
 
   return React.createElement(ProviderIcon, {

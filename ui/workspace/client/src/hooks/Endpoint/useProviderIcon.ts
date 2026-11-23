@@ -15,9 +15,9 @@ export interface ProviderIconParams {
 }
 
 /**
- * Single source of truth for which art a given endpoint renders. Precedence, highest
- * first: an image iconURL, an iconURL naming a provider, the server resolved
- * providerId, the first-class endpoint mapping, then the endpoint name.
+ * Prefer the neutral provider icon even when a channel, model spec, or
+ * conversation carries a legacy provider-logo URL. Only non-provider custom
+ * images (such as custom agent avatars) may be resolved as image URLs.
  */
 export function resolveProviderIcon({
   endpoint,
@@ -26,27 +26,17 @@ export function resolveProviderIcon({
 }: ProviderIconParams): ProviderIconResolution {
   const configured = getEndpointField(endpointsConfig, endpoint, 'iconURL');
   const candidate = iconURL || configured;
+  const provider =
+    resolveProviderId(candidate) ||
+    getEndpointField(endpointsConfig, endpoint, 'providerId') ||
+    (endpoint ? endpointToProvider[endpoint as EModelEndpoint] : undefined) ||
+    resolveProviderId(endpoint);
 
-  if (isImageURL(candidate)) {
-    return { provider: null, imageURL: candidate };
+  if (provider) {
+    return { provider, imageURL: null };
   }
 
-  const declared = resolveProviderId(candidate);
-  if (declared) {
-    return { provider: declared, imageURL: null };
-  }
-
-  const served = getEndpointField(endpointsConfig, endpoint, 'providerId');
-  if (served) {
-    return { provider: served, imageURL: null };
-  }
-
-  const firstClass = endpoint ? endpointToProvider[endpoint as EModelEndpoint] : undefined;
-  if (firstClass) {
-    return { provider: firstClass, imageURL: null };
-  }
-
-  return { provider: resolveProviderId(endpoint), imageURL: null };
+  return { provider: null, imageURL: isImageURL(candidate) ? candidate : null };
 }
 
 /** Memoized form of {@link resolveProviderIcon}, for use outside render callbacks. */

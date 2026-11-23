@@ -1,14 +1,7 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 import { FileSources, FileContext } from 'librechat-data-provider';
-import { ArrowUpDown, ArrowUp, ArrowDown, Database } from 'lucide-react';
-import {
-  Button,
-  Checkbox,
-  useMediaQuery,
-  TooltipAnchor,
-  AzureMinimalIcon,
-  OpenAIMinimalIcon,
-} from '@librechat/client';
+import { ArrowUpDown, ArrowUp, ArrowDown, Database, Bot } from 'lucide-react';
+import { Button, Checkbox, useMediaQuery, TooltipAnchor } from '@librechat/client';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { TFile } from 'librechat-data-provider';
 import ImagePreview from '~/components/Chat/Input/Files/ImagePreview';
@@ -199,14 +192,14 @@ export const columns: ColumnDef<TFile>[] = [
       if (source === FileSources.openai) {
         return (
           <div className="flex flex-wrap items-center gap-2">
-            <OpenAIMinimalIcon className="icon-sm text-green-600/50" />
+            <Bot className="icon-sm text-text-secondary" aria-hidden="true" />
             {'OpenAI'}
           </div>
         );
       } else if (source === FileSources.azure) {
         return (
           <div className="flex flex-wrap items-center gap-2">
-            <AzureMinimalIcon className="icon-sm text-cyan-700" />
+            <Bot className="icon-sm text-text-secondary" aria-hidden="true" />
             {'Azure'}
           </div>
         );
