@@ -136,10 +136,12 @@ class WorkspaceRepository:
         if tags:
             # Bookmark filtering must happen before cursor pagination. JSON
             # array membership avoids substring/LIKE wildcard collisions.
-            for tag in tags:
-                filters.append("EXISTS (SELECT 1 FROM json_each(conversations.metadata, '$.tags') "
-                               "WHERE json_each.value=?)")
-                params.append(tag)
+            # Multiple selected bookmarks are an OR filter, matching the
+            # conversation sidebar's existing filter semantics.
+            placeholders = ",".join("?" for _ in tags)
+            filters.append("EXISTS (SELECT 1 FROM json_each(conversations.metadata, '$.tags') "
+                           f"WHERE json_each.value IN ({placeholders}))")
+            params.extend(tags)
         if search:
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             filters.append("(title LIKE ? ESCAPE '\\' OR id IN "

@@ -144,7 +144,7 @@ async def test_skill_policy_blocks_writes_and_projects_legacy_records(state):
 async def test_bookmark_filter_before_pagination(state):
     server, repo = state
     first = repo.create_conversation('alice', {'title': 'Tagged', 'tags': ['a_b']})
-    repo.create_conversation('alice', {'title': 'Other', 'tags': ['axb']})
+    second = repo.create_conversation('alice', {'title': 'Other', 'tags': ['axb']})
     repo.create_conversation('bob', {'title': 'Foreign', 'tags': ['a_b']})
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
                                  base_url='http://example.test') as c:
@@ -153,6 +153,21 @@ async def test_bookmark_filter_before_pagination(state):
         assert [r['conversationId'] for r in response.json()['conversations']] == [first['conversationId']]
         assert response.json()['nextCursor'] is None
         assert (await c.get('/api/convos?tags=axb')).json()['conversations'][0]['title'] == 'Other'
+        # A multi-select bookmark filter is a union, not an intersection.
+        combined = await c.get('/api/convos?tags=a_b&tags=axb&limit=10')
+        assert combined.status_code == 200, combined.text
+        assert {r['conversationId'] for r in combined.json()['conversations']} == {
+            first['conversationId'], second['conversationId']}
+        # Filtering must also precede cursor pagination.
+        page = await c.get('/api/convos?tags=a_b&tags=axb&limit=1')
+        assert len(page.json()['conversations']) == 1
+        assert page.json()['nextCursor'] is not None
+        next_page = await c.get('/api/convos', params={
+            'tags': ['a_b', 'axb'], 'limit': 1, 'cursor': page.json()['nextCursor']})
+        assert len(next_page.json()['conversations']) == 1
+        assert {page.json()['conversations'][0]['conversationId'],
+                next_page.json()['conversations'][0]['conversationId']} == {
+                    first['conversationId'], second['conversationId']}
 
 
 @pytest.mark.asyncio
