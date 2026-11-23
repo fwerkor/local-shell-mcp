@@ -74,7 +74,7 @@ def test_original_recursion_budget_cascade():
          {"recursionLimit": 90, "maxRecursionLimit": 30}, {"maxRecursionLimit": -1}],
     )]
     reference = _oracle("budget", cases)
-    for case, expected in zip(cases, reference):
+    for case, expected in zip(cases, reference, strict=True):
         actual = resolve_subagent_max_turns(case["agent"], case["endpoint"])
         # The upstream implementation inserts a 50-step implicit fallback.
         # LSM deliberately leaves the budget unset when no cap was selected.
