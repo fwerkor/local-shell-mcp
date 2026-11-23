@@ -32,7 +32,7 @@ export default function MessageIcon(
   const assistantName = (assistant ? assistant.name : '') ?? '';
   const assistantAvatar = (assistant ? assistant.metadata?.avatar : '') ?? '';
   const agentName = (agent ? agent.name : '') ?? '';
-  const agentAvatar = (agent ? agent?.avatar?.filepath : '') ?? '';
+  const agentAvatar = ''; // Agent profile pictures are not displayed.
   const avatarURL = useMemo(() => {
     let result = '';
     if (assistant) {

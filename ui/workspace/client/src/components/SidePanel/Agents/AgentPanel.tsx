@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { useMemo, useCallback, useEffect, useRef } from 'react';
 import { Plus } from 'lucide-react';
 import isEqual from 'lodash/isEqual';
 import { Button, useToastContext } from '@librechat/client';
@@ -26,7 +26,6 @@ import {
   useUpdateAgentMutation,
   useGetAgentByIdQuery,
   useGetExpandedAgentByIdQuery,
-  useUploadAgentAvatarMutation,
 } from '~/data-provider';
 import {
   createProviderOption,
@@ -49,14 +48,9 @@ import ModelPanel from './ModelPanel';
 /* Helpers */
 function getUpdateToastMessage(
   noVersionChange: boolean,
-  avatarActionState: AgentForm['avatar_action'],
   name: string | null | undefined,
   localize: (key: TranslationKeys, vars?: Record<string, unknown>) => string,
 ): string | null {
-  // If only avatar upload is pending (separate endpoint), suppress the no-changes toast.
-  if (noVersionChange && avatarActionState === 'upload') {
-    return null;
-  }
   if (noVersionChange) {
     return localize('com_ui_no_changes');
   }
@@ -64,8 +58,7 @@ function getUpdateToastMessage(
 }
 
 /**
- * Normalizes the payload sent to the agent update/create endpoints.
- * Handles avatar reset requests for persistent agents independently of avatar uploads.
+ * Serializes the editable agent configuration for agent update/create endpoints.
  * @param {AgentForm} data - Form data from the agent configuration form.
  * @param {string | null} [agent_id] - Agent identifier, if the agent already exists.
  * @returns {{ payload: Partial<AgentForm>; provider: string; model: string }} Payload metadata.
@@ -103,7 +96,6 @@ export function composeAgentUpdatePayload(
     skill_authoring_enabled,
     skills_scope,
     memory_scope,
-    avatar_action: avatarActionState,
   } = data;
 
   /* stateful_code_sessions requires Code Interpreter; force it off on save when
@@ -114,8 +106,6 @@ export function composeAgentUpdatePayload(
     data.execute_code === true ? tool_options : removeCodeExecutionCaller(tool_options);
   const normalizedStatefulCodeEnvironment = stateful_code_environment ?? 'user';
 
-  const shouldResetAvatar =
-    avatarActionState === 'reset' && Boolean(agent_id) && !isEphemeralAgent(agent_id);
   const model = _model ?? '';
   const provider =
     (typeof _provider === 'string' ? _provider : (_provider as StringOption).value) ?? '';
@@ -177,131 +167,15 @@ export function composeAgentUpdatePayload(
       /** A hidden stale 'agent' scope must not survive disabling memory —
        *  runtime partitioning keys off memory_scope alone. */
       memory_scope: data.memory === true ? memory_scope : MemoryScope.user,
-      ...(shouldResetAvatar ? { avatar: null } : {}),
     },
     provider,
     model,
   } as const;
 }
 
-type UploadAvatarFn = (variables: { agent_id: string; formData: FormData }) => Promise<Agent>;
-
-export interface PersistAvatarChangesParams {
-  agentId?: string | null;
-  avatarActionState: AgentForm['avatar_action'];
-  avatarFile?: File | null;
-  uploadAvatar: UploadAvatarFn;
-}
-
-/**
- * Uploads a new avatar when the form indicates an avatar upload is pending.
- * The helper ensures we only attempt uploads for persisted agents and when
- * the avatar action is explicitly set to "upload".
- * @returns {Promise<boolean>} Resolves true if an upload occurred, false otherwise.
- */
-export async function persistAvatarChanges({
-  agentId,
-  avatarActionState,
-  avatarFile,
-  uploadAvatar,
-}: PersistAvatarChangesParams): Promise<boolean> {
-  if (!agentId || isEphemeralAgent(agentId)) {
-    return false;
-  }
-
-  if (avatarActionState !== 'upload' || !avatarFile) {
-    return false;
-  }
-
-  const formData = new FormData();
-  formData.append('file', avatarFile, avatarFile.name);
-
-  await uploadAvatar({
-    agent_id: agentId,
-    formData,
-  });
-
-  return true;
-}
-
-const AVATAR_ONLY_DIRTY_FIELDS = new Set(['avatar_action', 'avatar_file', 'avatar_preview']);
-const IGNORED_DIRTY_FIELDS = new Set(['agent']);
-
-const isNestedDirtyField = (
-  value: FieldNamesMarkedBoolean<AgentForm>[keyof AgentForm],
-): value is FieldNamesMarkedBoolean<AgentForm> => typeof value === 'object' && value !== null;
-
-const evaluateDirtyFields = (
-  fields: FieldNamesMarkedBoolean<AgentForm>,
-): { sawDirty: boolean; onlyAvatarDirty: boolean } => {
-  let sawDirty = false;
-
-  for (const [key, value] of Object.entries(fields)) {
-    if (!value) {
-      continue;
-    }
-
-    if (IGNORED_DIRTY_FIELDS.has(key)) {
-      continue;
-    }
-
-    if (isNestedDirtyField(value)) {
-      const nested = evaluateDirtyFields(value);
-      if (!nested.onlyAvatarDirty) {
-        return { sawDirty: true, onlyAvatarDirty: false };
-      }
-      sawDirty = sawDirty || nested.sawDirty;
-      continue;
-    }
-
-    sawDirty = true;
-
-    if (AVATAR_ONLY_DIRTY_FIELDS.has(key)) {
-      continue;
-    }
-
-    return { sawDirty: true, onlyAvatarDirty: false };
-  }
-
-  return { sawDirty, onlyAvatarDirty: true };
-};
-
-/**
- * Determines whether the dirty form state only contains avatar uploads/resets.
- * This enables short-circuiting the general agent update flow when only the avatar
- * needs to be uploaded.
- */
-export const isAvatarUploadOnlyDirty = (
-  dirtyFields?: FieldNamesMarkedBoolean<AgentForm>,
-): boolean => {
-  if (!dirtyFields) {
-    return false;
-  }
-
-  const result = evaluateDirtyFields(dirtyFields);
-  return result.sawDirty && result.onlyAvatarDirty;
-};
-
-/**
- * Whether the submission carries an edit the agent update endpoint persists. Only an
- * avatar upload travels through its own endpoint; a reset rides the update payload as
- * `avatar: null` (see `composeAgentUpdatePayload`), so it is an edit like any other.
- */
-export const hasPersistedDirtyFields = (
-  dirtyFields?: FieldNamesMarkedBoolean<AgentForm>,
-  avatarAction?: AgentForm['avatar_action'],
-): boolean => {
-  if (avatarAction === 'reset') {
-    return true;
-  }
-
-  if (!dirtyFields) {
-    return false;
-  }
-
-  const result = evaluateDirtyFields(dirtyFields);
-  return result.sawDirty && !result.onlyAvatarDirty;
-};
+/** Ignore the hydrated agent selector when checking whether a form edit was persisted. */
+const hasPersistedDirtyFields = (dirtyFields?: FieldNamesMarkedBoolean<AgentForm>): boolean =>
+  Object.entries(dirtyFields ?? {}).some(([key, value]) => key !== 'agent' && Boolean(value));
 
 /**
  * Whether the save may have left the stored agent different from the one it replaced,
@@ -387,51 +261,6 @@ export default function AgentPanel() {
     setValue,
     formState: { dirtyFields },
   } = methods;
-  const [isAvatarUploadInFlight, setIsAvatarUploadInFlight] = useState(false);
-
-  const uploadAvatarMutation = useUploadAgentAvatarMutation({
-    onSuccess: (updatedAgent) => {
-      showToast({ message: localize('com_ui_upload_agent_avatar') });
-
-      setValue('avatar_preview', updatedAgent.avatar?.filepath ?? '', { shouldDirty: false });
-      setValue('avatar_file', null, { shouldDirty: false });
-      setValue('avatar_action', null, { shouldDirty: false });
-
-      const agentOption = getValues('agent');
-      if (agentOption && typeof agentOption !== 'string') {
-        setValue('agent', { ...agentOption, ...updatedAgent }, { shouldDirty: false });
-      }
-    },
-    onError: () => {
-      showToast({ message: localize('com_ui_upload_error'), status: 'error' });
-    },
-  });
-
-  const handleAvatarUpload = useCallback(
-    async (agentId?: string | null) => {
-      const avatarActionState = getValues('avatar_action');
-      const avatarFile = getValues('avatar_file');
-      if (!agentId || isEphemeralAgent(agentId) || avatarActionState !== 'upload' || !avatarFile) {
-        return false;
-      }
-
-      setIsAvatarUploadInFlight(true);
-      try {
-        return await persistAvatarChanges({
-          agentId,
-          avatarActionState,
-          avatarFile,
-          uploadAvatar: uploadAvatarMutation.mutateAsync,
-        });
-      } catch (error) {
-        console.error('[AgentPanel] Avatar upload failed', error);
-        throw error;
-      } finally {
-        setIsAvatarUploadInFlight(false);
-      }
-    },
-    [getValues, uploadAvatarMutation],
-  );
   const agent_id = useWatch({ control, name: 'id' });
   const previousVersionRef = useRef<number | undefined>();
   const submittedDirtyRef = useRef(false);
@@ -512,11 +341,10 @@ export default function AgentPanel() {
        *  submitted field is comparable. The mutation replaces this cache entry on success,
        *  so it has to be captured here to stay comparable afterwards. */
       previousVersionRef.current = agentQuery.data?.version;
-      submittedDirtyRef.current = hasPersistedDirtyFields(dirtyFields, getValues('avatar_action'));
+      submittedDirtyRef.current = hasPersistedDirtyFields(dirtyFields);
       submittedRef.current = { payload: variables.data, previous: expandedAgentQuery.data };
     },
-    onSuccess: async (data) => {
-      const avatarActionState = getValues('avatar_action');
+    onSuccess: (data) => {
       /** An update whose result matches the newest version is written without recording a
        *  version entry, so an unchanged count no longer means the save was a no-op. Only
        *  a save that both carried no edit and left the agent as it found it can claim
@@ -528,12 +356,7 @@ export default function AgentPanel() {
         !persistedEdit &&
         previousVersionRef.current !== undefined &&
         data.version === previousVersionRef.current;
-      const toastMessage = getUpdateToastMessage(
-        noVersionChange,
-        avatarActionState,
-        data.name,
-        localize,
-      );
+      const toastMessage = getUpdateToastMessage(noVersionChange, data.name, localize);
       if (toastMessage) {
         showToast({ message: toastMessage, status: noVersionChange ? 'info' : undefined });
       }
@@ -541,22 +364,6 @@ export default function AgentPanel() {
       const agentOption = getValues('agent');
       if (agentOption && typeof agentOption !== 'string') {
         setValue('agent', { ...agentOption, ...data }, { shouldDirty: false });
-      }
-
-      try {
-        await handleAvatarUpload(data.id ?? agent_id);
-      } catch (error) {
-        console.error('[AgentPanel] Avatar upload failed after update', error);
-        showToast({
-          message: localize('com_agents_avatar_upload_error'),
-          status: 'error',
-        });
-      }
-
-      if (avatarActionState === 'reset') {
-        setValue('avatar_action', null, { shouldDirty: false });
-        setValue('avatar_file', null, { shouldDirty: false });
-        setValue('avatar_preview', '', { shouldDirty: false });
       }
 
       // Clear the refs after use
@@ -576,23 +383,13 @@ export default function AgentPanel() {
   });
 
   const create = useCreateAgentMutation({
-    onSuccess: async (data) => {
+    onSuccess: (data) => {
       setCurrentAgentId(data.id);
       showToast({
         message: `${localize('com_assistants_create_success')} ${
           data.name ?? localize('com_ui_agent')
         }`,
       });
-
-      try {
-        await handleAvatarUpload(data.id);
-      } catch (error) {
-        console.error('[AgentPanel] Avatar upload failed after create', error);
-        showToast({
-          message: localize('com_agents_avatar_upload_error'),
-          status: 'error',
-        });
-      }
     },
     onError: (err) => {
       const error = err as Error;
@@ -606,7 +403,7 @@ export default function AgentPanel() {
   });
 
   const onSubmit = useCallback(
-    async (data: AgentForm) => {
+    (data: AgentForm) => {
       const tools = Array.from(new Set([...(data.tools ?? []), ...resolveCapabilityTools(data)]));
 
       const {
@@ -619,24 +416,6 @@ export default function AgentPanel() {
       });
 
       if (agent_id) {
-        if (data.avatar_action === 'upload' && isAvatarUploadOnlyDirty(dirtyFields)) {
-          try {
-            const uploaded = await handleAvatarUpload(agent_id);
-            if (!uploaded) {
-              showToast({
-                message: localize('com_agents_avatar_upload_error'),
-                status: 'error',
-              });
-            }
-          } catch (error) {
-            console.error('[AgentPanel] Avatar upload failed for avatar-only submission', error);
-            showToast({
-              message: localize('com_agents_avatar_upload_error'),
-              status: 'error',
-            });
-          }
-          return;
-        }
         update.mutate({ agent_id, data: { ...basePayload, tools } });
         return;
       }
@@ -678,9 +457,7 @@ export default function AgentPanel() {
     [
       agent_id,
       create,
-      dirtyFields,
       endpointsConfig,
-      handleAvatarUpload,
       models,
       modelsError,
       modelsReady,
@@ -788,7 +565,6 @@ export default function AgentPanel() {
           <AgentFooter
             createMutation={create}
             updateMutation={update}
-            isAvatarUploading={isAvatarUploadInFlight || uploadAvatarMutation.isLoading}
             activePanel={activePanel}
             setActivePanel={setActivePanel}
             setCurrentAgentId={setCurrentAgentId}

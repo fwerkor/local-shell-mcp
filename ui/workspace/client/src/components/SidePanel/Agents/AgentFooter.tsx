@@ -25,13 +25,11 @@ export default function AgentFooter({
   updateMutation,
   setActivePanel,
   setCurrentAgentId,
-  isAvatarUploading = false,
 }: Pick<
   AgentPanelProps,
   'setCurrentAgentId' | 'createMutation' | 'activePanel' | 'setActivePanel'
 > & {
   updateMutation: ReturnType<typeof useUpdateAgentMutation>;
-  isAvatarUploading?: boolean;
 }) {
   const localize = useLocalize();
   const { user } = useAuthContext();
@@ -61,7 +59,7 @@ export default function AgentFooter({
   const canDeleteThisAgent = hasPermission(PermissionBits.DELETE);
   const canShareRemoteAgent = hasRemoteAgentPermission(PermissionBits.SHARE);
   const isAdmin = user?.role === SystemRoles.ADMIN;
-  const isSaving = createMutation.isLoading || updateMutation.isLoading || isAvatarUploading;
+  const isSaving = createMutation.isLoading || updateMutation.isLoading;
   const saveLabel = agent_id ? localize('com_ui_save') : localize('com_ui_create');
   const renderSaveButton = () => (
     <span className="t-icon-swap" data-state={isSaving ? 'b' : 'a'} aria-hidden={false}>
