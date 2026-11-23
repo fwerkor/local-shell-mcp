@@ -127,9 +127,12 @@ class AgentRunner:
                                self.event_delivery_lease)
 
     def _memory_context(self, agent: dict | None) -> str:
+        from .misc_routes import effective_features
         from .storage import WorkspaceRepository
 
         settings = WorkspaceRepository(self.database)
+        if not effective_features(self.owner, self.authorization_conversation_id, repo=settings)["memory"]:
+            return ''
         if not memory_enabled(settings, self.owner):
             return ''
         # The original primary Agent reads shared personal memories even when
@@ -170,7 +173,9 @@ class AgentRunner:
         parameters = (agent or {}).get('model_parameters') or self.initial_parameters
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
-        if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
+        from .misc_routes import effective_features
+        if ('memory' in selected and effective_features(self.owner, self.authorization_conversation_id, repo=settings)['memory']
+                and memory_enabled(settings, self.owner, tools=True)):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):

@@ -5,14 +5,11 @@ import { request } from 'librechat-data-provider';
 
 type Access = 'none' | 'read' | 'write';
 type Scope = 'global' | 'project' | 'chat';
-type Flags = { web: boolean; mcp: boolean; memory: boolean };
 type Policy = { machines: Record<string, Access>; effective: Record<string, Access> };
-type ChatPolicy = Policy & Flags & { lsm: boolean; projectId: string | null };
+type ChatPolicy = Policy & { projectId: string | null };
 type Machine = { name: string; status: string };
 type Project = { id: string; name: string };
 
-const flags: (keyof Flags)[] = ['web', 'mcp', 'memory'];
-const defaults = { web: false, mcp: false, memory: false };
 
 export default function LsmChatPermissions({ conversationId }: { conversationId?: string | null }) {
   const client = useQueryClient();
@@ -104,20 +101,8 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
     const next: Record<string, Access> = { ...chosenPolicy.machines };
     if (access === 'inherit') delete next[machine];
     else next[machine] = access;
-    const value = active === 'chat'
-      ? { ...defaults, web: chat.data?.web ?? false, mcp: chat.data?.mcp ?? false,
-        memory: chat.data?.memory ?? false, machines: next }
-      : { machines: next };
+    const value = { machines: next };
     mutation.mutate({ url, value });
-  }
-
-  function updateFlag(field: keyof Flags, enabled: boolean) {
-    if (!chat.data || mutation.isLoading) return;
-    mutation.mutate({
-      url: `/api/lsm/preferences/${encodeURIComponent(chatId)}`,
-      value: { web: chat.data.web, mcp: chat.data.mcp, memory: chat.data.memory, [field]: enabled,
-        machines: chat.data.machines },
-    });
   }
 
   return (
@@ -175,18 +160,6 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
           );
         })}
         <p className="mt-2 text-text-secondary">Each machine has independent permissions. Read-only allows inspection; read/write allows commands and edits. Setting local to read/write enables Controller MCP and Worker-registration management. Session and plan management are always available, regardless of machine permissions. Inheritance: Global → Project → This chat. Unknown machines are denied.</p>
-        {hasChat && active === 'chat' && (
-          <div className="mt-3 border-t border-border-medium pt-2">
-            {flags.map((field) => (
-              <label className="my-2 flex cursor-pointer items-center justify-between gap-3" key={field}>
-                <span>{field === 'web' ? 'Web search' : field === 'mcp' ? 'External MCP' : 'Cross-chat memory'}</span>
-                <input type="checkbox" checked={chat.data?.[field] ?? false}
-                  disabled={!chat.data || mutation.isLoading}
-                  onChange={(event) => updateFlag(field, event.target.checked)} />
-              </label>
-            ))}
-          </div>
-        )}
         {(selected.isError || machines.isError || projects.isError || mutation.isError) &&
           <p role="alert" className="mt-2 text-status-error">Unable to load or save permissions</p>}
       </div>, document.body)}

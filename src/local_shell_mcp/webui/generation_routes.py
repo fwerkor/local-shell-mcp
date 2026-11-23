@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from .agents import AgentRepository
+from .misc_routes import effective_features
 from .artifact_prompts import agent_instructions, artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
@@ -602,7 +603,7 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
                        reissue={"tool_name": payload["tool_name"]})
         return False
     profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
-    flags = _repo().setting(owner, "conversation.permissions." + generation.conversation_id, {}) or {}
+    flags = effective_features(owner, generation.conversation_id)
     started = await _start_task(owner, generation, profile, agent,
                       native_file_tools=any(level in {"read", "write"} for level in policy.values()),
                       write_tools=any(level == "write" for level in policy.values()),
@@ -731,8 +732,7 @@ async def start_generation(request: Request):
         ask_user_enabled = ask_user_requested(agent, payload)
         from .routes import _repo
 
-        flags = _repo().setting(owner, "conversation.permissions." + result.conversation_id, {})
-        mcp_enabled = isinstance(flags, dict) and flags.get("mcp") is True
+        mcp_enabled = effective_features(owner, result.conversation_id)["mcp"]
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
@@ -1034,7 +1034,7 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
         native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
         write_tools=any(level == "write" for level in machine_policy.values()),
         ask_user_enabled=bool(state.get("askUserEnabled")),
-        mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+        mcp_enabled=bool(effective_features(owner, cid)["mcp"]),
         resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
         partial_text=(checkpoint_text if checkpoint_text is not None
                       else _generation_store().accumulated_text(owner, generation.run_id)),
@@ -1188,7 +1188,7 @@ async def resume_generation(request: Request):
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
                       artifacts_mode=state.get("artifactsMode"),
-                      mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+                      mcp_enabled=bool(effective_features(owner, cid)["mcp"]),
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
                       granted_scopes=frozenset(scopes), grant_expires=expiry,

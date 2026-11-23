@@ -517,14 +517,15 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
             # the only task runner; the wakeup queue only admits trusted turns.
             current = runner._TASKS.get(generation.run_id)
             if current is None or current.done():
-                flags = WorkspaceRepository(database).setting(
-                    owner, "conversation.permissions." + generation.conversation_id, {})
+                from .misc_routes import effective_features
+                flags = effective_features(owner, generation.conversation_id,
+                                           repo=WorkspaceRepository(database))
                 try:
                     await dispatch(owner, generation, profile, agent,
                                    native_file_tools=any(v in {"read", "write"} for v in policy.values()),
                                    write_tools=any(v == "write" for v in policy.values()),
                                    ask_user_enabled=ask_user_requested(agent, {}),
-                                   mcp_enabled=isinstance(flags, dict) and flags.get("mcp") is True,
+                                   mcp_enabled=flags["mcp"],
                                    resume_history=None if new_turn else store.history(
                                        owner, generation.conversation_id,
                                        message_id=generation.user_message_id),
