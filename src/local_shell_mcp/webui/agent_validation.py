@@ -210,9 +210,12 @@ def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
         result["maxHandoffs"] = limit
     if "recursion_limit" in obj:
         number = obj["recursion_limit"]
-        if type(number) not in (int, float) or not math.isfinite(number):
-            raise ValueError("recursion_limit must be a number")
-        result["recursion_limit"] = number
+        if number is None:
+            result["recursion_limit"] = None
+        elif type(number) is not int or number <= 0 or number > 2**53 - 1:
+            raise ValueError("recursion_limit must be a positive safe integer or null")
+        else:
+            result["recursion_limit"] = number
     if "avatar" in obj:
         avatar = obj["avatar"]
         result["avatar"] = None if avatar is None else {key: _require(_require(avatar, dict, "avatar").get(key), str, "avatar." + key) for key in ("filepath", "source")}

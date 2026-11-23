@@ -26,16 +26,18 @@ export default function MaxAgentSteps() {
               id="recursion_limit"
               type="number"
               inputMode="numeric"
+              min={1}
+              step={1}
               value={field.value ?? ''}
               onChange={(e) => {
                 const value = e.target.value;
                 if (value === '') {
-                  field.onChange('');
-                } else if (!isNaN(Number(value))) {
+                  field.onChange(null);
+                } else if (Number.isSafeInteger(Number(value)) && Number(value) > 0) {
                   field.onChange(Number(value));
                 }
               }}
-              placeholder={localize('com_nav_theme_system')}
+              placeholder={localize('com_ui_unlimited')}
               aria-label={localize('com_ui_agent_recursion_limit')}
               className="h-9 w-full"
             />

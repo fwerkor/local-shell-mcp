@@ -28,7 +28,7 @@ export interface IAgent extends Omit<Document, 'model'> {
   model_parameters?: Record<string, unknown>;
   artifacts?: string;
   access_level?: number;
-  recursion_limit?: number;
+  recursion_limit?: number | null;
   tools?: string[];
   skills?: string[];
   skills_enabled?: boolean;

@@ -552,7 +552,6 @@ export const mbToBytes = (mb: number): number => mb * megabyte;
 
 const defaultSizeLimit = mbToBytes(512);
 const defaultSkillImportSizeLimit = mbToBytes(50);
-const defaultTokenLimit = 100000;
 const defaultContextSizeLimit = mbToBytes(128);
 const defaultContextCharLimit = 1_000_000;
 const assistantsFileConfig = {
@@ -589,7 +588,7 @@ export const fileConfig = {
   },
   serverFileSizeLimit: defaultSizeLimit,
   avatarSizeLimit: mbToBytes(2),
-  fileTokenLimit: defaultTokenLimit,
+  fileTokenLimit: undefined,
   fileContextSizeLimit: defaultContextSizeLimit,
   fileContextCharLimit: defaultContextCharLimit,
   clientImageResize: {
