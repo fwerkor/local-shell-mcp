@@ -1499,6 +1499,8 @@
   "com_ui_permissions_updated_success": "權限更新成功",
   "com_ui_pin": "釘選",
   "com_ui_pin_error": "無法釘選對話",
+  "com_ui_pinned_favorites": "釘選模型與助理",
+  "com_ui_pinned_conversations": "釘選對話",
   "com_ui_pinned": "已釘選",
   "com_ui_plus_n_more": "另外還有 {{0}} 項",
   "com_ui_preferences_updated": "偏好設定更新成功",

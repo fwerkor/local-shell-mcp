@@ -906,6 +906,8 @@
   "com_ui_continue_oauth": "使用 OAuth 登录",
   "com_ui_control_bar": "控制栏",
   "com_ui_conversation_not_found": "对话未找到",
+  "com_ui_pinned_favorites": "置顶模型与助手",
+  "com_ui_pinned_conversations": "置顶会话",
   "com_ui_conversations": "对话",
   "com_ui_convo_archived": "对话已归档",
   "com_ui_convo_delete_error": "删除对话失败",
