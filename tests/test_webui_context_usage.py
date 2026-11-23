@@ -19,12 +19,18 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
 @pytest.fixture
-def setup(tmp_path):
+def setup(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path / '.local-shell-mcp')
     store = GenerationStore(db)
     job, fresh = store.begin('alice', {'text': 'What was our plan?', 'model': 'test'})
     assert fresh
-    return db, store, job
+    yield db, store, job
+    get_settings.cache_clear()
 
 
 def _snapshot(job, *, messages=None):
