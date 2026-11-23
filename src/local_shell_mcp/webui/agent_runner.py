@@ -142,10 +142,16 @@ class AgentRunner:
         if formatted.get('readFailed'):
             return ''
         explicit_memory_tool = bool(agent and 'memory' in ((agent or {}).get('tools') or []))
-        if not explicit_memory_tool and not (formatted.get('withKeys') or formatted.get('withoutKeys')):
-            # An empty, default-enabled Memory store must not inject a system
-            # message into ordinary chats. An Agent that explicitly opted into
-            # memory tools still receives the memory usage instructions.
+        endpoints = settings.setting(self.owner, 'endpoints', {})
+        explicit_memory_config = (
+            isinstance(settings.setting(self.owner, 'webui.memory.config'), dict)
+            or isinstance((endpoints or {}).get('memory'), dict)
+        )
+        if (not explicit_memory_tool and not explicit_memory_config
+                and not (formatted.get('withKeys') or formatted.get('withoutKeys'))):
+            # An empty default-enabled Memory store should not alter ordinary
+            # prompts. Preserve legacy context when memory is explicitly
+            # configured or an Agent explicitly selected its memory tool.
             return ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
         return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')

@@ -56,7 +56,9 @@ def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, mon
     repo.save_setting('a', 'user.memories', True)
     repo.save_setting('a', 'endpoints', {'memory': {'tokenLimit': 100}, 'agents': {}})
     assert 'Persistent memory is available' in runner._memory_context({'id': 'a', 'tools': ['memory']})
-    assert 'Only use the `set_memory`' not in runner._memory_context({'id': 'a', 'tools': ['memory']})
+    # Default-enabled memory tools remain available even if an Agent's other
+    # endpoint settings do not spell out its capabilities.
+    assert 'Only use the `set_memory`' in runner._memory_context({'id': 'a', 'tools': ['memory']})
 
 
 @pytest.mark.asyncio
@@ -65,8 +67,10 @@ async def test_memory_tool_requires_enabled_runtime_capability(runtime):
     tool = tool_definitions()[0]
     state = AgentLoopState(AgentContext(profile, [tool]), [{'role': 'user', 'content': 'Remember.'}])
     call = ModelToolCall('call-1', 'set_memory', {'key': 'style', 'value': 'I prefer concise responses.'})
+    repo.save_setting('a', 'user.memories', False)
     with pytest.raises(RuntimeSafetyError, match='disabled'):
         await runner._invoke(call, state)
+    repo.save_setting('a', 'user.memories', True)
     repo.save_setting('a', 'endpoints', {'memory': {}, 'agents': {'capabilities': ['memory']}})
     assert 'Memory set' in await runner._invoke(call, state)
     repo.save_setting('a', 'user.memories', False)
