@@ -161,7 +161,13 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             # Keep checkpointed sessions recoverable, but do not execute tools
             # until an authenticated browser SSE/resume request re-attaches.
             recoverable = resumable_run_ids(generation_store.database, excludes=live)
-            generation_store.recover_orphans(live | recoverable)
+            from .webui.schedule_routes import unstarted_schedule_generations
+
+            # A committed schedule generation without an actor lease has not
+            # reached execution. Preserve it for the scheduled worker to
+            # retry using its original idempotency key, not a new generation.
+            generation_store.recover_orphans(
+                live | recoverable | unstarted_schedule_generations(generation_store.database))
             await recover_subagent_tasks(
                 generation_store.database,
                 stream_tools=stream_model_with_tools, stream_text=stream_model,

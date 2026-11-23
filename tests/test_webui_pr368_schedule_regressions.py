@@ -241,3 +241,91 @@ def test_exhausted_legacy_schedule_does_not_block_healthy_claims(state, monkeypa
                              ('no-future',)).fetchone()
     assert invalid['enabled'] == 1 and invalid['next_run'] is None
     assert schedule_routes._claim_due(repo.database) == []
+
+
+@pytest.mark.asyncio
+async def test_committed_but_unstarted_generation_is_recovered_once(state, monkeypatch):
+    from local_shell_mcp.webui import generation_routes, providers
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    _, repo, agent = state
+    config = _config(agent)
+    now = _now()
+    with repo.database.connect() as db:
+        db.execute('INSERT INTO webui_schedules '
+                   '(id,owner,request_id,config,enabled,next_run,created_at,updated_at) '
+                   'VALUES(?,?,?,?,?,?,?,?)',
+                   ('stranded', 'alice', 'stranded', _json(config), 1,
+                    int(time.time() * 1000) - 60_000, now, now))
+    occurrence = schedule_routes._claim_due(repo.database)[0]
+    store = GenerationStore(repo.database)
+    generation, fresh = store.begin('alice', {
+        'text': config['prompt'], 'agent_id': agent['id'],
+        'clientRequestId': 'schedule:' + occurrence[0],
+    }, agent)
+    assert fresh
+    preserved = schedule_routes.unstarted_schedule_generations(repo.database)
+    assert generation.run_id in preserved
+    assert store.recover_orphans(preserved) == 0
+    assert store.get('alice', generation.run_id).status == 'running'
+
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(providers, 'provider_config',
+                        lambda *args, **kwargs: ProviderConfig('openai', 'mock', 'http://example', ''))
+    starts = []
+
+    async def record_start(owner, resumed, profile, selected_agent, **kwargs):
+        starts.append(resumed.run_id)
+        return True
+
+    monkeypatch.setattr(generation_routes, '_start_task', record_start)
+    await schedule_routes._dispatch(occurrence, repo.database)
+    assert starts == [generation.run_id]
+    with repo.database.connect() as db:
+        run = db.execute('SELECT status,run_id FROM webui_schedule_runs WHERE id=?',
+                         (occurrence[0],)).fetchone()
+        assert run['status'] == 'started' and run['run_id'] == generation.run_id
+        assert db.execute('SELECT COUNT(*) FROM generation_requests WHERE owner=? AND '
+                          'client_request_id=?',
+                          ('alice', 'schedule:' + occurrence[0])).fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_prior_execution_lease_prevents_schedule_replay(state, monkeypatch):
+    from local_shell_mcp.webui import generation_routes, providers
+    from local_shell_mcp.webui.generation_actor_lease import ActorLease
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    _, repo, agent = state
+    config = _config(agent)
+    now = _now()
+    with repo.database.connect() as db:
+        db.execute('INSERT INTO webui_schedules '
+                   '(id,owner,request_id,config,enabled,next_run,created_at,updated_at) '
+                   'VALUES(?,?,?,?,?,?,?,?)',
+                   ('executed', 'alice', 'executed', _json(config), 1,
+                    int(time.time() * 1000) - 60_000, now, now))
+    occurrence = schedule_routes._claim_due(repo.database)[0]
+    store = GenerationStore(repo.database)
+    generation, _ = store.begin('alice', {
+        'text': config['prompt'], 'agent_id': agent['id'],
+        'clientRequestId': 'schedule:' + occurrence[0],
+    }, agent)
+    lease = ActorLease.claim(repo.database, 'alice', generation.run_id)
+    assert lease is not None
+    assert generation.run_id not in schedule_routes.unstarted_schedule_generations(repo.database)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(providers, 'provider_config',
+                        lambda *args, **kwargs: ProviderConfig('openai', 'mock', 'http://example', ''))
+
+    async def forbidden_start(*args, **kwargs):
+        pytest.fail('A previously executed scheduled generation must not run again')
+
+    monkeypatch.setattr(generation_routes, '_start_task', forbidden_start)
+    await schedule_routes._dispatch(occurrence, repo.database)
+    with repo.database.connect() as db:
+        row = db.execute('SELECT status,run_id FROM webui_schedule_runs WHERE id=?',
+                         (occurrence[0],)).fetchone()
+    assert row['status'] == 'started' and row['run_id'] == generation.run_id

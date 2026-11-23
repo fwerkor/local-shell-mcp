@@ -457,6 +457,26 @@ def _recover_claimed(database, *, grace_seconds=90):
     return claimed
 
 
+def unstarted_schedule_generations(database) -> set[str]:
+    """Protect only unexecuted scheduled admissions from boot orphan cleanup.
+
+    A generation created by begin() may be committed before _start_task()
+    acquires its first actor lease. This narrow set can be safely retried with
+    its existing idempotency key. Any generation with a lease has crossed the
+    execution boundary and must follow the ordinary orphan recovery rules.
+    """
+    with database.connect() as db:
+        return {row['run_id'] for row in db.execute(
+            "SELECT gr.run_id FROM webui_schedule_runs sr "
+            "JOIN webui_schedules s ON s.id=sr.schedule_id AND s.owner=sr.owner "
+            "JOIN generation_requests gr ON gr.owner=sr.owner "
+            "AND gr.client_request_id='schedule:' || sr.id "
+            "JOIN runs r ON r.id=gr.run_id "
+            "WHERE sr.status='claimed' AND s.enabled=1 AND r.status='running' "
+            "AND NOT EXISTS (SELECT 1 FROM generation_actor_leases l WHERE l.run_id=r.id)"
+        )}
+
+
 def _settle(database, occurrence_id, status, *, conversation_id=None, run_id=None, error=None):
     with database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
@@ -514,15 +534,34 @@ async def _dispatch(occurrence, database):
         if config.get('file_ids'):
             payload['files'] = [{'file_id': file_id} for file_id in config['file_ids']]
         generation, fresh = _generation_store().begin(owner, payload, agent)
-        _settle(database, occurrence_id, 'started', conversation_id=generation.conversation_id,
-                run_id=generation.run_id)
-        if fresh:
-            started = await _start_task(owner, generation, profile, agent,
-                                        native_file_tools=False, write_tools=False, mcp_enabled=False,
-                                        granted_scopes=frozenset())
-            if not started:
-                _settle(database, occurrence_id, 'interrupted',
-                        conversation_id=generation.conversation_id, error='generation_not_started')
+        if not fresh:
+            if generation.status != 'running':
+                status = 'success' if generation.status == 'complete' else 'interrupted'
+                _settle(database, occurrence_id, status,
+                        conversation_id=generation.conversation_id, run_id=generation.run_id)
+                return
+            with database.connect() as db:
+                executed = db.execute('SELECT 1 FROM generation_actor_leases WHERE run_id=?',
+                                      (generation.run_id,)).fetchone() is not None
+            if executed:
+                # A prior dispatcher crossed the actor-lease boundary. Never
+                # restart it, even if that lease has since expired.
+                _settle(database, occurrence_id, 'started',
+                        conversation_id=generation.conversation_id, run_id=generation.run_id)
+                return
+        started = await _start_task(owner, generation, profile, agent,
+                                    native_file_tools=False, write_tools=False, mcp_enabled=False,
+                                    granted_scopes=frozenset())
+        if started:
+            # The first actor lease is persisted before the task is created.
+            # After a crash in this gap, recovery observes the lease rather
+            # than replaying an occurrence that may already be executing.
+            _settle(database, occurrence_id, 'started',
+                    conversation_id=generation.conversation_id, run_id=generation.run_id)
+        else:
+            _settle(database, occurrence_id, 'interrupted',
+                    conversation_id=generation.conversation_id, run_id=generation.run_id,
+                    error='generation_not_started')
     except Exception as exc:
         # Only stable user-facing validation errors may be echoed into the run
         # record. Unexpected provider exceptions can contain credential data.
