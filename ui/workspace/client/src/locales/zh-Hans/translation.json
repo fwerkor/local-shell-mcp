@@ -900,6 +900,7 @@
   "com_ui_confirm_change": "确认更改",
   "com_ui_connecting": "连接中",
   "com_ui_contact_admin_if_issue_persists": "如果问题仍然存在，请联系管理员",
+  "com_ui_context_provider_reported": "模型 API 返回的最近一次请求实际用量（输入 + 输出）。下次请求的上下文可能不同。",
   "com_ui_context": "上下文",
   "com_ui_context_filter_sort": "根据上下文筛选和排序",
   "com_ui_continue": "继续",

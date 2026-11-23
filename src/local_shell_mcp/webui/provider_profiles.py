@@ -86,9 +86,9 @@ def _redact(value: dict) -> dict:
     return {"provider": value["provider"],
             **({"name": value["name"]} if "name" in value else {}),
             "base_url": urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", "")),
-            "models": value["models"], "configured": configured(value),
-            "include_usage": value.get("include_usage") is True or (
-                value["provider"] == "openai" and parsed.hostname == "api.openai.com")}
+            "models": value["models"], "model_contexts": value.get("model_contexts", {}),
+            "configured": configured(value),
+            "include_usage": value["provider"] == "openai" and value.get("include_usage") is not False}
 
 
 def all_profiles() -> list[dict]:
@@ -149,11 +149,18 @@ def _validate(body: dict) -> dict:
     key = body.get("api_key")
     if key is not None and (not isinstance(key, str) or len(key) > 16384 or any(ord(char) < 32 for char in key)):
         raise ValueError("Invalid model API key")
+    model_contexts = body.get('model_contexts', {})
+    if not isinstance(model_contexts, dict) or any(
+        model not in models or type(limit) is not int or not 1 <= limit <= 2_000_000
+        for model, limit in model_contexts.items()
+    ):
+        raise ValueError('Model context windows must be integers from 1 to 2000000 for configured models')
     include_usage = body.get('include_usage')
     if include_usage is not None and type(include_usage) is not bool:
         raise ValueError('include_usage must be a boolean')
     return {**({"name": name} if name is not None else {}), "provider": kind, "base_url": base,
             "models": models, "api_key": (key.strip() or None) if key else None,
+            "model_contexts": model_contexts,
             'include_usage': include_usage}
 
 
@@ -257,7 +264,7 @@ async def provider_profiles(request):
             if value["api_key"] is None:
                 value["api_key"] = previous.get("api_key", "")
             if value["include_usage"] is None:
-                value["include_usage"] = previous.get("include_usage", False)
+                value["include_usage"] = previous.get("include_usage", value["provider"] == "openai")
             db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) "
                        "DO UPDATE SET value=excluded.value", (_OWNER, key, json.dumps(value)))
             if renaming:

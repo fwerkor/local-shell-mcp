@@ -284,6 +284,9 @@ export type TContextUsageEvent = {
   /** Tokens still free after instructions + pruned messages */
   remainingContextTokens?: number;
   calibrationRatio?: number;
+  /** Provider-confirmed tokens of the LAST model request, never a local estimate. */
+  providerInputTokens?: number;
+  providerOutputTokens?: number;
   /** Model and provider of the reconciling primary call, retained across reloads. */
   model?: string;
   provider?: string;

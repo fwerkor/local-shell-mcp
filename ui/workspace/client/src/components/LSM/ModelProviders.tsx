@@ -10,11 +10,14 @@ type Profile = {
   provider: Kind;
   base_url: string;
   models: string[];
+  model_contexts?: Record<string, number>;
+  include_usage?: boolean;
   configured: boolean;
   source: Source;
 };
 type Profiles = { providers: Profile[] };
-type Draft = { name: string; provider: Kind; base: string; models: string; apiKey: string };
+type Draft = { name: string; provider: Kind; base: string; models: string;
+  contexts: Record<string, string>; includeUsage: boolean; apiKey: string };
 type Editor = { original: Profile | null };
 const input = 'w-full rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary';
 const button = 'rounded-lg border border-border-medium px-3 py-2 text-sm text-text-primary hover:bg-surface-secondary disabled:opacity-40';
@@ -26,7 +29,8 @@ const kinds: { value: Kind; label: string; defaultUrl: string }[] = [
 const protocolLabel = (provider: Kind) => kinds.find((kind) => kind.value === provider)?.label ?? provider;
 const channelLabel = (profile: Profile) => profile.name ?? protocolLabel(profile.provider) + ' (legacy)';
 const channelId = (profile: Profile) => profile.name ?? 'legacy:' + profile.provider;
-const newDraft = (): Draft => ({ name: '', provider: 'openai', base: kinds[0].defaultUrl, models: '', apiKey: '' });
+const newDraft = (): Draft => ({ name: '', provider: 'openai', base: kinds[0].defaultUrl,
+  models: '', contexts: {}, includeUsage: true, apiKey: '' });
 const errorMessage = (reason: unknown) => {
   const error = reason as { response?: { data?: { detail?: string } }; message?: string };
   return error?.response?.data?.detail || error?.message || String(reason);
@@ -45,6 +49,7 @@ export default function ModelProviders() {
   const [saved, setSaved] = useState(false);
   const url = apiBaseUrl() + '/api/lsm/providers';
   const channels = profiles.filter((profile) => profile.source !== 'default');
+  const draftModels = [...new Set(draft.models.split(/[\n,]/).map((model) => model.trim()).filter(Boolean))];
 
   useEffect(() => {
     let live = true;
@@ -59,7 +64,7 @@ export default function ModelProviders() {
   const refresh = async () => {
     const data = await request.get<Profiles>(url);
     setProfiles(data.providers);
-    await Promise.all([QueryKeys.models, QueryKeys.endpoints].map((name) =>
+    await Promise.all([QueryKeys.models, QueryKeys.endpoints, QueryKeys.tokenConfig].map((name) =>
       client.invalidateQueries({ queryKey: [name], refetchType: 'all' })));
   };
   const beginAdd = () => {
@@ -76,6 +81,8 @@ export default function ModelProviders() {
       provider: profile.provider,
       base: profile.base_url,
       models: profile.models.join('\n'),
+      contexts: Object.fromEntries(Object.entries(profile.model_contexts ?? {}).map(([key, value]) => [key, String(value)])),
+      includeUsage: profile.include_usage !== false,
       apiKey: '',
     });
     setConfirmDelete(null);
@@ -91,12 +98,24 @@ export default function ModelProviders() {
       const original = editor.original;
       const name = draft.name.trim();
       if ((!original || original.name) && !name) throw new Error('Channel name is required');
-      const models = draft.models.split(/[\n,]/).map((model) => model.trim()).filter(Boolean);
+      const models = draftModels;
+      const modelContexts: Record<string, number> = {};
+      for (const model of models) {
+        const raw = draft.contexts[model]?.trim();
+        if (!raw) continue;
+        const tokens = Number(raw);
+        if (!Number.isInteger(tokens) || tokens < 1 || tokens > 2_000_000) {
+          throw new Error('Context window must be 1–2,000,000 tokens');
+        }
+        modelContexts[model] = tokens;
+      }
       if (!models.length) throw new Error('At least one model identifier is required');
       await request.put(url, {
         provider: draft.provider,
         base_url: draft.base.trim(),
         models,
+        model_contexts: modelContexts,
+        ...(draft.provider === 'openai' ? { include_usage: draft.includeUsage } : {}),
         ...(original?.name || !original ? { name } : {}),
         ...(original?.name && name !== original.name ? { previous_name: original.name } : {}),
         ...(draft.apiKey ? { api_key: draft.apiKey } : {}),
@@ -187,6 +206,21 @@ export default function ModelProviders() {
         <label className="space-y-1 text-sm text-text-primary sm:col-span-2"><span>Models / 模型 (one per line)</span>
           <textarea aria-label="Model identifiers" className={input} value={draft.models} onChange={(event) => setDraft({ ...draft, models: event.target.value })} rows={3} required />
         </label>
+        {draftModels.length > 0 && <div className="space-y-2 sm:col-span-2">
+          <p className="text-sm text-text-primary">Context window per model (optional, tokens)</p>
+          {draftModels.map((model) => <label key={model} className="flex items-center gap-3 text-xs text-text-secondary">
+            <span className="min-w-0 flex-1 break-all">{model}</span>
+            <input className={input + ' max-w-40'} type="number" min={1} max={2000000}
+              placeholder="Unknown" aria-label={'Context window for ' + model}
+              value={draft.contexts[model] ?? ''} onChange={(event) => setDraft({ ...draft,
+                contexts: { ...draft.contexts, [model]: event.target.value } })} />
+          </label>)}
+          <p className="text-xs text-text-tertiary">Leave blank if unknown. The model API usually does not publish this limit.</p>
+        </div>}
+        {draft.provider === 'openai' && <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
+          <input type="checkbox" checked={draft.includeUsage} onChange={(event) => setDraft({ ...draft, includeUsage: event.target.checked })} />
+          Request exact token usage from the model API (auto-fallback when unsupported)
+        </label>}
       </div>
       <p className="text-xs text-text-secondary">{editor.original?.name ? 'Renaming a channel in use is restricted to protect Agent and conversation references. ' : ''}Keys are stored on the server and never returned here; an empty key preserves an existing one.</p>
       <div className="flex flex-wrap gap-2">
