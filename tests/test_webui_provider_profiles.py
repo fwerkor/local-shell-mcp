@@ -269,3 +269,87 @@ async def test_named_channel_protocols_validation_and_delete_protection(setup_pr
         assert provider_config("Gemini Gateway").token == "private-named-token"
         assert (await client.delete("/api/lsm/providers?name=google")).status_code == 400
         assert (await client.delete("/api/lsm/providers?name=not%20existing")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_channel_management_create_rename_edit_delete_and_legacy_reset(setup_profiles):
+    _, app = setup_profiles
+    from local_shell_mcp.webui.provider_profiles import profile
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        initial = (await client.get("/api/lsm/providers")).json()["providers"]
+        assert [entry["source"] for entry in initial] == ["default", "default", "default"]
+        first = {"name": "Research A", "provider": "openai", "base_url": "https://research.invalid/v1",
+                 "models": ["model-a"], "api_key": "secret-a"}
+        assert (await client.put("/api/lsm/providers", json=first)).status_code == 200
+        entries = (await client.get("/api/lsm/providers")).json()["providers"]
+        assert [entry["name"] for entry in entries if entry["source"] == "named"] == ["Research A"]
+        assert "secret-a" not in str(entries)
+        # Editing name, models and URL should keep the secret and clean the old key atomically.
+        renamed = {**first, "name": "Research B", "previous_name": "Research A",
+                   "base_url": "https://updated.invalid/v1", "models": ["model-b"]}
+        renamed.pop("api_key")
+        result = await client.put("/api/lsm/providers", json=renamed)
+        assert result.status_code == 200, result.text
+        assert profile("Research B")["api_key"] == "secret-a"
+        assert provider_config("Research B").url == "https://updated.invalid/v1/chat/completions"
+        with pytest.raises(ValueError, match="Unknown model channel"):
+            profile("Research A")
+        assert "Research B" in (await client.get("/api/models")).json()
+        assert "Research A" not in (await client.get("/api/models")).json()
+        # Changing provider transport after creation is still forbidden.
+        assert (await client.put("/api/lsm/providers",
+            json={**renamed, "previous_name": "Research B", "provider": "anthropic"})).status_code == 409
+        assert (await client.put("/api/lsm/providers",
+            json={**renamed, "previous_name": "unknown"})).status_code == 404
+
+        # A separate channel is allowed for the same provider, but names are case-insensitive.
+        assert (await client.put("/api/lsm/providers", json=first)).status_code == 200
+        assert (await client.put("/api/lsm/providers",
+            json={**first, "name": "research b"})).status_code == 409
+        assert (await client.put("/api/lsm/providers",
+            json={**renamed, "name": "Research A", "previous_name": "Research B"})).status_code == 409
+        assert (await client.delete("/api/lsm/providers?name=Research%20A")).status_code == 200
+
+        legacy = {"provider": "anthropic", "base_url": "https://api.anthropic.com/v1",
+                  "models": ["model-legacy"], "api_key": "legacy-secret"}
+        assert (await client.put("/api/lsm/providers", json=legacy)).status_code == 200
+        entries = (await client.get("/api/lsm/providers")).json()["providers"]
+        assert next(entry["source"] for entry in entries if entry["provider"] == "anthropic") == "saved"
+        assert (await client.delete("/api/lsm/providers?legacy_provider=anthropic")).status_code == 200
+        assert next(entry["source"] for entry in (await client.get("/api/lsm/providers")).json()["providers"]
+                    if entry["provider"] == "anthropic") == "default"
+        assert (await client.delete("/api/lsm/providers?legacy_provider=unknown")).status_code == 400
+        assert (await client.delete("/api/lsm/providers?legacy_provider=anthropic&name=Research%20B")).status_code == 400
+        assert (await client.delete("/api/lsm/providers")).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_rename_and_legacy_reset_protect_saved_agent_references(setup_profiles):
+    _, app = setup_profiles
+    from local_shell_mcp.webui.agents import AgentRepository
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        named = {"name": "Used Research", "provider": "openai",
+                 "base_url": "https://research.invalid/v1", "models": ["m"], "api_key": "k"}
+        assert (await client.put("/api/lsm/providers", json=named)).status_code == 200
+        agents = AgentRepository(routes._repo().database)
+        agents.create("owner", {"name": "Used Agent", "description": "",
+                                "provider": "Used Research", "model": "m"})
+        renamed = {**named, "name": "New Research", "previous_name": "Used Research"}
+        assert (await client.put("/api/lsm/providers", json=renamed)).status_code == 409
+        assert (await client.delete("/api/lsm/providers?name=Used%20Research")).status_code == 409
+        assert "Used Research" in (await client.get("/api/models")).json()
+        assert "New Research" not in (await client.get("/api/models")).json()
+        # A non-identity edit remains possible while a channel is referenced.
+        assert (await client.put("/api/lsm/providers",
+            json={**named, "models": ["m", "new-m"]})).status_code == 200
+        old = {"provider": "openai", "base_url": "https://legacy.invalid/v1",
+               "models": ["legacy-m"], "api_key": "k"}
+        assert (await client.put("/api/lsm/providers", json=old)).status_code == 200
+        agents.create("owner", {"name": "Legacy Agent", "description": "",
+                                "provider": "openAI", "model": "legacy-m"})
+        assert (await client.delete("/api/lsm/providers?legacy_provider=openai")).status_code == 409
+        assert provider_config("openai").url == "https://legacy.invalid/v1/chat/completions"
