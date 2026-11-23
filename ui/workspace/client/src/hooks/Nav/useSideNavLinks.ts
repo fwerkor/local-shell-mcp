@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { MCPIcon, AttachmentIcon, OpenAIMinimalIcon } from '@librechat/client';
+import { MCPIcon, AttachmentIcon } from '@librechat/client';
 import {
   Bot,
   Brain,
@@ -20,11 +20,7 @@ import {
 } from 'librechat-data-provider';
 import type { TInterfaceConfig, TEndpointsConfig } from 'librechat-data-provider';
 import type { NavLink } from '~/common';
-import {
-  useAgentCapabilities,
-  useGetAgentsConfig,
-  useHasAccess,
-} from '~/hooks';
+import { useAgentCapabilities, useGetAgentsConfig, useHasAccess } from '~/hooks';
 import LsmNestedMcpPanel from '~/components/SidePanel/MCPBuilder/LsmNestedMcpPanel';
 import AgentPanelSwitch from '~/components/SidePanel/Agents/AgentPanelSwitch';
 import BookmarkPanel from '~/components/SidePanel/Bookmarks/BookmarkPanel';
@@ -120,7 +116,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_sidepanel_assistant_builder',
         label: '',
-        icon: OpenAIMinimalIcon,
+        icon: Bot,
         id: EModelEndpoint.assistants,
         Component: PanelSwitch,
       });

@@ -9,9 +9,9 @@ const sourceToEndpoint = {
 };
 
 const sourceToClassname = {
-  [FileSources.openai]: 'bg-white/75 dark:bg-black/65',
-  [FileSources.azure]: 'azure-bg-color',
-  [FileSources.azure_blob]: 'azure-bg-color',
+  [FileSources.openai]: 'bg-surface-secondary',
+  [FileSources.azure]: 'bg-surface-secondary',
+  [FileSources.azure_blob]: 'bg-surface-secondary',
   [FileSources.execute_code]: 'bg-black text-white opacity-85',
   /** Categorical rather than status: a source is an identity, so it takes a
    *  series slot and the label ink that pairs with one. No alpha here, which
