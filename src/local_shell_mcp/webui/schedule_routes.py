@@ -141,7 +141,53 @@ def next_run(cadence, timezone, *, after_ms, min_interval_minutes=5):
         local = datetime.fromtimestamp(timestamp / 1000, tz=UTC).astimezone(zone)
         if _matches(local, parsed):
             return timestamp
-    raise HTTPException(400, detail='Schedule has no occurrence within one year')
+    if parsed[0] == 'cron':
+        # Sparse schedules such as Feb 29 may have multi-year gaps. Search
+        # calendar dates rather than millions of UTC minutes. One Gregorian
+        # 400-year cycle covers all valid month/day/weekday combinations.
+        found = _next_sparse_cron(parsed, zone, after_ms, earliest)
+        if found is not None:
+            return found
+    raise HTTPException(400, detail='Schedule has no occurrence within one Gregorian cycle')
+
+
+def _next_sparse_cron(parsed, zone, after_ms, earliest):
+    minutes, hours, days, months, weekdays, dom_any, dow_any = parsed[1]
+    start = datetime.fromtimestamp(after_ms / 1000, tz=UTC).astimezone(zone).date()
+    for offset in range(146_098):
+        try:
+            day = start + timedelta(days=offset)
+        except OverflowError:
+            break
+        if day.month not in months:
+            continue
+        weekday = (day.weekday() + 1) % 7
+        if dom_any:
+            day_ok = weekday in weekdays
+        elif dow_any:
+            day_ok = day.day in days
+        else:
+            day_ok = day.day in days or weekday in weekdays
+        if not day_ok:
+            continue
+        candidates = []
+        for hour in hours:
+            for minute in minutes:
+                for fold in (0, 1):
+                    local = datetime(day.year, day.month, day.day, hour, minute,
+                                     tzinfo=zone, fold=fold)
+                    timestamp = int(local.timestamp() * 1000)
+                    if timestamp <= after_ms or timestamp < earliest:
+                        continue
+                    # Reject nonexistent local times in spring-forward gaps.
+                    actual = datetime.fromtimestamp(timestamp / 1000, tz=UTC).astimezone(zone)
+                    if (actual.year, actual.month, actual.day, actual.hour, actual.minute) != (
+                            day.year, day.month, day.day, hour, minute):
+                        continue
+                    candidates.append(timestamp)
+        if candidates:
+            return min(candidates)
+    return None
 
 
 def _validate_cadence_interval(cadence):
@@ -170,7 +216,7 @@ def _validate_cadence_interval(cadence):
             raise HTTPException(400, detail='Schedule interval must be at least five minutes')
 
 
-def _validate(owner, repo, data, *, partial=False):
+def _validate(owner, repo, data, *, partial=False, check_dependencies=True):
     required = {'name', 'prompt', 'agent_id', 'cadence', 'timezone', 'clientRequestId'}
     if not partial and not required.issubset(data):
         raise HTTPException(400, detail='Missing schedule fields')
@@ -180,7 +226,8 @@ def _validate(owner, repo, data, *, partial=False):
             raise HTTPException(400, detail=f'Invalid {field}')
     if 'agent_id' in data:
         agent = data['agent_id']
-        if not isinstance(agent, str) or not agent or AgentRepository(repo.database).get(owner, agent) is None:
+        if (not isinstance(agent, str) or not agent or
+                (check_dependencies and AgentRepository(repo.database).get(owner, agent) is None)):
             raise HTTPException(404, detail='Schedule Agent not found')
     if 'clientRequestId' in data and (not isinstance(data['clientRequestId'], str) or
                                       not 1 <= len(data['clientRequestId']) <= 128):
@@ -194,7 +241,8 @@ def _validate(owner, repo, data, *, partial=False):
         if not isinstance(files, list) or len(files) > 10 or any(not isinstance(f, str) for f in files):
             raise HTTPException(400, detail='Invalid files')
     if ('chatProjectId' in data and data['chatProjectId'] is not None
-            and (not isinstance(data['chatProjectId'], str) or not repo.project(owner, data['chatProjectId']))):
+            and (not isinstance(data['chatProjectId'], str) or
+                 (check_dependencies and not repo.project(owner, data['chatProjectId'])))):
         raise HTTPException(404, detail='Schedule project not found')
     if 'cadence' in data:
         _validate_cadence_interval(data['cadence'])
@@ -296,23 +344,25 @@ async def schedule(request: Request):
                 'file_ids', 'chatProjectId'):
         if key in payload:
             config[key] = payload[key]
-    _validate(owner, repo, config, partial=True)
     enabled = payload.get('enabled', bool(row['enabled']))
+    _validate(owner, repo, config, partial=True, check_dependencies=enabled)
     timing_changed = (config['cadence'] != json.loads(row['config'])['cadence']
                       or config['timezone'] != json.loads(row['config'])['timezone'])
-    if enabled and (timing_changed or not row['enabled']):
-        next_at = next_run(config['cadence'], config['timezone'],
-                           after_ms=int(time.time() * 1000))
-    else:
-        next_at = row['next_run'] if enabled else None
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        latest = db.execute('SELECT revision FROM webui_schedules WHERE id=? AND owner=?',
+        latest = db.execute('SELECT revision,enabled,next_run FROM webui_schedules WHERE id=? AND owner=?',
                             (sid, owner)).fetchone()
         if latest is None:
             raise HTTPException(404, detail='Schedule not found')
         if latest['revision'] != row['revision']:
             raise HTTPException(409, detail='Schedule configuration changed')
+        if enabled and (timing_changed or not latest['enabled']):
+            next_at = next_run(config['cadence'], config['timezone'],
+                               after_ms=int(time.time() * 1000))
+        else:
+            # The scheduler may claim the due occurrence after the first read.
+            # Preserve the latest next_run under the same SQLite write lease.
+            next_at = latest['next_run'] if enabled else None
         db.execute('UPDATE webui_schedules SET config=?,enabled=?,next_run=?,'
                    'revision=revision+1,updated_at=? WHERE id=? AND owner=?',
                    (_json(config), int(enabled), next_at, _now(), sid, owner))
@@ -355,8 +405,19 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
                     continue
             # Anchor recurrence to the scheduled due minute, never to polling
             # latency. The creation/edit path already enforces the initial delay.
-            next_at = next_run(config['cadence'], config['timezone'],
-                               after_ms=due, min_interval_minutes=0) if not manual else row['next_run']
+            if manual:
+                next_at = row['next_run']
+            else:
+                try:
+                    next_at = next_run(config['cadence'], config['timezone'],
+                                       after_ms=due, min_interval_minutes=0)
+                except HTTPException:
+                    # A once-in-a-century or corrupt legacy recurrence must
+                    # still dispatch its currently due occurrence exactly once.
+                    # Suppress later timed claims by nulling next_run, but keep
+                    # enabled=1 so a crashed current claim remains recoverable.
+                    next_at = None
+                    log.warning('Scheduled recurrence exhausted for %s', row['id'])
             run_id = str(uuid.uuid4())
             db.execute('INSERT INTO webui_schedule_runs(id,owner,schedule_id,due_at,status,created_at,updated_at) '
                        'VALUES(?,?,?,?,?,?,?)',

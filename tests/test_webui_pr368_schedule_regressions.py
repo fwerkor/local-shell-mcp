@@ -148,3 +148,96 @@ def test_invalid_cron_step_rejected_not_interpreted_as_default(state):
                        '*/+5 * * * *', '*/0 * * * *', '*/x * * * *'):
         with pytest.raises(HTTPException):
             _parse_cadence({'frequency': 'cron', 'expression': expression})
+
+
+@pytest.mark.asyncio
+async def test_config_edit_preserves_next_run_advanced_concurrently(state, monkeypatch):
+    app, repo, agent = state
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as c:
+        created = await c.post('/api/schedules', json=_config(agent))
+        assert created.status_code == 201
+        sid = created.json()['id']
+        now = int(time.time() * 1000)
+        due = now - 60_000
+        with repo.database.connect() as db:
+            db.execute('UPDATE webui_schedules SET next_run=? WHERE id=?', (due, sid))
+        actual_validate = schedule_routes._validate
+        claimed = []
+
+        def concurrent_claim(owner, local_repo, config, *, partial=False, **kwargs):
+            actual_validate(owner, local_repo, config, partial=partial, **kwargs)
+            if partial and 'cadence' in config and 'clientRequestId' not in config:
+                claimed.extend(schedule_routes._claim_due(repo.database))
+
+        monkeypatch.setattr(schedule_routes, '_validate', concurrent_claim)
+        changed = await c.patch('/api/schedules/' + sid, json={'name': 'Updated'})
+        assert changed.status_code == 200, changed.text
+        assert len(claimed) == 1
+        with repo.database.connect() as db:
+            actual_next = db.execute('SELECT next_run FROM webui_schedules WHERE id=?',
+                                     (sid,)).fetchone()['next_run']
+        assert actual_next > now
+        assert changed.json()['nextRunAt'] == schedule_routes._iso(actual_next)
+        schedule_routes._settle(repo.database, claimed[0][0], 'success')
+        assert schedule_routes._claim_due(repo.database) == []
+
+
+@pytest.mark.asyncio
+async def test_schedule_with_deleted_agent_can_be_paused(state):
+    app, repo, agent = state
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as c:
+        created = await c.post('/api/schedules', json=_config(agent))
+        assert created.status_code == 201
+        sid = created.json()['id']
+        assert AgentRepository(repo.database).delete('alice', agent['id'])
+        paused = await c.patch('/api/schedules/' + sid, json={'enabled': False})
+        assert paused.status_code == 200, paused.text
+        assert paused.json()['enabled'] is False
+        assert paused.json()['nextRunAt'] is None
+        reenabled = await c.patch('/api/schedules/' + sid, json={'enabled': True})
+        assert reenabled.status_code == 404
+
+
+def test_sparse_leap_day_cron_keeps_future_occurrences(state, monkeypatch):
+    from datetime import UTC, datetime
+
+    _, repo, agent = state
+    due = int(datetime(2028, 2, 29, 9, 0, tzinfo=UTC).timestamp() * 1000)
+    monkeypatch.setattr(schedule_routes.time, 'time', lambda: (due + 20_000) / 1000)
+    config = _config(agent, {'frequency': 'cron', 'expression': '0 9 29 2 *'})
+    now = _now()
+    with repo.database.connect() as db:
+        db.execute('INSERT INTO webui_schedules '
+                   '(id,owner,request_id,config,enabled,next_run,created_at,updated_at) '
+                   'VALUES(?,?,?,?,?,?,?,?)',
+                   ('leap', 'alice', 'leap', _json(config), 1, due, now, now))
+    claims = schedule_routes._claim_due(repo.database)
+    assert len(claims) == 1
+    future = int(datetime(2032, 2, 29, 9, 0, tzinfo=UTC).timestamp() * 1000)
+    with repo.database.connect() as db:
+        row = db.execute('SELECT next_run,enabled FROM webui_schedules WHERE id=?',
+                         ('leap',)).fetchone()
+    assert row['enabled'] == 1 and row['next_run'] == future
+
+
+def test_exhausted_legacy_schedule_does_not_block_healthy_claims(state, monkeypatch):
+    _, repo, agent = state
+    due = int(time.time() * 1000) - 60_000
+    now = _now()
+    healthy = _config(agent)
+    impossible = _config(agent, {'frequency': 'cron', 'expression': '0 9 31 2 *'})
+    with repo.database.connect() as db:
+        for sid, config in (('no-future', impossible), ('healthy', healthy)):
+            db.execute('INSERT INTO webui_schedules '
+                       '(id,owner,request_id,config,enabled,next_run,created_at,updated_at) '
+                       'VALUES(?,?,?,?,?,?,?,?)',
+                       (sid, 'alice', sid, _json(config), 1, due, now, now))
+    claims = schedule_routes._claim_due(repo.database)
+    assert {item[2] for item in claims} == {'healthy', 'no-future'}
+    with repo.database.connect() as db:
+        invalid = db.execute('SELECT enabled,next_run FROM webui_schedules WHERE id=?',
+                             ('no-future',)).fetchone()
+    assert invalid['enabled'] == 1 and invalid['next_run'] is None
+    assert schedule_routes._claim_due(repo.database) == []
