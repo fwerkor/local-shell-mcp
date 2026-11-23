@@ -11,7 +11,6 @@ import '@testing-library/jest-dom';
 // allows you to do things like:
 // expect(element).toHaveTextContent(/react/i)
 // learn more: https://github.com/testing-library/jest-dom
-import '@testing-library/jest-dom/extend-expect';
 
 // Mock canvas when run unit test cases with jest.
 // 'react-lottie' uses canvas
