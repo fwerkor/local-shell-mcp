@@ -160,13 +160,14 @@ class AgentRunner:
         native = available_tools(self.owner, self.authorization_conversation_id,
                                  scopes=set(self.scopes), expires=self.grant_expires,
                                  agent_permissions=machine_policy if machine_configured else None)
-        tools = [tool for tool in native if unrestricted or (machine_configured and selected_tools is None)
+        machine_exposed = selected_tools is None and machine_configured
+        tools = [tool for tool in native if unrestricted or machine_exposed
                  or tool["function"]["name"] in selected
                  or tool["function"]["name"] in {"session_manage", "plan_manage"}]
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
-                      if unrestricted or (machine_configured and selected_tools is None)
+                      if unrestricted or machine_exposed or (selected_tools is None and not selected)
                       or tool["function"]["name"] in selected]
         from .storage import WorkspaceRepository
         settings = WorkspaceRepository(self.database)
@@ -479,11 +480,14 @@ class AgentRunner:
                 if self.background_deny:
                     raise RuntimeSafetyError("Background execution is disabled in this child context")
 
+                origin_agent_id = (state.context.agent or {}).get("id")
+
                 async def detached_dispatch(c, scopes, expires, authorization):
                     return await invoke_native(self.owner, self.generation.conversation_id, c,
                                                granted_scopes=set(scopes), grant_expires=expires,
                                                run_id=self.generation.run_id,
-                                               authorization_conversation_id=authorization)
+                                               authorization_conversation_id=authorization,
+                                               agent_id=origin_agent_id)
 
                 return await start_tool_task(self.database, self.owner,
                                              self.generation.conversation_id,

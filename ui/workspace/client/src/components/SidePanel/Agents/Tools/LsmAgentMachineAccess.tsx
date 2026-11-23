@@ -26,6 +26,7 @@ export default function LsmAgentMachineAccess() {
   const localize = useLocalize();
   const { control, setValue } = useFormContext<AgentForm>();
   const selected = useWatch({ control, name: 'machine_permissions' });
+  const legacy = selected === undefined;
   const { data, isLoading, isError } = useLsmMachines();
   const names = useMemo(
     () => [...new Set([
@@ -56,6 +57,25 @@ export default function LsmAgentMachineAccess() {
           {localize('com_lsm_agent_machine_help')}
         </p>
       </div>
+      {legacy && (
+        <div className="space-y-2 rounded-md border border-border-medium p-3">
+          <p className="text-xs text-text-secondary">
+            {localize('com_lsm_agent_machine_legacy')}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="rounded-md border border-border-medium px-3 py-1.5 text-xs text-text-primary"
+              onClick={() => setValue('machine_permissions', {}, { shouldDirty: true, shouldValidate: true })}>
+              {localize('com_lsm_agent_machine_convert')}
+            </button>
+            <button type="button" className="rounded-md border border-border-medium px-3 py-1.5 text-xs text-text-primary"
+              disabled={isLoading || isError || names.length === 0}
+              onClick={() => setValue('machine_permissions', Object.fromEntries(names.map((name) => [name, 'none' as Access])),
+                { shouldDirty: true, shouldValidate: true })}>
+              {localize('com_lsm_agent_machine_revoke')}
+            </button>
+          </div>
+        </div>
+      )}
       {isLoading && <p className="text-xs text-text-secondary">{localize('com_lsm_agent_machine_loading')}</p>}
       {isError && <p role="alert" className="text-xs text-status-error">{localize('com_lsm_agent_machine_error')}</p>}
       {!isLoading && !isError && names.length === 0 && (
@@ -73,11 +93,12 @@ export default function LsmAgentMachineAccess() {
           </span>
           <select
             aria-label={`${machine} machine access`}
-            value={selected?.[machine] ?? 'write'}
+            value={legacy ? 'legacy' : (selected?.[machine] ?? 'write')}
             onChange={(event) => change(machine, event.target.value as Access)}
-            disabled={isError}
+            disabled={isError || legacy}
             className="max-w-44 rounded-md border border-border-medium bg-surface-primary p-2 text-sm text-text-primary"
           >
+            {legacy && <option value="legacy">{localize('com_lsm_agent_machine_legacy_choice')}</option>}
             <option value="none">{localize('com_lsm_agent_machine_none')}</option>
             <option value="read">{localize('com_lsm_agent_machine_read')}</option>
             <option value="write">{localize('com_lsm_agent_machine_write')}</option>

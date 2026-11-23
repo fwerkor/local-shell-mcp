@@ -331,7 +331,8 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     )):
         intent = durable_tasks.reserve(owner, conversation_id, run_id, call.call_id,
                                       tool.name, arguments, granted_scopes, grant_expires,
-                                      authorization_conversation_id=authorization_conversation_id)
+                                      authorization_conversation_id=authorization_conversation_id,
+                                      agent_id=agent_id)
         check_authorization()
     invocation = dict(arguments)
     if intent is not None and intent.key is not None:

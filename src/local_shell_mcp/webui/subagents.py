@@ -49,7 +49,7 @@ class SubagentConfig:
 class SubagentInvocation:
     agent: dict
     messages: list[dict]
-    selected_tools: tuple[str, ...]
+    selected_tools: tuple[str, ...] | None
     max_turns: int
     recursion_limit: int
     remaining_depth: int
@@ -314,7 +314,12 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
     messages.append({"role": "user", "content": description})
     invocation = SubagentInvocation(
         agent=copy.deepcopy(config.agent), messages=messages,
-        selected_tools=tuple(config.agent.get("tools") or []),
+        # Machine-configured Agents derive native tools from their machine
+        # permissions, including detached children. Legacy Agents keep an
+        # explicit tool subset; empty legacy lists still allow chat-enabled MCP.
+        selected_tools=(tuple(config.agent.get("tools") or [])
+                        if "machine_permissions" not in config.agent and config.agent.get("tools")
+                        else None),
         max_turns=config.max_turns, recursion_limit=config.max_turns * 3,
         remaining_depth=max(0, max_depth - 1) if config.allow_nested else 0,
         scopes=frozenset(scopes), grant_expires=grant_expires, owner=owner,

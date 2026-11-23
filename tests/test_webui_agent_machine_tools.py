@@ -168,3 +168,127 @@ async def test_external_mcp_list_strips_connection_secrets(machine_agent, monkey
         assert response.status_code == 200
         assert all(item["pluginKey"] not in {"file_read", "file_write"}
                    for item in response.json())
+
+
+def test_durable_task_lease_tracks_agent_and_revokes_machine_changes(machine_agent):
+    from local_shell_mcp.webui import durable_tasks as durable
+
+    repo, cid, agents, agent = machine_agent
+    with repo.database.connect() as db:
+        db.execute("INSERT INTO runs(id,conversation_id,status,state,created_at,updated_at) "
+                   "VALUES('agent-run',?,'running','{}',1,1)", (cid,))
+    agents.update("local", agent["id"], {"machine_permissions": {"local": "write"}})
+    intent = durable.reserve("local", cid, "agent-run", "lease-1", "job_start",
+                            {"command": "echo ok"}, SCOPES, None, agent_id=agent["id"])
+    with repo.database.connect() as db:
+        row = db.execute("SELECT agent_id,state FROM agent_durable_tasks WHERE id=?", (intent.id,)).fetchone()
+        assert row["agent_id"] == agent["id"] and row["state"] == "reserved"
+    assert durable.mark_revoked("local") == 0
+    with pytest.raises(PermissionError, match="another Agent"):
+        durable.reserve("local", cid, "agent-run", "lease-1", "job_start",
+                        {"command": "echo ok"}, SCOPES, None, agent_id="other-agent")
+    agents.update("local", agent["id"], {"machine_permissions": {"local": "none"}})
+    assert durable.mark_revoked("local") == 1
+    with repo.database.connect() as db:
+        assert db.execute("SELECT state FROM agent_durable_tasks WHERE id=?", (intent.id,)).fetchone()[0] == "cancel_pending"
+
+
+def test_durable_task_lease_revokes_deleted_agent(machine_agent):
+    from local_shell_mcp.webui import durable_tasks as durable
+
+    repo, cid, agents, agent = machine_agent
+    with repo.database.connect() as db:
+        db.execute("INSERT INTO runs(id,conversation_id,status,state,created_at,updated_at) "
+                   "VALUES('deleted-agent-run',?,'running','{}',1,1)", (cid,))
+    intent = durable.reserve("local", cid, "deleted-agent-run", "lease-2", "job_start",
+                            {"command": "echo ok"}, SCOPES, None, agent_id=agent["id"])
+    agents.delete("local", agent["id"])
+    assert durable.mark_revoked("local") == 1
+    with pytest.raises(PermissionError, match="revoked"):
+        durable.check_intent(intent)
+
+
+@pytest.mark.asyncio
+async def test_detached_native_execution_keeps_agent_identity(machine_agent, monkeypatch):
+    from types import SimpleNamespace
+
+    from local_shell_mcp.webui import background_tools
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    repo, cid, _, agent = machine_agent
+    store = GenerationStore(repo.database)
+    generation, _ = store.begin("local", {"text": "Background"}, agent)
+    profile = ProviderConfig("openai", "test", "https://test.invalid", "")
+    runner = AgentRunner(
+        "local", generation, repo.database, store, scopes=SCOPES, grant_expires=None,
+        stream_tools=None, stream_text=None, on_text=None, profile=profile, agent=agent,
+    )
+    runner._injected_background_names[agent["id"]] = frozenset({"run_shell"})
+    exposed = [{"function": {"name": "run_shell", "parameters": {"properties": {
+        "run_in_background": {"type": "boolean"},
+    }}}}]
+    state = SimpleNamespace(context=SimpleNamespace(tools=exposed, agent=agent))
+    recorded = {}
+
+    async def fake_native(owner, conversation_id, call, **kwargs):
+        recorded.update(kwargs)
+        recorded["arguments"] = call.arguments
+        return '{"ok":true}'
+
+    async def fake_start(*args, scopes, grant_expires, dispatch, **kwargs):
+        return await dispatch(args[5], scopes, grant_expires, args[3])
+
+    monkeypatch.setattr(registry, "call_tool", fake_native)
+    monkeypatch.setattr(background_tools, "start_tool_task", fake_start)
+    result = await runner._invoke(ModelToolCall("bg-1", "run_shell", {
+        "command": "echo hi", "run_in_background": True,
+    }), state)
+    assert result == '{"ok":true}'
+    assert recorded["agent_id"] == agent["id"]
+    assert "run_in_background" not in recorded["arguments"]
+
+
+def test_external_mcp_available_without_machine_policy(machine_agent):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    repo, _, agents, _ = machine_agent
+    legacy = agents.create("local", {"name": "External only", "provider": "openAI",
+                                      "model": "test", "tools": []})
+    store = GenerationStore(repo.database)
+    generation, _ = store.begin("local", {"text": "External MCP"}, legacy)
+    profile = ProviderConfig("openai", "test", "https://test.invalid", "")
+    runner = AgentRunner(
+        "local", generation, repo.database, store, scopes=SCOPES, grant_expires=None,
+        stream_tools=None, stream_text=None, on_text=None, profile=profile,
+        agent=legacy, mcp_enabled=True,
+    )
+    context = runner._context(legacy, profile=profile)
+    names = {item["function"]["name"] for item in context.tools}
+    assert {"mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call"} <= names
+    assert "file_write" not in names  # No implicit migration of legacy tool grants.
+
+
+@pytest.mark.asyncio
+async def test_subagent_machine_policy_is_not_replaced_by_empty_legacy_list(machine_agent):
+    from local_shell_mcp.webui.subagents import SubagentConfig, invoke_subagent
+
+    repo, cid, _, agent = machine_agent
+    observed = []
+
+    async def child(invocation):
+        observed.append(invocation.selected_tools)
+        return "completed"
+
+    config = SubagentConfig(type="worker", name="worker", description="worker", agent=agent,
+                            max_turns=5, owner="local")
+    await invoke_subagent(
+        ModelToolCall("delegated", "subagent", {"subagent_type": "worker", "description": "test"}),
+        [config], execute_child=child, owner="local", conversation_id=cid,
+        parent_run_id="test-run", database=repo.database, scopes=frozenset(SCOPES),
+        grant_expires=None,
+    )
+    assert observed == [None]

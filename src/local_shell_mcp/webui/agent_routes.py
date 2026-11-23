@@ -55,7 +55,7 @@ async def detail(request: Request):
         try:
             body = await _body(request)
             result = repository.update(owner, agent_id, body)
-            if "machine_permissions" in body:
+            if "machine_permissions" in body or "tools" in body:
                 from .durable_tasks import mark_revoked
 
                 mark_revoked(owner)
@@ -106,6 +106,9 @@ async def revert(request: Request):
         raise HTTPException(400, detail="Invalid agent version index") from exc
     if result is None:
         _not_found()
+    from .durable_tasks import mark_revoked
+
+    mark_revoked(_owner(request))
     return JSONResponse(result)
 
 

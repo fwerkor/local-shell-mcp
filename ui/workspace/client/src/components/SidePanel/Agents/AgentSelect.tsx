@@ -114,6 +114,13 @@ function AgentSelect({
         git_identity: fullAgent.git_identity,
       };
 
+      // A pre-machine-ACL Agent must retain its legacy tool allowlist until
+      // the user explicitly opts into machine permissions. The new-Agent
+      // default ({}) would otherwise silently broaden access on every edit.
+      if (!Object.prototype.hasOwnProperty.call(fullAgent, 'machine_permissions')) {
+        formValues.machine_permissions = undefined;
+      }
+
       Object.entries(fullAgent).forEach(([name, value]) => {
         if (name === 'model_parameters') {
           formValues[name] = value;
