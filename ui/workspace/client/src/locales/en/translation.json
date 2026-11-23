@@ -527,6 +527,7 @@
   "com_error_context_next_steps_compact": "Compact the conversation to free up room, shorten your message, or start a new chat.",
   "com_error_context_token_budget": "Token budget",
   "com_error_convo_access": "You do not have access to this conversation.",
+  "com_error_details_diagnostic": "Full error details",
   "com_error_details_provider": "Provider response",
   "com_error_empty_messages": "Your messages do not fit in the current context window, so there was nothing left to send to the model.",
   "com_error_endpoint_models_not_loaded": "Models for {{0}} could not be loaded. Please refresh the page and try again.",

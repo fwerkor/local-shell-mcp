@@ -65,6 +65,27 @@ def _generation_store() -> GenerationStore:
     return GenerationStore(_database())
 
 
+def _webui_grant_cookie(request: Request) -> str | None:
+    """Bind the short-lived first-party bearer to its live, revocable browser session.
+
+    Ordinary OAuth clients never get a longer grant; possession of a bearer
+    alone (or of an unrelated cookie) cannot extend execution authorization.
+    """
+    from ..auth import principal_scopes
+    from .auth import COOKIE, _store
+
+    principal = getattr(request.state, "principal", None)
+    claims = getattr(principal, "claims", {})
+    if not isinstance(claims, dict) or claims.get("client_id") != "lsm-webui":
+        return None
+    cookie = request.cookies.get(COOKIE, "")
+    session = _store().session(cookie)
+    if (session is None or session.owner != principal.subject
+            or not principal_scopes(principal).issubset(set(session.scopes.split()))):
+        return None
+    return cookie
+
+
 def _request_grant(request: Request) -> tuple[set[str], int | None]:
     from ..auth import principal_scopes
     from ..settings import get_settings
@@ -76,7 +97,23 @@ def _request_grant(request: Request) -> tuple[set[str], int | None]:
     principal = getattr(request.state, "principal", None)
     if principal is None or not hasattr(principal, "claims"):
         return set(), None
-    return principal_scopes(principal), principal.claims.get("exp")
+    scopes = principal_scopes(principal)
+    if principal.claims.get("client_id") == "lsm-webui":
+        cookie = _webui_grant_cookie(request)
+        if cookie is None:
+            # A revoked browser cookie must not fall back to the still-valid
+            # short bearer and silently authorize a new generation.
+            raise HTTPException(401, detail="WebUI login expired or was revoked")
+        request.state._lsm_webui_grant_cookie = cookie
+        # Give detached children a finite initial grant. Foreground runners
+        # re-read this session at every boundary and adopt its renewed expiry.
+        from .auth import _store
+
+        session = _store().session(cookie)
+        if session is None:
+            raise HTTPException(401, detail="WebUI login expired or was revoked")
+        return scopes, session.grant_until
+    return scopes, principal.claims.get("exp")
 
 
 def _generation_body(job: Generation, *, status: str = "stream", resumed: bool = False,
@@ -173,6 +210,7 @@ async def _run_model(
     resume_history: list[dict] | None = None, partial_text: str = "",
     approved_batch=None, resume_namespace: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+    webui_cookie: str | None = None,
     wakeup_lease: tuple[str, str] | None = None,
     event_delivery_lease: tuple[str, str] | None = None,
     actor_lease=None,
@@ -323,6 +361,7 @@ async def _run_model(
 
         runner = AgentRunner(owner, generation, _database(), repo,
                              scopes=granted_scopes, grant_expires=grant_expires,
+                             webui_cookie=webui_cookie,
                              stream_tools=stream_model_with_tools, stream_text=stream_model,
                              on_text=append_text, agent=parent_agent, profile=profile,
                              parameters=params, ask_user_enabled=ask_user_enabled,
@@ -413,10 +452,13 @@ async def _run_model(
                 check_wakeup_lease()
             except Exception:
                 return
-        # Do not put provider tokens, request metadata or secrets in response.
+        # Preserve the precise failure class and safe stack locations for
+        # expandable UI diagnostics, never upstream headers or secret values.
+        from .error_diagnostics import generation_failure
+
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=f"Model generation failed ({type(exc).__name__})",
+                    error=generation_failure(exc, generation.run_id),
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
                                                              "".join(text_parts)), actor_lease=actor_lease)
     finally:
@@ -442,6 +484,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       resume_history: list[dict] | None = None, partial_text: str = "",
                       approved_batch=None, resume_namespace: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+                      webui_cookie: str | None = None,
                       wakeup_lease: tuple[str, str] | None = None,
                       event_delivery_lease: tuple[str, str] | None = None,
                       recovery_steers: bool = False,
@@ -487,6 +530,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        resume_history=resume_history, partial_text=partial_text,
                        approved_batch=approved_batch, resume_namespace=resume_namespace,
                        granted_scopes=granted_scopes, grant_expires=grant_expires,
+                       webui_cookie=webui_cookie,
                        wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
                        actor_lease=actor_lease, recovery_steers=recovery_steers),
             name="webui-generation-" + generation.run_id,
@@ -737,7 +781,8 @@ async def start_generation(request: Request):
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                           artifacts_mode=artifact_mode(payload, agent),
-                          granted_scopes=frozenset(scopes), grant_expires=grant_expires)
+                          granted_scopes=frozenset(scopes), grant_expires=grant_expires,
+                          webui_cookie=getattr(request.state, "_lsm_webui_grant_cookie", None))
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh, protocol_version=protocol), status_code=202,
                         headers=_generator_headers(protocol))
@@ -1039,6 +1084,7 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
         partial_text=(checkpoint_text if checkpoint_text is not None
                       else _generation_store().accumulated_text(owner, generation.run_id)),
         granted_scopes=frozenset(scopes), grant_expires=expiry,
+        webui_cookie=getattr(request.state, "_lsm_webui_grant_cookie", None),
         recovery_steers=True,
         checkpoint_text=checkpoint_text,
     )
@@ -1192,6 +1238,7 @@ async def resume_generation(request: Request):
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
                       granted_scopes=frozenset(scopes), grant_expires=expiry,
+                      webui_cookie=getattr(request.state, "_lsm_webui_grant_cookie", None),
                       recovery_steers=True)
     return JSONResponse(_generation_body(resumed, status="resuming", resumed=True, protocol_version=protocol),
                         headers=_generator_headers(protocol))

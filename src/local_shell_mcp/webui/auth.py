@@ -68,15 +68,15 @@ class WebAuthStore:
 
         self.database = shared_database(directory.resolve())
 
-    def issue_ticket(self, owner: str, scopes: str, grant_until: int) -> str:
+    def issue_ticket(self, owner: str, scopes: str, grant_until: int, *, renewable: bool = False) -> str:
         now = int(time.time())
         if not owner or grant_until <= now:
             raise ValueError("An active authenticated identity is required")
         secret = secrets.token_urlsafe(32)
         with self.database.connect() as db:
             db.execute("DELETE FROM web_login_tickets WHERE expires_at<=?", (now,))
-            db.execute("INSERT INTO web_login_tickets(hash,owner,scopes,grant_until,expires_at) VALUES(?,?,?,?,?)",
-                       (_hash(secret), owner, scopes, grant_until, now + TICKET_TTL))
+            db.execute("INSERT INTO web_login_tickets(hash,owner,scopes,grant_until,expires_at,renewable) VALUES(?,?,?,?,?,?)",
+                       (_hash(secret), owner, scopes, grant_until, now + TICKET_TTL, int(renewable)))
         return secret
 
     def redeem(self, ticket: str) -> tuple[str, WebSession]:
@@ -85,14 +85,14 @@ class WebAuthStore:
         now = int(time.time())
         with self.database.connect() as db:
             db.execute("DELETE FROM web_sessions WHERE expires_at<=?", (now,))
-            row = db.execute("DELETE FROM web_login_tickets WHERE hash=? RETURNING owner,scopes,grant_until,expires_at",
+            row = db.execute("DELETE FROM web_login_tickets WHERE hash=? RETURNING owner,scopes,grant_until,expires_at,renewable",
                              (_hash(ticket),)).fetchone()
             if not row or row["expires_at"] < now or row["grant_until"] < now:
                 raise ValueError("Invalid or expired login ticket")
             raw = secrets.token_urlsafe(48)
             expiry = min(row["grant_until"], now + SESSION_TTL)
-            db.execute("INSERT INTO web_sessions(hash,owner,scopes,grant_until,expires_at) VALUES(?,?,?,?,?)",
-                       (_hash(raw), row["owner"], row["scopes"], row["grant_until"], expiry))
+            db.execute("INSERT INTO web_sessions(hash,owner,scopes,grant_until,expires_at,renewable) VALUES(?,?,?,?,?,?)",
+                       (_hash(raw), row["owner"], row["scopes"], row["grant_until"], expiry, row["renewable"]))
             return raw, WebSession(row["owner"], row["scopes"], row["grant_until"])
 
     def session(self, cookie: str) -> WebSession | None:
@@ -105,6 +105,35 @@ class WebAuthStore:
             if not row or row["expires_at"] <= now or row["grant_until"] <= now:
                 return None
             return WebSession(row["owner"], row["scopes"], row["grant_until"])
+
+    def renew(self, cookie: str) -> WebSession | None:
+        """Slide an authenticated browser session on actual frontend activity.
+
+        A revoked or expired cookie is never resurrected. The cookie itself is
+        the revocable, HttpOnly browser credential; external OAuth tokens keep
+        their own independent, shorter expiry.
+        """
+        if not cookie or len(cookie) > 256:
+            return None
+        now = int(time.time())
+        until = now + SESSION_TTL
+        with self.database.connect() as db:
+            row = db.execute(
+                "UPDATE web_sessions SET expires_at=?,grant_until=? "
+                "WHERE hash=? AND expires_at>? AND grant_until>? AND renewable=1 "
+                "RETURNING owner,scopes,grant_until",
+                (until, until, _hash(cookie), now, now),
+            ).fetchone()
+            if row is None:
+                # Legacy and explicitly bounded OAuth grants stay valid, but
+                # no independent connection or 30-day promotion is necessary.
+                row = db.execute(
+                    "SELECT owner,scopes,grant_until FROM web_sessions "
+                    "WHERE hash=? AND expires_at>? AND grant_until>?",
+                    (_hash(cookie), now, now),
+                ).fetchone()
+            return (WebSession(row["owner"], row["scopes"], row["grant_until"])
+                    if row is not None else None)
 
     def revoke(self, cookie: str) -> None:
         with self.database.connect() as db:
@@ -232,7 +261,21 @@ async def login_ticket(request: Request) -> Response:
 
         request.state.principal = _verify_oauth(request, settings)
     owner, scopes, expiry = _owner(request)
-    token = _store().issue_ticket(owner, scopes, expiry)
+    principal = getattr(request.state, "principal", None)
+    if getattr(principal, "claims", {}).get("client_id") == "lsm-webui":
+        # A copied first-party bearer must not mint another 30-day session
+        # after logout or loss of its owning HttpOnly browser cookie.
+        existing = _store().session(request.cookies.get(COOKIE, ""))
+        if (existing is None or existing.owner != owner
+                or not set(scopes.split()).issubset(set(existing.scopes.split()))):
+            raise HTTPException(401, detail="WebUI login expired or was revoked")
+    # A fresh OAuth proof opens a *separate, revocable* browser login. Its
+    # delegated idle lifetime is independent from the short-lived OAuth bearer
+    # used to exchange the ticket; scopes are never expanded.
+    renewable = settings.auth_mode == "oauth" and bool(request.headers.get("authorization"))
+    if renewable:
+        expiry = int(time.time()) + SESSION_TTL
+    token = _store().issue_ticket(owner, scopes, expiry, renewable=renewable)
     origin = get_settings().public_base_url or str(request.base_url).rstrip("/")
     return JSONResponse({"ticket": token, "url": origin})
 
@@ -257,7 +300,8 @@ async def authenticate(request: Request) -> Response:
 
 async def refresh(request: Request) -> Response:
     _same_origin(request)
-    session = _store().session(request.cookies.get(COOKIE, ""))
+    cookie = request.cookies.get(COOKIE, "")
+    session = _store().renew(cookie)
     if session is None and get_settings().auth_mode == "none":
         # The Controller itself is explicitly unauthenticated. Make the
         # first-party React frontend usable directly without an extra login
@@ -282,7 +326,12 @@ async def refresh(request: Request) -> Response:
     if claims.get("exp") is None or int(claims["exp"]) > session.grant_until:
         claims["exp"] = session.grant_until
         token = jwt.encode(claims, get_settings().oauth_jwt_secret, algorithm="HS256")
-    return JSONResponse({"token": token, "user": _frontend_user(session)})
+    response = JSONResponse({"token": token, "user": _frontend_user(session)})
+    if cookie and get_settings().auth_mode != "none":
+        remaining = min(SESSION_TTL, max(0, session.grant_until - int(time.time())))
+        response.set_cookie(COOKIE, cookie, max_age=remaining, path="/", httponly=True,
+                            secure=request.url.scheme == "https", samesite="lax")
+    return response
 
 
 async def logout(request: Request) -> Response:
