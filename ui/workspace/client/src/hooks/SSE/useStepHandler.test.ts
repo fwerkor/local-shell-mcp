@@ -19,6 +19,42 @@ describe('rewindStreamContent', () => {
     expect(cleared[2]).toEqual({ ...freshText, text: '' });
   });
 
+  it('removes abandoned new text folded into the retained last text part', () => {
+    const original = 'Retained prefix. ';
+    const merged = { type: ContentTypes.TEXT, text: original + 'Checkpoint. Abandoned.' };
+    const content = [merged] as TMessageContentParts[];
+
+    expect(rewindStreamContent(content, 'Checkpoint. ', 1, original)).toEqual([
+      { ...merged, text: original + 'Checkpoint. ' },
+    ]);
+    expect(rewindStreamContent(content, '', 1, original)).toEqual([
+      { ...merged, text: original },
+    ]);
+    expect(content[0]).toBe(merged);
+  });
+
+  it('spends checkpoint text across a folded part and later text slots', () => {
+    const oldText = { type: ContentTypes.TEXT, text: 'Kept.' };
+    const oldTool = { type: ContentTypes.TOOL_CALL, tool_call: { id: 'previous' } };
+    const folded = { type: ContentTypes.TEXT, text: 'Saved. Checkpoint. ' };
+    const tool = { type: ContentTypes.TOOL_CALL, tool_call: { id: 'fresh' } };
+    const next = { type: ContentTypes.TEXT, text: 'Recovered. Abandoned.' };
+    const content = [oldText, oldTool, folded, tool, next] as TMessageContentParts[];
+
+    const result = rewindStreamContent(content, 'Checkpoint. Recovered.', 3, 'Saved. ');
+    expect(result).toEqual([
+      oldText,
+      oldTool,
+      folded,
+      tool,
+      { ...next, text: 'Recovered.' },
+    ]);
+    expect(rewindStreamContent(content, '', 3, 'Saved. ')[2]).toEqual({
+      ...folded,
+      text: 'Saved. ',
+    });
+  });
+
   it('preserves sparse tool-slot indexes and Unicode text boundaries', () => {
     const content: TMessageContentParts[] = [];
     const tool = { type: ContentTypes.TOOL_CALL, tool_call: { id: 'tool-1' } };

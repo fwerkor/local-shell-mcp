@@ -168,12 +168,30 @@ export function rewindStreamContent(
   content: TMessageContentParts[],
   preserved: string,
   editPrefixOffset = 0,
+  editPrefixTailText?: string,
 ): TMessageContentParts[] {
   let remaining = Array.from(preserved).length;
   // Live content is indexed by server RunStep.index, not an append-only
   // packed array. Preserve sparse slots and the retained edit prefix: the
   // checkpoint only covers text emitted by the current generation.
   const retained = content.slice();
+  if (editPrefixOffset > 0 && editPrefixTailText !== undefined) {
+    const foldedIndex = editPrefixOffset - 1;
+    const folded = content[foldedIndex];
+    if (
+      folded?.type === ContentTypes.TEXT &&
+      typeof folded.text === 'string' &&
+      folded.text.startsWith(editPrefixTailText)
+    ) {
+      // RunStep 0 can append to the LAST retained text part (same phase).
+      // Preserve exactly the original edit text, and spend the checkpoint
+      // budget only on new text in that part before visiting later slots.
+      const suffix = Array.from(folded.text.slice(editPrefixTailText.length));
+      const kept = suffix.slice(0, remaining).join('');
+      remaining -= Math.min(remaining, suffix.length);
+      retained[foldedIndex] = { ...folded, text: editPrefixTailText + kept };
+    }
+  }
   for (let index = editPrefixOffset; index < content.length; index++) {
     const part = content[index];
     if (part == null || part.type !== ContentTypes.TEXT) continue;
@@ -950,7 +968,12 @@ export default function useStepHandler({
         pendingDeltaBuffer.current.clear();
         const updated = {
           ...response,
-          content: rewindStreamContent(response.content ?? [], preserveText, editPrefixOffset),
+          content: rewindStreamContent(
+            response.content ?? [],
+            preserveText,
+            editPrefixOffset,
+            submission.editPrefixTailText,
+          ),
         };
         messageMap.current.set(responseId, updated);
         setMessages(mergeResponseMessage(messages, updated, responseId, { ensureUserMessage: true }));
