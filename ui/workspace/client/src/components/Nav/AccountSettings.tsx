@@ -6,6 +6,7 @@ import {
   Archive,
   ChevronRight,
   CircleHelp,
+  CircleUserRound,
   Keyboard,
   LifeBuoy,
   LogOut,
@@ -119,7 +120,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
           className={collapsed ? 'size-7 flex-shrink-0' : '-ml-0.9 -mt-0.8 h-8 w-8 flex-shrink-0'}
         >
           <div className="relative flex">
-            <img src="/assets/logo.svg" alt="" className="h-full w-full rounded-lg" />
+            <CircleUserRound className="h-full w-full text-text-primary" aria-hidden="true" />
           </div>
         </div>
         {!collapsed && (
