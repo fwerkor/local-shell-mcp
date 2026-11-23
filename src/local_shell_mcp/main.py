@@ -167,6 +167,9 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
                 stream_tools=stream_model_with_tools, stream_text=stream_model,
             )
             await start_event_worker(generation_store.database)
+            from .webui.schedule_routes import start_schedule_worker
+
+            await start_schedule_worker(generation_store.database)
             from .webui.attachments import recover_attachment_deletions
 
             recover_attachment_deletions()
@@ -186,6 +189,9 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
 
                     await shutdown_background_tools()
                     await shutdown_event_workers()
+                    from .webui.schedule_routes import shutdown_schedule_worker
+
+                    await shutdown_schedule_worker()
                     await shutdown_generations()
                 if recovery_task is not None:
                     recovery_task.cancel()
@@ -220,6 +226,10 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.memory_routes import memory_routes
             from .webui.misc_routes import misc_routes
             from .webui.routes import webui_routes
+            from .webui.schedule_routes import schedule_routes
+            from .webui.skill_routes import skill_routes
+            from .webui.skill_tree_routes import skill_tree_routes
+            from .webui.tag_routes import tag_routes
 
             routes[2:2] = webui_routes()
             routes[2:2] = auth_routes()
@@ -230,6 +240,10 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             routes[2:2] = event_trigger_routes()
             routes[2:2] = misc_routes()
             routes[2:2] = memory_routes()
+            routes[2:2] = tag_routes()
+            routes[2:2] = skill_routes()
+            routes[2:2] = skill_tree_routes()
+            routes[2:2] = schedule_routes()
             routes[2:2] = controller_routes()
     if settings.remote_enabled:
         routes[2:2] = remote_routes()

@@ -68,6 +68,8 @@ async def test_text_only_provider_path_when_no_native_tools(runner_parts, monkey
     from local_shell_mcp.webui import lsm_tool_registry
 
     monkeypatch.setattr(lsm_tool_registry, 'available_tools', lambda *a, **kw: [])
+    # Memory is enabled by default, so opt out for the explicit no-tools path.
+    _repo().save_setting('local', 'user.memories', False)
     streams = []
 
     async def text_model(profile, messages, **kwargs):
@@ -135,3 +137,32 @@ async def test_enabled_registry_and_nested_mcp_error_guards(runner_parts, monkey
 
     monkeypatch.setattr(SQLiteSubagentTaskHost, 'check', check)
     assert await obj._invoke(ModelToolCall('task-poll', 'check_background_task', {}), state) == 'queued child'
+
+
+@pytest.mark.asyncio
+async def test_managed_skill_is_callable_in_the_real_agent_loop(runner_parts):
+    from local_shell_mcp.webui.storage import _json, _now
+
+    db, store, generation = runner_parts
+    with db.connect() as conn:
+        now = _now()
+        conn.execute('INSERT INTO webui_skills(id,owner,name,record,created_at,updated_at) '
+                     'VALUES(?,?,?,?,?,?)', ('skill-in-loop', 'local', 'test-skill',
+                     _json({'name': 'test-skill', 'description': 'Test runtime',
+                            'body': 'Read the spec first.'}), now, now))
+    seen = []
+
+    async def model(profile, messages, **kwargs):
+        seen.append((messages, kwargs))
+        if not any(msg.get('role') == 'tool' for msg in messages):
+            tools = kwargs.get('tools', [])
+            assert any(t.get('function', {}).get('name') == 'skill' for t in tools)
+            yield ModelToolCall('skill-1', 'skill', {'name': 'test-skill'})
+        else:
+            assert messages[-1]['content'] == 'Read the spec first.'
+            yield 'Skill instructions applied.'
+
+    obj = runner(runner_parts, model)
+    completed = await obj.run(store.history('local', generation.conversation_id))
+    assert completed[-1]['content'] == 'Skill instructions applied.'
+    assert len(seen) == 2

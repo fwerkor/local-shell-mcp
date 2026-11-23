@@ -144,6 +144,80 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_web_sessions_expiry ON web_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_web_tickets_expiry ON web_login_tickets(expires_at);
+CREATE TABLE IF NOT EXISTS webui_tags (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,tag)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_tags_owner ON webui_tags(owner,position);
+CREATE TABLE IF NOT EXISTS webui_skills (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    name TEXT NOT NULL,
+    record TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,name)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_skills_owner ON webui_skills(owner,updated_at DESC);
+CREATE TABLE IF NOT EXISTS webui_skill_folders (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    skill_id TEXT NOT NULL REFERENCES webui_skills(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(skill_id,path)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_skill_folders_skill ON webui_skill_folders(skill_id,path);
+CREATE TABLE IF NOT EXISTS webui_skill_files (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    skill_id TEXT NOT NULL REFERENCES webui_skills(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    data BLOB NOT NULL,
+    mime TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(skill_id,path)
+);
+CREATE TABLE IF NOT EXISTS webui_schedules (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    config TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 0,
+    next_run INTEGER,
+    run_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_run TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_schedules_due ON webui_schedules(enabled,next_run);
+CREATE TABLE IF NOT EXISTS webui_schedule_runs (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    schedule_id TEXT NOT NULL REFERENCES webui_schedules(id) ON DELETE CASCADE,
+    due_at INTEGER NOT NULL,
+    conversation_id TEXT,
+    run_id TEXT,
+    status TEXT NOT NULL DEFAULT 'claimed',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(schedule_id,due_at)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_schedule_runs_schedule ON webui_schedule_runs(schedule_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS webui_memories (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,

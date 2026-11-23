@@ -135,7 +135,7 @@ class AgentRunner:
         # The original primary Agent reads shared personal memories even when
         # it has no inline memory tool. Only an Agent explicitly registering
         # the memory capability receives keys and a mutation-tool prompt.
-        has_tools = ('memory' in ((agent or {}).get('tools') or [])
+        has_tools = ((agent is None or 'memory' in ((agent or {}).get('tools') or []))
                      and memory_enabled(settings, self.owner, tools=True))
         formatted = MemoryRepository(self.database).formatted(
             self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
@@ -170,9 +170,15 @@ class AgentRunner:
         parameters = (agent or {}).get('model_parameters') or self.initial_parameters
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
-        if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
+        if (unrestricted or 'memory' in selected) and memory_enabled(settings, self.owner, tools=True):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
+        from .skill_runtime import SKILL_TOOL, active_skills
+
+        if ((unrestricted or 'skills' in selected or 'skill' in selected
+             or (agent or {}).get('skills_enabled') is True)
+                and active_skills(self.database, self.owner, agent)):
+            tools.append(SKILL_TOOL)
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
@@ -407,6 +413,11 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name == 'skill':
+            from .skill_runtime import load
+
+            return load(self.database, self.owner, state.context.agent,
+                        call.arguments.get('name'))
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
@@ -1180,6 +1191,11 @@ class AgentRunner:
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
         if not self.namespace or (self.graph_node and self.namespace.startswith('/graph:')):
+            from .skill_runtime import catalog
+
+            skills_text = catalog(self.database, self.owner, self.root_agent)
+            if skills_text:
+                history = [{'role': 'system', 'content': skills_text}, *history]
             memory_text = self._memory_context(self.root_agent)
             if memory_text:
                 history = [{'role': 'system', 'content': memory_text}, *history]
