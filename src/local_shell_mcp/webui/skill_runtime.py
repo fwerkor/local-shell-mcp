@@ -73,6 +73,7 @@ def active_skills(database, owner: str, agent: dict | None):
                        'description': payload['description'],
                        'body': payload['body'],
                        'alwaysApply': payload.get('alwaysApply', False),
+                       'userInvocable': payload.get('frontmatter', {}).get('user-invocable', True),
                        'disableModelInvocation': payload.get('frontmatter', {}).get('disable-model-invocation', False)})
     for record in list_installed_skills()['skills']:
         identity = 'deployment:' + record['name']
@@ -84,7 +85,7 @@ def active_skills(database, owner: str, agent: dict | None):
             continue
         result.append({'id': identity, 'name': record['name'],
                        'description': record.get('description') or record['name'],
-                       'body': None, 'alwaysApply': False,
+                       'body': None, 'alwaysApply': False, 'userInvocable': True,
                        'disableModelInvocation': False})
     return result[:256]
 
@@ -144,3 +145,42 @@ def load(database, owner, agent, name, *, path=None):
             raise ValueError('Skill supporting file blocked by content policy')
         return content[:512_000]
     raise ValueError('Skill is not enabled or does not exist')
+
+
+
+def resolve_manual_skills(database, owner: str, agent: dict | None, skill_ids) -> list[dict]:
+    """Verify selected IDs against the current owner, Agent and active states.
+
+    Explicit user selection may load a Skill with model invocation disabled,
+    but a Skill not user-invocable must not appear in this selection.
+    """
+    if not isinstance(skill_ids, list) or len(skill_ids) > 16 or any(
+        not isinstance(sid, str) or not 1 <= len(sid) <= 256 for sid in skill_ids
+    ):
+        raise ValueError('Invalid manual Skill selection')
+    if len(set(skill_ids)) != len(skill_ids):
+        raise ValueError('Duplicate manual Skill selection')
+    available = {item['id']: item for item in active_skills(database, owner, agent)}
+    resolved = []
+    for identity in skill_ids:
+        item = available.get(identity)
+        if item is None or item['userInvocable'] is False:
+            raise ValueError('Manual Skill is not available for this Agent')
+        resolved.append(item)
+    return resolved
+
+
+def manual_context(database, owner: str, agent: dict | None, skill_ids) -> str:
+    """Render the explicitly selected Skill bodies for this single user turn."""
+    resolved = resolve_manual_skills(database, owner, agent, skill_ids)
+    if not resolved:
+        return ''
+    blocks = ['# Manually selected Skills', 'Apply these instructions to the current user turn.']
+    for item in resolved:
+        body = item['body']
+        if body is None:
+            body = load_installed_skill(item['name'])['content']
+        if not _policy_allows(configured_filters(WorkspaceRepository(database), owner), body=body):
+            raise ValueError('Manual Skill content blocked by configured policy')
+        blocks.append(f"## {item['name']}\n{body[:16384]}")
+    return '\n\n'.join(blocks)[:64_000]

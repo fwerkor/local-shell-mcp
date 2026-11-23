@@ -134,6 +134,11 @@ def _owner(request: Request) -> tuple[str, str, int]:
     raise HTTPException(401, detail="LSM login is required")
 
 
+def public_owner_id(owner: str) -> str:
+    """Stable public identity shared by user API and author projections."""
+    return hashlib.sha256(owner.encode('utf-8')).hexdigest()[:24]
+
+
 def _frontend_user(session: WebSession) -> dict:
     from ..sqlite_store import shared_database
     from .storage import WorkspaceRepository
@@ -143,7 +148,7 @@ def _frontend_user(session: WebSession) -> dict:
     display_name = repo.setting(session.owner, 'user.display_name', '')
     if not isinstance(display_name, str):
         display_name = ''
-    owner_id = hashlib.sha256(session.owner.encode("utf-8")).hexdigest()[:24]
+    owner_id = public_owner_id(session.owner)
     return {
         "id": owner_id, "_id": owner_id, "username": "workspace", "name": display_name,
         "email": "workspace@local-shell-mcp.invalid",

@@ -136,3 +136,15 @@ async def test_sub_five_minute_cron_rejected_independently_of_polling(state):
             'clientRequestId': 'safe-five-minute',
         })
         assert normal.status_code == 201, normal.text
+
+
+def test_invalid_cron_step_rejected_not_interpreted_as_default(state):
+    _, repo, agent = state
+    from starlette.exceptions import HTTPException
+
+    from local_shell_mcp.webui.schedule_routes import _parse_cadence
+
+    for expression in ('*/-15 * * * *', '*/oops * * * *', '*/ * * * *',
+                       '*/+5 * * * *', '*/0 * * * *', '*/x * * * *'):
+        with pytest.raises(HTTPException):
+            _parse_cadence({'frequency': 'cron', 'expression': expression})

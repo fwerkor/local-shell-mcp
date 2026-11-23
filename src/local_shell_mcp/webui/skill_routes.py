@@ -22,7 +22,7 @@ from starlette.routing import Route
 
 from ..agent_bridge.skills import validate_skill_file_path
 from ..skill_ops import list_installed_skills, load_installed_skill, read_installed_skill_file
-from .auth import _same_origin
+from .auth import _same_origin, public_owner_id
 from .content_filters import ContentFilterBlocked, ContentFragment, inspect_content
 from .memory_protection import configured_filters
 from .routes import _body, _owner, _repo
@@ -75,7 +75,7 @@ def _row(row, *, detail=False, file_count=0):
     rec = json.loads(row['record'])
     data = {key: value for key, value in rec.items() if key not in ('_id', 'author', 'version')}
     data.update(
-        _id=row['id'], author=row['owner'], authorName='local-shell-mcp',
+        _id=row['id'], author=public_owner_id(row['owner']), authorName='local-shell-mcp',
         version=row['version'], source='inline', fileCount=file_count,
         userInvocable=rec.get('frontmatter', {}).get('user-invocable', True),
         disableModelInvocation=rec.get('frontmatter', {}).get('disable-model-invocation', False),
@@ -124,7 +124,7 @@ def _file_meta(row):
     return dict(_id=row['id'], skillId=row['skill_id'], relativePath=path,
                 file_id=row['id'], filename=PurePosixPath(path).name, filepath=path,
                 source='local', mimeType=row['mime'], bytes=len(row['data']),
-                category=category, isExecutable=False, author=row['owner'],
+                category=category, isExecutable=False, author=public_owner_id(row['owner']),
                 createdAt=_stamp(row['created_at'] / 1_000_000),
                 updatedAt=_stamp(row['updated_at'] / 1_000_000))
 
@@ -357,6 +357,8 @@ async def file_by_path(request: Request):
 
 
 def _parse_skill_text(text, fallback):
+    # Normalize Windows line endings before locating YAML frontmatter fences.
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
     fm = {}
     body = text
     if text.startswith('---\n'):

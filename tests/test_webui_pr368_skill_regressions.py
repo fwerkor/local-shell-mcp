@@ -207,3 +207,110 @@ async def test_delegated_agent_receives_only_its_selected_skill_catalog(state, m
     assert 'Child system message' in first
     assert 'Always use selected instructions' in first
     assert 'Do not inject these instructions' not in first
+
+
+@pytest.mark.asyncio
+async def test_windows_skill_import_author_identity_and_slash_bookmark(state):
+    from local_shell_mcp.webui.auth import public_owner_id
+
+    server, _repo = state
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
+                                 base_url='http://example.test') as c:
+        windows = b'---\r\nname: windows\r\ndescription: CRLF metadata\r\n' \
+                  b'always-apply: true\r\n---\r\nWindows body'
+        imported = await c.post('/api/skills/import',
+                                files={'file': ('fallback.md', windows, 'text/markdown')})
+        assert imported.status_code == 201, imported.text
+        skill = imported.json()
+        assert skill['name'] == 'windows' and skill['description'] == 'CRLF metadata'
+        assert skill['alwaysApply'] is True
+        assert skill['author'] == public_owner_id('alice')
+        tag = await c.post('/api/tags', json={'tag': 'work/personal'})
+        assert tag.status_code == 201
+        renamed = await c.put('/api/tags/work%2Fpersonal', json={'tag': 'work/professional'})
+        assert renamed.status_code == 200, renamed.text
+        deleted = await c.delete('/api/tags/work%2Fprofessional')
+        assert deleted.status_code == 200, deleted.text
+
+
+@pytest.mark.asyncio
+async def test_manual_skill_selection_survives_storage_and_reaches_model(state, monkeypatch):
+    from local_shell_mcp.webui import lsm_tool_registry
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+    from local_shell_mcp.webui.storage import _now
+
+    server, repo = state
+    monkeypatch.setattr(lsm_tool_registry, 'available_tools', lambda *args, **kwargs: [])
+    db = repo.database
+    with db.connect() as conn:
+        now = _now()
+        conn.execute('INSERT INTO webui_skills(id,owner,name,record,created_at,updated_at) '
+                     'VALUES(?,?,?,?,?,?)',
+                     ('manual-id', 'alice', 'manual-only', _json({
+                         'name': 'manual-only', 'description': 'Explicit choice',
+                         'body': 'Perform the manually selected task.',
+                         'frontmatter': {'disable-model-invocation': True},
+                     }), now, now))
+    agent = {'id': 'selected-agent', 'skills_enabled': True, 'skills_scope': 'selected',
+             'skills': ['manual-id'], 'tools': ['skill']}
+    store = GenerationStore(db)
+    selected_payload = {'text': 'Use the manual Skill', 'manualSkills': ['manual-id']}
+    for invalid in (['missing'], ['manual-id', 'manual-id'], ['manual-id'] * 17,
+                    'manual-id', {'manual-id': True}, 123):
+        with pytest.raises(ValueError):
+            store.begin('alice', {**selected_payload, 'manualSkills': invalid}, agent)
+    with pytest.raises(ValueError):
+        store.begin('alice', selected_payload, {'id': 'disabled', 'skills_enabled': False})
+    with pytest.raises(ValueError):
+        store.begin('bob', selected_payload, None)
+    generation, fresh = store.begin('alice', selected_payload, agent)
+    assert fresh
+    with db.connect() as conn:
+        metadata = conn.execute('SELECT metadata FROM messages WHERE id=?',
+                                (generation.user_message_id,)).fetchone()['metadata']
+    import json
+
+    assert json.loads(metadata)['manualSkills'] == ['manual-id']
+    captured = []
+
+    async def model(profile, messages, **kwargs):
+        captured.append(messages)
+        yield 'Done'
+
+    async def send(_):
+        pass
+
+    runner = AgentRunner(
+        'alice', generation, db, store, scopes=set(), grant_expires=None,
+        stream_tools=model, stream_text=model, on_text=send, agent=agent,
+        profile=ProviderConfig('openai', 'mock', 'http://example.test/v1', ''),
+    )
+    await runner.run([{'role': 'user', 'content': 'Use the manual Skill'}])
+    assert captured
+    assert 'Perform the manually selected task.' in captured[0][0]['content']
+    assert 'Manually selected Skills' in captured[0][0]['content']
+    # A non-selected turn does not inherit the previous turn's transient catalog.
+    assert not any('Perform the manually selected task.' in (str(message.get('content')))
+                   for message in store.history('alice', generation.conversation_id))
+
+
+@pytest.mark.asyncio
+async def test_manual_skill_selection_respects_user_invocable_flag(state):
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.storage import _now
+
+    _, repo = state
+    with repo.database.connect() as db:
+        now = _now()
+        db.execute('INSERT INTO webui_skills(id,owner,name,record,created_at,updated_at) '
+                   'VALUES(?,?,?,?,?,?)',
+                   ('auto-only', 'alice', 'auto-only', _json({
+                       'name': 'auto-only', 'description': 'Not manually invocable',
+                       'body': 'Automatic only.',
+                       'frontmatter': {'user-invocable': False},
+                   }), now, now))
+    with pytest.raises(ValueError):
+        GenerationStore(repo.database).begin('alice',
+                                            {'text': 'Try it', 'manualSkills': ['auto-only']}, None)

@@ -1217,6 +1217,25 @@ class AgentRunner:
                 supplementary.append({'role': 'system', 'content': memory_text})
             if skills_text:
                 supplementary.append({'role': 'system', 'content': skills_text})
+            if not self.namespace:
+                # The selection is stored on the exact user message in SQLite,
+                # rather than carrying a transient HTTP field across retries.
+                with self.database.connect() as db:
+                    record = db.execute(
+                        'SELECT m.metadata FROM messages m JOIN conversations c '
+                        'ON c.id=m.conversation_id WHERE m.id=? AND c.owner=? '
+                        'AND m.conversation_id=? AND m.role=\'user\'',
+                        (self.generation.user_message_id, self.owner,
+                         self.generation.conversation_id)).fetchone()
+                if record is not None:
+                    selected_ids = json.loads(record['metadata']).get('manualSkills') or []
+                    if selected_ids:
+                        from .skill_runtime import manual_context
+
+                        selected_text = manual_context(self.database, self.owner,
+                                                       self.root_agent, selected_ids)
+                        if selected_text:
+                            supplementary.append({'role': 'system', 'content': selected_text})
             if supplementary:
                 # Preserve the built-in artifact/Agent system message as the
                 # single leading prompt, appending Memory/Skill context to it.

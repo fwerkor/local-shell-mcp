@@ -50,7 +50,11 @@ def _cron_field(source, lower, upper, *, weekday=False):
         parts = section.split('/')
         if len(parts) > 2 or not parts[0]:
             raise ValueError('Invalid cron segment')
-        step = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 1
+        if len(parts) == 2 and not parts[1].isascii():
+            raise ValueError('Invalid cron step')
+        if len(parts) == 2 and not parts[1].isdigit():
+            raise ValueError('Invalid cron step')
+        step = int(parts[1]) if len(parts) == 2 else 1
         if step <= 0 or step > upper:
             raise ValueError('Invalid cron step')
         expression = parts[0]

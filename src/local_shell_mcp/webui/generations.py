@@ -157,6 +157,13 @@ class GenerationStore:
             prompt = ''
         if not manual_compaction and (not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
             raise ValueError("A non-empty text message is required (max 128 KiB)")
+        manual_skill_ids = payload.get('manualSkills')
+        if manual_skill_ids is not None:
+            from .skill_runtime import resolve_manual_skills
+
+            resolve_manual_skills(self.database, owner, agent, manual_skill_ids)
+        else:
+            manual_skill_ids = []
         user_message_id = str(payload.get('parentMessageId') if manual_compaction else (payload.get('messageId') or uuid.uuid4()))
         response_message_id = str(uuid.uuid4())
         run_id = "run_" + secrets.token_hex(16)
@@ -231,6 +238,7 @@ class GenerationStore:
                 "sender": "User", "isCreatedByUser": True,
                 "endpoint": str(payload.get("endpoint") or "agents"),
                 "files": files,
+                **({"manualSkills": manual_skill_ids} if manual_skill_ids else {}),
             }
             if not manual_compaction:
                 db.execute(
@@ -258,6 +266,7 @@ class GenerationStore:
                     "sender": "User",
                     "files": files,
                     "isCreatedByUser": True,
+                    **({"manualSkills": manual_skill_ids} if manual_skill_ids else {}),
                 },
             }
             if manual_compaction:

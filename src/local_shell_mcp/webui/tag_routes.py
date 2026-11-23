@@ -164,5 +164,5 @@ def tag_routes() -> list[Route]:
         Route('/api/tags', tags, methods=['GET', 'POST']),
         Route('/api/tags/list', tags, methods=['GET']),
         Route('/api/tags/convo/{conversation_id}', tags_in_conversation, methods=['PUT']),
-        Route('/api/tags/{tag}', tag, methods=['PUT', 'DELETE']),
+        Route('/api/tags/{tag:path}', tag, methods=['PUT', 'DELETE']),
     ]
