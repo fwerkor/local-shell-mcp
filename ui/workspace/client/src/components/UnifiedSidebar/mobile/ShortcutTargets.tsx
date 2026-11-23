@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { NavLink } from '~/common';
 import { useActivePanel, resolveActivePanel } from '~/Providers';
+import useLeaveControlForPanel from '~/hooks/Nav/useLeaveControlForPanel';
 
 /**
  * The panel keyboard shortcuts locate a panel by its rail button
@@ -26,6 +27,7 @@ function ShortcutTargets({
   routeActiveId?: string;
 }) {
   const { active, setActive } = useActivePanel();
+  const leaveControlForPanel = useLeaveControlForPanel();
   const activeId = routeActiveId ?? resolveActivePanel(active, links);
 
   return (
@@ -45,6 +47,7 @@ function ShortcutTargets({
               return;
             }
             setActive(link.id);
+            leaveControlForPanel(link.id);
             if (routeActiveId) {
               onLeaveInsights?.();
             }

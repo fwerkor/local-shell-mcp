@@ -6,6 +6,17 @@
   scroll-margin-top: 4rem;
 }
 
+/* Native select popups need a matching browser color scheme as well as
+   semantic text colors: a dark control with a light native foreground is
+   otherwise unreadable on some browsers. Keep this scoped to the LSM dialog. */
+.lsm-permissions-dialog select {
+  color-scheme: light;
+}
+
+.dark .lsm-permissions-dialog select {
+  color-scheme: dark;
+}
+
 /* Custom Variables */
 :root {
   --white: 255 255 255;

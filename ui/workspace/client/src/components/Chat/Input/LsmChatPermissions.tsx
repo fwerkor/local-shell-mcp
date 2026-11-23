@@ -123,12 +123,12 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
   return (
     <>
       <button type="button" ref={trigger} aria-haspopup="dialog" aria-expanded={open}
-        className="cursor-pointer rounded-lg border border-border-medium px-2 py-1.5 text-xs"
+        className="cursor-pointer rounded-lg border border-border-medium px-2 py-1.5 text-xs text-text-primary"
         onClick={() => setOpen((previous) => !previous)}>Permissions</button>
       {open && createPortal(
       <div role="dialog" aria-label="Machine and conversation permissions"
         style={{ right: position.right, bottom: position.bottom, zIndex: 1000 }}
-        className="fixed w-80 max-w-[calc(100vw-16px)] max-h-[65vh] overflow-y-auto rounded-xl border border-border-medium bg-surface-primary p-3 text-xs shadow-xl">
+        className="lsm-permissions-dialog fixed w-80 max-w-[calc(100vw-16px)] max-h-[65vh] overflow-y-auto rounded-xl border border-border-medium bg-surface-primary p-3 text-xs text-text-primary shadow-xl">
         <strong className="block mb-2 text-sm">Machine access</strong>
         <label className="block mb-2 text-text-secondary">
           Set default permissions or override individual machines in this chat.
@@ -146,7 +146,7 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
         {active === 'project' && (
           <select aria-label="Project permission defaults" value={currentProject}
             onChange={(event) => setProjectId(event.target.value)}
-            className="mb-3 w-full rounded-md border border-border-medium bg-surface-primary p-2">
+            className="mb-3 w-full rounded-md border border-border-medium bg-surface-primary p-2 text-text-primary">
             <option value="">Select a project</option>
             {(projects.data?.projects ?? []).map((item) => (
               <option key={item.id} value={item.id}>{item.name}</option>
@@ -165,7 +165,7 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
               <select aria-label={`${machine} machine access`}
                 value={explicit ?? (active === 'global' ? 'none' : 'inherit')}
                 disabled={disabled} onChange={(event) => updateMachine(machine, event.target.value as Access | 'inherit')}
-                className="max-w-44 rounded-md border border-border-medium bg-surface-primary p-1.5">
+                className="max-w-44 rounded-md border border-border-medium bg-surface-primary p-1.5 text-text-primary">
                 {active !== 'global' && <option value="inherit">Inherit ({inherited})</option>}
                 <option value="none">No access</option>
                 <option value="read">Read only</option>

@@ -9,6 +9,7 @@ import { useActivePanel, resolveActivePanel, DEFAULT_PANEL } from '~/Providers';
 import AgentMarketplaceButton from '~/components/Nav/AgentMarketplaceButton';
 import { CLOSE_SIDEBAR_ID } from '~/components/Chat/Menus/OpenSidebar';
 import useNewChat from '~/hooks/Chat/useNewChat';
+import useLeaveControlForPanel from '~/hooks/Nav/useLeaveControlForPanel';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 import store from '~/store';
@@ -73,6 +74,7 @@ const NavIconButton = memo(function NavIconButton({
   onLeaveInsights?: () => void;
 }) {
   const localize = useLocalize();
+  const leaveControlForPanel = useLeaveControlForPanel();
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -88,13 +90,14 @@ const NavIconButton = memo(function NavIconButton({
       if (!isActive) {
         setActive(link.id);
       }
+      leaveControlForPanel(link.id);
       if (!expanded) {
         onExpand?.();
       } else {
         onLeaveInsights?.();
       }
     },
-    [link, isActive, setActive, expanded, onExpand, onCollapse, onNavigate, onLeaveInsights],
+    [link, isActive, setActive, leaveControlForPanel, expanded, onExpand, onCollapse, onNavigate, onLeaveInsights],
   );
 
   return (

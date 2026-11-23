@@ -750,6 +750,8 @@
   "com_nav_font_size_xs": "Extra Small",
   "com_nav_help": "Help",
   "com_nav_help_faq": "Help & FAQ",
+  "com_nav_documentation": "Documentation",
+  "com_nav_source_repository": "Source repository",
   "com_nav_info_balance": "Balance shows how many token credits you have left to use. Token credits translate to monetary value (e.g., 1000 credits = $0.001 USD)",
   "com_nav_info_client_image_resize": "When enabled, large images are downscaled in your browser before they are uploaded, which speeds up uploads and uses less bandwidth. Images already within the size limits are sent unchanged.",
   "com_nav_info_client_image_resize_enforced": "This setting is managed by your administrator and cannot be changed here.",
