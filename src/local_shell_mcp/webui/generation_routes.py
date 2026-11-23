@@ -331,7 +331,8 @@ async def _run_model(
                              approved_batch=approved_batch, on_injected=on_injected,
                              on_tool_completed=on_tool_completed,
                              wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
-                             actor_lease=actor_lease, recovery_steers=recovery_steers)
+                             actor_lease=actor_lease, recovery_steers=recovery_steers,
+                             web_search_enabled=generation.web_search_enabled)
         # Only the first entry determines this run's prefix. After human
         # actions, resume_history/checkpoints already contain prior run steps.
         original_boundary = len(history) if resume_history is None else len(

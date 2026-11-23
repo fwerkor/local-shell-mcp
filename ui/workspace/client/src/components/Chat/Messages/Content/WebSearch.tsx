@@ -131,7 +131,38 @@ export default function WebSearch({
     return '0';
   }, [attachments]);
 
+  // Native LSM web_search returns lightweight JSON tool output rather than
+  // LibreChat's provider-specific search attachments.
+  const nativeSources = useMemo((): ValidSource[] => {
+    if (typeof output !== 'string') {
+      return [];
+    }
+    try {
+      const parsed: unknown = JSON.parse(output);
+      if (parsed == null || typeof parsed !== 'object' || !('results' in parsed)) {
+        return [];
+      }
+      const results = (parsed as { results?: unknown }).results;
+      if (!Array.isArray(results)) {
+        return [];
+      }
+      return results
+        .filter((item) => item && typeof item.url === 'string' && /^https?:\/\//.test(item.url))
+        .map((item, i) => ({
+          link: item.url,
+          title: typeof item.title === 'string' ? item.title : '',
+          snippet: typeof item.snippet === 'string' ? item.snippet : '',
+          position: i + 1,
+        })) as ValidSource[];
+    } catch {
+      return [];
+    }
+  }, [output]);
+
   const allSources = useMemo((): ValidSource[] => {
+    if (nativeSources.length > 0) {
+      return nativeSources;
+    }
     if (attachments != null) {
       const turnMap: Record<string, SearchResultData> = {};
       for (const att of attachments) {
@@ -147,7 +178,7 @@ export default function WebSearch({
       return collectSources({ [ownTurn]: searchResults[ownTurn] });
     }
     return [];
-  }, [searchResults, attachments, ownTurn]);
+  }, [searchResults, attachments, ownTurn, nativeSources]);
 
   /** Direct-answer card shown at the top of the source list. Attachment-only:
    *  answer boxes are provider extras (Serper) that never carry citations, so
