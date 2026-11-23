@@ -70,7 +70,7 @@ export default function useUnifiedSidebarLinks() {
       Component: ConversationsSection,
     };
 
-    return [controlLink, conversationLink, ...sideNavLinks];
+    return [conversationLink, ...sideNavLinks, controlLink];
   }, [navigate, sideNavLinks]);
 
   return links;
