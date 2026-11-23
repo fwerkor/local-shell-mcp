@@ -87,7 +87,9 @@ export default function WebSearch({
    *  persists as the settled label like the other tool cards. */
   const intent = useToolCallIntent(args);
   const { searchResults } = useSearchContext();
-  const error = (typeof output === 'string' && isError(output)) || runStepStatus === 'failed';
+  const error =
+    (typeof output === 'string' && (isError(output) || /^\s*\{\s*"error"\s*:/.test(output))) ||
+    runStepStatus === 'failed';
   const legacyError =
     !error && typeof output === 'string' && output.toLowerCase().includes('error processing');
   const isClosed = runStepStatus != null;
