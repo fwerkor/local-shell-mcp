@@ -175,7 +175,7 @@ def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], st
 
 
 async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, tools: list[dict],
-                              max_tokens: int, temperature: float | None,
+                              max_tokens: int | None, temperature: float | None,
                               top_p: float | None = None,
                               emit_finish_reason: bool = False) -> AsyncIterator[str | ModelToolCall | ModelUsage | ModelFinish | ModelThought]:
     import httpx
@@ -184,7 +184,7 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
     headers = {"accept": "text/event-stream", "content-type": "application/json"}
     if config.provider == "anthropic":
         headers.update({"x-api-key": config.token, "anthropic-version": "2023-06-01"})
-        body = {"model": config.model, "stream": True, "messages": history, "max_tokens": max_tokens,
+        body = {"model": config.model, "stream": True, "messages": history, "max_tokens": max_tokens if max_tokens is not None else 16384,
                 "tools": [{"name": t["function"]["name"], "description": t["function"].get("description", ""),
                            "input_schema": t["function"]["parameters"]} for t in tools]}
         if instructions:
@@ -196,12 +196,14 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
                 body["top_p"] = top_p
     elif config.provider == "google":
         headers["x-goog-api-key"] = config.token
-        body = {"contents": history, "generationConfig": {"maxOutputTokens": max_tokens},
+        body = {"contents": history, "generationConfig": {},
                 "tools": [{"functionDeclarations": [
                     {"name": t["function"]["name"], "description": t["function"].get("description", ""),
                      "parametersJsonSchema": t["function"]["parameters"]} for t in tools]}]}
         if instructions:
             body["systemInstruction"] = {"parts": [{"text": instructions}]}
+        if max_tokens is not None:
+            body["generationConfig"]["maxOutputTokens"] = max_tokens
         if temperature is not None:
             body["generationConfig"]["temperature"] = temperature
         if top_p is not None:

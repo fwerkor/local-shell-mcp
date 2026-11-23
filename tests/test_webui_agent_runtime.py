@@ -34,7 +34,7 @@ async def test_no_tools_routes_directly_to_model_and_end_with_parameters():
 
     async def stream(model, messages, **kwargs):
         assert model.model == "root" and messages == [{"role": "user", "content": "question"}]
-        assert kwargs == {"max_tokens": 16384, "temperature": 0.0}
+        assert kwargs == {"max_tokens": 999999, "temperature": 0.0}
         yield "Hello"
         yield ""
         yield " world"

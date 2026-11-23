@@ -101,7 +101,7 @@ export const librechat = {
     labelCode: true,
     type: 'number',
     component: 'input',
-    placeholder: 'com_endpoint_default',
+    placeholder: 'com_ui_unlimited',
     placeholderCode: true,
     description: 'com_endpoint_context_info',
     descriptionCode: true,
@@ -158,7 +158,7 @@ export const librechat = {
     labelCode: true,
     description: 'com_ui_file_token_limit_desc',
     descriptionCode: true,
-    placeholder: 'com_endpoint_default',
+    placeholder: 'com_ui_unlimited',
     placeholderCode: true,
     type: 'number',
     component: 'input',
@@ -403,7 +403,7 @@ const anthropic: Record<string, SettingDefinition> = {
     component: 'input',
     description: 'com_endpoint_anthropic_maxoutputtokens',
     descriptionCode: true,
-    placeholder: 'com_endpoint_default',
+    placeholder: 'com_ui_unlimited',
     placeholderCode: true,
     range: {
       min: anthropicSettings.maxOutputTokens.min,
@@ -593,7 +593,7 @@ const bedrock: Record<string, SettingDefinition> = {
     component: 'input',
     description: 'com_endpoint_anthropic_maxoutputtokens',
     descriptionCode: true,
-    placeholder: 'com_endpoint_default',
+    placeholder: 'com_ui_unlimited',
     placeholderCode: true,
     optionType: 'model',
     columnSpan: 2,
@@ -748,9 +748,8 @@ const google: Record<string, SettingDefinition> = {
     component: 'input',
     description: 'com_endpoint_google_maxoutputtokens',
     descriptionCode: true,
-    placeholder: 'com_endpoint_default',
+    placeholder: 'com_ui_unlimited',
     placeholderCode: true,
-    default: googleSettings.maxOutputTokens.default,
     range: {
       min: googleSettings.maxOutputTokens.min,
       max: googleSettings.maxOutputTokens.max,
@@ -1384,9 +1383,6 @@ export function applyModelAwareDefaults(
   const modelAwareSettings =
     endpoint === EModelEndpoint.google
       ? settings.map((setting) => {
-          if (setting.key === 'maxOutputTokens') {
-            return { ...setting, default: googleSettings.maxOutputTokens.reset(model) };
-          }
           /** The shared thinking budget range is model-agnostic, so it caps Pro below
            *  its real ceiling and accepts Flash values the provider rejects. The
            *  maximum and the positive floor move together. `range.min` stays -1 so

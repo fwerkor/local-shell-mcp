@@ -48,7 +48,7 @@ async def start_task(env, model, *, call_id="task-1", text="description",
     invocation = SubagentInvocation(
         agent=config.agent, messages=[{"role": "user", "content": text}],
         selected_tools=tuple(config.agent.get("tools") or []),
-        max_turns=config.max_turns, recursion_limit=config.max_turns * 3,
+        max_turns=config.max_turns, recursion_limit=config.max_turns * 3 if config.max_turns is not None else None,
         remaining_depth=0, scopes=scopes, grant_expires=grant_expires,
         owner="local", conversation_id=generation.conversation_id,
         parent_run_id=generation.run_id, parent_tool_call_id=call_id,

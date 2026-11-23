@@ -73,7 +73,24 @@ def test_original_recursion_budget_cascade():
         [{}, {"recursionLimit": 75}, {"maxRecursionLimit": 20},
          {"recursionLimit": 90, "maxRecursionLimit": 30}, {"maxRecursionLimit": -1}],
     )]
-    assert [resolve_subagent_max_turns(case["agent"], case["endpoint"]) for case in cases] == _oracle("budget", cases)
+    reference = _oracle("budget", cases)
+    for case, expected in zip(cases, reference):
+        actual = resolve_subagent_max_turns(case["agent"], case["endpoint"])
+        # The upstream implementation inserts a 50-step implicit fallback.
+        # LSM deliberately leaves the budget unset when no cap was selected.
+        if actual is None:
+            assert not (
+                type(case["agent"].get("recursion_limit")) in (int, float)
+                and case["agent"]["recursion_limit"] > 0
+            )
+            assert not any(type(case["endpoint"].get(key)) in (int, float)
+                           and case["endpoint"][key] > 0
+                           for key in ("recursionLimit", "maxRecursionLimit")
+                           if key in case["endpoint"])
+        else:
+            assert actual == expected
+    assert resolve_subagent_max_turns({}) is None
+    assert resolve_subagent_max_turns({"recursion_limit": 30}) == 10
 
 
 def test_original_result_projection_strips_reasoning_and_intermediate_tools():
@@ -178,7 +195,7 @@ async def test_shared_child_execution_is_isolated_and_scope_bound(db):
         assert invocation.selected_tools == ("file_read",)
         assert invocation.scopes == frozenset({"shell:read"})
         assert invocation.grant_expires == expiry
-        assert invocation.recursion_limit == 48 and invocation.remaining_depth == 4
+        assert invocation.recursion_limit is None and invocation.remaining_depth == 4
         assert invocation.parent_tool_call_id == "call-1"
         assert invocation.parent_run_id == "run-1" and invocation.owner == "alice"
         assert invocation.conversation_id == "conversation-1"
@@ -279,7 +296,7 @@ async def test_child_multi_step_real_provider_wire_and_native_tools_respect_revo
 
     async def execute(invocation):
         history = list(invocation.messages)
-        for _ in range(invocation.max_turns):
+        for _ in range(invocation.max_turns or 8):
             tools = [entry for entry in registry.available_tools("local", cid, scopes=set(invocation.scopes))
                      if entry["function"]["name"] in invocation.selected_tools]
             calls, text = [], ""
