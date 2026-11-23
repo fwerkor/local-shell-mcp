@@ -1,8 +1,13 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useToastContext } from '@librechat/client';
 import { useRecoilValue } from 'recoil';
-import type { EModelEndpoint, TConversation } from 'librechat-data-provider';
+import { Constants, QueryKeys, dataService } from 'librechat-data-provider';
+import type { EModelEndpoint, TConversation, TUpdateConversationRequest } from 'librechat-data-provider';
 import type { ConvoGenerator } from '~/common';
 import { useGetConversation, useNewConvo } from '~/hooks';
+import { NotificationSeverity } from '~/common';
+import { updateConvoInAllQueries } from '~/utils';
 import store from '~/store';
 
 interface ModelSelectorChatContextValue {
@@ -13,6 +18,7 @@ interface ModelSelectorChatContextValue {
   assistant_id?: string | null;
   getConversation: () => TConversation | null;
   newConversation: ConvoGenerator;
+  selectExistingConversation: (selection: Partial<TConversation>) => boolean;
 }
 
 const ModelSelectorChatContext = createContext<ModelSelectorChatContextValue | undefined>(
@@ -21,6 +27,10 @@ const ModelSelectorChatContext = createContext<ModelSelectorChatContextValue | u
 
 export function ModelSelectorChatProvider({ children }: { children: React.ReactNode }) {
   const getConversation = useGetConversation(0);
+  const { setConversation } = store.useSetConversationAtom(0);
+  const queryClient = useQueryClient();
+  const { showToast } = useToastContext();
+  const pendingSave = useRef<Promise<void>>(Promise.resolve());
   const { newConversation: nextNewConversation } = useNewConvo();
 
   const spec = useRecoilValue(store.conversationSpecByIndex(0));
@@ -36,6 +46,45 @@ export function ModelSelectorChatProvider({ children }: { children: React.ReactN
     [],
   );
 
+  /** A model selection belongs to the active saved conversation. Do not route it
+   * through newConversation(), which turns it into an unsaved /c/new draft.
+   * Serialize quick successive picks so an earlier HTTP response cannot win. */
+  const selectExistingConversation = useCallback(
+    (selection: Partial<TConversation>): boolean => {
+      const conversationId = getConversation()?.conversationId;
+      if (!conversationId || conversationId === Constants.NEW_CONVO || conversationId.startsWith('_')) {
+        return false;
+      }
+
+      setConversation((previous) =>
+        previous?.conversationId === conversationId ? { ...previous, ...selection } : previous,
+      );
+      pendingSave.current = pendingSave.current
+        .catch(() => undefined)
+        .then(async () => {
+          const saved = await dataService.updateConversation({ conversationId, ...selection } as TUpdateConversationRequest);
+          const mergeSavedSelection = (previous: TConversation) => ({
+            ...previous,
+            ...selection,
+            updatedAt: saved.updatedAt,
+          });
+          queryClient.setQueryData<TConversation>([QueryKeys.conversation, conversationId], (previous) =>
+            previous ? mergeSavedSelection(previous) : saved,
+          );
+          updateConvoInAllQueries(queryClient, conversationId, mergeSavedSelection);
+        })
+        .catch((error) => {
+          console.error('Failed to save conversation model selection', error);
+          showToast({
+            message: 'Could not save the selected model. Refreshing may restore the previous model.',
+            severity: NotificationSeverity.ERROR,
+          });
+        });
+      return true;
+    },
+    [getConversation, queryClient, setConversation, showToast],
+  );
+
   /** Context value only created when relevant conversation properties change */
   const contextValue = useMemo<ModelSelectorChatContextValue>(
     () => ({
@@ -46,8 +95,9 @@ export function ModelSelectorChatProvider({ children }: { children: React.ReactN
       assistant_id,
       getConversation,
       newConversation,
+      selectExistingConversation,
     }),
-    [endpoint, model, spec, agent_id, assistant_id, getConversation, newConversation],
+    [endpoint, model, spec, agent_id, assistant_id, getConversation, newConversation, selectExistingConversation],
   );
 
   return (

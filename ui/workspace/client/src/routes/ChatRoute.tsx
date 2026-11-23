@@ -17,6 +17,7 @@ import {
   isTemporaryConversation,
   logger,
   clearMessagesCache,
+  getLocalStorageItems,
 } from '~/utils';
 import {
   useGetConvoIdQuery,
@@ -220,6 +221,19 @@ export default function ChatRoute() {
     }
 
     const getNewConvoPreset = () => {
+      // An unsubmitted /c/new chat has no server record yet. Restore its own
+      // model selection on reload instead of replacing it with the default spec.
+      const draft = getLocalStorageItems().lastConversationSetup;
+      if (
+        Object.keys(querySettings).length === 0 &&
+        draft?.conversationId === Constants.NEW_CONVO &&
+        (draft.chatProjectId ?? null) === chatProjectId &&
+        draft.endpoint && endpointsQuery.data?.[draft.endpoint] &&
+        hasModelSelection(draft)
+      ) {
+        return draft as TPreset;
+      }
+
       /** A spec named in the URL is an explicit selection: it must resolve to its own
        * full preset, or stale last-selection state (endpoint/agent) fills the gaps.
        * Names absent from the client config (e.g. `showInMenu: false`) stay in the

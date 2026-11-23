@@ -401,10 +401,7 @@ export type TAgentApiKeyListResponse = {
   keys: TAgentApiKeyListItem[];
 };
 
-export type TUpdateConversationRequest = {
-  conversationId: string;
-  title: string;
-};
+export type TUpdateConversationRequest = { conversationId: string } & Partial<TConversation>;
 
 export type TUpdateConversationResponse = TConversation;
 

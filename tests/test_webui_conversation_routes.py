@@ -30,6 +30,16 @@ async def test_archive_pin_update_duplicate_and_message_listing(tmp_path, monkey
         updated = await client.post("/api/convos/update", json={"arg": {"conversationId": cid, "title": "Renamed"}})
         assert updated.status_code == 200
         assert updated.json()["title"] == "Renamed"
+        # Selection updates are persisted before the next message is sent.
+        selection = {"conversationId": cid, "endpoint": "openAI", "model": "selected-model", "spec": None}
+        switched = await client.post("/api/convos/update", json={"arg": selection})
+        assert switched.status_code == 200
+        assert switched.json()["model"] == "selected-model"
+        loaded = (await client.get(f"/api/convos/{cid}")).json()
+        assert loaded["endpoint"] == "openAI"
+        assert loaded["model"] == "selected-model"
+        assert next(item for item in (await client.get("/api/convos")).json()["conversations"]
+                    if item["conversationId"] == cid)["model"] == "selected-model"
         pinned = await client.post("/api/convos/pin", json={"arg": {"conversationId": cid, "pinned": True}})
         assert pinned.json()["pinned"] is True
         archived = await client.post("/api/convos/archive", json={"arg": {"conversationId": cid, "isArchived": True}})
