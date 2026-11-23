@@ -412,9 +412,14 @@ def _xls_html(data: bytes) -> str:
     """SheetJS legacy-BIFF fallback with a small pure-Python XLS reader."""
     from struct import error as StructError
 
-    import xlrd
-    from xlrd.compdoc import CompDocError
-    from xlrd.xldate import xldate_as_datetime
+    try:
+        import xlrd
+        from xlrd.compdoc import CompDocError
+        from xlrd.xldate import xldate_as_datetime
+    except ImportError as exc:
+        # Rendering is optional. The publisher records a failed preview while
+        # keeping the original XLS attachment available for download.
+        raise ValueError('Legacy XLS preview requires xlrd') from exc
 
     try:
         book = xlrd.open_workbook(file_contents=data, on_demand=True)
