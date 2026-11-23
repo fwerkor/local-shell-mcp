@@ -17,13 +17,19 @@ from local_shell_mcp.webui.storage import WorkspaceRepository, _json
 
 @pytest.fixture
 def state(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    get_settings.cache_clear()
     repo = WorkspaceRepository(SQLiteDatabase(tmp_path))
     for module in (routes, skill_routes, skill_tree_routes, tag_routes):
         monkeypatch.setattr(module, '_repo', lambda: repo)
         monkeypatch.setattr(module, '_owner', lambda request: request.headers.get('x-owner', 'alice'))
     server = Starlette(routes=[*tag_routes.tag_routes(), *skill_tree_routes.skill_tree_routes(),
                                *skill_routes.skill_routes(), Route('/api/convos', routes.conversations, methods=['GET'])])
-    return server, repo
+    yield server, repo
+    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio

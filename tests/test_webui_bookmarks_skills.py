@@ -9,6 +9,7 @@ import pytest
 from starlette.applications import Starlette
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
+from local_shell_mcp.settings import get_settings
 from local_shell_mcp.webui import skill_routes, skill_tree_routes, tag_routes
 from local_shell_mcp.webui.skill_runtime import catalog, load
 from local_shell_mcp.webui.storage import WorkspaceRepository
@@ -16,13 +17,17 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    get_settings.cache_clear()
     database = SQLiteDatabase(tmp_path)
     repo = WorkspaceRepository(database)
     for module in (skill_routes, skill_tree_routes, tag_routes):
         monkeypatch.setattr(module, '_repo', lambda: repo)
         monkeypatch.setattr(module, '_owner', lambda request: request.headers.get('x-owner', 'alice'))
-    return Starlette(routes=[*tag_routes.tag_routes(), *skill_tree_routes.skill_tree_routes(),
-                            *skill_routes.skill_routes()]), repo
+    yield Starlette(routes=[*tag_routes.tag_routes(), *skill_tree_routes.skill_tree_routes(),
+                           *skill_routes.skill_routes()]), repo
+    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio

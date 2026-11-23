@@ -14,6 +14,11 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 
 @pytest.fixture
 def state(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path)
     repo = WorkspaceRepository(db)
     monkeypatch.setattr(schedule_routes, '_repo', lambda: repo)
@@ -23,7 +28,8 @@ def state(tmp_path, monkeypatch):
         'name': 'Timer', 'provider': 'openAI', 'model': 'mock-model',
     })
     app = Starlette(routes=schedule_routes.schedule_routes())
-    return app, repo, agent
+    yield app, repo, agent
+    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio

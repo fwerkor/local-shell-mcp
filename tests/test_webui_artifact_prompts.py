@@ -226,7 +226,10 @@ async def test_live_artifact_generation_sse_persistence_and_next_turn(tmp_path, 
             == "Edited HTML read back."
         )
         assert len(seen) == 2
-        assert seen[1][0]["role"] != "system"
+        # Custom artifact mode omits the default artifact prompt, but the
+        # separately enabled personal Memory guard may still be a system turn.
+        assert all("application/vnd.react" not in str(message.get("content", ""))
+                   for message in seen[1] if message.get("role") == "system")
     finally:
         await generation_routes.shutdown_generations()
         get_settings.cache_clear()
