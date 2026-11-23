@@ -11,7 +11,6 @@ import ToolsSection from './Tools/ToolsSection';
 import { cn } from '~/utils';
 import Instructions from './Instructions';
 import FileContext from './FileContext';
-import AgentAvatar from './AgentAvatar';
 import { Panel } from '~/common';
 
 const fieldClass = 'h-9';
@@ -28,7 +27,6 @@ export default function AgentConfig() {
   } = methods;
   const provider = useWatch({ control, name: 'provider' });
   const model = useWatch({ control, name: 'model' });
-  const agent = useWatch({ control, name: 'agent' });
   const agent_id = useWatch({ control, name: 'id' });
   const { contextFiles } = useAgentFileEntries();
 
@@ -40,59 +38,54 @@ export default function AgentConfig() {
 
   return (
     <div className="h-auto pt-1">
-      {/* IDENTITY — flat header, always visible, avatar inline */}
-      <div className="mb-3 mt-1 flex items-center gap-3">
-        <div className="flex-shrink-0">
-          <AgentAvatar avatar={agent?.['avatar'] ?? null} />
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <Controller
-            name="name"
-            rules={{ required: localize('com_ui_agent_name_is_required') }}
-            control={control}
-            render={({ field }) => (
-              <div className="flex flex-col">
-                <Input
-                  {...field}
-                  value={field.value ?? ''}
-                  maxLength={256}
-                  className={cn(fieldClass, 'font-medium')}
-                  id="name"
-                  type="text"
-                  placeholder={localize('com_agents_name_placeholder')}
-                  aria-label={localize('com_ui_agent_name')}
-                  aria-invalid={!!errors.name}
-                  aria-describedby={errors.name ? 'agent-name-error' : undefined}
-                />
-                {errors.name && (
-                  <div
-                    id="agent-name-error"
-                    className="mt-1 text-xs text-text-destructive"
-                    role="alert"
-                  >
-                    {errors.name.message}
-                  </div>
-                )}
-              </div>
-            )}
-          />
-          <Controller
-            name="description"
-            control={control}
-            render={({ field }) => (
+      {/* Identity fields use the full panel width. */}
+      <div className="mb-3 mt-1 flex min-w-0 flex-col gap-2">
+        <Controller
+          name="name"
+          rules={{ required: localize('com_ui_agent_name_is_required') }}
+          control={control}
+          render={({ field }) => (
+            <div className="flex flex-col">
               <Input
                 {...field}
                 value={field.value ?? ''}
-                maxLength={512}
-                className={fieldClass}
-                id="description"
+                maxLength={256}
+                className={cn(fieldClass, 'font-medium')}
+                id="name"
                 type="text"
-                placeholder={localize('com_agents_description_placeholder')}
-                aria-label={localize('com_ui_agent_description')}
+                placeholder={localize('com_agents_name_placeholder')}
+                aria-label={localize('com_ui_agent_name')}
+                aria-invalid={!!errors.name}
+                aria-describedby={errors.name ? 'agent-name-error' : undefined}
               />
-            )}
-          />
-        </div>
+              {errors.name && (
+                <div
+                  id="agent-name-error"
+                  className="mt-1 text-xs text-text-destructive"
+                  role="alert"
+                >
+                  {errors.name.message}
+                </div>
+              )}
+            </div>
+          )}
+        />
+        <Controller
+          name="description"
+          control={control}
+          render={({ field }) => (
+            <Input
+              {...field}
+              value={field.value ?? ''}
+              maxLength={512}
+              className={fieldClass}
+              id="description"
+              type="text"
+              placeholder={localize('com_agents_description_placeholder')}
+              aria-label={localize('com_ui_agent_description')}
+            />
+          )}
+        />
       </div>
 
       {/* MODEL + CATEGORY — balanced 2-column grid */}

@@ -127,13 +127,13 @@ describe('getSpecAgentAvatarURL', () => {
   const agentSpec = (agent_id?: string, endpoint: string = EModelEndpoint.agents): TModelSpec =>
     ({ name: 'n', label: 'l', preset: { endpoint, agent_id } }) as TModelSpec;
 
-  it('resolves an object avatar', () => {
-    expect(getSpecAgentAvatarURL(agentSpec('agent_obj'), agentsMap)).toBe('/images/obj.png');
+  it('does not display stored agent avatars', () => {
+    expect(getSpecAgentAvatarURL(agentSpec('agent_obj'), agentsMap)).toBeUndefined();
   });
 
   /** Agents persisted before the object format still store the URL as a string. */
-  it('resolves a legacy string avatar', () => {
-    expect(getSpecAgentAvatarURL(agentSpec('agent_str'), agentsMap)).toBe('/images/legacy.png');
+  it('does not display legacy string avatars', () => {
+    expect(getSpecAgentAvatarURL(agentSpec('agent_str'), agentsMap)).toBeUndefined();
   });
 
   /** A leftover agent_id must not surface an unrelated agent on a non-agent spec. */
