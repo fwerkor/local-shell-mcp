@@ -37,7 +37,7 @@ async def test_revalidate_redirect_target(monkeypatch):
     monkeypatch.setattr(web, '_public_address', lambda host: True)
     # Even if name resolution is mocked, _safe_url must block direct loopback.
     monkeypatch.setattr(web.httpx, 'AsyncClient', lambda **kw: real_client(
-        transport=httpx.MockTransport(handler), **kw))
+        **{**kw, 'transport': httpx.MockTransport(handler)}))
     with pytest.raises(web.WebResearchError, match='Private'):
         await web._download('https://example.org/')
 

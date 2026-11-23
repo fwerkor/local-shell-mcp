@@ -14,18 +14,23 @@ The Agent receives only two first-party read-only web tools:
   JSON/XML, Markdown, and PDFs. An arXiv abstract URL opens the HTML full text
   when available and otherwise attempts its PDF, without a separate paper API.
 
-The first fetch caches the full extracted text privately on the Controller,
+The first fetch caches the full extracted text privately on the Controller when its
+cache directory is writable,
 while returning at most 8,000 characters, the document length, and headings
 or PDF page markers. The Agent can read more with `offset` / `limit` (up to
 12,000 characters per call) or find a passage with `query`. The cache is scoped
 to the authenticated user, expires after 24 hours, and is limited to 80 files
 per user. The fetcher enforces a 20 MiB download limit and a 3 MiB extracted
 text limit; it rejects local/private network targets, credentials in URLs,
-nonstandard ports and unsafe redirects.
+nonstandard ports and unsafe redirects. Outbound TCP sockets connect only to
+validated public IPs, preventing DNS rebinding between URL checks and connection.
 
 PDF extraction uses PyMuPDF when available and falls back to `pypdf`.
-Scanned PDFs without a text layer require OCR and currently cannot be fully
-read by this tool. Unsupported file formats are rejected explicitly.
+Scanned PDFs without a text layer require OCR and return an explicit error.
+HTML with a non-UTF-8 HTTP or meta charset is decoded accordingly.
+Unsupported file formats are rejected explicitly.
 
 The WebUI displays the search result links in the existing tool-result card.
 AI answers should cite the original URLs and PDF page numbers when possible.
+Search snippets and fetched page contents are untrusted external data; embedded
+instructions must not override the user or Agent configuration.

@@ -67,7 +67,7 @@ async def test_bounded_http_fetch_paths(monkeypatch, kind, message):
 
     monkeypatch.setattr(web, '_public_address', lambda host: True)
     monkeypatch.setattr(web.httpx, 'AsyncClient', lambda **kwargs: original(
-        transport=httpx.MockTransport(handler), **kwargs))
+        **{**kwargs, 'transport': httpx.MockTransport(handler)}))
     url = 'https://example.org/start' if kind == 'redirect' else 'https://example.org/forever'
     if message:
         with pytest.raises(web.WebResearchError, match=message):
@@ -265,3 +265,125 @@ async def test_non_arxiv_fetch_failure_and_dispatch_arguments(monkeypatch, tmp_p
         assert 'error' in response
     output = json.loads(await web.invoke_web_tool('alice', 'web_fetch', {'url': 'https://example.org/'}))
     assert 'error' in output
+
+@pytest.mark.asyncio
+async def test_dial_time_dns_rebinding_is_blocked(monkeypatch):
+    """The preflight DNS answer cannot authorize a different dial-time answer."""
+    queries = []
+    def dns(host, port, **kwargs):
+        queries.append((host, port))
+        # A hostname can change between the URL precheck and socket creation.
+        ip = '8.8.8.8' if len(queries) == 1 else '127.0.0.1'
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, port or 443))]
+    monkeypatch.setattr(web.socket, 'getaddrinfo', dns)
+    with pytest.raises(web.WebResearchError, match='Unable to fetch URL'):
+        await web._download('https://rebind.example.org/x')
+    assert len(queries) >= 2
+
+
+@pytest.mark.asyncio
+async def test_network_backend_connects_only_pinned_public_ips(monkeypatch):
+    addresses = []
+    class FakeSocketBackend:
+        async def connect_tcp(self, host, port, **kwargs):
+            addresses.append((host, port, kwargs['timeout']))
+            return object()
+        async def sleep(self, seconds):
+            return None
+
+    monkeypatch.setattr(web.socket, 'getaddrinfo', lambda host, port, **kw: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', port)),
+        (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('1.1.1.1', port)),
+    ])
+    backend = web._PublicNetworkBackend()
+    backend._backend = FakeSocketBackend()
+    assert await backend.connect_tcp('public.example.org', 443, timeout=6) is not None
+    assert addresses == [('8.8.8.8', 443, 6)]
+    with pytest.raises(web.httpcore.ConnectError):
+        await backend.connect_unix_socket('/run/container.sock')
+    monkeypatch.setattr(web.socket, 'getaddrinfo', lambda host, port, **kw: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', port)),
+        (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('10.1.1.1', port)),
+    ])
+    with pytest.raises(web.httpcore.ConnectError):
+        await backend.connect_tcp('mixed.example.org', 443, timeout=6)
+    assert len(addresses) == 1
+
+
+def test_pdf_page_markers_match_exact_character_offsets(monkeypatch):
+    class Doc:
+        def __enter__(self):
+            return [SimpleNamespace(get_text=lambda **kwargs: 'Intro'),
+                    SimpleNamespace(get_text=lambda **kwargs: 'Final content')]
+        def __exit__(self, *args):
+            return None
+    monkeypatch.setitem(sys.modules, 'pymupdf', SimpleNamespace(open=lambda **kwargs: Doc()))
+    doc = web._parse_document('application/pdf', b'%PDF-1', 'https://example.org/paper.pdf')
+    assert doc['sections'][0]['offset'] == doc['text'].index('[Page 1]') == 0
+    assert doc['sections'][1]['offset'] == doc['text'].index('[Page 2]') - 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_invalid_url_types_return_tool_errors():
+    for url in (None, True, 123, [], {}, ''):
+        result = json.loads(await web.invoke_web_tool('alice', 'web_fetch', {'url': url}))
+        assert 'error' in result
+
+
+@pytest.mark.asyncio
+async def test_cache_io_failure_does_not_block_reading(monkeypatch, tmp_path):
+    monkeypatch.setattr(web, '_public_address', lambda hostname: True)
+    calls = []
+    async def download(url, **kw):
+        calls.append(url)
+        return url, 'text/plain', b'First-party web fetch still works'
+    monkeypatch.setattr(web, '_download', download)
+    monkeypatch.setattr(web, '_cache_file', lambda owner, url: (_ for _ in ()).throw(PermissionError('read-only')))
+    uncached = await web.web_fetch('alice', 'https://example.org/')
+    assert 'web fetch still works' in uncached['content'] and uncached['cached'] is False
+    monkeypatch.setattr(web, '_cache_file', lambda owner, url: tmp_path / 'read.json')
+    monkeypatch.setattr(web, '_store_cache', lambda path, data: (_ for _ in ()).throw(OSError('disk full')))
+    also_uncached = await web.web_fetch('alice', 'https://example.org/')
+    assert also_uncached['content'] == uncached['content'] and also_uncached['cached'] is False
+    assert len(calls) == 2
+
+
+def test_utf8_byte_limit_not_character_count(monkeypatch):
+    monkeypatch.setattr(web, '_MAX_TEXT', 10)
+    with pytest.raises(web.WebResearchError, match='3 MiB text limit'):
+        web._parse_document('text/plain', '汉汉汉汉'.encode(), 'https://example.org/unicode')
+
+
+def test_non_utf8_html_charset_and_binary_rejections(monkeypatch):
+    gbk = '<html><head><meta charset="gb2312"><title>中文论文</title></head><body><p>研究成果</p></body></html>'.encode('gbk')
+    meta = web._parse_document('text/html', gbk, 'https://example.org/zh.html')
+    assert meta['title'] == '中文论文' and '研究成果' in meta['text']
+    header = web._parse_document('text/html; charset=gbk', '中文正文'.encode('gbk'), 'https://example.org/zh.html')
+    assert '中文正文' in header['text']
+    unknown = web._parse_document('text/plain; charset=x-unknown', b'fallback text', 'https://example.org/plain')
+    assert unknown['text'] == 'fallback text'
+    with pytest.raises(web.WebResearchError, match='binary'):
+        web._parse_document('application/octet-stream', b'\0\xff\0', 'https://example.org/archive.bin')
+
+
+def test_scan_only_pdf_reports_ocr_required(monkeypatch):
+    class Document:
+        def __enter__(self):
+            return [SimpleNamespace(get_text=lambda **kw: '')]
+        def __exit__(self, *args):
+            return None
+    monkeypatch.setitem(sys.modules, 'pymupdf', SimpleNamespace(open=lambda **kw: Document()))
+    with pytest.raises(web.WebResearchError, match='OCR'):
+        web._parse_document('application/pdf', b'%PDF-1', 'https://example.org/scan.pdf')
+
+
+@pytest.mark.asyncio
+async def test_slow_stream_has_total_request_deadline(monkeypatch):
+    import asyncio
+    async def never_finishes(url, **kwargs):
+        await asyncio.sleep(0.06)
+        return url, 'text/plain', b'unexpected'
+    monkeypatch.setattr(web, '_FETCH_DEADLINE', 0.005)
+    monkeypatch.setattr(web, '_download_stream', never_finishes)
+    with pytest.raises(web.WebResearchError, match='deadline'):
+        await web._download('https://example.org/slow')
