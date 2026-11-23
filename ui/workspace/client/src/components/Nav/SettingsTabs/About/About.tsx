@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import copy from 'copy-to-clipboard';
-import { Constants } from 'librechat-data-provider';
 import type { TStartupConfig } from 'librechat-data-provider';
 import CopyButton from '~/components/Messages/Content/CopyButton';
 import { useGetStartupConfig } from '~/data-provider';
@@ -27,10 +26,10 @@ function buildDiagnosticsBlob(
   buildInfo: TStartupConfig['buildInfo'] | undefined,
 ): string {
   const lines: string[] = [
-    `LibreChat version: ${version}`,
-    `Commit: ${buildInfo?.commit ?? UNKNOWN_PLACEHOLDER}`,
-    `Branch: ${buildInfo?.branch ?? UNKNOWN_PLACEHOLDER}`,
-    `Build date: ${formatBuildDate(buildInfo?.buildDate)}`,
+    `local-shell-mcp version: ${version}`,
+    ...(buildInfo?.commit ? [`Commit: ${buildInfo.commit}`] : []),
+    ...(buildInfo?.branch ? [`Branch: ${buildInfo.branch}`] : []),
+    ...(buildInfo?.buildDate ? [`Build date: ${formatBuildDate(buildInfo.buildDate)}`] : []),
     `User agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : UNKNOWN_PLACEHOLDER}`,
   ];
   return lines.join('\n');
@@ -52,7 +51,7 @@ function About() {
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const buildInfo = startupConfig?.buildInfo;
-  const version: string = Constants.VERSION;
+  const version = startupConfig?.lsmVersion ?? UNKNOWN_PLACEHOLDER;
 
   const diagnosticsBlob = useMemo(
     () => buildDiagnosticsBlob(version, buildInfo),
@@ -84,18 +83,21 @@ function About() {
     <div className="flex flex-col text-sm text-text-primary">
       <dl className="flex flex-col divide-y divide-border-light">
         <Row label={localize('com_nav_about_version')} value={version} />
-        <Row
-          label={localize('com_nav_about_commit')}
-          value={buildInfo?.commitShort ?? UNKNOWN_PLACEHOLDER}
-        />
-        <Row
-          label={localize('com_nav_about_branch')}
-          value={buildInfo?.branch ?? UNKNOWN_PLACEHOLDER}
-        />
-        <Row
-          label={localize('com_nav_about_build_date')}
-          value={formatBuildDate(buildInfo?.buildDate)}
-        />
+        {(buildInfo?.commitShort || buildInfo?.commit) && (
+          <Row
+            label={localize('com_nav_about_commit')}
+            value={buildInfo.commitShort || buildInfo.commit || UNKNOWN_PLACEHOLDER}
+          />
+        )}
+        {buildInfo?.branch && (
+          <Row label={localize('com_nav_about_branch')} value={buildInfo.branch} />
+        )}
+        {buildInfo?.buildDate && (
+          <Row
+            label={localize('com_nav_about_build_date')}
+            value={formatBuildDate(buildInfo.buildDate)}
+          />
+        )}
       </dl>
 
       <div className="mt-4 flex flex-col items-start gap-3 border-t border-border-light pt-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
