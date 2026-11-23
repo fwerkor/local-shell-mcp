@@ -7,6 +7,7 @@ LSM rather than maintaining separate provider or machine execution systems.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,6 +22,21 @@ class RuntimeSafetyError(PermissionError):
 
 class AgentSuspended(Exception):
     """A durable human interrupt has been saved; leave the generation parked."""
+
+
+_MODEL_RETRY_DELAYS = (0.5, 1.5)
+
+
+def _retryable_model_error(error: Exception) -> bool:
+    """Only retry transient transport failures and explicitly temporary HTTP statuses."""
+    import httpx
+
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code in {408, 429, 500, 502, 503, 504}
+    return isinstance(error, (
+        httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError,
+        httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.PoolTimeout,
+    ))
 
 
 @dataclass
@@ -137,41 +153,57 @@ async def run_agent_loop(
         reasoning: list[dict] = []
         projected = project_messages(state) if project_messages else state.messages
         state.provider_projection = projected
-        source = stream_tools(context.profile, projected, tools=context.tools,
-                              **sampling) if context.tools else \
-            stream_text(context.profile, projected, **sampling)
         preempted = False
-        try:
-            async for item in source:
-                if isinstance(item, ModelToolCall):
-                    calls.append(item)
-                elif isinstance(item, ModelUsage):
-                    if on_model_usage is not None:
-                        await on_model_usage(item, state)
-                elif isinstance(item, ModelThought):
-                    if item.kind == 'thinking':
-                        if reasoning and reasoning[-1].get('type') == 'thinking' and not reasoning[-1].get('signature'):
-                            reasoning[-1]['thinking'] += item.text
-                        else:
-                            reasoning.append({'type': 'thinking', 'thinking': item.text})
-                    elif item.kind == 'signature':
-                        if reasoning and reasoning[-1].get('type') == 'thinking':
-                            reasoning[-1]['signature'] = item.signature
-                    elif item.kind == 'redacted_thinking':
-                        reasoning.append({'type': 'redacted_thinking', 'data': item.data})
-                elif item:
-                    text_parts.append(item)
-                    await on_text(item)
-                # Model streams may contain only tool calls. Both the durable
-                # user steer and detached-child interrupt can preempt these.
+        # Retry only an *empty* model attempt. Text and complete tool proposals
+        # are observable, so replaying them could duplicate output or actions.
+        # A new model attempt keeps the graph turn and completed tool results.
+        for attempt in range(len(_MODEL_RETRY_DELAYS) + 1):
+            source = stream_tools(context.profile, projected, tools=context.tools,
+                                  **sampling) if context.tools else \
+                stream_text(context.profile, projected, **sampling)
+            try:
+                async for item in source:
+                    if isinstance(item, ModelToolCall):
+                        calls.append(item)
+                    elif isinstance(item, ModelUsage):
+                        if on_model_usage is not None:
+                            await on_model_usage(item, state)
+                    elif isinstance(item, ModelThought):
+                        if item.kind == 'thinking':
+                            if reasoning and reasoning[-1].get('type') == 'thinking' and not reasoning[-1].get('signature'):
+                                reasoning[-1]['thinking'] += item.text
+                            else:
+                                reasoning.append({'type': 'thinking', 'thinking': item.text})
+                        elif item.kind == 'signature':
+                            if reasoning and reasoning[-1].get('type') == 'thinking':
+                                reasoning[-1]['signature'] = item.signature
+                        elif item.kind == 'redacted_thinking':
+                            reasoning.append({'type': 'redacted_thinking', 'data': item.data})
+                    elif item:
+                        text_parts.append(item)
+                        await on_text(item)
+                    # Model streams may contain only tool calls. Both the durable
+                    # user steer and detached-child interrupt can preempt these.
+                    if ((should_preempt is not None and should_preempt()) or
+                        (on_stream_chunk is not None and await on_stream_chunk())):
+                        preempted = True
+                        break
+            except Exception as error:
+                if (attempt == len(_MODEL_RETRY_DELAYS) or text_parts or calls or reasoning
+                        or not _retryable_model_error(error)):
+                    raise
+                # Honor revocation and user interrupts even during backoff.
                 if ((should_preempt is not None and should_preempt()) or
                     (on_stream_chunk is not None and await on_stream_chunk())):
                     preempted = True
                     break
-        finally:
-            close = getattr(source, "aclose", None)
-            if close is not None:
-                await close()
+                await asyncio.sleep(_MODEL_RETRY_DELAYS[attempt])
+                continue
+            finally:
+                close = getattr(source, "aclose", None)
+                if close is not None:
+                    await close()
+            break
         # A steer can arrive between final SSE chunk and tool dispatch.
         if not preempted and ((should_preempt is not None and should_preempt()) or
                               (on_stream_chunk is not None and await on_stream_chunk())):

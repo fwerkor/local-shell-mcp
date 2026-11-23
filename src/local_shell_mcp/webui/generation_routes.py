@@ -40,6 +40,22 @@ _TASK_GUARD = asyncio.Lock()
 _SHUTDOWN_TASKS: set[asyncio.Task] = set()
 
 
+def _safe_model_error(error: Exception) -> str:
+    """Explain provider failures without exposing request URLs, keys or headers."""
+    import httpx
+
+    name = type(error).__name__
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"Model provider returned HTTP {error.response.status_code} ({name})"
+    if isinstance(error, httpx.RemoteProtocolError):
+        return f"Model stream disconnected before completion ({name})"
+    if isinstance(error, (httpx.ReadError, httpx.ReadTimeout)):
+        return f"Model stream failed while reading the upstream response ({name})"
+    if isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+        return f"Unable to connect to model provider ({name})"
+    return f"Model generation failed ({name})"
+
+
 def _prune_stale_task_handles() -> None:
     """Do not hand tasks tied to a terminated loop to a replacement loop.
 
@@ -414,9 +430,10 @@ async def _run_model(
             except Exception:
                 return
         # Do not put provider tokens, request metadata or secrets in response.
-        log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
+        detail = _safe_model_error(exc)
+        log.warning("Model generation failed for %s: %s", generation.run_id, detail)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=f"Model generation failed ({type(exc).__name__})",
+                    error=detail,
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
                                                              "".join(text_parts)), actor_lease=actor_lease)
     finally:
