@@ -139,7 +139,10 @@ class AgentRunner:
                      and memory_enabled(settings, self.owner, tools=True))
         formatted = MemoryRepository(self.database).formatted(
             self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
-        if formatted.get('readFailed'):
+        if (formatted.get('readFailed') or
+                not (formatted.get('withKeys') or formatted.get('withoutKeys'))):
+            # Keep Memory enabled and its tools available without injecting an
+            # otherwise empty system message into every normal conversation.
             return ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
         return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
@@ -1194,11 +1197,26 @@ class AgentRunner:
             from .skill_runtime import catalog
 
             skills_text = catalog(self.database, self.owner, self.root_agent)
-            if skills_text:
-                history = [{'role': 'system', 'content': skills_text}, *history]
             memory_text = self._memory_context(self.root_agent)
+            supplementary = []
             if memory_text:
-                history = [{'role': 'system', 'content': memory_text}, *history]
+                supplementary.append({'role': 'system', 'content': memory_text})
+            if skills_text:
+                supplementary.append({'role': 'system', 'content': skills_text})
+            if supplementary:
+                # Preserve the built-in artifact/Agent system message as the
+                # single leading prompt, appending Memory/Skill context to it.
+                # Empty memories must never inject a second system message.
+                index = 0
+                while index < len(history) and history[index].get('role') == 'system':
+                    index += 1
+                if index:
+                    last = dict(history[index - 1])
+                    last['content'] = str(last['content']) + '\n\n' + '\n\n'.join(
+                        item['content'] for item in supplementary)
+                    history = [*history[:index - 1], last, *history[index:]]
+                else:
+                    history = [*supplementary, *history]
         state = AgentLoopState(context, history)
         if restored:
             self.active_config = restored["config"]

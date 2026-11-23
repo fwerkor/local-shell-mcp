@@ -179,12 +179,6 @@ async def api_health(request: Request):
     return JSONResponse({"status": "ok"})
 
 
-async def tags(request: Request):
-    _owner(request)
-    # No tags exist until the user assigns them in the Python project model.
-    return JSONResponse([])
-
-
 async def files_config(request: Request):
     _owner(request)
     from ..settings import get_settings
@@ -209,7 +203,6 @@ def misc_routes() -> list[Route]:
         Route("/health", api_health, methods=["GET"]),
         Route("/api/health", api_health, methods=["GET"]),
         Route("/api/banner", banner, methods=["GET"]),
-        Route("/api/tags", tags, methods=["GET"]),
         Route("/api/keys", user_key, methods=["GET"]),
         Route("/api/agents/tools/calls", tool_calls, methods=["GET"]),
         Route("/api/lsm/preferences/{conversation_id}", conversation_permissions, methods=["GET", "PUT"]),
