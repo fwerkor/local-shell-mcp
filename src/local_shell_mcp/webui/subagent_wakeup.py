@@ -473,8 +473,6 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     db.execute("UPDATE subagent_tasks SET result_claimed=0,result_claim_key=NULL "
                                "WHERE id=? AND result_claim_key=?", (task_id, "wakeup:" + task_id))
                     continue
-                # Candidate enumeration is only advisory. A second Controller
-                # must respect both an active lease and a scheduled retry.
                 # Candidate enumeration is only advisory. Another Controller
                 # may have renewed this lease while we waited for BEGIN
                 # IMMEDIATE. Never revoke its live actor or duplicate dispatch.

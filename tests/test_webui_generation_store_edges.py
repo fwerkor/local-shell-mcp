@@ -175,7 +175,7 @@ def test_oauth_dispatch_requires_original_stage_and_durable_completion_proof(cur
     store.append('alice', job.run_id, {'event': 'on_run_step_completed', 'data': {'result': {
         'tool_call': {'id': 'call-1', 'name': 'mcp_tool_call'},
     }}})
-    # Durable tool evidence now authorizes idempotent completion replay.
+    # Durable tool evidence authorizes idempotent completion replay.
     store.oauth_dispatch('alice', job.run_id, 'call-1', 'completed')
     store.oauth_dispatch('alice', job.run_id, 'call-1', 'cleared')
     with db.connect() as sql:

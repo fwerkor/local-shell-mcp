@@ -646,6 +646,7 @@ export default function useChatFunctions({
       null;
     /** Set only for edited resubmissions; see `TSubmission.editPrefixLength`. */
     let editPrefixLength: number | undefined;
+    let editPrefixTailText: string | undefined;
     const initialResponseId =
       responseMessageId ??
       `${regenerateShaped ? messageId : intermediateId}`.replace(/_+$/, '') + '_';
@@ -717,6 +718,13 @@ export default function useChatFunctions({
             contentPart[ContentTypes.TEXT] = part[ContentTypes.TEXT];
           }
         }
+        // Snapshot the actual retained text after the user's edit. The first
+        // provider text delta may fold into this slot instead of allocating a
+        // new part, so later recovery needs this immutable boundary.
+        const tail = initialResponse.content[initialResponse.content.length - 1];
+        if (tail?.type === ContentTypes.TEXT && typeof tail.text === 'string') {
+          editPrefixTailText = tail.text;
+        }
       } else if (addedConvo && conversation) {
         // Pre-populate placeholders for smooth UI - these will be overridden/extended
         // as SSE events arrive with actual content, preserving the agent-based agentId
@@ -771,6 +779,7 @@ export default function useChatFunctions({
       ephemeralAgent,
       editedContent,
       editPrefixLength,
+      editPrefixTailText,
       addedConvo,
       manualSkills: manualSkills.length > 0 ? manualSkills : undefined,
       codeApprovalMode,

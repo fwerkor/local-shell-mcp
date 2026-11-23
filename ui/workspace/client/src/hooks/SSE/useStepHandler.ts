@@ -79,7 +79,8 @@ type TStepEvent =
   | { event: StepEvents.ON_SUMMARIZE_COMPLETE; data: Agents.SummarizeCompleteEvent }
   | { event: StepEvents.ON_SUBAGENT_UPDATE; data: SubagentUpdateEvent }
   | { event: StepEvents.ON_SANDBOX_STARTING; data: SandboxStartingEvent }
-  | { event: StepEvents.ON_PTC_TOOL_CALL; data: PtcToolCallEvent };
+  | { event: StepEvents.ON_PTC_TOOL_CALL; data: PtcToolCallEvent }
+  | { event: 'on_content_rewind'; data: { preserveText: string; runId?: string } };
 
 type MessageDeltaUpdate = {
   type: ContentTypes.TEXT;
@@ -159,6 +160,49 @@ const isOAuthToolCallContent = (part?: Partial<TMessageContentParts>) => {
   const name = toolCall != null && 'name' in toolCall ? toolCall.name : undefined;
   return isOAuthToolCallName(name);
 };
+
+/** Match GenerationStore's checkpoint rewind: only provisional text is cut;
+ * tool cards and steer parts retain their relative order. Iterate Unicode
+ * scalars to mirror Python string slicing (including astral characters). */
+export function rewindStreamContent(
+  content: TMessageContentParts[],
+  preserved: string,
+  editPrefixOffset = 0,
+  editPrefixTailText?: string,
+): TMessageContentParts[] {
+  let remaining = Array.from(preserved).length;
+  // Live content is indexed by server RunStep.index, not an append-only
+  // packed array. Preserve sparse slots and the retained edit prefix: the
+  // checkpoint only covers text emitted by the current generation.
+  const retained = content.slice();
+  if (editPrefixOffset > 0 && editPrefixTailText !== undefined) {
+    const foldedIndex = editPrefixOffset - 1;
+    const folded = content[foldedIndex];
+    if (
+      folded?.type === ContentTypes.TEXT &&
+      typeof folded.text === 'string' &&
+      folded.text.startsWith(editPrefixTailText)
+    ) {
+      // RunStep 0 can append to the LAST retained text part (same phase).
+      // Preserve exactly the original edit text, and spend the checkpoint
+      // budget only on new text in that part before visiting later slots.
+      const suffix = Array.from(folded.text.slice(editPrefixTailText.length));
+      const kept = suffix.slice(0, remaining).join('');
+      remaining -= Math.min(remaining, suffix.length);
+      retained[foldedIndex] = { ...folded, text: editPrefixTailText + kept };
+    }
+  }
+  for (let index = editPrefixOffset; index < content.length; index++) {
+    const part = content[index];
+    if (part == null || part.type !== ContentTypes.TEXT) continue;
+    if (typeof part.text !== 'string') continue;
+    const chars = Array.from(part.text);
+    const kept = chars.slice(0, remaining).join('');
+    remaining -= Math.min(remaining, chars.length);
+    retained[index] = { ...part, text: kept };
+  }
+  return retained;
+}
 
 export default function useStepHandler({
   setMessages,
@@ -900,6 +944,40 @@ export default function useStepHandler({
       if (submission?.editedContent != null && submission?.editPrefixCleared !== true) {
         initialContent = submission?.initialResponse?.content ?? initialContent;
         editPrefixOffset = submission?.editPrefixLength ?? initialContent.length;
+      }
+
+      if (stepEvent.event === 'on_content_rewind') {
+        const { preserveText, runId } = stepEvent.data;
+        if (typeof preserveText !== 'string') return;
+        const latestStepId = [...stepMap.current.values()].at(-1)?.runId;
+        const responseId = runId || latestStepId || submission.initialResponse?.messageId;
+        if (!responseId) return;
+        const response = messageMap.current.get(responseId) ??
+          messages.find((message) => message.messageId === responseId);
+        if (!response) return;
+
+        // An already scheduled frame may still contain discarded tokens.
+        // Cancel it before replacing BOTH the rendered message and delta cache.
+        if (messageDeltaRaf.current != null) {
+          cancelAnimationFrame(messageDeltaRaf.current);
+          messageDeltaRaf.current = null;
+        }
+        deltaFlushScheduled.current = false;
+        pendingDeltaFlushRef.current = null;
+        pendingDeltaFlushIds.current.clear();
+        pendingDeltaBuffer.current.clear();
+        const updated = {
+          ...response,
+          content: rewindStreamContent(
+            response.content ?? [],
+            preserveText,
+            editPrefixOffset,
+            submission.editPrefixTailText,
+          ),
+        };
+        messageMap.current.set(responseId, updated);
+        setMessages(mergeResponseMessage(messages, updated, responseId, { ensureUserMessage: true }));
+        return;
       }
 
       if (stepEvent.event === StepEvents.ON_RUN_STEP) {

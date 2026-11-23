@@ -49,12 +49,14 @@ class GenerationConflict(Exception):
         super().__init__("Conversation already has an active generation")
 
 
-def _rewind_uncheckpointed_text(parts: list[dict], saved: str) -> None:
+def _rewind_uncheckpointed_text(parts: list[dict], saved: str, *, preserve_slots: bool = False) -> None:
     """Remove incomplete provider text after the last durable human checkpoint.
 
     Preserve the placement of tool calls and steers; only assistant text is
     provisional while a model stream is in flight. The exact checkpointed
     prefix is retained even when it spans several independent text parts.
+    Snapshot replay additionally keeps empty text placeholders: persisted
+    step indexes must remain stable when a cached tool completes again.
     """
     if not isinstance(saved, str):
         raise ValueError('Invalid checkpoint text prefix')
@@ -65,9 +67,11 @@ def _rewind_uncheckpointed_text(parts: list[dict], saved: str) -> None:
             retained.append(part)
             continue
         if remaining <= 0:
+            if preserve_slots:
+                retained.append({**part, 'text': ''})
             continue
         piece = part['text'][:remaining]
-        if piece:
+        if piece or preserve_slots:
             retained.append({**part, 'text': piece})
         remaining -= len(piece)
     parts[:] = retained
@@ -937,7 +941,10 @@ class GenerationStore:
             elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
                 content_parts.append(data["part"])
             elif event == 'on_content_rewind':
-                _rewind_uncheckpointed_text(content_parts, data.get('preserveText', ''))
+                _rewind_uncheckpointed_text(content_parts, data.get('preserveText', ''),
+                                           preserve_slots=True)
+                # Retain live content indices for React RunStep events, while
+                # validating recovered mappings before cached tool replay.
                 tool_slot_by_step = {
                     part["tool_call"]["stepId"]: index for index, part in enumerate(content_parts)
                     if part.get("type") == "tool_call" and isinstance(part.get("tool_call"), dict)
@@ -1646,6 +1653,16 @@ class GenerationStore:
                     content.append(data["part"])
                 elif kind == 'on_content_rewind':
                     _rewind_uncheckpointed_text(content, data.get('preserveText', ''))
+                    # Compacting abandoned text shifts surviving tool cards;
+                    # rebuild their positions before replaying completions or
+                    # applying final RunStep closure metadata.
+                    tool_positions = {
+                        part['tool_call']['stepId']: index
+                        for index, part in enumerate(content)
+                        if part.get('type') == 'tool_call'
+                        and isinstance(part.get('tool_call'), dict)
+                        and isinstance(part['tool_call'].get('stepId'), str)
+                    }
             if text and not any(isinstance(part, dict) and part.get('type') == 'text'
                                 for part in content):
                 content.append({"type": "text", "text": text, "phase": "final_answer"})

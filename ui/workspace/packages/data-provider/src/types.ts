@@ -230,6 +230,10 @@ export type TSubmission = {
    * resumes for run steps and activity labels alike.
    */
   editPrefixLength?: number;
+  /** Original text in the retained final slot, captured before streamed deltas can
+   * fold new text into it. Kept separately because a resume SYNC may replace
+   * `initialResponse.content` with generation-local content. */
+  editPrefixTailText?: string;
   /** True once server index 0 text/reasoning actually merged into the retained tail. */
   editPrefixFirstPartFolded?: boolean;
   /**

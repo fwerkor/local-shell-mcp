@@ -1224,11 +1224,16 @@ class AgentRunner:
                 steer_id = part.get("steerId")
                 if not isinstance(steer_id, str) or steer_id in existing_steers:
                     continue
-                state.messages.append({"role": "user", "content": merged_text(part),
-                                       "source": "steer", "steerId": steer_id,
-                                       "id": "steer:" + steer_id, "files": part.get("files", [])})
+                recovered = self._steer_message(part)
+                # The checkpoint may still contain assistant tool calls without
+                # their corresponding tool responses. Inject the recovered user
+                # steer only after dispatch restores those responses.
+                if state.pending_calls:
+                    self._pending_recovered_steers.append(recovered)
+                else:
+                    state.messages.append(recovered)
+                    state.completed = False
                 existing_steers.add(steer_id)
-                state.completed = False
         if recursion_limit is not None:
             state.context.recursion_limit = recursion_limit
         review = self.store.approved_review(self.owner, self.generation.run_id)
