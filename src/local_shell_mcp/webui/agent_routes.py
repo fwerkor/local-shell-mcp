@@ -31,10 +31,6 @@ async def list_or_create(request: Request):
             raise HTTPException(400, detail=str(exc)) from exc
     try:
         body = await _body(request)
-        if "machine_permissions" in body:
-            from .machine_permissions import _checked, validate_access_map
-
-            _checked(request, validate_access_map(body["machine_permissions"]))
         return JSONResponse(repository.create(owner, body), status_code=201)
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
@@ -58,10 +54,6 @@ async def detail(request: Request):
     else:
         try:
             body = await _body(request)
-            if "machine_permissions" in body:
-                from .machine_permissions import _checked, validate_access_map
-
-                _checked(request, validate_access_map(body["machine_permissions"]))
             result = repository.update(owner, agent_id, body)
             if "machine_permissions" in body:
                 from .durable_tasks import mark_revoked
@@ -142,9 +134,6 @@ async def external_mcp_servers(request: Request):
     servers registered through LSM mcp_manage.
     """
     _owner(request)
-    from .machine_permissions import _principal_scopes
-    if "shell:read" not in _principal_scopes(request):
-        raise HTTPException(403, detail="shell:read permission is required")
     from ..dynamic_mcp import DynamicMCPManager
     from ..settings import get_settings
 

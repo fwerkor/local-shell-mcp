@@ -68,16 +68,6 @@ def access_level(owner: str, conversation_id: str, machine: str, *, repo: Any = 
     return resolve_access(owner, conversation_id, repo=repo).get(machine, "none")
 
 
-def _principal_scopes(request: Request) -> set[str]:
-    from ..auth import principal_scopes
-    from ..settings import get_settings
-
-    if get_settings().auth_mode == "none":
-        return {"shell:read", "shell:write", "remote:use"}
-    principal = getattr(request.state, "principal", None)
-    return principal_scopes(principal) if principal is not None and hasattr(principal, "claims") else set()
-
-
 def require_machine_scope(scopes: set[str], machine: str, level: str, *, expires: int | None = None) -> None:
     if expires is not None and expires <= int(time.time()):
         raise PermissionError("Agent session authorization has expired")
@@ -121,30 +111,9 @@ def authorize_machine_action(
         raise PermissionError("shell:execute permission is required")
 
 
-def _checked(request: Request, permissions: dict[str, str]) -> None:
-    from ..settings import get_settings
-
-    scopes = _principal_scopes(request)
-    settings = get_settings()
-    for machine, level in permissions.items():
-        if level == "none":
-            continue
-        if machine == "local" and settings.disable_local:
-            raise HTTPException(403, detail="Local machine is disabled")
-        if machine != "local" and not settings.remote_enabled:
-            raise HTTPException(403, detail="Remote machines are disabled")
-        try:
-            require_machine_scope(scopes, machine, level)
-        except PermissionError as exc:
-            raise HTTPException(403, detail=str(exc)) from exc
-
-
 async def available_machines(request: Request):
     _owner(request)
     from ..human_ui import _machine_rows
-
-    if "shell:read" not in _principal_scopes(request):
-        raise HTTPException(403, detail="shell:read permission is required")
     from ..settings import get_settings
 
     try:
@@ -160,8 +129,6 @@ async def available_machines(request: Request):
     for row in rows:
         name = row.get("name")
         if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
-            continue
-        if name != "local" and "remote:use" not in _principal_scopes(request):
             continue
         visible.append({"name": name, "status": row.get("status", "unknown")})
     return JSONResponse({"machines": visible})
@@ -182,7 +149,8 @@ async def default_permissions(request: Request):
             value = validate_access_map(body.get("machines"))
         except ValueError as exc:
             raise HTTPException(400, detail=str(exc)) from exc
-        _checked(request, value)
+        # UI toggles are exposure preferences, not OAuth grants. Runtime
+        # dispatch still validates the unchanged principal scopes.
         repository.save_setting(owner, key, value)
         from .durable_tasks import mark_revoked
 

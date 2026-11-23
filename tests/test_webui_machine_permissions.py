@@ -76,16 +76,12 @@ def test_scopes_are_checked_per_machine_and_access_type():
 
 
 @pytest.mark.asyncio
-async def test_permission_http_scopes_and_multiuser_defaults(tmp_path, monkeypatch):
+async def test_permission_http_ui_preferences_do_not_require_token_scope_changes(tmp_path, monkeypatch):
     from local_shell_mcp import settings as setting_module
-    from local_shell_mcp.webui import machine_permissions
 
     settings = SimpleNamespace(auth_mode="oauth", state_dir=tmp_path, disable_local=False, remote_enabled=True)
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
     monkeypatch.setattr(setting_module, "get_settings", lambda: settings)
-    monkeypatch.setattr(machine_permissions, "_principal_scopes", lambda req: {
-        part for part in req.headers.get("x-scopes", "").split() if part
-    })
     monkeypatch.setattr("local_shell_mcp.human_ui._machine_rows", lambda: {
         "machines": [{"name": "local", "status": "online"}, {"name": "worker1", "status": "offline"}]
     })
@@ -101,14 +97,16 @@ async def test_permission_http_scopes_and_multiuser_defaults(tmp_path, monkeypat
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=authenticated), base_url="http://test") as client:
         owner = {"x-owner": "alice", "x-scopes": "shell:read shell:write remote:use"}
         read_only = {"x-owner": "alice", "x-scopes": "shell:read"}
+        no_scopes = {"x-owner": "alice", "x-scopes": ""}
         bob = {"x-owner": "bob", "x-scopes": "shell:read shell:write remote:use"}
         assert (await client.get("/api/lsm/permissions/defaults")).status_code == 401
         assert (await client.get("/api/lsm/permissions/machines", headers=owner)).json()["machines"][0]["name"] == "local"
-        assert len((await client.get("/api/lsm/permissions/machines", headers=read_only)).json()["machines"]) == 1
+        assert len((await client.get("/api/lsm/permissions/machines", headers=read_only)).json()["machines"]) == 2
+        assert len((await client.get("/api/lsm/permissions/machines", headers=no_scopes)).json()["machines"]) == 2
         assert (await client.put("/api/lsm/permissions/defaults", headers=read_only,
-                                 json={"machines": {"local": "write"}})).status_code == 403
+                                 json={"machines": {"local": "write"}})).status_code == 200
         assert (await client.put("/api/lsm/permissions/defaults", headers=read_only,
-                                 json={"machines": {"worker1": "read"}})).status_code == 403
+                                 json={"machines": {"worker1": "read"}})).status_code == 200
         assert (await client.put("/api/lsm/permissions/defaults", headers=owner,
                                  json={"machines": {"local": "read", "worker1": "write"}})).status_code == 200
         assert (await client.get("/api/lsm/permissions/defaults", headers=bob)).json()["machines"] == {}
@@ -129,7 +127,13 @@ async def test_permission_http_scopes_and_multiuser_defaults(tmp_path, monkeypat
         assert changed.status_code == 200
         assert changed.json()["effective"] == {"local": "write", "worker1": "none"}
         assert (await client.put(f"/api/lsm/preferences/{cid}", headers=read_only,
-                                 json={"machines": {"local": "write"}})).status_code == 403
+                                 json={"machines": {"local": "write"}})).status_code == 200
+        assert (await client.put(f"/api/lsm/preferences/{cid}", headers=no_scopes,
+                                 json={"machines": {"local": "write", "worker1": "read"}})).status_code == 200
+        assert (await client.put(f"/api/lsm/permissions/projects/{pid}", headers=no_scopes,
+                                 json={"machines": {"worker1": "write"}})).status_code == 200
+        assert (await client.put("/api/lsm/permissions/defaults", headers=no_scopes,
+                                 json={"machines": {"local": "write"}})).status_code == 200
         assert (await client.get(f"/api/lsm/preferences/{cid}", headers=bob)).status_code == 404
         assert (await client.put("/api/lsm/permissions/defaults", headers=owner,
                                  json={"machines": {"unknown-worker": "admin"}})).status_code == 400

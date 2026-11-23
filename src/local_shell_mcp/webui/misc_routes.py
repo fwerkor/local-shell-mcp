@@ -103,7 +103,6 @@ async def balance(request: Request):
 async def conversation_permissions(request: Request):
     from .machine_permissions import (
         _CONVERSATION,
-        _checked,
         _stored,
         resolve_access,
         validate_access_map,
@@ -129,7 +128,6 @@ async def conversation_permissions(request: Request):
                 machines = validate_access_map(payload["machines"])
             except ValueError as exc:
                 raise HTTPException(400, detail=str(exc)) from exc
-            _checked(request, machines)
             repo.save_setting(owner, machine_key, machines)
         repo.save_setting(owner, key, flags)
         if "machines" in payload:
