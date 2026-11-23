@@ -23,7 +23,7 @@ def _check_mcp_access(owner: str, conversation_id: str, scopes: set[str], *, exe
     if _repo().conversation(owner, conversation_id) is None:
         raise PermissionError("Conversation not found")
     flags = _repo().setting(owner, "conversation.permissions." + conversation_id, {})
-    if not isinstance(flags, dict) or flags.get("mcp") is not True:
+    if not isinstance(flags, dict) or flags.get("mcp", True) is not True:
         raise PermissionError("Nested MCP tools are disabled for this conversation")
     if "shell:read" not in scopes:
         raise PermissionError("shell:read is required to discover external tools")

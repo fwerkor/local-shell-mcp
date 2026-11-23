@@ -116,10 +116,14 @@ async def conversation_permissions(request: Request):
         raise HTTPException(404, detail="Conversation not found")
     key = "conversation.permissions." + conversation_id
     machine_key = _CONVERSATION + conversation_id
-    defaults = {"web": False, "lsm": False, "mcp": False, "memory": False}
+    defaults = {"web": True, "lsm": True, "mcp": True, "memory": True}
     if request.method == "PUT":
         payload = await _body(request)
-        flags = {name: payload.get(name, False) for name in defaults}
+        stored_flags = repo.setting(owner, key, {}) or {}
+        if not isinstance(stored_flags, dict):
+            stored_flags = {}
+        flags = {name: payload.get(name, stored_flags.get(name, default))
+                 for name, default in defaults.items()}
         if any(type(item) is not bool for item in flags.values()):
             raise HTTPException(400, detail="Permission flags must be booleans")
         # An old bare `lsm` flag never confers implicit access to every machine.
@@ -135,12 +139,12 @@ async def conversation_permissions(request: Request):
 
             mark_revoked(owner)
     else:
-        flags = repo.setting(owner, key, defaults)
+        flags = repo.setting(owner, key, {}) or {}
         if not isinstance(flags, dict):
-            flags = defaults
+            flags = {}
     stored = _stored(repo, owner, machine_key)
     effective = resolve_access(owner, conversation_id, repo=repo)
-    return JSONResponse({**{name: bool(flags.get(name, False)) for name in defaults},
+    return JSONResponse({**{name: flags.get(name, default) for name, default in defaults.items()},
                          "machines": stored, "effective": effective,
                          "projectId": convo.get("projectId")})
 

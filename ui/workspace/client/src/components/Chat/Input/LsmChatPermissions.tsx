@@ -182,7 +182,7 @@ export default function LsmChatPermissions({
   const selected = active === 'global' ? global : active === 'project' ? project : chat;
   const explicit = selected.data?.machines ?? {};
   const inherited: Record<string, Access> = active === 'global'
-    ? {}
+    ? global.data?.effective ?? {}
     : active === 'project'
       ? global.data?.effective ?? {}
       : associatedProject && currentProject === associatedProject
@@ -221,8 +221,8 @@ export default function LsmChatPermissions({
     if (access === 'inherit') delete next[machine];
     else next[machine] = access;
     const value = active === 'chat'
-      ? { machines: next, web: chat.data?.web ?? false, mcp: chat.data?.mcp ?? false,
-          memory: chat.data?.memory ?? false }
+      ? { machines: next, web: chat.data?.web ?? true, mcp: chat.data?.mcp ?? true,
+          memory: chat.data?.memory ?? true }
       : { machines: next };
     mutation.mutate({ url, value });
   };
@@ -308,7 +308,7 @@ export default function LsmChatPermissions({
                 <div className="mb-1 flex items-center justify-between">
                   <h3 className="text-xs font-semibold text-text-secondary">机器</h3>
                   <span className="text-[11px] text-text-secondary">
-                    {active === 'global' ? '默认拒绝' : '未设置时继承上级'}
+                    {active === 'global' ? '默认读写' : '未设置时继承上级'}
                   </span>
                 </div>
                 {machineNames.length === 0 && !machines.isFetching && (

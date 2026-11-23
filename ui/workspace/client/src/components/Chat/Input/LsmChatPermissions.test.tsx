@@ -31,14 +31,14 @@ beforeEach(() => {
     }
     if (url === '/api/lsm/permissions/defaults') {
       return Promise.resolve({
-        machines: { local: 'read', worker1: 'none' },
-        effective: { local: 'read', worker1: 'none' },
+        machines: {},
+        effective: { local: 'write', worker1: 'write' },
       });
     }
     if (url === '/api/lsm/permissions/projects/project-1') {
       return Promise.resolve({
         machines: { worker1: 'write' },
-        effective: { local: 'read', worker1: 'write' },
+        effective: { local: 'write', worker1: 'write' },
       });
     }
     if (url === '/api/projects') return Promise.resolve({ projects: [{ id: 'project-1', name: 'Project A' }] });
@@ -69,13 +69,13 @@ describe.each(['light', 'dark'])('%s theme', (theme) => {
     expect(dialog).toHaveClass('lsm-permissions-dialog', 'bg-surface-primary', 'text-text-primary');
     expect(screen.getByRole('button', { name: '实例默认' })).toHaveAttribute('aria-pressed', 'true');
 
-    const read = await screen.findByRole('button', { name: 'local 只读' });
-    await waitFor(() => expect(read).not.toBeDisabled());
-    expect(read).toHaveAttribute('aria-pressed', 'true');
+    const write = await screen.findByRole('button', { name: 'local 读写' });
+    await waitFor(() => expect(write).not.toBeDisabled());
+    expect(write).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('本机')).toHaveClass('text-text-secondary');
-    fireEvent.click(screen.getByRole('button', { name: 'local 读写' }));
+    fireEvent.click(screen.getByRole('button', { name: 'local 只读' }));
     await waitFor(() => expect(put).toHaveBeenCalledWith('/api/lsm/permissions/defaults', {
-      machines: { local: 'write', worker1: 'none' },
+      machines: { local: 'read' },
     }));
 
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -91,7 +91,7 @@ it('opens on the current project defaults when starting a project chat', async (
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'worker1 读写' })).toHaveAttribute('aria-pressed', 'true'),
   );
-  expect(screen.getByText('继承 · 只读')).toBeInTheDocument();
+  expect(screen.getByText('继承 · 读写')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'worker1 恢复继承' }));
   await waitFor(() => expect(put).toHaveBeenCalledWith(
     '/api/lsm/permissions/projects/project-1', { machines: {} },

@@ -19,6 +19,10 @@ SCOPES = {"shell:read", "shell:write", "shell:execute", "remote:use"}
 
 @pytest.fixture
 def machine_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "local_shell_mcp.webui.machine_permissions._registered_defaults",
+        lambda: {"local": "write", "worker1": "write"},
+    )
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
@@ -49,7 +53,9 @@ def test_agent_machine_permissions_validate_persist_and_bound_tools(machine_agen
     assert not {"file_write", "run_shell", "shell_start", "mcp_manage"} & names
 
     none = registry.available_tools("local", cid, scopes=SCOPES, agent_permissions={})
-    assert {tool["function"]["name"] for tool in none} == {"session_manage", "plan_manage"}
+    assert {"file_read", "file_write", "session_manage", "plan_manage"} <= {
+        tool["function"]["name"] for tool in none
+    }
 
     with pytest.raises(ValueError):
         agents.update("local", agent["id"], {"machine_permissions": {"*": "write"}})

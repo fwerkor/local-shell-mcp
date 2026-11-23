@@ -524,7 +524,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                                    native_file_tools=any(v in {"read", "write"} for v in policy.values()),
                                    write_tools=any(v == "write" for v in policy.values()),
                                    ask_user_enabled=ask_user_requested(agent, {}),
-                                   mcp_enabled=isinstance(flags, dict) and flags.get("mcp") is True,
+                                   mcp_enabled=isinstance(flags, dict) and flags.get("mcp", True) is True,
                                    resume_history=None if new_turn else store.history(
                                        owner, generation.conversation_id,
                                        message_id=generation.user_message_id),

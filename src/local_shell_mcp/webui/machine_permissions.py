@@ -1,7 +1,7 @@
 """Owner-scoped per-machine Agent permissions with inherited SQLite defaults.
 
-Only exact machine identifiers are granted. A machine not present in any policy
-is denied, even when added after a user configures global defaults.
+Registered machines default to read/write. Explicit owner, project and chat
+overrides take precedence; an unknown machine is never implicitly granted.
 """
 
 from __future__ import annotations
@@ -46,10 +46,33 @@ def _stored(repo: Any, owner: str, key: str) -> dict[str, str]:
         return {}
 
 
+def _registered_defaults() -> dict[str, str]:
+    """Expose all registered machines by default, including offline Workers.
+
+    The Controller still enforces server-side machine switches and OAuth scopes
+    at each native tool invocation. Nothing is granted to unknown machine IDs.
+    """
+    from ..remote import remote_manager
+
+    defaults = {"local": "write"}
+    try:
+        workers = remote_manager().list_machines().get("machines", ())
+    except Exception:
+        # A temporarily unavailable Worker registry cannot break ordinary
+        # chat. Remote names still need registration before implicit exposure.
+        workers = ()
+    for worker in workers:
+        name = worker.get("name") if isinstance(worker, dict) else None
+        if isinstance(name, str) and _NAME_RE.fullmatch(name):
+            defaults[name] = "write"
+    return defaults
+
+
 def resolve_access(owner: str, conversation_id: str | None = None, *, project_id: str | None = None,
                    repo: Any = None) -> dict[str, str]:
     repository = repo or _repo()
-    policy = _stored(repository, owner, _GLOBAL)
+    policy = _registered_defaults()
+    policy.update(_stored(repository, owner, _GLOBAL))
     if conversation_id is not None:
         convo = repository.conversation(owner, conversation_id)
         if convo is None:
@@ -157,8 +180,9 @@ async def default_permissions(request: Request):
         mark_revoked(owner)
     else:
         value = _stored(repository, owner, key)
-    inherited = {} if key == _GLOBAL else _stored(repository, owner, _GLOBAL)
-    return JSONResponse({"machines": value, "effective": {**inherited, **value}})
+    effective = (resolve_access(owner, repo=repository) if key == _GLOBAL
+                 else resolve_access(owner, project_id=project_id, repo=repository))
+    return JSONResponse({"machines": value, "effective": effective})
 
 
 def machine_permission_routes() -> list[Route]:

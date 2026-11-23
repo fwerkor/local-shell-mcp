@@ -60,7 +60,11 @@ async def test_invalid_model_tool_calls_do_not_dispatch(monkeypatch, frames, mes
 
 
 @pytest.mark.asyncio
-async def test_background_generation_reads_workspace_only_after_explicit_enablement(tmp_path, monkeypatch):
+async def test_background_generation_honors_explicit_machine_disable_and_reenable(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "local_shell_mcp.webui.machine_permissions._registered_defaults",
+        lambda: {"local": "write"},
+    )
     (tmp_path / "hello.txt").write_text("read-only sample")
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
@@ -91,6 +95,11 @@ async def test_background_generation_reads_workspace_only_after_explicit_enablem
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             cid = (await client.post("/api/convos", json={"title": "Test"})).json()["conversationId"]
+            from local_shell_mcp.webui.routes import _repo
+
+            # Full access is the default; explicit per-chat deny still wins.
+            _repo().save_setting("local", "agent.machine_policy.conversation." + cid,
+                                 {"local": "none"})
             deny = await client.post("/api/agents/chat", json={"conversationId": cid, "text": "Before permission"})
             assert deny.status_code == 202
             for _ in range(100):
@@ -143,7 +152,7 @@ async def test_tool_policy_is_rechecked_before_execution(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_oauth_scope_is_checked_before_creating_tool_enabled_run(tmp_path, monkeypatch):
+async def test_limited_oauth_scopes_allow_text_chat_but_not_native_tools(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
@@ -158,6 +167,13 @@ async def test_oauth_scope_is_checked_before_creating_tool_enabled_run(tmp_path,
     monkeypatch.setattr(generation_routes, "provider_config", lambda *_: ProviderConfig(
         "openai", "mock", "http://127.0.0.1:11434/v1/chat/completions", "",
     ))
+    observed = []
+
+    async def text_model(*_args, **kwargs):
+        observed.extend(item["function"]["name"] for item in kwargs["tools"])
+        yield "Text-only conversation succeeds."
+
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", text_model)
     app = Starlette(routes=generation_routes.generation_routes())
 
     async def principal(scope, receive, send):
@@ -168,11 +184,21 @@ async def test_oauth_scope_is_checked_before_creating_tool_enabled_run(tmp_path,
 
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=principal), base_url="http://test") as client:
-            denied = await client.post("/api/agents/chat", json={"conversationId": cid, "text": "read secret"})
-            assert denied.status_code == 403
-            assert (await client.get(f"/api/agents/chat/status/{cid}")).json()["active"] is False
+            response = await client.post("/api/agents/chat", json={"conversationId": cid, "text": "read secret"})
+            assert response.status_code == 202
+            for _ in range(120):
+                status = (await client.get(f"/api/agents/chat/status/{cid}")).json()
+                if status["status"] in {"complete", "error"}:
+                    break
+                await asyncio.sleep(.02)
+            assert status["status"] == "complete"
+            assert "file_read" not in observed
+            assert "run_shell" not in observed
+            with pytest.raises(PermissionError, match="shell:read"):
+                await call_tool("alice", cid, ModelToolCall("read", "file_read", {"path": "secret"}),
+                                granted_scopes=set())
             with shared_database(get_settings().state_dir.resolve()).connect() as db:
-                assert db.execute("SELECT count(*) FROM runs WHERE conversation_id=?", (cid,)).fetchone()[0] == 0
+                assert db.execute("SELECT count(*) FROM runs WHERE conversation_id=?", (cid,)).fetchone()[0] == 1
     finally:
         get_settings.cache_clear()
 

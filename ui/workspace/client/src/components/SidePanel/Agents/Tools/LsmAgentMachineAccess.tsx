@@ -38,7 +38,7 @@ export default function LsmAgentMachineAccess() {
 
   const change = (machine: string, level: Access) => {
     const next = { ...(selected ?? {}) };
-    if (level === 'none') {
+    if (level === 'write') {
       delete next[machine];
     } else {
       next[machine] = level;
@@ -73,7 +73,7 @@ export default function LsmAgentMachineAccess() {
           </span>
           <select
             aria-label={`${machine} machine access`}
-            value={selected?.[machine] ?? 'none'}
+            value={selected?.[machine] ?? 'write'}
             onChange={(event) => change(machine, event.target.value as Access)}
             disabled={isError}
             className="max-w-44 rounded-md border border-border-medium bg-surface-primary p-2 text-sm text-text-primary"

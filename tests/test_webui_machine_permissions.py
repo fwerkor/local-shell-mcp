@@ -25,7 +25,11 @@ from local_shell_mcp.webui.machine_permissions import (
 from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
-def test_effective_permission_precedence_and_isolation(tmp_path):
+def test_effective_permission_precedence_and_isolation(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "local_shell_mcp.webui.machine_permissions._registered_defaults",
+        lambda: {"local": "write"},
+    )
     repo = WorkspaceRepository(SQLiteDatabase(tmp_path / "state"))
     project = repo.create_project("alice", "Research")
     pid = project["id"]
@@ -43,7 +47,7 @@ def test_effective_permission_precedence_and_isolation(tmp_path):
     assert resolve_access("alice", project_id=pid, repo=repo)["local"] == "write"
     plain = repo.create_conversation("alice", {"title": "No project"})
     assert access_level("alice", plain["conversationId"], "local", repo=repo) == "read"
-    assert resolve_access("bob", repo=repo) == {}
+    assert resolve_access("bob", repo=repo)["local"] == "write"
     with pytest.raises(KeyError):
         resolve_access("bob", cid, repo=repo)
     with pytest.raises(KeyError):
@@ -58,6 +62,34 @@ def test_effective_permission_precedence_and_isolation(tmp_path):
 def test_invalid_machine_maps_fail_closed(value):
     with pytest.raises(ValueError):
         validate_access_map(value)
+
+
+def test_newly_registered_machines_default_to_write_and_explicit_denials_win(tmp_path, monkeypatch):
+    from local_shell_mcp.webui import machine_permissions as permissions
+
+    class Registry:
+        workers = ["worker1"]
+
+        def list_machines(self):
+            return {"machines": [{"name": name, "status": "offline"} for name in self.workers]}
+
+    registry = Registry()
+    monkeypatch.setattr("local_shell_mcp.remote.remote_manager", lambda: registry)
+    repo = WorkspaceRepository(SQLiteDatabase(tmp_path / "default-all"))
+    project = repo.create_project("alice", "Default project")["id"]
+    cid = repo.create_conversation("alice", {"title": "Default chat", "projectId": project})["conversationId"]
+    assert permissions.resolve_access("alice", cid, repo=repo) == {
+        "local": "write", "worker1": "write",
+    }
+    registry.workers.append("worker2")
+    assert permissions.access_level("alice", cid, "worker2", repo=repo) == "write"
+    assert permissions.access_level("alice", cid, "unregistered", repo=repo) == "none"
+    repo.save_setting("alice", "agent.machine_policy.global", {"worker1": "none"})
+    repo.save_setting("alice", "agent.machine_policy.project." + project, {"local": "read"})
+    repo.save_setting("alice", "agent.machine_policy.conversation." + cid, {"worker2": "none"})
+    assert permissions.resolve_access("alice", cid, repo=repo) == {
+        "local": "read", "worker1": "none", "worker2": "none",
+    }
 
 
 def test_scopes_are_checked_per_machine_and_access_type():
@@ -78,6 +110,10 @@ def test_scopes_are_checked_per_machine_and_access_type():
 @pytest.mark.asyncio
 async def test_permission_http_ui_preferences_do_not_require_token_scope_changes(tmp_path, monkeypatch):
     from local_shell_mcp import settings as setting_module
+    monkeypatch.setattr(
+        "local_shell_mcp.webui.machine_permissions._registered_defaults",
+        lambda: {"local": "write", "worker1": "write"},
+    )
 
     settings = SimpleNamespace(auth_mode="oauth", state_dir=tmp_path, disable_local=False, remote_enabled=True)
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
@@ -115,6 +151,10 @@ async def test_permission_http_ui_preferences_do_not_require_token_scope_changes
         chat = (await client.post("/api/convos", headers=owner,
                                   json={"title": "Chat", "projectId": pid})).json()
         cid = chat["conversationId"]
+        defaults = (await client.get(f"/api/lsm/preferences/{cid}", headers=owner)).json()
+        assert defaults["web"] is True
+        assert defaults["mcp"] is True
+        assert defaults["memory"] is True
         assert (await client.get(f"/api/lsm/permissions/projects/{pid}", headers=bob)).status_code == 404
         assert (await client.put(f"/api/lsm/permissions/projects/{pid}", headers=owner,
                                  json={"machines": {"worker1": "none"}})).status_code == 200
@@ -125,9 +165,12 @@ async def test_permission_http_ui_preferences_do_not_require_token_scope_changes
                                    json={"web": False, "mcp": False, "memory": False,
                                          "machines": {"local": "write"}})
         assert changed.status_code == 200
+        assert all(changed.json()[flag] is False for flag in ("web", "mcp", "memory"))
         assert changed.json()["effective"] == {"local": "write", "worker1": "none"}
         assert (await client.put(f"/api/lsm/preferences/{cid}", headers=read_only,
                                  json={"machines": {"local": "write"}})).status_code == 200
+        unchanged_flags = (await client.get(f"/api/lsm/preferences/{cid}", headers=owner)).json()
+        assert all(unchanged_flags[flag] is False for flag in ("web", "mcp", "memory"))
         assert (await client.put(f"/api/lsm/preferences/{cid}", headers=no_scopes,
                                  json={"machines": {"local": "write", "worker1": "read"}})).status_code == 200
         assert (await client.put(f"/api/lsm/permissions/projects/{pid}", headers=no_scopes,

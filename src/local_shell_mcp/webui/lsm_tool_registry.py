@@ -128,7 +128,9 @@ def _targets(tool: Any, arguments: dict[str, Any]) -> list[str]:
 
 
 def _agent_allows(policy: dict[str, str], machine: str, operation: str) -> bool:
-    level = policy.get(machine, "none")
+    # Agent maps contain only exceptions to the default fully exposed policy.
+    # The chat's machine policy and existing principal scopes remain ceilings.
+    level = policy.get(machine, "write")
     return level == "write" if operation != "read" else level in {"read", "write"}
 
 
@@ -143,7 +145,7 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
 
         agent_policy = validate_access_map(agent_permissions)
         rank = {"none": 0, "read": 1, "write": 2}
-        policy = {name: min(level, agent_policy.get(name, "none"), key=rank.get)
+        policy = {name: min(level, agent_policy.get(name, "write"), key=rank.get)
                   for name, level in policy.items()}
     definitions: list[dict] = []
     for tool in _registry()._tool_manager.list_tools():
