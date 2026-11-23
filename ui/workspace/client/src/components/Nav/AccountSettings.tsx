@@ -4,11 +4,12 @@ import * as Menu from '@ariakit/react/menu';
 import { GearIcon, DropdownMenuSeparator } from '@librechat/client';
 import {
   Archive,
+  BookOpen,
   ChevronRight,
   CircleHelp,
   CircleUserRound,
+  Github,
   Keyboard,
-  LifeBuoy,
   LogOut,
   Scale,
   ShieldCheck,
@@ -21,22 +22,21 @@ import { useLocalize } from '~/hooks';
 import Settings from './Settings';
 import store from '~/store';
 
+const DOCUMENTATION_URL = 'https://fwerkor.github.io/local-shell-mcp/';
+const SOURCE_REPOSITORY_URL = 'https://github.com/fwerkor/local-shell-mcp';
+
 function HelpSubmenu({
-  helpAndFaqURL,
   termsOfServiceURL,
   privacyPolicyURL,
   onShowShortcuts,
 }: {
-  helpAndFaqURL?: string;
   termsOfServiceURL?: string;
   privacyPolicyURL?: string;
   onShowShortcuts: () => void;
 }) {
   const localize = useLocalize();
-  const hasHelpFaq = !!helpAndFaqURL && helpAndFaqURL !== '/';
   const hasTos = !!termsOfServiceURL;
   const hasPrivacy = !!privacyPolicyURL;
-  const showLegalDivider = (hasHelpFaq || true) && (hasTos || hasPrivacy);
 
   return (
     <Menu.MenuProvider placement="right-start">
@@ -55,20 +55,22 @@ function HelpSubmenu({
         gutter={12}
         className="account-settings-popover popover-ui popover-from-left z-[126] w-[244px] rounded-lg"
       >
-        {hasHelpFaq && (
-          <Menu.MenuItem
-            onClick={() => openInNewTab(helpAndFaqURL)}
-            className="select-item text-sm"
-          >
-            <LifeBuoy className="icon-md" aria-hidden="true" />
-            {localize('com_nav_help_faq')}
-          </Menu.MenuItem>
-        )}
+        <Menu.MenuItem onClick={() => openInNewTab(DOCUMENTATION_URL)} className="select-item text-sm">
+          <BookOpen className="icon-md" aria-hidden="true" />
+          {localize('com_nav_documentation')}
+        </Menu.MenuItem>
+        <Menu.MenuItem
+          onClick={() => openInNewTab(SOURCE_REPOSITORY_URL)}
+          className="select-item text-sm"
+        >
+          <Github className="icon-md" aria-hidden="true" />
+          {localize('com_nav_source_repository')}
+        </Menu.MenuItem>
         <Menu.MenuItem onClick={onShowShortcuts} className="select-item text-sm">
           <Keyboard className="icon-md" aria-hidden="true" />
           {localize('com_shortcut_keyboard_shortcuts')}
         </Menu.MenuItem>
-        {showLegalDivider && (hasTos || hasPrivacy) && <DropdownMenuSeparator />}
+        {(hasTos || hasPrivacy) && <DropdownMenuSeparator />}
         {hasTos && (
           <Menu.MenuItem
             onClick={() => openInNewTab(termsOfServiceURL)}
@@ -128,7 +130,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
             className="mt-2 grow overflow-hidden text-ellipsis whitespace-nowrap text-left text-text-primary"
             style={{ marginTop: '0', marginLeft: '0' }}
           >
-            local-shell-mcp
+            {user?.name || localize('com_nav_user')}
           </div>
         )}
       </Menu.MenuButton>
@@ -141,7 +143,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
         }}
       >
         <div className="text-token-text-secondary ml-3 mr-2 py-2 text-sm" role="note">
-          local-shell-mcp · Single-user workspace
+          {user?.name || localize('com_nav_user')}
         </div>
         <DropdownMenuSeparator />
         {startupConfig?.balance?.enabled === true && balanceQuery.data != null && (
@@ -154,7 +156,6 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
           </>
         )}
         <HelpSubmenu
-          helpAndFaqURL={startupConfig?.helpAndFaqURL}
           termsOfServiceURL={startupConfig?.interface?.termsOfService?.externalUrl}
           privacyPolicyURL={startupConfig?.interface?.privacyPolicy?.externalUrl}
           onShowShortcuts={() => setShowShortcutsDialog(true)}

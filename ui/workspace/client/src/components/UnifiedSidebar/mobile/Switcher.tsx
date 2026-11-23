@@ -7,6 +7,7 @@ import type { NavLink } from '~/common';
 import type * as t from '~/common';
 import { useActivePanel, resolveActivePanel } from '~/Providers';
 import { useLocalize } from '~/hooks';
+import useLeaveControlForPanel from '~/hooks/Nav/useLeaveControlForPanel';
 import { cn } from '~/utils';
 
 /**
@@ -29,6 +30,7 @@ function Switcher({
   const menuId = useId();
   const [isOpen, setIsOpen] = useState(false);
   const { active, setActive } = useActivePanel();
+  const leaveControlForPanel = useLeaveControlForPanel();
   const location = useLocation();
   useEffect(() => {
     if (location.pathname.startsWith('/control/') && active !== 'lsm-control') setActive('lsm-control');
@@ -53,12 +55,13 @@ function Switcher({
             return;
           }
           setActive(link.id);
+          leaveControlForPanel(link.id);
           if (routeActiveId) {
             onLeaveInsights?.();
           }
         },
       })),
-    [links, activeId, localize, onLeaveInsights, onNavigate, routeActiveId, setActive],
+    [links, activeId, localize, onLeaveInsights, onNavigate, routeActiveId, setActive, leaveControlForPanel],
   );
 
   if (!activeLink) {

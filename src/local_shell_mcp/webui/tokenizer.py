@@ -5,8 +5,11 @@ BPE rank file shipped as package data rather than downloaded at runtime.
 """
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from pathlib import Path
+
+_LOGGER = logging.getLogger(__name__)
 
 _HASH = '446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d'
 _PATTERN = '|'.join((
@@ -41,9 +44,28 @@ def _encoding():
                              special_tokens={'<|endoftext|>': 199999, '<|endofprompt|>': 200018})
 
 
+@lru_cache(maxsize=1)
+def _warn_missing_encoding() -> None:
+    _LOGGER.warning(
+        "WebUI tokenizer dependencies are unavailable; using conservative UTF-8 byte "
+        "counts until local-shell-mcp[webui] is installed"
+    )
+
+
 def count_tokens(text: str, *, exact: bool = True) -> int:
-    """Count actual BPE tokens without fetching model data from the network."""
-    encoding = _encoding()
+    """Count offline BPE tokens, or conservatively bound them without WebUI extras.
+
+    o200k_base is byte-level BPE: every encoded byte is at most one token.
+    When tiktoken or its regex dependency is unavailable, counting UTF-8 bytes
+    may prune earlier, but must not underestimate the model's token budget or
+    abort a chat, memory update, or background generation with ImportError.
+    The ``exact`` flag only applies when the real tokenizer is available.
+    """
+    try:
+        encoding = _encoding()
+    except ImportError:
+        _warn_missing_encoding()
+        return len(text.encode('utf-8', 'surrogatepass'))
     if exact:
         return len(encoding.encode(text, disallowed_special=()))
     # LibreChat's TypeScript tokenizer slices UTF-16 code units, not Python

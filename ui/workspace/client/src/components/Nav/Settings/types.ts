@@ -96,6 +96,7 @@ export const TABS: TabMeta[] = [
     labelKey: 'com_nav_setting_general',
     icon: createElement(GearIcon),
     sections: [
+      { id: 'profile', labelKey: 'com_ui_settings_section_profile' },
       { id: 'appearance', labelKey: 'com_ui_settings_section_appearance' },
       { id: 'layout', labelKey: 'com_ui_settings_section_layout' },
       { id: 'accessibility', labelKey: 'com_ui_settings_section_accessibility' },
