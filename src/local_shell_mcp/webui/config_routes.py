@@ -6,6 +6,7 @@ state. No public endpoint exposes model API keys or controller credentials.
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import urlsplit
 
 from starlette.exceptions import HTTPException
@@ -106,9 +107,11 @@ async def startup_config(request: Request):
         _owner(request)
     except HTTPException:
         return JSONResponse(settings)
+    from .build_info import about_build_info
     from .memory import memory_enabled
     has_memory = memory_enabled(_repo(), _owner(request))
     settings.update({
+        **(await asyncio.to_thread(about_build_info)),
         "interface": {
             "modelSelect": True,
             "parameters": True,
