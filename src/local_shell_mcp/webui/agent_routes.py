@@ -121,17 +121,21 @@ def _native_tool_catalog() -> list[dict]:
 async def tool_catalog(request: Request):
     _owner(request)
     from .ask_user_tools import ASK_USER_MANIFEST
+    from .web_research import WEB_TOOLS
 
     # The original manifest and PluginController authentication shape are
     # reused. Availability does not enable a saved or ephemeral Agent's tool.
-    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}, *_native_tool_catalog()])
+    web = [{"name": item["function"]["name"], "pluginKey": item["function"]["name"],
+            "description": item["function"]["description"], "agentsOnly": True,
+            "authConfig": [], "authenticated": True} for item in WEB_TOOLS]
+    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}, *web, *_native_tool_catalog()])
 
 
 async def tool_auth(request: Request):
     _owner(request)
     from .ask_user_tools import ASK_USER_QUESTION_TOOL_NAME
 
-    if request.path_params["tool_id"] != ASK_USER_QUESTION_TOOL_NAME and not any(
+    if request.path_params["tool_id"] not in {ASK_USER_QUESTION_TOOL_NAME, "web_search", "web_fetch"} and not any(
         item["pluginKey"] == request.path_params["tool_id"] for item in _native_tool_catalog()
     ):
         _not_found()

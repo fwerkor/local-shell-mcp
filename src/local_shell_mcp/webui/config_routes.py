@@ -41,7 +41,7 @@ def _endpoint_info(*, memory_available: bool = False) -> dict:
             "order": 0, "type": "agents", "name": "Agents",
             "modelDisplayLabel": "Agent", "allowedProviders": list(configs),
             "maxSubagents": 10,
-            "capabilities": ["tools", "subagents", "chain", "ask_user_question", "end_after_tools", *(["memory"] if memory_available else [])],
+            "capabilities": ["tools", "web_search", "subagents", "chain", "ask_user_question", "end_after_tools", *(["memory"] if memory_available else [])],
             "availableTools": [],
         },
     }
@@ -121,7 +121,8 @@ async def startup_config(request: Request):
             "agents": {"use": True, "create": True, "share": False, "public": False},
             "prompts": {"use": False, "create": False, "share": False, "public": False},
             "mcpServers": {"use": True, "create": True, "share": False, "public": False},
-            "webSearch": False,
+            "webSearch": True,
+            "defaultPinnedTools": ["web_search"],
             "fileSearch": False,
             "contextUsage": True,
             "memories": has_memory,
