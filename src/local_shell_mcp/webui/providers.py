@@ -181,6 +181,24 @@ def _usage_frame(provider: str, event: dict, previous: ModelUsage | None = None)
     return ModelUsage(provider, raw_input, raw_output)
 
 
+def _openai_reasoning_fragments(delta: dict) -> list[str]:
+    """Extract visible reasoning from common OpenAI-compatible chat deltas.
+
+    Prefer the single text field when vendors also send structured copies;
+    encrypted reasoning, signatures and token counts are not readable text.
+    """
+    for field in ("reasoning_content", "reasoning"):
+        value = delta.get(field)
+        if isinstance(value, str) and value:
+            return [value]
+    details = delta.get("reasoning_details")
+    if not isinstance(details, list):
+        return []
+    return [part["text"] for part in details if isinstance(part, dict)
+            and part.get("type") in {"reasoning.text", "text"}
+            and isinstance(part.get("text"), str) and part["text"]]
+
+
 async def stream_model(
     config: ProviderConfig,
     messages: list[dict],
@@ -189,7 +207,7 @@ async def stream_model(
     temperature: float | None = None,
     top_p: float | None = None,
     emit_finish_reason: bool = False,
-) -> AsyncIterator[str | ModelUsage | ModelFinish]:
+) -> AsyncIterator[str | ModelUsage | ModelFinish | ModelThought]:
     """Stream user-visible answer text without buffering the provider response."""
     import httpx
 
@@ -259,7 +277,10 @@ async def stream_model(
                 for choice in event.get("choices", []):
                     if isinstance(choice.get('finish_reason'), str):
                         finish_reason = choice['finish_reason']
-                    content = choice.get("delta", {}).get("content")
+                    delta = choice.get("delta") or {}
+                    for thought in _openai_reasoning_fragments(delta):
+                        yield ModelThought("thinking", text=thought)
+                    content = delta.get("content")
                     if isinstance(content, str) and content:
                         yield content
                     elif isinstance(content, list):
@@ -272,7 +293,12 @@ async def stream_model(
                     if isinstance(reason, str):
                         finish_reason = reason
                 if event.get("type") == "content_block_delta":
-                    text = event.get("delta", {}).get("text")
+                    delta = event.get("delta") or {}
+                    if delta.get("type") == "thinking_delta" and isinstance(delta.get("thinking"), str):
+                        yield ModelThought("thinking", text=delta["thinking"])
+                    elif delta.get("type") == "signature_delta" and isinstance(delta.get("signature"), str):
+                        yield ModelThought("signature", signature=delta["signature"])
+                    text = delta.get("text")
                     if isinstance(text, str) and text:
                         yield text
             else:
@@ -282,7 +308,10 @@ async def stream_model(
                     for part in (candidate.get("content") or {}).get("parts", []):
                         text = part.get("text")
                         if isinstance(text, str) and text:
-                            yield text
+                            if part.get("thought"):
+                                yield ModelThought("thinking", text=text)
+                            else:
+                                yield text
 
     if usage_snapshot is not None:
         yield usage_snapshot
@@ -333,8 +362,8 @@ async def stream_model_with_tools(
             yield event
         return
     if not tools or config.provider != "openai":
-        async for text in stream_model(config, messages, max_tokens=max_tokens, temperature=temperature, top_p=top_p):
-            yield text
+        async for event in stream_model(config, messages, max_tokens=max_tokens, temperature=temperature, top_p=top_p):
+            yield event
         return
 
     import httpx
@@ -378,6 +407,8 @@ async def stream_model_with_tools(
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             for choice in event.get("choices", []):
                 delta = choice.get("delta") or {}
+                for thought in _openai_reasoning_fragments(delta):
+                    yield ModelThought("thinking", text=thought)
                 content = delta.get("content")
                 if isinstance(content, str) and content:
                     yield content
