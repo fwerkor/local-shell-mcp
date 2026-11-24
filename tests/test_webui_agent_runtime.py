@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 
+import httpx
 import pytest
 
 from local_shell_mcp.webui.agent_runtime import (
@@ -219,6 +220,136 @@ async def test_provider_failure_and_cancellation_propagate_without_fabricating_m
     with pytest.raises(asyncio.CancelledError):
         await task
     assert state.messages == []
+
+
+@pytest.mark.asyncio
+async def test_disconnect_after_completed_tools_retries_model_without_repeating_tools(monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, '_MODEL_RETRY_DELAYS', (0, 0))
+    state = AgentLoopState(AgentContext(profile(), [{'name': 'read_file'}]),
+                           [{'role': 'user', 'content': 'read'}])
+    model_attempts = 0
+    dispatches = 0
+    text = []
+
+    async def stream(*args, **kwargs):
+        nonlocal model_attempts
+        model_attempts += 1
+        if model_attempts == 1:
+            yield ModelToolCall('call-1', 'read_file', {'path': '/tmp/test'})
+        elif model_attempts == 2:
+            assert state.messages[-1]['content'] == 'file contents'
+            raise httpx.RemoteProtocolError('upstream closed early')
+        else:
+            assert state.messages[-1]['content'] == 'file contents'
+            yield 'Answer based on file contents'
+
+    async def dispatch(calls, current):
+        nonlocal dispatches
+        dispatches += 1
+        assert [call.call_id for call in calls] == ['call-1']
+        return ToolBatchOutput([{'role': 'tool', 'tool_call_id': 'call-1',
+                                 'content': 'file contents'}])
+
+    async def on_text(chunk):
+        text.append(chunk)
+
+    await run_agent_loop(state, stream_tools=stream, stream_text=forbidden,
+                         dispatch=dispatch, on_text=on_text)
+    assert model_attempts == 3 and dispatches == 1
+    assert state.model_turn == 2
+    assert text == ['Answer based on file contents']
+    assert state.messages[-1]['content'] == text[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,retries', [(429, True), (503, True), (401, False), (400, False)])
+async def test_retry_only_transient_http_statuses(monkeypatch, status, retries):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, '_MODEL_RETRY_DELAYS', (0, 0))
+    state = AgentLoopState(AgentContext(profile(), []), [])
+    attempts = 0
+
+    async def stream(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            request = httpx.Request('POST', 'https://example.invalid/chat')
+            response = httpx.Response(status, request=request)
+            raise httpx.HTTPStatusError('private upstream details', request=request, response=response)
+        yield 'ok'
+
+    if retries:
+        await run_agent_loop(state, stream_tools=forbidden, stream_text=stream,
+                             dispatch=forbidden, on_text=lambda _: asyncio.sleep(0))
+        assert state.messages[-1]['content'] == 'ok'
+        assert attempts == 2
+    else:
+        with pytest.raises(httpx.HTTPStatusError):
+            await run_agent_loop(state, stream_tools=forbidden, stream_text=stream,
+                                 dispatch=forbidden, on_text=forbidden)
+        assert attempts == 1 and state.messages == []
+
+
+@pytest.mark.asyncio
+async def test_disconnect_after_visible_text_never_replays_model_output(monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, '_MODEL_RETRY_DELAYS', (0, 0))
+    state = AgentLoopState(AgentContext(profile(), []), [])
+    chunks = []
+    attempts = 0
+
+    async def stream(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        yield 'partial response'
+        raise httpx.RemoteProtocolError('closed after text')
+
+    async def on_text(chunk):
+        chunks.append(chunk)
+
+    with pytest.raises(httpx.RemoteProtocolError):
+        await run_agent_loop(state, stream_tools=forbidden, stream_text=stream,
+                             dispatch=forbidden, on_text=on_text)
+    assert attempts == 1 and chunks == ['partial response']
+    assert state.messages == []
+
+
+@pytest.mark.asyncio
+async def test_repeated_empty_disconnects_fail_after_bounded_attempts(monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, '_MODEL_RETRY_DELAYS', (0, 0))
+    state = AgentLoopState(AgentContext(profile(), []), [])
+    attempts = 0
+
+    async def stream(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise httpx.RemoteProtocolError('closed early')
+        yield 'unreachable'
+
+    with pytest.raises(httpx.RemoteProtocolError):
+        await run_agent_loop(state, stream_tools=forbidden, stream_text=stream,
+                             dispatch=forbidden, on_text=forbidden)
+    assert attempts == 3 and state.model_turn == 1 and state.messages == []
+
+
+def test_provider_error_message_explains_failure_without_leaking_request_details():
+    from local_shell_mcp.webui.generation_routes import _safe_model_error
+
+    request = httpx.Request('POST', 'https://secret.invalid/chat?token=private',
+                            headers={'authorization': 'Bearer private'})
+    response = httpx.Response(503, request=request)
+    result = _safe_model_error(httpx.HTTPStatusError('secret upstream text',
+                                                     request=request, response=response))
+    assert 'HTTP 503' in result and 'HTTPStatusError' in result
+    assert 'secret' not in result and 'private' not in result
+    assert 'stream disconnected' in _safe_model_error(
+        httpx.RemoteProtocolError('internal proxy address and tokens'))
 
 
 @pytest.mark.asyncio

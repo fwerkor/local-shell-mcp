@@ -41,6 +41,22 @@ _TASK_GUARD = asyncio.Lock()
 _SHUTDOWN_TASKS: set[asyncio.Task] = set()
 
 
+def _safe_model_error(error: Exception) -> str:
+    """Explain provider failures without exposing request URLs, keys or headers."""
+    import httpx
+
+    name = type(error).__name__
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"Model provider returned HTTP {error.response.status_code} ({name})"
+    if isinstance(error, httpx.RemoteProtocolError):
+        return f"Model stream disconnected before completion ({name})"
+    if isinstance(error, (httpx.ReadError, httpx.ReadTimeout)):
+        return f"Model stream failed while reading the upstream response ({name})"
+    if isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+        return f"Unable to connect to model provider ({name})"
+    return f"Model generation failed ({name})"
+
+
 def _prune_stale_task_handles() -> None:
     """Do not hand tasks tied to a terminated loop to a replacement loop.
 

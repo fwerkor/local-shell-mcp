@@ -42,6 +42,21 @@ class AgentSuspended(Exception):
     """A durable human interrupt has been saved; leave the generation parked."""
 
 
+_MODEL_RETRY_DELAYS = (0.4, 0.4 * 3)
+
+
+def _retryable_model_error(error: Exception) -> bool:
+    """Only retry transient transport failures and explicitly temporary HTTP statuses."""
+    import httpx
+
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code in {408, 429, 500, 502, 503, 504}
+    return isinstance(error, (
+        httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError,
+        httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.PoolTimeout,
+    ))
+
+
 @dataclass
 class AgentContext:
     profile: ProviderConfig
@@ -158,14 +173,11 @@ async def run_agent_loop(
         projected = project_messages(state) if project_messages else state.messages
         state.provider_projection = projected
         preempted = False
-        # A provider can close an HTTP connection before producing the first
-        # SSE event (e.g. while pre-filling a large post-tool context). No
-        # model state is committed at that point, so two bounded retries are
-        # safe. Once any event is observed, leave the failure to the normal
-        # durable error path instead of replaying possibly visible output.
-        for attempt in range(3):
+        # Retry only an *empty* model attempt. Text and complete tool proposals
+        # are observable, so replaying them could duplicate output or actions.
+        # A new model attempt keeps the graph turn and completed tool results.
+        for attempt in range(len(_MODEL_RETRY_DELAYS) + 1):
             received_event = False
-            retry = False
             source = stream_tools(context.profile, projected, tools=context.tools,
                                   **sampling) if context.tools else \
                 stream_text(context.profile, projected, **sampling)
@@ -199,19 +211,24 @@ async def run_agent_loop(
                         (on_stream_chunk is not None and await on_stream_chunk())):
                         preempted = True
                         break
-            except Exception as exc:
-                if received_event or attempt == 2 or not _retryable_provider_disconnect(exc):
+            except Exception as error:
+                if (attempt == len(_MODEL_RETRY_DELAYS) or received_event
+                        or not _retryable_model_error(error)):
                     raise
+                # Honor revocation and user interrupts even during backoff.
+                if ((should_preempt is not None and should_preempt()) or
+                    (on_stream_chunk is not None and await on_stream_chunk())):
+                    preempted = True
+                    break
                 log.warning("Model transport %s before first event; retry %d/2 (model=%s)",
-                            type(exc).__name__, attempt + 1, context.profile.model)
-                retry = True
+                            type(error).__name__, attempt + 1, context.profile.model)
+                await asyncio.sleep(_MODEL_RETRY_DELAYS[attempt])
+                continue
             finally:
                 close = getattr(source, "aclose", None)
                 if close is not None:
                     await close()
-            if not retry:
-                break
-            await asyncio.sleep(0.4 * (3 ** attempt))
+            break
         # A steer can arrive between final SSE chunk and tool dispatch.
         if not preempted and ((should_preempt is not None and should_preempt()) or
                               (on_stream_chunk is not None and await on_stream_chunk())):
