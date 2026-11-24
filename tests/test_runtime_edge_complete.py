@@ -258,6 +258,13 @@ def test_job_start_tail_stop_and_retry_failures(tmp_path, monkeypatch):
 
     monkeypatch.setattr(jobs, "read_shell", lambda *args: (_ for _ in ()).throw(RuntimeError("read failed")))
     tailed = asyncio.run(jobs.tail_job(job_id))
+    assert tailed["job"]["status"] == "running"
+    # A capture error is not a verdict while the session still exists.
+    # Once the session is absent and the receipt grace has elapsed, it is lost.
+    monkeypatch.setattr(jobs, "list_shells", lambda: asyncio.sleep(0, result={"sessions": []}))
+    with jobs._store_transaction() as store:
+        jobs._find_job(store, job_id)["last_started_at"] = 1.0
+    tailed = asyncio.run(jobs.tail_job(job_id))
     assert tailed["job"]["status"] == "lost"
 
     terminal = asyncio.run(jobs.stop_job(job_id))

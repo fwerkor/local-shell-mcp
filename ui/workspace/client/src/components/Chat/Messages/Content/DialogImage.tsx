@@ -7,6 +7,16 @@ import { useLocalize } from '~/hooks';
 
 const imageSizeCache = new Map<string, string>();
 
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 Bytes';
+
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
 const getQualityStyles = (quality: string): string => {
   if (quality === 'high') {
     return 'bg-status-success-subtle text-status-success';
@@ -21,6 +31,7 @@ export default function DialogImage({
   isOpen,
   onOpenChange,
   src = '',
+  byteSize,
   downloadImage,
   args,
   triggerRef,
@@ -28,6 +39,7 @@ export default function DialogImage({
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   src?: string;
+  byteSize?: number;
   downloadImage: () => void;
   args?: {
     prompt?: string;
@@ -78,16 +90,6 @@ export default function DialogImage({
       return null;
     }
   }, []);
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 Bytes';
-
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
 
   const resetZoom = useCallback(() => {
     setZoom(1);
@@ -204,10 +206,14 @@ export default function DialogImage({
 
   useEffect(() => {
     if (isOpen && src) {
-      getImageSize(src).then(setImageSize);
+      if (byteSize !== undefined) {
+        setImageSize(formatFileSize(byteSize));
+      } else {
+        getImageSize(src).then(setImageSize);
+      }
       resetZoom();
     }
-  }, [isOpen, src, getImageSize, resetZoom]);
+  }, [isOpen, src, byteSize, getImageSize, resetZoom]);
 
   useEffect(() => {
     if (zoom === 1) {
