@@ -3,7 +3,6 @@ export * from './Agents';
 export * from './Endpoints';
 export * from './Skills';
 export * from './Files';
-export * from './Langfuse';
 /* Memories */
 export * from './Memories';
 export * from './Messages';
@@ -14,7 +13,6 @@ export * from './Schedules';
 export * from './Subagents';
 export * from './BackgroundTasks';
 export * from './Tools';
-export * from './Traces';
 export * from './connection';
 export * from './Favorites';
 export * from './CodeEnvironments';
