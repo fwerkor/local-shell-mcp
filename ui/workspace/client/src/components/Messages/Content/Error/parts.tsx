@@ -299,13 +299,10 @@ export function ErrorDetails({ label, children }: { label: string; children: Rea
   );
 }
 
-/** Past a sentence's worth of text, or across lines, a detail is a body to open rather than read. */
-const INLINE_DETAIL_LENGTH = 240;
-
 /**
- * A headline plus the failure's own words, the way every provider-produced error reads: what is
- * known first, the reported text second. A single sentence stays in place, where a reader gets it
- * without acting; a body of text collapses under `label`.
+ * Keep failure details available but collapsed by default, including short
+ * provider errors. An expanded detail can contain a multi-line diagnostic
+ * report without forcing the entire conversation to scroll past it.
  */
 export function ErrorWithDetail({
   headline,
@@ -323,11 +320,7 @@ export function ErrorWithDetail({
   return (
     <ErrorBody>
       <div>{headline}</div>
-      {detail.length <= INLINE_DETAIL_LENGTH && !/[\r\n]/.test(detail) ? (
-        <div className="text-text-secondary">{detail}</div>
-      ) : (
-        <ErrorDetails label={label}>{detail}</ErrorDetails>
-      )}
+      <ErrorDetails label={label}>{detail}</ErrorDetails>
     </ErrorBody>
   );
 }

@@ -225,6 +225,9 @@ async def assign_project(request: Request):
     project_id = payload.get("projectId")
     if project_id is not None and repo.project(owner, str(project_id)) is None:
         _not_found()
+    previous = repo.conversation(owner, conversation_id)
+    if previous is None:
+        _not_found()
     result = repo.update_conversation(owner, conversation_id, {"projectId": project_id})
     if result is not None:
         from .durable_tasks import mark_revoked
@@ -232,7 +235,11 @@ async def assign_project(request: Request):
         mark_revoked(owner)
     if result is None:
         _not_found()
-    return _result(result)
+    return _result({
+        "conversation": result,
+        "previousProjectId": previous["chatProjectId"],
+        "projectId": result["chatProjectId"],
+    })
 
 
 async def message_search(request: Request):

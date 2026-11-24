@@ -645,3 +645,45 @@ async def test_oauth_action_prompt_callback_resumes_same_agent_tool_call(runtime
         thread.join(timeout=1)
         server.server_close()
         get_settings.cache_clear()
+
+@pytest.mark.asyncio
+async def test_native_web_search_default_on_and_explicit_chat_opt_out(runtime, monkeypatch):
+    """A real model tool call reaches the native search host, and off hides both tools."""
+    from local_shell_mcp.webui import web_research
+
+    _, database, store, profile = runtime
+    generation, _ = store.begin("local", {"text": "Find a diffusion paper"})
+    assert generation.web_search_enabled is True
+    seen = []
+
+    async def fake_search(query):
+        seen.append(query)
+        return {"query": query, "results": [{"title": "Paper", "url": "https://arxiv.org/abs/2502.09992",
+                                            "snippet": "Diffusion"}]}
+
+    async def model(profile, history, **kwargs):
+        names = {tool["function"]["name"] for tool in kwargs["tools"]}
+        assert {"web_search", "web_fetch"} <= names
+        if not any(message.get("role") == "tool" for message in history):
+            yield ModelToolCall("search-1", "web_search", {"query": "diffusion language models"})
+        else:
+            assert "arxiv.org" in history[-1]["content"]
+            yield "Found the paper."
+
+    monkeypatch.setattr(web_research, "web_search", fake_search)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", model)
+    await generation_routes._run_model("local", generation, profile, granted_scopes=frozenset())
+    assert seen == ["diffusion language models"]
+    assert store.latest("local", generation.conversation_id).status == "complete"
+
+    disabled, _ = store.begin("local", {
+        "text": "No search please", "ephemeralAgent": {"web_search": False},
+    })
+    assert disabled.web_search_enabled is False
+    restarted = store.get("local", disabled.run_id)
+    assert restarted.web_search_enabled is False
+    runner = AgentRunner("local", restarted, database, store, scopes=set(), grant_expires=None,
+                         stream_tools=model, stream_text=model, on_text=lambda text: None,
+                         profile=profile, web_search_enabled=restarted.web_search_enabled)
+    available = {tool["function"]["name"] for tool in runner._context(None).tools}
+    assert not ({"web_search", "web_fetch"} & available)
