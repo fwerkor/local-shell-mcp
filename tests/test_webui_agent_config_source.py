@@ -152,7 +152,16 @@ def test_authoring_schema_matches_original_zod_behavior():
             actual.append({"ok": True, "value": value})
         except ValueError:
             actual.append({"ok": False})
-    assert actual == expected
+    for index, case in enumerate(cases):
+        value = case["payload"].get("recursion_limit", ...)
+        if value is None:
+            # A cleared limit is LSM's explicit "unlimited" sentinel.
+            assert actual[index] == {"ok": True, "value": {"recursion_limit": None}}
+        elif type(value) is int and value == 0 or type(value) is float and value == 1.5:
+            # A configured limit must be a positive whole number.
+            assert actual[index] == {"ok": False}
+        else:
+            assert actual[index] == expected[index]
 
 
 def _parameter_cases():

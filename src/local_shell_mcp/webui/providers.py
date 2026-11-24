@@ -185,7 +185,7 @@ async def stream_model(
     config: ProviderConfig,
     messages: list[dict],
     *,
-    max_tokens: int = 2048,
+    max_tokens: int | None = None,
     temperature: float | None = None,
     top_p: float | None = None,
     emit_finish_reason: bool = False,
@@ -203,7 +203,8 @@ async def stream_model(
         # Local OpenAI-compatible servers may run without an API key. An
         # empty `Bearer ` value is illegal HTTP and breaks streaming.
         body["messages"] = openai_wire_messages(project_artifact_messages(messages, config.provider))
-        body["max_completion_tokens"] = max_tokens
+        if max_tokens is not None:
+            body["max_completion_tokens"] = max_tokens
         if config.include_usage:
             body['stream_options'] = {'include_usage': True}
         if temperature is not None:
@@ -214,7 +215,7 @@ async def stream_model(
         headers["x-api-key"] = config.token
         headers["anthropic-version"] = "2023-06-01"
         items, instructions = _messages_for_anthropic(messages)
-        body = {"model": config.model, "messages": items, "max_tokens": max_tokens, "stream": True}
+        body = {"model": config.model, "messages": items, "max_tokens": max_tokens if max_tokens is not None else 16384, "stream": True}
         if instructions:
             body["system"] = instructions
         if not _anthropic_omits_sampling_parameters(config.model):
@@ -225,7 +226,9 @@ async def stream_model(
     elif config.provider == "google":
         headers["x-goog-api-key"] = config.token
         items, instructions = _messages_for_google(messages)
-        body = {"contents": items, "generationConfig": {"maxOutputTokens": max_tokens}}
+        body = {"contents": items, "generationConfig": {}}
+        if max_tokens is not None:
+            body["generationConfig"]["maxOutputTokens"] = max_tokens
         if instructions:
             body["systemInstruction"] = {"parts": [{"text": instructions}]}
         if temperature is not None:
@@ -314,7 +317,7 @@ async def stream_model_with_tools(
     messages: list[dict],
     *,
     tools: list[dict],
-    max_tokens: int = 2048,
+    max_tokens: int | None = None,
     temperature: float | None = None,
     top_p: float | None = None,
 ) -> AsyncIterator[str | ModelToolCall | ModelUsage]:
@@ -344,9 +347,11 @@ async def stream_model_with_tools(
         headers["Authorization"] = f"Bearer {config.token}"
     body: dict = {
         "model": config.model, "stream": True, "messages": messages,
-        "max_completion_tokens": max_tokens, "tools": tools,
+        "tools": tools,
         "tool_choice": "auto", "parallel_tool_calls": True,
     }
+    if max_tokens is not None:
+        body["max_completion_tokens"] = max_tokens
     if config.include_usage:
         body['stream_options'] = {'include_usage': True}
     if temperature is not None:

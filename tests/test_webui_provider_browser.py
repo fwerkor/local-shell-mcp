@@ -68,8 +68,12 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 textarea = page.get_by_test_id("text-input")
                 await textarea.fill("Keep my draft while I configure a model.", timeout=15000)
                 assert await textarea.input_value() == "Keep my draft while I configure a model."
-                await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                await page.get_by_test_id("model-selector-button").click()
+                await page.get_by_test_id("model-selector-settings").click()
                 await page.get_by_role("heading", name="Channels & models / 渠道与模型").wait_for()
+                await page.get_by_text("No channels added yet", exact=False).wait_for()
+                await page.get_by_role("button", name="Add channel").click()
+                await page.get_by_label("Channel name").fill("Primary Research")
                 await page.get_by_label("Model provider", exact=True).select_option("openai")
                 await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
                 await page.get_by_label("Model API key").fill("private-test-token")
@@ -101,7 +105,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 if reject_provider:
                     # Correcting an invalid credential must recover without a
                     # server restart and without rewriting old conversations.
-                    await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                    await page.get_by_test_id("model-selector-button").click()
+                    await page.get_by_test_id("model-selector-settings").click()
+                    await page.get_by_role("button", name="Edit Primary Research").click()
                     await page.get_by_label("Model API key").fill("recovered-test-token")
                     await page.get_by_label("Model identifiers").fill("recovered-model")
                     await page.get_by_role("button", name="Save model channel").click()
@@ -115,8 +121,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     # Two OpenAI-compatible profiles with independent credentials
                     # must remain distinct through the actual original React
                     # model selector and Python streaming call, not just storage.
-                    await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
-                    await page.get_by_role("button", name="Add named channel").click()
+                    await page.get_by_test_id("model-selector-button").click()
+                    await page.get_by_test_id("model-selector-settings").click()
+                    await page.get_by_role("button", name="Add channel").click()
                     await page.get_by_label("Channel name").fill("Secondary Research")
                     await page.get_by_label("Model provider").select_option("openai")
                     await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
@@ -127,11 +134,40 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     named_response = await named_saved.value
                     assert named_response.status == 200, await named_response.text()
                     assert "secondary-private-token" not in await named_response.text()
+                    # Rename and edit an unused channel through the actual UI.
+                    await page.get_by_role("button", name="Edit Secondary Research").click()
+                    await page.get_by_label("Channel name").fill("Secondary Renamed")
+                    await page.get_by_label("Model identifiers").fill("independent-model" + chr(10) + "extra-model")
+                    await page.get_by_role("button", name="Save model channel").click()
+                    await page.get_by_role("button", name="Edit Secondary Renamed").wait_for()
+                    assert "Secondary Research" not in (await (await page.request.get(
+                        f"http://127.0.0.1:{port}/api/models")).json())
+                    await page.get_by_role("button", name="Edit Secondary Renamed").click()
+                    await page.get_by_label("Channel name").fill("Secondary Research")
+                    await page.get_by_label("Model identifiers").fill("independent-model")
+                    await page.get_by_role("button", name="Save model channel").click()
+                    await page.get_by_role("button", name="Edit Secondary Research").wait_for()
+
+                    # Deletion requires an explicit second action and removes the model inventory.
+                    await page.get_by_role("button", name="Add channel").click()
+                    await page.get_by_label("Channel name").fill("Temporary Research")
+                    await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
+                    await page.get_by_label("Model identifiers").fill("temporary-model")
+                    await page.get_by_role("button", name="Save model channel").click()
+                    await page.get_by_role("button", name="Delete Temporary Research").click()
+                    assert await page.get_by_role("button", name="Confirm delete Temporary Research").is_visible()
+                    await page.get_by_role("button", name="Confirm delete Temporary Research").click()
+                    await page.get_by_role("button", name="Delete Temporary Research").wait_for(state="detached")
+                    assert "Temporary Research" not in (await (await page.request.get(
+                        f"http://127.0.0.1:{port}/api/models")).json())
                     inventory = await page.request.get(f"http://127.0.0.1:{port}/api/models")
                     assert (await inventory.json())["Secondary Research"] == ["independent-model"]
                     endpoint = await page.request.get(f"http://127.0.0.1:{port}/api/endpoints")
                     assert (await endpoint.json())["Secondary Research"]["type"] == "openAI"
-                    await page.get_by_role("link", name="Start a new chat and select a model").click()
+                    # Deleting the temporary channel clears the save notice.
+                    # Navigate via the stable route instead of its conditional link.
+                    await page.goto(f"http://127.0.0.1:{port}/c/new", wait_until="domcontentloaded")
+                    await page.get_by_test_id("text-input").wait_for()
                     await page.get_by_test_id("model-selector-button").click()
                     await page.locator("#model-search").fill("independent-model")
                     await page.get_by_text("independent-model", exact=True).first.click()
@@ -201,6 +237,22 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     payload = await profiles.json()
                     assert {p.get("name") for p in payload["providers"]} >= {"Secondary Research"}
                     assert "secondary-private-token" not in str(payload)
+                    # Referenced channels show the real conflict and a deliberate
+                    # force-delete option instead of an opaque HTTP 409.
+                    await page.goto(f"http://127.0.0.1:{port}/c/new", wait_until="domcontentloaded")
+                    await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                    await page.get_by_role("button", name="Delete Secondary Research").click()
+                    async with page.expect_response(lambda response: response.request.method == "DELETE" and "name=Secondary%20Research" in response.url) as blocked:
+                        await page.get_by_role("button", name="Confirm delete Secondary Research").click()
+                    assert (await blocked.value).status == 409
+                    await page.get_by_role("alert").get_by_text("Channel is referenced by", exact=False).wait_for()
+                    await page.get_by_role("button", name="Delete anyway Secondary Research").click()
+                    await page.get_by_role("button", name="Delete Secondary Research").wait_for(state="detached")
+                    assert "Secondary Research" not in (await (await page.request.get(
+                        f"http://127.0.0.1:{port}/api/models")).json())
+                    # No prior chat or Agent configuration is silently replaced.
+                    still_saved = await page.request.get(f"http://127.0.0.1:{port}/api/agents/{agent_id}")
+                    assert (await still_saved.json())["provider"] == "Secondary Research"
                 assert not errors, errors
             except Exception:
                 print(await page.locator("body").inner_text())

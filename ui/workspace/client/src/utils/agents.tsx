@@ -1,77 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Feather } from 'lucide-react';
-import { Skeleton } from '@librechat/client';
 import type t from 'librechat-data-provider';
 
-/**
- * Extracts the avatar URL from an agent's avatar property
- * Handles both string and object formats
- */
-export const getAgentAvatarUrl = (agent: t.Agent | null | undefined): string | null => {
-  if (!agent?.avatar) {
-    return null;
-  }
-
-  if (typeof agent.avatar === 'string') {
-    return agent.avatar;
-  }
-
-  if (agent.avatar && typeof agent.avatar === 'object' && 'filepath' in agent.avatar) {
-    return agent.avatar.filepath;
-  }
-
-  return null;
-};
-
-const LazyAgentAvatar = ({
-  url,
-  alt,
-  imgClass,
-}: {
-  url: string;
-  alt: string;
-  imgClass: string;
-}) => {
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    setIsLoaded(false);
-  }, [url]);
-
-  return (
-    <>
-      <img
-        src={url}
-        alt={alt}
-        className={imgClass}
-        loading="lazy"
-        onLoad={() => setIsLoaded(true)}
-        onError={() => setIsLoaded(false)}
-        style={{
-          opacity: isLoaded ? 1 : 0,
-          transition: 'opacity 0.2s ease-in-out',
-        }}
-      />
-      {!isLoaded && <Skeleton className="absolute inset-0 rounded-full" aria-hidden="true" />}
-    </>
-  );
-};
+/** Agent images are intentionally hidden; retain the helper for legacy callers. */
+export const getAgentAvatarUrl = (_agent: t.Agent | null | undefined): null => null;
 
 /**
- * Renders an agent avatar with fallback to Bot icon
- * Consistent across all agent displays
+ * Renders a consistent, non-customizable agent glyph across the interface.
  */
 export const renderAgentAvatar = (
-  agent: t.Agent | null | undefined,
+  _agent: t.Agent | null | undefined,
   options: {
     size?: 'icon' | 'sm' | 'md' | 'lg' | 'xl';
     className?: string;
     showBorder?: boolean;
   } = {},
 ): React.ReactElement => {
-  const { size = 'md', className = '', showBorder = true } = options;
-
-  const avatarUrl = getAgentAvatarUrl(agent);
+  const { size = 'md', className = '' } = options;
 
   // Size mappings for responsive design
   const sizeClasses = {
@@ -89,30 +34,6 @@ export const renderAgentAvatar = (
     lg: 'h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12',
     xl: 'h-10 w-10',
   };
-
-  const placeholderSizeClasses = {
-    icon: 'h-5 w-5',
-    sm: 'h-10 w-10 sm:h-12 sm:w-12',
-    md: 'h-12 w-12 sm:h-16 sm:w-16 md:h-20 md:w-20',
-    lg: 'h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24',
-    xl: 'h-20 w-20',
-  };
-
-  const borderClasses = showBorder ? 'border-1 border-border-medium' : '';
-
-  if (avatarUrl) {
-    return (
-      <div
-        className={`relative flex items-center justify-center ${sizeClasses[size]} ${className}`}
-      >
-        <LazyAgentAvatar
-          url={avatarUrl}
-          alt={`${agent?.name || 'Agent'} avatar`}
-          imgClass={`${sizeClasses[size]} rounded-full object-cover shadow-lg ${borderClasses}`}
-        />
-      </div>
-    );
-  }
 
   return (
     <div className={`relative flex items-center justify-center ${sizeClasses[size]} ${className}`}>

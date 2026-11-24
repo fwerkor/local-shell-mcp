@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import { Feather } from 'lucide-react';
-import { ProviderId } from 'librechat-data-provider';
 import { Sparkles, AssistantIcon, ProviderIcon } from '@librechat/client';
 import type * as t from 'librechat-data-provider';
 import ConvoIconURL from '~/components/Endpoints/ConvoIconURL';
@@ -106,9 +105,9 @@ export default function ConvoIcon({
     ? (entity as t.Agent | undefined)?.avatar?.filepath
     : ((entity as t.Assistant | undefined)?.metadata?.avatar as string);
 
-  const { provider, imageURL } = useProviderIcon({ endpoint, endpointsConfig, iconURL });
+  const { provider } = useProviderIcon({ endpoint, endpointsConfig, iconURL });
 
-  if (isImageURL(iconURL)) {
+  if (isImageURL(iconURL) && (isAgent || isAssistant)) {
     return (
       <ConvoIconURL
         iconURL={iconURL}
@@ -142,16 +141,12 @@ export default function ConvoIcon({
       );
     }
 
-    if (imageURL != null) {
-      return <img src={imageURL} alt={`${endpoint} Icon`} className={className} />;
-    }
-
     return (
       <ProviderIcon
         provider={provider}
         model={conversation?.model}
         size={size != null ? Math.round(size * artScale) : undefined}
-        className={cn(className, context === 'landing' && provider === ProviderId.cohere && 'p-2')}
+        className={className}
       />
     );
   };

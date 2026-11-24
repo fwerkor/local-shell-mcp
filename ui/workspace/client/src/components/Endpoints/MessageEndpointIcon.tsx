@@ -17,7 +17,7 @@ const MessageEndpointIcon: React.FC<IconProps> = (props) => {
     agentName,
     endpointsConfig,
   } = props;
-  const { provider, imageURL } = useProviderIcon({ endpoint, iconURL, endpointsConfig });
+  const { provider } = useProviderIcon({ endpoint, iconURL, endpointsConfig });
 
   const assistantsIcon = {
     icon: iconURL ? (
@@ -89,29 +89,6 @@ const MessageEndpointIcon: React.FC<IconProps> = (props) => {
 
   if (endpoint === EModelEndpoint.agents) {
     return agentsIcon.icon;
-  }
-
-  if (imageURL != null) {
-    return (
-      <div
-        title={endpoint ?? ''}
-        style={{
-          width: size,
-          height: size,
-        }}
-        className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-sm p-1 text-text-primary',
-          props.className ?? '',
-        )}
-      >
-        <div className="h-6 w-6">
-          <div className="overflow-hidden rounded-full">
-            <img className="h-full w-full object-contain" src={imageURL} alt={`${endpoint} Icon`} />
-          </div>
-        </div>
-        {errorBadge}
-      </div>
-    );
   }
 
   return (

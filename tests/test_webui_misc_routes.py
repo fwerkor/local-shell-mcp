@@ -52,7 +52,7 @@ async def test_disabled_optional_capabilities_never_claim_unsupported_services(t
     app = Starlette(routes=[*tag_routes.tag_routes(), *misc_routes.misc_routes()])
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/api/banner")).json() is None
-        assert (await client.get("/api/search/enable")).json() is False
+        assert (await client.get("/api/search/enable")).json() is True
         assert (await client.get("/api/files")).json() == []
         assert (await client.get("/api/files/speech/config/get")).json()["speechToText"]["enabled"] is False
         assert (await client.get("/api/roles/USER")).json()["name"] == "USER"
@@ -63,7 +63,7 @@ async def test_disabled_optional_capabilities_never_claim_unsupported_services(t
         assert (await client.get("/health")).json()["status"] == "ok"
         assert (await client.get("/api/tags")).json() == []
         assert (await client.get("/api/files/config")).json()["serverFileSizeLimit"] == 32 * 1024 * 1024
-        assert (await client.get("/api/agents/tools/web_search/auth")).json()["authenticated"] is False
+        assert (await client.get("/api/agents/tools/web_search/auth")).json()["authenticated"] is True
 
 
 @pytest.mark.asyncio

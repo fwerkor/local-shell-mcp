@@ -15,7 +15,6 @@ import { useUpdateAgentMutation } from '~/data-provider';
 import AdvancedButton from './Advanced/AdvancedButton';
 import VersionButton from './Version/VersionButton';
 import DuplicateAgent from './DuplicateAgent';
-import AdminSettings from './AdminSettings';
 import DeleteButton from './DeleteButton';
 import { Panel } from '~/common';
 
@@ -25,13 +24,11 @@ export default function AgentFooter({
   updateMutation,
   setActivePanel,
   setCurrentAgentId,
-  isAvatarUploading = false,
 }: Pick<
   AgentPanelProps,
   'setCurrentAgentId' | 'createMutation' | 'activePanel' | 'setActivePanel'
 > & {
   updateMutation: ReturnType<typeof useUpdateAgentMutation>;
-  isAvatarUploading?: boolean;
 }) {
   const localize = useLocalize();
   const { user } = useAuthContext();
@@ -61,7 +58,7 @@ export default function AgentFooter({
   const canDeleteThisAgent = hasPermission(PermissionBits.DELETE);
   const canShareRemoteAgent = hasRemoteAgentPermission(PermissionBits.SHARE);
   const isAdmin = user?.role === SystemRoles.ADMIN;
-  const isSaving = createMutation.isLoading || updateMutation.isLoading || isAvatarUploading;
+  const isSaving = createMutation.isLoading || updateMutation.isLoading;
   const saveLabel = agent_id ? localize('com_ui_save') : localize('com_ui_create');
   const renderSaveButton = () => (
     <span className="t-icon-swap" data-state={isSaving ? 'b' : 'a'} aria-hidden={false}>
@@ -84,7 +81,6 @@ export default function AgentFooter({
           {!!agent_id && <VersionButton setActivePanel={setActivePanel} />}
         </div>
       )}
-      {user?.role === SystemRoles.ADMIN && showButtons && <AdminSettings />}
       {/* Context Button */}
       <div className="flex items-center justify-end gap-2">
         {(agent?.author === user?.id || user?.role === SystemRoles.ADMIN || canDeleteThisAgent) &&

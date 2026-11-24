@@ -7,12 +7,31 @@ LSM rather than maintaining separate provider or machine execution systems.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
 from .semantic_index import SemanticSnapshot
+
+log = logging.getLogger(__name__)
+
+
+def _retryable_provider_disconnect(error: Exception) -> bool:
+    """Retry transient HTTP transport failures only before any model event.
+
+    A model response may already contain executed tool calls, visible text or
+    signed reasoning. Retrying after the first event would duplicate content or
+    invalidate provider state; HTTP status errors are never transient here.
+    """
+    import httpx
+
+    return isinstance(error, (
+        httpx.RemoteProtocolError, httpx.ConnectError, httpx.ConnectTimeout,
+        httpx.ReadError, httpx.ReadTimeout,
+    ))
 
 
 class RuntimeSafetyError(PermissionError):
@@ -28,7 +47,7 @@ class AgentContext:
     profile: ProviderConfig
     tools: list[dict]
     parameters: dict = field(default_factory=dict)
-    recursion_limit: int = 50
+    recursion_limit: int | None = None
     tool_end: bool = False
     agent: dict | None = None
     compaction_semantic_index: SemanticSnapshot | None = None
@@ -79,7 +98,7 @@ async def run_agent_loop(
         if state.pending_calls:
             context = state.context
             if not state.tool_step_started:
-                if state.step >= context.recursion_limit:
+                if context.recursion_limit is not None and state.step >= context.recursion_limit:
                     raise ValueError("Recursion limit reached without hitting a stop condition")
                 state.step += 1
                 state.tool_step_started = True
@@ -109,7 +128,7 @@ async def run_agent_loop(
             continue
         if inject_controls is not None:
             await inject_controls(state, "tool")
-        if state.step >= state.context.recursion_limit:
+        if state.context.recursion_limit is not None and state.step >= state.context.recursion_limit:
             raise ValueError("Recursion limit reached without hitting a stop condition")
         if before_model is not None:
             await before_model(state)
@@ -117,15 +136,19 @@ async def run_agent_loop(
         state.step += 1
         state.model_turn += 1
         params = context.parameters
-        max_tokens = max(1, min(int(next((params[key] for key in ("max_tokens", "maxTokens", "max_output_tokens", "maxOutputTokens")
-                                          if params.get(key) is not None), 2048)), 16384))
+        # Missing max tokens means no application-imposed output limit.
+        max_tokens = next((params[key] for key in ("max_tokens", "maxTokens", "max_output_tokens", "maxOutputTokens")
+                           if params.get(key) is not None), None)
+        max_tokens = int(max_tokens) if isinstance(max_tokens, (int, float)) and not isinstance(max_tokens, bool) and max_tokens > 0 else None
         temperature = params.get("temperature")
         if temperature is not None:
             temperature = max(0.0, min(float(temperature), 2.0))
         top_p = next((params[key] for key in ("top_p", "topP") if params.get(key) is not None), None)
         if top_p is not None:
             top_p = max(0.0, min(float(top_p), 1.0))
-        sampling = {"max_tokens": max_tokens, "temperature": temperature}
+        sampling = {"temperature": temperature}
+        if max_tokens is not None:
+            sampling["max_tokens"] = max_tokens
         if top_p is not None:
             sampling["top_p"] = top_p
         calls: list[ModelToolCall] = []
@@ -133,41 +156,59 @@ async def run_agent_loop(
         reasoning: list[dict] = []
         projected = project_messages(state) if project_messages else state.messages
         state.provider_projection = projected
-        source = stream_tools(context.profile, projected, tools=context.tools,
-                              **sampling) if context.tools else \
-            stream_text(context.profile, projected, **sampling)
         preempted = False
-        try:
-            async for item in source:
-                if isinstance(item, ModelToolCall):
-                    calls.append(item)
-                elif isinstance(item, ModelUsage):
-                    if on_model_usage is not None:
-                        await on_model_usage(item, state)
-                elif isinstance(item, ModelThought):
-                    if item.kind == 'thinking':
-                        if reasoning and reasoning[-1].get('type') == 'thinking' and not reasoning[-1].get('signature'):
-                            reasoning[-1]['thinking'] += item.text
-                        else:
-                            reasoning.append({'type': 'thinking', 'thinking': item.text})
-                    elif item.kind == 'signature':
-                        if reasoning and reasoning[-1].get('type') == 'thinking':
-                            reasoning[-1]['signature'] = item.signature
-                    elif item.kind == 'redacted_thinking':
-                        reasoning.append({'type': 'redacted_thinking', 'data': item.data})
-                elif item:
-                    text_parts.append(item)
-                    await on_text(item)
-                # Model streams may contain only tool calls. Both the durable
-                # user steer and detached-child interrupt can preempt these.
-                if ((should_preempt is not None and should_preempt()) or
-                    (on_stream_chunk is not None and await on_stream_chunk())):
-                    preempted = True
-                    break
-        finally:
-            close = getattr(source, "aclose", None)
-            if close is not None:
-                await close()
+        # A provider can close an HTTP connection before producing the first
+        # SSE event (e.g. while pre-filling a large post-tool context). No
+        # model state is committed at that point, so two bounded retries are
+        # safe. Once any event is observed, leave the failure to the normal
+        # durable error path instead of replaying possibly visible output.
+        for attempt in range(3):
+            received_event = False
+            retry = False
+            source = stream_tools(context.profile, projected, tools=context.tools,
+                                  **sampling) if context.tools else \
+                stream_text(context.profile, projected, **sampling)
+            try:
+                async for item in source:
+                    received_event = True
+                    if isinstance(item, ModelToolCall):
+                        calls.append(item)
+                    elif isinstance(item, ModelUsage):
+                        if on_model_usage is not None:
+                            await on_model_usage(item, state)
+                    elif isinstance(item, ModelThought):
+                        if item.kind == 'thinking':
+                            if reasoning and reasoning[-1].get('type') == 'thinking' and not reasoning[-1].get('signature'):
+                                reasoning[-1]['thinking'] += item.text
+                            else:
+                                reasoning.append({'type': 'thinking', 'thinking': item.text})
+                        elif item.kind == 'signature':
+                            if reasoning and reasoning[-1].get('type') == 'thinking':
+                                reasoning[-1]['signature'] = item.signature
+                        elif item.kind == 'redacted_thinking':
+                            reasoning.append({'type': 'redacted_thinking', 'data': item.data})
+                    elif item:
+                        text_parts.append(item)
+                        await on_text(item)
+                    # Model streams may contain only tool calls. Both the durable
+                    # user steer and detached-child interrupt can preempt these.
+                    if ((should_preempt is not None and should_preempt()) or
+                        (on_stream_chunk is not None and await on_stream_chunk())):
+                        preempted = True
+                        break
+            except Exception as exc:
+                if received_event or attempt == 2 or not _retryable_provider_disconnect(exc):
+                    raise
+                log.warning("Model transport %s before first event; retry %d/2 (model=%s)",
+                            type(exc).__name__, attempt + 1, context.profile.model)
+                retry = True
+            finally:
+                close = getattr(source, "aclose", None)
+                if close is not None:
+                    await close()
+            if not retry:
+                break
+            await asyncio.sleep(0.4 * (3 ** attempt))
         # A steer can arrive between final SSE chunk and tool dispatch.
         if not preempted and ((should_preempt is not None and should_preempt()) or
                               (on_stream_chunk is not None and await on_stream_chunk())):

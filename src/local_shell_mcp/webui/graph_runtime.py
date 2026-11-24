@@ -360,8 +360,9 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                    "initialInputCount": initial_count,
                    "handoffState": HandoffRouting(topology.default_agent_id, root.get("maxHandoffs"),
                                                    topology.routing_parallel).snapshot()}
-    limit = recursion_limit or root.get("recursion_limit") or 50
-    config = {**checkpoint_config, "recursion_limit": int(limit)}
+    limit = recursion_limit if recursion_limit is not None else root.get("recursion_limit")
+    # LangGraph requires an integer recursion limit, even when none was set.
+    config = {**checkpoint_config, "recursion_limit": int(limit) if limit is not None else 2**31 - 1}
     outcome = await compiled.ainvoke(initial, config)
     # Source SubagentExecutor returns the designated resultAgentId, never the
     # last sibling to settle in a parallel team. Keep intermediate messages

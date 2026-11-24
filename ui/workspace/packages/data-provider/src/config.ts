@@ -2616,6 +2616,7 @@ export type TStartupConfig = {
   >;
   mcpPlaceholder?: string;
   conversationImportMaxFileSize?: number;
+  lsmVersion?: string;
   buildInfo?: {
     commit?: string | null;
     commitShort?: string | null;

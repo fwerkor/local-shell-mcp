@@ -38,7 +38,7 @@ class SubagentConfig:
     name: str
     description: str
     agent: dict
-    max_turns: int
+    max_turns: int | None
     owner: str
     self_spawn: bool = False
     allow_nested: bool = False
@@ -50,8 +50,8 @@ class SubagentInvocation:
     agent: dict
     messages: list[dict]
     selected_tools: tuple[str, ...]
-    max_turns: int
-    recursion_limit: int
+    max_turns: int | None
+    recursion_limit: int | None
     remaining_depth: int
     scopes: frozenset[str]
     grant_expires: int | None
@@ -64,19 +64,19 @@ class SubagentInvocation:
     parent_agent_id: str | None = None
 
 
-def resolve_subagent_max_turns(agent: dict, endpoint_config: dict | None = None) -> int:
-    """agents/config.ts resolveRecursionLimit + resolveSubagentMaxTurns."""
+def resolve_subagent_max_turns(agent: dict, endpoint_config: dict | None = None) -> int | None:
+    """Only an explicit agent or endpoint setting limits child turns."""
     endpoint = endpoint_config or {}
     limit = endpoint.get("recursionLimit")
-    if limit is None:
-        limit = 50
+    if type(limit) not in (int, float) or limit <= 0:
+        limit = None
     override = agent.get("recursion_limit")
     if type(override) in (int, float) and override > 0:
         limit = override
     cap = endpoint.get("maxRecursionLimit")
-    if type(cap) in (int, float) and cap > 0 and limit > cap:
+    if type(cap) in (int, float) and cap > 0 and (limit is None or limit > cap):
         limit = cap
-    return math.floor(limit / 3)
+    return math.floor(limit / 3) if limit is not None else None
 
 
 def build_subagent_configs(owner: str, parent: dict | None, database: Any, *,
@@ -170,7 +170,7 @@ def build_subagent_configs(owner: str, parent: dict | None, database: Any, *,
                 edge.pop("excludeResults")
         configs.append(SubagentConfig(
             definition["type"], definition["name"], definition["description"], team,
-            min(resolve_subagent_max_turns(member, endpoint_config) for member in members), owner,
+            min((turns for member in members if (turns := resolve_subagent_max_turns(member, endpoint_config)) is not None), default=None), owner,
         ))
     return configs
 
@@ -315,7 +315,8 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
     invocation = SubagentInvocation(
         agent=copy.deepcopy(config.agent), messages=messages,
         selected_tools=tuple(config.agent.get("tools") or []),
-        max_turns=config.max_turns, recursion_limit=config.max_turns * 3,
+        max_turns=config.max_turns,
+        recursion_limit=config.max_turns * 3 if config.max_turns is not None else None,
         remaining_depth=max(0, max_depth - 1) if config.allow_nested else 0,
         scopes=frozenset(scopes), grant_expires=grant_expires, owner=owner,
         conversation_id=conversation_id, parent_run_id=parent_run_id,

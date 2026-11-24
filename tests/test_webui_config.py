@@ -8,6 +8,7 @@ import httpx
 import pytest
 from starlette.applications import Starlette
 
+from local_shell_mcp import __version__
 from local_shell_mcp.webui import config_routes, routes
 
 
@@ -36,10 +37,12 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
         assert login_page_config.status_code == 200
         assert login_page_config.json()["appTitle"] == "local-shell-mcp"
         assert "interface" not in login_page_config.json()
+        assert "lsmVersion" not in login_page_config.json()
         assert "very-private" not in login_page_config.text
         assert (await client.get("/api/endpoints")).status_code == 401
         alice = {"x-test-owner": "alice"}
         startup = (await client.get("/api/config", headers=alice)).json()
+        assert startup["lsmVersion"] == __version__
         assert startup["interface"]["agents"]["use"] is True
         assert startup["interface"]["contextUsage"] is True
         endpoints = (await client.get("/api/endpoints", headers=alice)).json()

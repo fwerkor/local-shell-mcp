@@ -5,6 +5,7 @@ import { EntityEndpointMark, isEntityEndpoint } from '~/components/Endpoints/Ent
 import { URLIcon } from '~/components/Endpoints/URLIcon';
 import { useProviderIcon } from '~/hooks/Endpoint';
 import { getModelSpecIconURL } from '~/utils';
+import { isImageURL } from '~/utils/icons';
 
 interface SpecIconProps {
   currentSpec: TModelSpec;
@@ -16,17 +17,16 @@ interface SpecIconProps {
 const SpecIcon: React.FC<SpecIconProps> = ({ currentSpec, endpointsConfig, agentAvatarURL }) => {
   const iconURL = getModelSpecIconURL(currentSpec, agentAvatarURL);
   const endpoint = currentSpec.preset?.endpoint;
-  const { provider, imageURL } = useProviderIcon({ endpoint, endpointsConfig, iconURL });
-  const { provider: fallbackProvider } = useProviderIcon({ endpoint, endpointsConfig });
+  const { provider } = useProviderIcon({ endpoint, endpointsConfig, iconURL });
 
-  if (imageURL) {
+  if (isEntityEndpoint(endpoint) && isImageURL(iconURL)) {
     return (
       <URLIcon
-        iconURL={imageURL}
+        iconURL={iconURL}
         altName={currentSpec.name}
         containerStyle={{ width: 20, height: 20 }}
         className="icon-md shrink-0 overflow-hidden rounded-full"
-        provider={fallbackProvider}
+        provider={provider}
       />
     );
   }

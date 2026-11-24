@@ -21,7 +21,7 @@ from ..settings import get_settings
 
 COOKIE = "lsm_workspace"
 TICKET_TTL = 60
-SESSION_TTL = 3600
+SESSION_TTL = 30 * 24 * 60 * 60  # 30 days for WebUI login sessions
 
 
 def _hash(value: str) -> str:
@@ -249,11 +249,13 @@ async def authenticate(request: Request) -> Response:
     if not isinstance(raw, str):
         raise HTTPException(400, detail="Login ticket is required")
     try:
-        cookie, _ = _store().redeem(raw)
+        cookie, session = _store().redeem(raw)
     except ValueError as exc:
         raise HTTPException(401, detail=str(exc)) from exc
     response = RedirectResponse(url="/c/new", status_code=303)
-    response.set_cookie(COOKIE, cookie, max_age=SESSION_TTL, path="/", httponly=True,
+    # Do not retain a browser cookie beyond an explicitly shorter OAuth grant.
+    cookie_ttl = min(SESSION_TTL, max(0, session.grant_until - int(time.time())))
+    response.set_cookie(COOKIE, cookie, max_age=cookie_ttl, path="/", httponly=True,
                         secure=request.url.scheme == "https", samesite="lax")
     return response
 

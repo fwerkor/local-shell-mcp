@@ -87,6 +87,7 @@ async def test_text_only_provider_path_when_no_native_tools(runner_parts, monkey
         yield ''
 
     obj = runner(runner_parts, unexpected_tools, text=text_model)
+    obj.web_search_enabled = False  # Web tools default on; opt out for text-only path.
     messages = await obj.run(runner_parts[1].history('local', runner_parts[2].conversation_id))
     assert messages[-1]['content'] == 'Native-tools-disabled text still streams.'
     assert len(streams) == 1

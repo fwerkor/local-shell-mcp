@@ -70,9 +70,10 @@ class AgentRunner:
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
                  on_injected=None, wakeup_lease=None, event_delivery_lease=None,
-                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None):
+                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, web_search_enabled=True):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
+        self.web_search_enabled = web_search_enabled
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
         self.root_agent, self.initial_profile = agent, profile
         self.graph_definition = graph_definition if graph_definition is not None else agent
@@ -165,6 +166,7 @@ class AgentRunner:
         from .graph_topology import admit_agent_graph
         from .lsm_tool_registry import available_tools
         from .nested_mcp import nested_tools
+        from .web_research import WEB_TOOLS
 
         self._check_grant()
         admit_agent_graph(self.owner, self.graph_definition, self.repository)
@@ -175,6 +177,8 @@ class AgentRunner:
         tools = [tool for tool in native if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
                  and (unrestricted or tool["function"]["name"] in selected
                       or tool["function"]["name"] in {"session_manage", "plan_manage"})]
+        if self.web_search_enabled:
+            tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
@@ -230,7 +234,7 @@ class AgentRunner:
 
                 tools += check_background_task_tools()
         override = (agent or {}).get("recursion_limit")
-        limit = override if type(override) in (int, float) and override > 0 else 50
+        limit = int(override) if type(override) in (int, float) and override > 0 else None
         return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
                             tools, (agent or {}).get("model_parameters") or self.initial_parameters,
                             recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent,
@@ -452,6 +456,10 @@ class AgentRunner:
             if artifact is not None:
                 self.memory_artifacts[call.call_id] = artifact
             return result
+        if call.name in {"web_search", "web_fetch"}:
+            from .web_research import invoke_web_tool
+
+            return await invoke_web_tool(self.owner, call.name, call.arguments)
         if call.name == "check_background_task":
             from .background_tools import check_tool_task
             from .subagent_task_host import SQLiteSubagentTaskHost
@@ -617,7 +625,8 @@ class AgentRunner:
                             subagent_depth=invocation.remaining_depth,
                             wakeup_lease=self.wakeup_lease,
                             event_delivery_lease=self.event_delivery_lease,
-                            actor_lease=self.actor_lease, recovery_steers=self.recovery_steers)
+                            actor_lease=self.actor_lease, recovery_steers=self.recovery_steers,
+                            web_search_enabled=self.web_search_enabled)
         from .attachments import with_agent_context
 
         history = with_agent_context(self.database, self.owner, invocation.agent,

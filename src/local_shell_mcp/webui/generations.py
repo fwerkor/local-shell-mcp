@@ -41,6 +41,7 @@ class Generation:
     status: str
     agent_id: str | None = None
     protocol_version: int = 2
+    web_search_enabled: bool = True
 
 
 class GenerationConflict(Exception):
@@ -77,6 +78,19 @@ def _rewind_uncheckpointed_text(parts: list[dict], saved: str, *, preserve_slots
     parts[:] = retained
 
 
+def _web_search_requested(agent: dict | None, payload: dict) -> bool:
+    """Web search defaults on; explicit chat/Agent toggles take precedence."""
+    ephemeral = payload.get('ephemeralAgent')
+    if isinstance(ephemeral, dict) and type(ephemeral.get('web_search')) is bool:
+        return ephemeral['web_search']
+    if type(payload.get('web_search')) is bool:
+        return payload['web_search']
+    options = (agent or {}).get('model_parameters') or {}
+    if isinstance(options, dict) and type(options.get('web_search')) is bool:
+        return options['web_search']
+    return True
+
+
 class GenerationStore:
     def __init__(self, database: Any):
         self.database = database
@@ -90,6 +104,7 @@ class GenerationStore:
             response_message_id=state["responseMessageId"],
             user_message_id=state["userMessageId"], status=row["status"], agent_id=row["agent_id"],
             protocol_version=job_generation_protocol(state),
+            web_search_enabled=state.get("webSearchEnabled", True),
         )
 
     def latest(self, owner: str, conversation_id: str) -> Generation | None:
@@ -178,6 +193,7 @@ class GenerationStore:
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
+            "webSearchEnabled": _web_search_requested(agent, payload),
             'manualCompaction': manual_compaction,
             "artifactsMode": artifact_mode(payload, agent),
         }
@@ -274,7 +290,8 @@ class GenerationStore:
                     'conversationId': conversation_id, 'text': '', 'compact': True}
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(created)))
         return Generation(run_id, conversation_id, stamp_ms, response_message_id,
-                          user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id"), protocol_version), True
+                          user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id"),
+                          protocol_version, state["webSearchEnabled"]), True
 
     @staticmethod
     def action_expired(pending: dict) -> bool:

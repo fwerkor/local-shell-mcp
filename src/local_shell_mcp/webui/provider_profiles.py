@@ -25,6 +25,13 @@ _DEFAULTS = {
     "anthropic": ("https://api.anthropic.com/v1", "claude-sonnet-4-6"),
     "google": ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
 }
+# Built-in provider aliases resolve case-insensitively via profile(). Use the
+# same aliases when checking references before resetting saved credentials.
+_LEGACY_ALIASES = {
+    "openai": ("openai", "openai-compatible", "ollama", "azureopenai", "custom"),
+    "anthropic": ("anthropic",),
+    "google": ("google", "gemini"),
+}
 # LibreChat endpointSchema.name must not collide with EModelEndpoint values.
 _RESERVED = frozenset({"agents", "openai", "anthropic", "google", "gemini", "custom", "azureopenai",
                        "assistants", "azureassistants", "bedrock", "gptplugins", "chatgptbrowser", "ollama", "openai-compatible"})
@@ -56,10 +63,10 @@ def profile(channel: str) -> dict:
     if not isinstance(channel, str):
         raise ValueError("Invalid model channel")
     normalized = channel.strip().lower()
-    if normalized in {"openai-compatible", "ollama", "azureopenai", "custom"}:
-        normalized = "openai"
-    if normalized == "gemini":
-        normalized = "google"
+    for kind, aliases in _LEGACY_ALIASES.items():
+        if normalized in aliases:
+            normalized = kind
+            break
     if normalized in _DEFAULTS:
         saved = _repo().setting(_OWNER, _PREFIX + normalized)
         return saved if isinstance(saved, dict) else _default_profile(normalized)
@@ -89,7 +96,22 @@ def all_profiles() -> list[dict]:
 
 
 def public_profiles() -> dict:
-    return {"providers": [_redact(value) for value in all_profiles()]}
+    """Expose editable entries without presenting unsaved provider defaults as channels."""
+    entries = []
+    for kind in _DEFAULTS:
+        value = profile(kind)
+        saved = _repo().setting(_OWNER, _PREFIX + kind)
+        env_keys = {
+            "openai": ("LOCAL_SHELL_MCP_MODEL_BASE_URL", "LOCAL_SHELL_MCP_MODEL",
+                       "LOCAL_SHELL_MCP_MODEL_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_KEY"),
+            "anthropic": ("ANTHROPIC_API_KEY",),
+            "google": ("GOOGLE_KEY", "GOOGLE_API_KEY"),
+        }[kind]
+        source = "saved" if isinstance(saved, dict) else (
+            "environment" if any(os.getenv(key) for key in env_keys) else "default")
+        entries.append({**_redact(value), "source": source})
+    entries.extend({**_redact(value), "source": "named"} for value in _stored_channels())
+    return {"providers": entries}
 
 
 def _validate(body: dict) -> dict:
@@ -146,49 +168,116 @@ def _access(request):
         require_scopes(request.state.principal, ["admin:config"])
 
 
+def _reference_types(db, name: str, *, legacy: bool = False) -> list[str]:
+    # Retain snapshots and chat history; a forced removal must not rewrite the
+    # original provider identity to point at unrelated credentials.
+    references = (
+        ("agents", "json_extract(config,'$.provider')", "Agents"),
+        ("runs", "json_extract(state,'$.provider')", "run history"),
+        ("conversations", "endpoint", "saved conversations"),
+        ("agent_versions", "json_extract(snapshot,'$.provider')", "Agent revisions"),
+    )
+    aliases = _LEGACY_ALIASES[name] if legacy else ()
+    used_by = []
+    for table, field, label in references:
+        if legacy:
+            placeholders = ",".join("?" for _ in aliases)
+            query = f"SELECT 1 FROM {table} WHERE LOWER(TRIM({field})) IN ({placeholders}) LIMIT 1"
+            params = aliases
+        else:
+            query = f"SELECT 1 FROM {table} WHERE {field}=? LIMIT 1"
+            params = (name,)
+        if db.execute(query, params).fetchone():
+            used_by.append(label)
+    return used_by
+
+
+def _is_referenced(db, name: str, *, legacy: bool = False) -> bool:
+    return bool(_reference_types(db, name, legacy=legacy))
+
+
 async def provider_profiles(request):
     _access(request)
     if request.method == "DELETE":
         name = request.query_params.get("name")
-        if not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or name.lower() in _RESERVED:
-            raise HTTPException(400, detail="Invalid named channel")
-        # Refuse to silently orphan saved Agents or conversations. Direct runs
-        # already in progress also retain a persisted provider identifier.
+        legacy = request.query_params.get("legacy_provider")
+        if (name is None) == (legacy is None):
+            raise HTTPException(400, detail="Specify a named or saved legacy channel")
+        if legacy is not None:
+            if legacy not in _DEFAULTS:
+                raise HTTPException(400, detail="Invalid legacy channel")
+            key = _PREFIX + legacy
+        else:
+            if not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or name.lower() in _RESERVED:
+                raise HTTPException(400, detail="Invalid named channel")
+            key = _CHANNEL_PREFIX + name
+        # Explicit force removal is limited to named channels: resetting a
+        # referenced built-in alias would silently route old chats to defaults.
+        force = request.query_params.get("force", "false")
+        if force not in {"false", "true"}:
+            raise HTTPException(400, detail="force must be true or false")
         with _repo().database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if db.execute("SELECT 1 FROM agents WHERE json_extract(config,'$.provider')=? LIMIT 1", (name,)).fetchone() or db.execute(
-                "SELECT 1 FROM runs WHERE json_extract(state,'$.provider')=? LIMIT 1", (name,)
-            ).fetchone() or db.execute("SELECT 1 FROM conversations WHERE endpoint=? LIMIT 1", (name,)).fetchone() or db.execute(
-                "SELECT 1 FROM agent_versions WHERE json_extract(snapshot,'$.provider')=? LIMIT 1", (name,)
-            ).fetchone():
-                raise HTTPException(409, detail="Channel is referenced by saved conversations or Agents")
-            db.execute("DELETE FROM settings WHERE owner=? AND key=?", (_OWNER, _CHANNEL_PREFIX + name))
+            references = _reference_types(db, legacy or name, legacy=legacy is not None)
+            if references and (force != "true" or legacy is not None):
+                return JSONResponse({
+                    "detail": "Channel is referenced by " + ", ".join(references) + ". "
+                              + ("Choose another channel in affected chats and Agents before resetting "
+                                 "this built-in channel."
+                                 if legacy is not None else
+                                 "Deleting it keeps history but affected chats and Agents must "
+                                 "select another channel before running again."),
+                    "can_force": legacy is None,
+                }, status_code=409, headers={"Cache-Control": "no-store"})
+            db.execute("DELETE FROM settings WHERE owner=? AND key=?", (_OWNER, key))
     elif request.method == "PUT":
+        body = await _body(request)
         try:
-            value = _validate(await _body(request))
+            value = _validate(body)
         except ValueError as exc:
             raise HTTPException(400, detail=str(exc)) from exc
-        key = (_CHANNEL_PREFIX + value["name"]) if "name" in value else (_PREFIX + value["provider"])
-        # Atomic read/merge/write preserves omitted keys across concurrent edits.
+        old_name = body.get("previous_name")
+        if old_name is not None and (
+            not isinstance(old_name, str) or not _NAME.fullmatch(old_name) or
+            old_name != old_name.strip() or old_name.lower() in _RESERVED or
+            "name" not in value
+        ):
+            raise HTTPException(400, detail="Invalid previous channel name")
+        name = value.get("name")
+        renaming = old_name is not None and old_name != name
+        key = (_CHANNEL_PREFIX + name) if name is not None else (_PREFIX + value["provider"])
         with _repo().database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if "name" in value:
-                channels = db.execute("SELECT value FROM settings WHERE owner=? AND key LIKE ?",
-                                      (_OWNER, _CHANNEL_PREFIX + "%")).fetchall()
-                existing = [json.loads(row[0]) for row in channels]
-                if any(ch["name"].lower() == value["name"].lower() and ch["name"] != value["name"] for ch in existing):
+            if name is not None:
+                rows = db.execute("SELECT value FROM settings WHERE owner=? AND key LIKE ?",
+                                  (_OWNER, _CHANNEL_PREFIX + "%")).fetchall()
+                existing = [json.loads(row[0]) for row in rows]
+                if any(ch["name"].lower() == name.lower() and ch["name"] not in {name, old_name} for ch in existing):
                     raise HTTPException(409, detail="Channel name already exists")
-                if len(existing) >= 64 and not any(ch["name"] == value["name"] for ch in existing):
+                if len(existing) >= 64 and not (old_name or any(ch["name"] == name for ch in existing)):
                     raise HTTPException(400, detail="At most 64 named channels are supported")
-            row = db.execute("SELECT value FROM settings WHERE owner=? AND key=?", (_OWNER, key)).fetchone()
-            previous = json.loads(row[0]) if row else (
-                _default_profile(value["provider"]) if "name" not in value else {})
-            if row and previous.get("provider") != value["provider"]:
+            if renaming:
+                original = db.execute("SELECT value FROM settings WHERE owner=? AND key=?",
+                                      (_OWNER, _CHANNEL_PREFIX + old_name)).fetchone()
+                if not original:
+                    raise HTTPException(404, detail="Original channel no longer exists")
+                if db.execute("SELECT 1 FROM settings WHERE owner=? AND key=?", (_OWNER, key)).fetchone():
+                    raise HTTPException(409, detail="Channel name already exists")
+                if _is_referenced(db, old_name):
+                    raise HTTPException(409, detail="Channel is referenced by saved conversations or Agents; update those references before renaming")
+                previous = json.loads(original[0])
+            else:
+                row = db.execute("SELECT value FROM settings WHERE owner=? AND key=?", (_OWNER, key)).fetchone()
+                previous = json.loads(row[0]) if row else (
+                    _default_profile(value["provider"]) if name is None else {})
+            if previous and previous.get("provider") != value["provider"]:
                 raise HTTPException(409, detail="Existing channel provider type cannot be changed")
             if value["api_key"] is None:
                 value["api_key"] = previous.get("api_key", "")
-            if value['include_usage'] is None:
-                value['include_usage'] = previous.get('include_usage', False)
+            if value["include_usage"] is None:
+                value["include_usage"] = previous.get("include_usage", False)
             db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) "
                        "DO UPDATE SET value=excluded.value", (_OWNER, key, json.dumps(value)))
+            if renaming:
+                db.execute("DELETE FROM settings WHERE owner=? AND key=?", (_OWNER, _CHANNEL_PREFIX + old_name))
     return JSONResponse(public_profiles(), headers={"Cache-Control": "no-store"})

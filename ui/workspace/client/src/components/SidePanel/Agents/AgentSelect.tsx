@@ -107,9 +107,6 @@ function AgentSelect({
         category: fullAgent.category || 'general',
         // Make sure support_contact is properly loaded
         support_contact: fullAgent.support_contact,
-        avatar_file: null,
-        avatar_preview: fullAgent.avatar?.filepath ?? '',
-        avatar_action: null,
         stateful_code_environment: fullAgent.stateful_code_environment ?? 'user',
         code_environment_id: fullAgent.code_environment_id,
         repositoryInstructions: fullAgent.repositoryInstructions,

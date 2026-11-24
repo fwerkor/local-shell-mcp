@@ -35,6 +35,40 @@ def test_expired_login_cannot_be_redeemed(tmp_path, monkeypatch) -> None:
     assert store.session("invalid") is None
 
 
+def test_default_webui_session_lasts_30_days_but_not_longer(tmp_path, monkeypatch) -> None:
+    now = 1_800_000_000
+    day = 24 * 60 * 60
+    monkeypatch.setattr(auth.time, "time", lambda: now)
+    assert 30 * day == auth.SESSION_TTL
+    store = auth.WebAuthStore(tmp_path)
+    cookie, _ = store.redeem(store.issue_ticket("alice", "shell:read", now + 90 * day))
+    monkeypatch.setattr(auth.time, "time", lambda: now + 30 * day - 1)
+    assert store.session(cookie) is not None
+    monkeypatch.setattr(auth.time, "time", lambda: now + 30 * day)
+    assert store.session(cookie) is None
+
+
+@pytest.mark.asyncio
+async def test_cookie_lifetime_respects_shorter_oauth_grant(tmp_path, monkeypatch) -> None:
+    now = 1_800_000_000
+    monkeypatch.setattr(auth.time, "time", lambda: now)
+    settings = SimpleNamespace(auth_mode="oauth", state_dir=tmp_path,
+                               public_base_url="https://lsm.example.test")
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+    store = auth.WebAuthStore(tmp_path)
+    ticket = store.issue_ticket("alice", "shell:read", now + 300)
+    app = Starlette(routes=auth.auth_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                base_url="https://lsm.example.test") as client:
+        response = await client.post("/api/auth/lsm", data={"ticket": ticket})
+        assert response.status_code == 303
+        assert "Max-Age=300" in response.headers["set-cookie"]
+        cookie = client.cookies.get(auth.COOKIE)
+        assert cookie and store.session(cookie) is not None
+        monkeypatch.setattr(auth.time, "time", lambda: now + 300)
+        assert store.session(cookie) is None
+
+
 @pytest.fixture(autouse=True)
 def _isolated_real_oauth_settings(tmp_path, monkeypatch):
     # OAuth token helpers read the actual global settings, independently of

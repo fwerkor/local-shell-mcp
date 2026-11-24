@@ -6,6 +6,7 @@ state. No public endpoint exposes model API keys or controller credentials.
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import urlsplit
 
 from starlette.exceptions import HTTPException
@@ -40,7 +41,7 @@ def _endpoint_info(*, memory_available: bool = False) -> dict:
             "order": 0, "type": "agents", "name": "Agents",
             "modelDisplayLabel": "Agent", "allowedProviders": list(configs),
             "maxSubagents": 10,
-            "capabilities": ["tools", "subagents", "chain", "ask_user_question", "end_after_tools", "skills", *(["memory"] if memory_available else [])],
+            "capabilities": ["tools", "web_search", "subagents", "chain", "ask_user_question", "end_after_tools", "skills", *(["memory"] if memory_available else [])],
             "availableTools": [],
         },
     }
@@ -106,9 +107,11 @@ async def startup_config(request: Request):
         _owner(request)
     except HTTPException:
         return JSONResponse(settings)
+    from .build_info import about_build_info
     from .memory import memory_enabled
     has_memory = memory_enabled(_repo(), _owner(request))
     settings.update({
+        **(await asyncio.to_thread(about_build_info)),
         "interface": {
             "modelSelect": True,
             "parameters": True,
@@ -119,7 +122,8 @@ async def startup_config(request: Request):
             "agents": {"use": True, "create": True, "share": False, "public": False},
             "prompts": {"use": False, "create": False, "share": False, "public": False},
             "mcpServers": {"use": True, "create": True, "share": False, "public": False},
-            "webSearch": False,
+            "webSearch": True,
+            "defaultPinnedTools": ["web_search"],
             "fileSearch": False,
             "contextUsage": True,
             "memories": has_memory,
