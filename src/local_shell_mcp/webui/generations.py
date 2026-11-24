@@ -1026,6 +1026,18 @@ class GenerationStore:
             ).fetchall()
             return [(int(row[0]), json.loads(row[1])) for row in rows]
 
+    def message_step_events(self, owner: str, run_id: str) -> list[dict]:
+        """Read only step boundaries, avoiding deserializing every streamed delta."""
+        with self.database.connect() as db:
+            rows = db.execute(
+                "SELECT ge.data FROM generation_events ge JOIN runs r ON r.id=ge.run_id "
+                "JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE c.owner=? AND ge.run_id=? AND json_extract(ge.data,'$.event') "
+                "IN ('on_run_step','on_run_step_closed') ORDER BY ge.seq",
+                (owner, run_id),
+            )
+            return [json.loads(row[0]) for row in rows]
+
     def fading_tier(self, owner: str, run_id: str, agent_id: str,
                     provider: str, model: str) -> dict | None:
         """Read the source v2 hysteresis tier, owned and scoped by Agent/model."""
