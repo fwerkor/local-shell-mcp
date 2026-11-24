@@ -334,3 +334,28 @@ def test_get_settings_creates_relative_defaults(tmp_path, monkeypatch):
     assert loaded.state_dir == workspace.resolve() / ".local-shell-mcp"
     assert loaded.audit_log_path.parent.is_dir()
     assert loaded.agent_config_dir.is_dir()
+
+
+@pytest.mark.parametrize("content", ["[]", "[one, two]", "false", "0", "text"])
+def test_yaml_rejects_non_mapping_documents(tmp_path, content):
+    config = tmp_path / "config.yaml"
+    config.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="YAML mapping"):
+        settings._flatten_yaml(config)
+
+
+@pytest.mark.parametrize("content", ["1: value", "remote:\n  1: value"])
+def test_yaml_rejects_non_string_keys(tmp_path, content):
+    config = tmp_path / "config.yaml"
+    config.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="keys must be strings"):
+        settings._flatten_yaml(config)
+
+
+def test_yaml_invalid_syntax_has_actionable_error(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("remote: [", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid YAML configuration"):
+        settings._flatten_yaml(config)
+    config.write_text("# empty config", encoding="utf-8")
+    assert settings._flatten_yaml(config) == {}

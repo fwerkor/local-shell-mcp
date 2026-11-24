@@ -128,6 +128,21 @@ def _validate_numeric_settings(settings: Settings) -> None:
         raise ValueError("file_download_max_ttl_s must be >= file_download_default_ttl_s")
 
 
+def _apply_common_settings_constraints(settings: Settings) -> None:
+    _validate_numeric_settings(settings)
+    if settings.stateless_controller:
+        settings.disable_local = True
+        if settings.state_backend in {"file", "sqlite"}:
+            settings.state_backend = "memory"
+        settings.file_download_enabled = False
+        settings.ui_wallpaper = "none"
+    if settings.state_backend == "redis" and not settings.state_backend_url:
+        raise ValueError("state_backend_url is required when state_backend=redis")
+    if settings.allow_full_container:
+        settings.command_denylist = []
+        settings.path_denylist = []
+
+
 def _matches_default_path(value: Path, default: Path) -> bool:
     """Match a default path before or after platform-specific normalization."""
     if value == default:
@@ -327,11 +342,22 @@ def _flatten_yaml(path: Path) -> dict[str, Any]:
         raise RuntimeError("PyYAML is required to load LOCAL_SHELL_MCP_CONFIG")
     if not path.exists():
         raise FileNotFoundError(path)
-    data = yaml.safe_load(path.read_text()) or {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"invalid YAML configuration: {path}: {exc}") from exc
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"configuration must be a YAML mapping: {path}")
     flat: dict[str, Any] = {}
     for key, value in data.items():
+        if not isinstance(key, str):
+            raise ValueError(f"configuration keys must be strings: {path}")
         if isinstance(value, dict):
             for child_key, child_value in value.items():
+                if not isinstance(child_key, str):
+                    raise ValueError(f"configuration keys must be strings: {path}")
                 flat[f"{key}_{child_key}"] = child_value
         else:
             flat[key] = value
@@ -570,18 +596,7 @@ if _PYDANTIC_AVAILABLE:
 
         @model_validator(mode="after")
         def disable_builtin_restrictions_in_full_container_mode(self) -> Settings:
-            _validate_numeric_settings(self)
-            if self.stateless_controller:
-                self.disable_local = True
-                if self.state_backend in {"file", "sqlite"}:
-                    self.state_backend = "memory"
-                self.file_download_enabled = False
-                self.ui_wallpaper = "none"
-            if self.state_backend == "redis" and not self.state_backend_url:
-                raise ValueError("state_backend_url is required when state_backend=redis")
-            if self.allow_full_container:
-                self.command_denylist = []
-                self.path_denylist = []
+            _apply_common_settings_constraints(self)
             return self
 
         def apply_yaml(self, path: Path, *, preserve_environment: bool = False) -> Settings:
@@ -641,18 +656,7 @@ else:
                     ).resolve(),
                 )
             self.ui_path = normalize_ui_path(self.ui_path)
-            _validate_numeric_settings(self)
-            if self.stateless_controller:
-                self.disable_local = True
-                if self.state_backend in {"file", "sqlite"}:
-                    self.state_backend = "memory"
-                self.file_download_enabled = False
-                self.ui_wallpaper = "none"
-            if self.state_backend == "redis" and not self.state_backend_url:
-                raise ValueError("state_backend_url is required when state_backend=redis")
-            if self.allow_full_container:
-                self.command_denylist = []
-                self.path_denylist = []
+            _apply_common_settings_constraints(self)
 
         def model_dump(self, mode: str | None = None) -> dict[str, Any]:
             data = asdict(self)
