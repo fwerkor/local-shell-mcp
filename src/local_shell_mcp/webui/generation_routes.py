@@ -19,11 +19,11 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from .agents import AgentRepository
-from .misc_routes import effective_features
 from .artifact_prompts import agent_instructions, artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
+from .misc_routes import effective_features
 from .providers import (
     ProviderConfig,
     provider_config,
@@ -526,7 +526,6 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
     from .actions import ActionRepository
     from .checkpoints import SQLiteCheckpointSaver
     from .machine_permissions import require_machine_scope, resolve_access
-    from .routes import _repo
 
     database = _database()
     with database.connect() as conn:
@@ -730,7 +729,6 @@ async def start_generation(request: Request):
     protocol = min(protocol, result.protocol_version)
     if fresh:
         ask_user_enabled = ask_user_requested(agent, payload)
-        from .routes import _repo
 
         mcp_enabled = effective_features(owner, result.conversation_id)["mcp"]
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
@@ -981,7 +979,6 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     from .checkpoints import SQLiteCheckpointSaver
     from .generation_actor_lease import active_run_ids
     from .machine_permissions import require_machine_scope, resolve_access
-    from .routes import _repo
 
     # Detached subagent child generations are owned by their task host.
     # Foreground reconnect may observe SSE, but never claim their actor lease.
@@ -1181,7 +1178,6 @@ async def resume_generation(request: Request):
         detail = str(exc)
         conflict = detail in {"Conflicting human action retry", "Stale human action"}
         raise HTTPException(409 if conflict else 400, detail=detail) from exc
-    from .routes import _repo
 
     await _start_task(owner, resumed, profile, agent,
                       native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
