@@ -348,7 +348,7 @@ export function applyModelSpecEphemeralAgent({
   const key = (convoId ?? Constants.NEW_CONVO) || Constants.NEW_CONVO;
   const agent: t.TEphemeralAgent = {
     mcp: modelSpec.mcpServers ?? [],
-    web_search: modelSpec.webSearch ?? false,
+    web_search: modelSpec.webSearch ?? true,
     file_search: modelSpec.fileSearch ?? false,
     execute_code: modelSpec.executeCode ?? false,
     memory: modelSpec.memory ?? false,

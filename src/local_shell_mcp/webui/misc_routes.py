@@ -66,9 +66,8 @@ async def speech_config(request: Request):
 
 async def search_available(request: Request):
     _owner(request)
-    # Native SQLite FTS5 chat search is available separately. This indicates
-    # that the external LibreChat web-search provider is not configured.
-    return JSONResponse(False)
+    # First-party web tools do not require a third-party API key.
+    return JSONResponse(True)
 
 
 async def role(request: Request):
@@ -88,6 +87,7 @@ async def role(request: Request):
             # interchangeable with these RBAC role-permission identifiers.
             "AGENTS": {"USE": True, "CREATE": True, "SHARE": False, "SHARE_PUBLIC": False},
             "MCP_SERVERS": {"USE": True, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
+            "WEB_SEARCH": {"USE": True},
             "PROMPTS": {"USE": False, "CREATE": False, "SHARE": False, "SHARE_PUBLIC": False},
             "MEMORIES": {"USE": has_memory, "CREATE": has_memory, "UPDATE": has_memory, "READ": has_memory, "OPT_OUT": True},
         },
@@ -198,7 +198,7 @@ async def files_config(request: Request):
 
 async def web_search_auth(request: Request):
     _owner(request)
-    return JSONResponse({"authenticated": False, "authTypes": []})
+    return JSONResponse({"authenticated": True, "authTypes": []})
 
 
 def misc_routes() -> list[Route]:

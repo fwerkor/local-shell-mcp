@@ -115,17 +115,21 @@ async def revert(request: Request):
 async def tool_catalog(request: Request):
     _owner(request)
     from .ask_user_tools import ASK_USER_MANIFEST
+    from .web_research import WEB_TOOLS
 
-    # Native LSM tools are controlled by machine ACLs, not a per-tool picker.
-    # Keep only app-specific features such as Ask User in the LibreChat catalog.
-    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}])
+    # The original manifest and PluginController authentication shape are
+    # reused. Availability does not enable a saved or ephemeral Agent's tool.
+    web = [{"name": item["function"]["name"], "pluginKey": item["function"]["name"],
+            "description": item["function"]["description"], "agentsOnly": True,
+            "authConfig": [], "authenticated": True} for item in WEB_TOOLS]
+    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}, *web])
 
 
 async def tool_auth(request: Request):
     _owner(request)
     from .ask_user_tools import ASK_USER_QUESTION_TOOL_NAME
 
-    if request.path_params["tool_id"] != ASK_USER_QUESTION_TOOL_NAME:
+    if request.path_params["tool_id"] not in {ASK_USER_QUESTION_TOOL_NAME, "web_search", "web_fetch"}:
         _not_found()
     return JSONResponse({"authenticated": True})
 

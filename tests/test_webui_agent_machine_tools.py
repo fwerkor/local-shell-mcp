@@ -87,8 +87,11 @@ def test_agent_runner_automatically_exposes_machine_scoped_tools(machine_agent):
     # native capabilities merely because the parent has a machine ACL.
     restricted = runner._context(agent, profile=profile, selected_tools=[])
     assert {item["function"]["name"] for item in restricted.tools} == {
-        "session_manage", "plan_manage",
+        "session_manage", "plan_manage", "web_search", "web_fetch",
     }
+    runner.web_search_enabled = False
+    restricted = runner._context(agent, profile=profile, selected_tools=[])
+    assert {item["function"]["name"] for item in restricted.tools} == {"session_manage", "plan_manage"}
 
 
 @pytest.mark.asyncio
