@@ -270,8 +270,8 @@ jobs:
           bun run typecheck
           bun run build
 
-      # Browser regressions in the coverage suite need the current React bundle;
-      # otherwise the server falls back to the older frontend.tar.gz.
+      # Browser regressions in the coverage suite need current React assets
+      # built from source, independent of any packaged release archive.
       - name: Build React workspace for browser coverage
         working-directory: ui/workspace
         run: |
@@ -512,6 +512,15 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun run build
+
+      - name: Build integrated React WebUI
+        working-directory: ui/workspace
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Generate React release archive
+        run: python scripts/embed-react-webui.py
 
       - name: Build platform wheel
         run: |
