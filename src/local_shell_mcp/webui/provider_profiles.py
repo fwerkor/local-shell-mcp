@@ -35,7 +35,9 @@ _LEGACY_ALIASES = {
 # LibreChat endpointSchema.name must not collide with EModelEndpoint values.
 _RESERVED = frozenset({"agents", "openai", "anthropic", "google", "gemini", "custom", "azureopenai",
                        "assistants", "azureassistants", "bedrock", "gptplugins", "chatgptbrowser", "ollama", "openai-compatible"})
-_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9 _.-]{0,63}$")
+# Keep channel IDs path-safe while allowing Unicode letters (including CJK).
+# The same rule is used for creation, renaming and deletion.
+_NAME = re.compile(r"^[^\W\d_][\w .-]{0,63}$")
 
 
 def _stored_channels() -> list[dict]:
