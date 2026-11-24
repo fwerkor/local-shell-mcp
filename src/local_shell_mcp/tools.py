@@ -52,6 +52,12 @@ from .fs_ops import (
 )
 from .gui import get_gui_manager
 from .gui.base import GUI_MAX_KEY_PARTS, GUI_MAX_KEYS_BYTES, GUI_MAX_TEXT_BYTES
+from .gui.limits import (
+    GUI_MAX_ELEMENTS_TOTAL_BYTES,
+    bounded_element,
+    bounded_records,
+    bounded_window,
+)
 from .image_ops import (
     MAX_VIEW_IMAGE_BYTES,
     ImageFile,
@@ -3086,101 +3092,10 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
         return _view_image_error_result(path, machine, exc)
 
 
-GUI_WINDOW_TEXT_FIELD_MAX_BYTES = 1024
-GUI_ELEMENT_TEXT_FIELD_MAX_BYTES = 1024
-GUI_ELEMENT_VALUE_FIELD_MAX_BYTES = 2048
-GUI_ELEMENT_ACTION_MAX_ITEMS = 32
-GUI_ELEMENT_ACTION_MAX_BYTES = 128
-GUI_ELEMENTS_TOTAL_BYTES = 64 * 1024
-
-
-def _truncate_gui_utf8(value: Any, limit: int) -> str:
-    text = str(value or "")
-    encoded = text.encode("utf-8")
-    if len(encoded) <= limit:
-        return text
-    suffix = "..."
-    budget = max(0, limit - len(suffix))
-    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
-
-
-def _bounded_gui_window(window: dict[str, Any]) -> dict[str, Any]:
-    bounded: dict[str, Any] = {}
-    for key in ("id", "title", "app"):
-        if key in window:
-            bounded[key] = _truncate_gui_utf8(
-                window.get(key),
-                GUI_WINDOW_TEXT_FIELD_MAX_BYTES,
-            )
-    if "pid" in window:
-        try:
-            bounded["pid"] = int(window.get("pid"))
-        except (TypeError, ValueError):
-            bounded["pid"] = 0
-    bounds = window.get("bounds")
-    if isinstance(bounds, dict):
-        bounded["bounds"] = {
-            key: bounds.get(key) for key in ("x", "y", "width", "height") if key in bounds
-        }
-    return bounded
-
-
-def _bounded_gui_element(element: dict[str, Any]) -> dict[str, Any]:
-    bounded: dict[str, Any] = {}
-    for key in ("id", "role", "name", "automation_id"):
-        if key in element:
-            bounded[key] = _truncate_gui_utf8(
-                element.get(key),
-                GUI_ELEMENT_TEXT_FIELD_MAX_BYTES,
-            )
-    if "value" in element:
-        bounded["value"] = _truncate_gui_utf8(
-            element.get("value"),
-            GUI_ELEMENT_VALUE_FIELD_MAX_BYTES,
-        )
-    bounds = element.get("bounds")
-    if isinstance(bounds, dict):
-        bounded["bounds"] = {
-            key: bounds.get(key) for key in ("x", "y", "width", "height") if key in bounds
-        }
-    for key in ("enabled", "offscreen", "focused", "editable"):
-        if key in element:
-            bounded[key] = bool(element.get(key))
-    if "depth" in element:
-        try:
-            bounded["depth"] = int(element.get("depth"))
-        except (TypeError, ValueError):
-            bounded["depth"] = 0
-    actions = element.get("actions")
-    if isinstance(actions, list):
-        bounded["actions"] = [
-            _truncate_gui_utf8(action, GUI_ELEMENT_ACTION_MAX_BYTES)
-            for action in actions[:GUI_ELEMENT_ACTION_MAX_ITEMS]
-        ]
-    return bounded
-
-
 def _bounded_gui_elements(elements: list[Any]) -> list[dict[str, Any]]:
-    bounded: list[dict[str, Any]] = []
-    used = 2
-    for raw in elements:
-        if not isinstance(raw, dict):
-            continue
-        element = _bounded_gui_element(raw)
-        encoded_size = len(
-            json.dumps(
-                element,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                default=str,
-            ).encode("utf-8")
-        )
-        extra = encoded_size + (1 if bounded else 0)
-        if used + extra > GUI_ELEMENTS_TOTAL_BYTES:
-            break
-        bounded.append(element)
-        used += extra
-    return bounded
+    return bounded_records(
+        elements, lambda element: bounded_element(element, model_output=True), GUI_MAX_ELEMENTS_TOTAL_BYTES
+    )
 
 
 def _format_gui_state_text(metadata: GuiStateResult) -> str:
@@ -3225,7 +3140,7 @@ def _gui_state_call_result(
         backend=str(data.get("backend") or "") or None,
         state_id=str(data.get("state_id") or "") or None,
         state_ttl_s=float(data.get("state_ttl_s") or 0) or None,
-        window=_bounded_gui_window(data.get("window"))
+        window=bounded_window(data["window"], model_output=True)
         if isinstance(data.get("window"), dict)
         else None,
         elements=_bounded_gui_elements(data.get("elements"))
