@@ -54,6 +54,10 @@ from .semantic_index import (
 from .steering import SteeringStore, merged_text
 from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
 
+# The hosted Agent has an owner/Agent-aware Skill tool. Native MCP aliases
+# bypass per-user activation and must remain exclusive to external MCP clients.
+_HOSTED_SKILL_ALIASES = frozenset({'skill_list', 'skill_load', 'skill_read'})
+
 
 class AgentRunner:
     def __init__(self, owner, generation, database, store, *, scopes, grant_expires,
@@ -136,12 +140,25 @@ class AgentRunner:
         # The original primary Agent reads shared personal memories even when
         # it has no inline memory tool. Only an Agent explicitly registering
         # the memory capability receives keys and a mutation-tool prompt.
-        has_tools = ('memory' in ((agent or {}).get('tools') or [])
+        has_tools = ((agent is None or 'memory' in ((agent or {}).get('tools') or []))
                      and memory_enabled(settings, self.owner, tools=True))
         formatted = MemoryRepository(self.database).formatted(
             self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
         if formatted.get('readFailed'):
-            return ''
+            # Never lose the mutation consent rule when Memory reads fail.
+            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
+        explicit_memory_tool = bool(agent and 'memory' in ((agent or {}).get('tools') or []))
+        endpoints = settings.setting(self.owner, 'endpoints', {})
+        explicit_memory_config = (
+            isinstance(settings.setting(self.owner, 'webui.memory.config'), dict)
+            or isinstance((endpoints or {}).get('memory'), dict)
+        )
+        if (not explicit_memory_tool and not explicit_memory_config
+                and not (formatted.get('withKeys') or formatted.get('withoutKeys'))):
+            # An empty default-enabled store needs no memory-list preamble,
+            # but the mutation consent rule must remain visible to the model
+            # whenever its Memory tools are offered.
+            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
         return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
 
@@ -157,8 +174,9 @@ class AgentRunner:
         unrestricted = agent is None and selected_tools is None
         native = available_tools(self.owner, self.authorization_conversation_id,
                                  scopes=set(self.scopes), expires=self.grant_expires)
-        tools = [tool for tool in native if unrestricted or tool["function"]["name"] in selected
-                 or tool["function"]["name"] in {"session_manage", "plan_manage"}]
+        tools = [tool for tool in native if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
+                 and (unrestricted or tool["function"]["name"] in selected
+                      or tool["function"]["name"] in {"session_manage", "plan_manage"})]
         if self.web_search_enabled:
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
@@ -174,9 +192,15 @@ class AgentRunner:
         parameters = (agent or {}).get('model_parameters') or self.initial_parameters
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
-        if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
+        if (unrestricted or 'memory' in selected) and memory_enabled(settings, self.owner, tools=True):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
+        from .skill_runtime import SKILL_TOOL, active_skills
+
+        if ((unrestricted or 'skills' in selected or 'skill' in selected
+             or (agent or {}).get('skills_enabled') is True)
+                and active_skills(self.database, self.owner, agent)):
+            tools.append(SKILL_TOOL)
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
@@ -409,8 +433,17 @@ class AgentRunner:
         from .nested_mcp import approved_call, discover
 
         self._check_grant()
+        # A restored checkpoint may still contain a pre-upgrade native schema.
+        # Reject these aliases at dispatch as well as filtering them from prompts.
+        if call.name in _HOSTED_SKILL_ALIASES:
+            raise RuntimeSafetyError("Use the hosted skill tool for enabled Skills")
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name == 'skill':
+            from .skill_runtime import load
+
+            return load(self.database, self.owner, state.context.agent,
+                        call.arguments.get('name'), path=call.arguments.get('path'))
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
@@ -1188,10 +1221,54 @@ class AgentRunner:
             return await run_multi_agent_graph(self, history, topology, recursion_limit=recursion_limit)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
-        if not self.namespace or (self.graph_node and self.namespace.startswith('/graph:')):
-            memory_text = self._memory_context(self.root_agent)
+        if (not self.namespace or
+                (self.graph_node and self.namespace.startswith('/graph:')) or
+                '/subagent:' in self.namespace):
+            from .skill_runtime import catalog
+
+            skills_text = catalog(self.database, self.owner, self.root_agent)
+            # Personal memory remains scoped to the main agent; delegated Agents
+            # must independently receive their own selected Skill catalog.
+            memory_text = self._memory_context(self.root_agent) if (
+                not self.namespace or self.graph_node) else ''
+            supplementary = []
             if memory_text:
-                history = [{'role': 'system', 'content': memory_text}, *history]
+                supplementary.append({'role': 'system', 'content': memory_text})
+            if skills_text:
+                supplementary.append({'role': 'system', 'content': skills_text})
+            if not self.namespace:
+                # The selection is stored on the exact user message in SQLite,
+                # rather than carrying a transient HTTP field across retries.
+                with self.database.connect() as db:
+                    record = db.execute(
+                        'SELECT m.metadata FROM messages m JOIN conversations c '
+                        'ON c.id=m.conversation_id WHERE m.id=? AND c.owner=? '
+                        'AND m.conversation_id=? AND m.role=\'user\'',
+                        (self.generation.user_message_id, self.owner,
+                         self.generation.conversation_id)).fetchone()
+                if record is not None:
+                    selected_ids = json.loads(record['metadata']).get('manualSkills') or []
+                    if selected_ids:
+                        from .skill_runtime import manual_context
+
+                        selected_text = manual_context(self.database, self.owner,
+                                                       self.root_agent, selected_ids)
+                        if selected_text:
+                            supplementary.append({'role': 'system', 'content': selected_text})
+            if supplementary:
+                # Preserve the built-in artifact/Agent system message as the
+                # single leading prompt, appending Memory/Skill context to it.
+                # Empty memories must never inject a second system message.
+                index = 0
+                while index < len(history) and history[index].get('role') == 'system':
+                    index += 1
+                if index:
+                    last = dict(history[index - 1])
+                    last['content'] = str(last['content']) + '\n\n' + '\n\n'.join(
+                        item['content'] for item in supplementary)
+                    history = [*history[:index - 1], last, *history[index:]]
+                else:
+                    history = [*supplementary, *history]
         state = AgentLoopState(context, history)
         if restored:
             self.active_config = restored["config"]

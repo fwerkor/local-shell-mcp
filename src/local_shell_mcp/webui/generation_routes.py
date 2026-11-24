@@ -414,7 +414,13 @@ async def _run_model(
             # new model-history boundary is committed with that checkpoint.
             history_start = post_compaction_start
         elif history_start > 0:
-            source_user = next((message for message in reversed(history[:history_start])
+            # The saved resume history may already start with a synthetic
+            # Memory/Skill system prompt.  The persisted boundary predates that
+            # insertion, so slicing the resumed prompt can miss the request and
+            # incorrectly persist a second copy of the user message.
+            submitted = repo.history(owner, generation.conversation_id,
+                                     message_id=generation.user_message_id)
+            source_user = next((message for message in reversed(submitted)
                                 if message.get('role') == 'user'), None)
             if source_user is not None:
                 # The runner can prepend a memory system message after this

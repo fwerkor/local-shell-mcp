@@ -50,8 +50,10 @@ def test_context_read_failure_fails_closed_not_empty_memory(runner_state, monkey
     settings.save_setting('local', 'endpoints', {'memory': {}, 'agents': {'capabilities': ['memory']}})
     MemoryRepository(db).write('local', 'private_note', 'A private memory.')
     monkeypatch.setattr(MemoryRepository, 'formatted', lambda *_args, **kwargs: {'readFailed': True})
-    assert runner._memory_context({'tools': ['memory']}) == ''
-    assert runner._memory_context(None) == ''
+    from local_shell_mcp.webui.memory import MEMORY_TOOL_USAGE_GUARD
+
+    assert runner._memory_context({'tools': ['memory']}) == MEMORY_TOOL_USAGE_GUARD
+    assert runner._memory_context(None) == MEMORY_TOOL_USAGE_GUARD
     with pytest.raises(RuntimeSafetyError, match='expired'):
         runner.grant_expires = int(time.time()) - 1
         runner._check_grant()
@@ -183,3 +185,49 @@ async def test_non_dict_summarization_configuration_uses_safe_defaults(runner_st
     state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 300}), history)
     await runner._before_model(state)
     assert store.fading_tier('local', job.run_id, 'default', 'openai', 'mock') is not None
+
+
+def test_native_skill_aliases_never_bypass_hosted_activation(runner_state, monkeypatch):
+    from local_shell_mcp.webui import lsm_tool_registry, skill_runtime
+    from local_shell_mcp.webui.storage import _json, _now
+
+    db, _, _, profile, runner = runner_state
+    tools = [
+        {'type': 'function', 'function': {'name': name}}
+        for name in ('skill_list', 'skill_load', 'skill_read', 'file_read')
+    ]
+    monkeypatch.setattr(lsm_tool_registry, 'available_tools', lambda *a, **kw: tools)
+    monkeypatch.setattr(skill_runtime, 'list_installed_skills', lambda: {'skills': []})
+    now = _now()
+    with db.connect() as conn:
+        conn.execute('INSERT INTO webui_skills(id,owner,name,record,created_at,updated_at) '
+                     'VALUES(?,?,?,?,?,?)',
+                     ('managed', 'local', 'managed', _json({
+                         'name': 'managed', 'description': 'Managed Skill',
+                         'body': 'Trusted by activation',
+                     }), now, now))
+    shown = {tool['function']['name'] for tool in runner._context(None, profile=profile).tools}
+    assert 'skill' in shown
+    assert 'file_read' in shown
+    assert not shown.intersection({'skill_list', 'skill_load', 'skill_read'})
+    # These schemas can be present in an old checkpoint and must fail closed.
+    WorkspaceRepository(db).save_setting('local', 'webui.skill.states', {'managed': False})
+    hidden = {tool['function']['name'] for tool in runner._context(None, profile=profile).tools}
+    assert 'skill' not in hidden
+    assert not hidden.intersection({'skill_list', 'skill_load', 'skill_read'})
+
+
+@pytest.mark.asyncio
+async def test_restored_native_skill_aliases_are_rejected(runner_state, monkeypatch):
+    from local_shell_mcp.webui import lsm_tool_registry
+
+    _, _, _, profile, runner = runner_state
+    async def forbidden(*args, **kwargs):
+        raise AssertionError('Native Skill tool must never run from the hosted Agent')
+
+    monkeypatch.setattr(lsm_tool_registry, 'call_tool', forbidden)
+    for name in ('skill_list', 'skill_load', 'skill_read'):
+        context = AgentContext(profile, [{'type': 'function', 'function': {'name': name}}])
+        state = AgentLoopState(context, [{'role': 'user', 'content': 'Inspect skills'}])
+        with pytest.raises(RuntimeSafetyError, match='hosted skill tool'):
+            await runner._invoke(ModelToolCall('old-call', name, {'name': 'managed'}), state)

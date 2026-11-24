@@ -121,6 +121,7 @@ class WorkspaceRepository:
 
     def conversations(self, owner: str, *, archived: bool = False, pinned: bool = False,
                       project_id: str | None = None, search: str | None = None,
+                      tags: list[str] | None = None,
                       cursor: str | None = None, limit: int = 25) -> dict:
         limit = max(1, min(int(limit), 100))
         filters = ["owner=?", "archived=?"]
@@ -132,6 +133,15 @@ class WorkspaceRepository:
         elif project_id:
             filters.append("project_id=?")
             params.append(project_id)
+        if tags:
+            # Bookmark filtering must happen before cursor pagination. JSON
+            # array membership avoids substring/LIKE wildcard collisions.
+            # Multiple selected bookmarks are an OR filter, matching the
+            # conversation sidebar's existing filter semantics.
+            placeholders = ",".join("?" for _ in tags)
+            filters.append("EXISTS (SELECT 1 FROM json_each(conversations.metadata, '$.tags') "
+                           f"WHERE json_each.value IN ({placeholders}))")
+            params.extend(tags)
         if search:
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             filters.append("(title LIKE ? ESCAPE '\\' OR id IN "

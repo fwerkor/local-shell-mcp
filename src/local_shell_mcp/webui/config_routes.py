@@ -41,7 +41,7 @@ def _endpoint_info(*, memory_available: bool = False) -> dict:
             "order": 0, "type": "agents", "name": "Agents",
             "modelDisplayLabel": "Agent", "allowedProviders": list(configs),
             "maxSubagents": 10,
-            "capabilities": ["tools", "web_search", "subagents", "chain", "ask_user_question", "end_after_tools", *(["memory"] if memory_available else [])],
+            "capabilities": ["tools", "web_search", "subagents", "chain", "ask_user_question", "end_after_tools", "skills", *(["memory"] if memory_available else [])],
             "availableTools": [],
         },
     }
@@ -118,6 +118,7 @@ async def startup_config(request: Request):
             "presets": True,
             "multiConvo": True,
             "bookmarks": True,
+            "schedules": {"use": True, "maxPerUser": 25, "minIntervalMinutes": 5, "requireProject": False},
             "agents": {"use": True, "create": True, "share": False, "public": False},
             "prompts": {"use": False, "create": False, "share": False, "public": False},
             "mcpServers": {"use": True, "create": True, "share": False, "public": False},

@@ -52,8 +52,8 @@ async def test_mcp_discovery_and_tool_call_requires_human_approval(tmp_path, mon
 
     async def model(profile, history, *, tools, **kwargs):
         assert {tool["function"]["name"] for tool in tools} == {
-            "session_manage", "plan_manage", "web_search", "web_fetch",
-            "mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call",
+            "session_manage", "plan_manage", "web_search", "web_fetch", "mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call",
+            "set_memory", "delete_memory",
         }
         count = sum(1 for item in history if item.get("role") == "tool")
         if count == 0:
