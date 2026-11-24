@@ -1473,3 +1473,47 @@ async def test_remote_copy_dir_packs_transfers_and_unpacks(tmp_path, monkeypatch
     assert (root / "dst-machine" / "run-copy" / "nested" / "result.txt").read_text(
         encoding="utf-8"
     ) == "ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_machine", [None, "source-worker"])
+async def test_packed_transfer_releases_source_when_destination_allocation_fails(monkeypatch, source_machine):
+    cleaned = []
+
+    async def transfer(machine, tool, args, timeout_s=None):
+        assert tool == "transfer_alloc_temp_path"
+        raise OSError("destination unavailable")
+
+    async def cleanup(machine, path):
+        cleaned.append((machine, path))
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+    monkeypatch.setattr(tools, "_remote_cleanup_file", cleanup)
+    monkeypatch.setattr(tools, "delete_path", lambda path, recursive: cleaned.append((None, path)))
+
+    pack = {"path": "src", "archive_path": "source.tar.gz", "bytes": 1, "sha256": "digest"}
+    with pytest.raises(OSError, match="destination unavailable"):
+        await tools._copy_packed_dir_to_remote(pack, source_machine, "destination-worker", "dst", True, None)
+    assert cleaned == [(source_machine, "source.tar.gz")]
+
+
+@pytest.mark.asyncio
+async def test_remote_directory_transfer_releases_source_when_local_allocation_fails(monkeypatch):
+    cleaned = []
+
+    async def transfer(machine, tool, args, timeout_s=None):
+        assert tool == "transfer_pack_dir"
+        return {"archive_path": "source.tar.gz"}
+
+    def allocate(suffix):
+        raise OSError("local disk full")
+
+    async def cleanup(machine, path):
+        cleaned.append((machine, path))
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+    monkeypatch.setattr(tools, "transfer_alloc_temp_path", allocate)
+    monkeypatch.setattr(tools, "_remote_cleanup_file", cleanup)
+    with pytest.raises(OSError, match="local disk full"):
+        await tools._copy_remote_dir_to_local("source-worker", "src", "dst")
+    assert cleaned == [("source-worker", "source.tar.gz")]

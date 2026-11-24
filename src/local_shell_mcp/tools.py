@@ -2714,10 +2714,11 @@ async def _copy_packed_dir_to_remote(
     chunk_size: int | None,
     progress: TransferProgress | None = None,
 ) -> dict:
-    dst_archive = await _remote_transfer_data(
-        dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
-    )
+    dst_archive = None
     try:
+        dst_archive = await _remote_transfer_data(
+            dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
+        )
         if src_machine:
             copy_result = await _copy_remote_file_to_remote(
                 src_machine,
@@ -2748,7 +2749,8 @@ async def _copy_packed_dir_to_remote(
             },
         )
     except (asyncio.CancelledError, Exception):
-        await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
+        if dst_archive is not None:
+            await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
         raise
     finally:
         if src_machine:
@@ -2802,8 +2804,9 @@ async def _copy_remote_dir_to_local(
     pack = await _remote_transfer_data(
         src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
     )
-    archive = await asyncio.to_thread(transfer_alloc_temp_path, ".tar.gz")
+    archive = None
     try:
+        archive = await asyncio.to_thread(transfer_alloc_temp_path, ".tar.gz")
         copy_result = await _copy_remote_file_to_local(
             src_machine,
             pack["archive_path"],
@@ -2823,8 +2826,9 @@ async def _copy_remote_dir_to_local(
             archive["path"], destination_path, overwrite, True
         )
     finally:
-        with suppress(Exception):
-            delete_path(archive.get("path", ""), False)
+        if archive is not None:
+            with suppress(Exception):
+                delete_path(archive.get("path", ""), False)
         await _remote_cleanup_file(src_machine, pack.get("archive_path", ""))
     return {
         "source": {"machine": src_machine, "path": pack["path"]},
