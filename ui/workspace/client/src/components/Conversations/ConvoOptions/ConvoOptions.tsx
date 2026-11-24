@@ -61,6 +61,7 @@ function ConvoOptions({
   renameHandler,
   isPopoverActive,
   setIsPopoverActive,
+  contextMenuPoint,
   isActiveConvo,
   isShiftHeld = false,
 }: {
@@ -74,6 +75,7 @@ function ConvoOptions({
   renameHandler: (e: MouseEvent) => void;
   isPopoverActive: boolean;
   setIsPopoverActive: (open: boolean) => void;
+  contextMenuPoint: { x: number; y: number } | null;
   isActiveConvo: boolean;
   isShiftHeld?: boolean;
 }) {
@@ -451,6 +453,11 @@ function ConvoOptions({
          */
         portal={true}
         menuId={menuId}
+        getAnchorRect={
+          contextMenuPoint
+            ? () => new DOMRect(contextMenuPoint.x, contextMenuPoint.y, 0, 0)
+            : undefined
+        }
         focusLoop={true}
         className="z-[125]"
         unmountOnHide={true}
@@ -525,6 +532,8 @@ export default memo(ConvoOptions, (prevProps, nextProps) => {
     prevProps.isPinned === nextProps.isPinned &&
     prevProps.isArchived === nextProps.isArchived &&
     prevProps.isPopoverActive === nextProps.isPopoverActive &&
+    prevProps.contextMenuPoint?.x === nextProps.contextMenuPoint?.x &&
+    prevProps.contextMenuPoint?.y === nextProps.contextMenuPoint?.y &&
     prevProps.isActiveConvo === nextProps.isActiveConvo &&
     prevProps.isShiftHeld === nextProps.isShiftHeld
   );
