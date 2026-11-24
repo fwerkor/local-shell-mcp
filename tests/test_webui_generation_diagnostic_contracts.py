@@ -41,16 +41,25 @@ def test_provider_error_messages_redact_details(error, short_reason, detail):
     assert 'run-test' in report
 
 
-def test_replay_open_step_handles_empty_pages_and_invalid_indices():
-    events = [(i, {'event': 'on_run_step_closed', 'data': {'id': str(i)}}) for i in range(1, 199)]
-    events += [(199, {'event': 'on_run_step', 'data': {'type': 'message_creation', 'id': 'bad', 'index': -1}}),
-               (200, {'event': 'on_run_step', 'data': {'type': 'message_creation', 'id': 'good', 'index': 2}})]
-    class Store:
-        def events(self, owner, run_id, cursor, limit=200):
-            return [item for item in events if item[0] > cursor][:limit]
-    assert routes._last_open_message_step(Store(), 'alice', 'run') == ('good', 2, None)
-    events.pop()
-    assert routes._last_open_message_step(Store(), 'alice', 'run') is None
+@pytest.mark.usefixtures('isolated_controller_settings')
+def test_replay_open_step_handles_empty_pages_and_invalid_indices(tmp_path):
+    from local_shell_mcp.sqlite_store import SQLiteDatabase
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    store = GenerationStore(SQLiteDatabase(tmp_path / 'state'))
+    job, _ = store.begin('alice', {'text': 'start'})
+    assert routes._last_open_message_step(store, 'alice', job.run_id) is None
+    # A full page of step boundaries exercises the old pagination path as
+    # well as the optimized query returning only step boundary events.
+    for i in range(198):
+        store.append('alice', job.run_id, {'event': 'on_run_step_closed', 'data': {'id': str(i)}})
+    store.append('alice', job.run_id, {'event': 'on_run_step', 'data': {
+        'type': 'message_creation', 'id': 'bad', 'index': -1}})
+    store.append('alice', job.run_id, {'event': 'on_run_step', 'data': {
+        'type': 'message_creation', 'id': 'good', 'index': 2}})
+    assert routes._last_open_message_step(store, 'alice', job.run_id) == ('good', 2, None)
+    store.append('alice', job.run_id, {'event': 'on_run_step_closed', 'data': {'id': 'good'}})
+    assert routes._last_open_message_step(store, 'alice', job.run_id) is None
 
 
 def test_recovered_terminal_text_preserves_non_prefix_visible_answer():
