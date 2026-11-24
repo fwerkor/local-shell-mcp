@@ -39,6 +39,8 @@ site/
 ui/workspace/node_modules/
 ui/workspace/**/node_modules/
 ui/workspace/**/dist/
+# Generated React release archive: bundled by release builds, never committed
+/ui/workspace/frontend.tar.gz
 ui/workspace/.turbo/
 
 # React unit-test artifacts
