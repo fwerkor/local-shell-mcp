@@ -716,6 +716,19 @@ def get_settings() -> Settings:
     return settings
 
 
+def controller_base_url() -> str:
+    """Advertised Controller URL, or its configured local listening address."""
+    settings = get_settings()
+    if settings.public_base_url:
+        return settings.public_base_url.rstrip("/")
+    host = settings.host
+    if host in {"", "0.0.0.0", "::"}:
+        host = "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{settings.port}"
+
+
 def safe_settings_dump(settings: Settings | None = None) -> dict:
     """Return settings for diagnostics without exposing credentials or auth secrets."""
 

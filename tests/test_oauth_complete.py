@@ -680,3 +680,18 @@ def test_unnamed_oauth_client_has_neutral_authorization_label(tmp_path, monkeypa
     form = client.get("/oauth/authorize", params=params)
     assert "<strong>OAuth client</strong> wants to access your workspace" in form.text
     assert "ChatGPT" not in form.text
+
+
+@pytest.mark.parametrize(("host", "expected"), [
+    ("0.0.0.0", "http://127.0.0.1:9876"),
+    ("::1", "http://[::1]:9876"),
+    ("127.0.0.1", "http://127.0.0.1:9876"),
+])
+def test_controller_url_fallback_uses_configured_listener(tmp_path, monkeypatch, host, expected):
+    from local_shell_mcp import downloads, remote_transfer
+
+    _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_HOST=host, LOCAL_SHELL_MCP_PORT="9876")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL")
+    get_settings.cache_clear()
+    assert oauth.public_base_url() == expected
+    assert downloads._public_base_url() == remote_transfer._public_base_url() == expected
