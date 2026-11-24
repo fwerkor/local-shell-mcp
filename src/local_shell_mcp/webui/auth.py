@@ -262,7 +262,8 @@ async def login_ticket(request: Request) -> Response:
         request.state.principal = _verify_oauth(request, settings)
     owner, scopes, expiry = _owner(request)
     principal = getattr(request.state, "principal", None)
-    if getattr(principal, "claims", {}).get("client_id") == "lsm-webui":
+    client_id = getattr(principal, "claims", {}).get("client_id")
+    if client_id == "lsm-webui":
         # A copied first-party bearer must not mint another 30-day session
         # after logout or loss of its owning HttpOnly browser cookie.
         existing = _store().session(request.cookies.get(COOKIE, ""))
@@ -272,7 +273,17 @@ async def login_ticket(request: Request) -> Response:
     # A fresh OAuth proof opens a *separate, revocable* browser login. Its
     # delegated idle lifetime is independent from the short-lived OAuth bearer
     # used to exchange the ticket; scopes are never expanded.
-    renewable = settings.auth_mode == "oauth" and bool(request.headers.get("authorization"))
+    # Only an approved first-party OAuth client whose sole callback is the
+    # controller's login page can exchange its proof for a sliding session.
+    # An arbitrary API client must retain the original bearer grant deadline.
+    renewable = False
+    if settings.auth_mode == "oauth" and request.headers.get("authorization") and client_id and client_id != "lsm-webui":
+        from ..oauth import _get_client
+
+        client = _get_client(client_id)
+        origin = (settings.public_base_url or str(request.base_url)).rstrip("/")
+        renewable = bool(client and client.approved and client.client_name == "WebUI"
+                         and client.redirect_uris == [origin + "/auth/login"])
     if renewable:
         expiry = int(time.time()) + SESSION_TTL
     token = _store().issue_ticket(owner, scopes, expiry, renewable=renewable)
