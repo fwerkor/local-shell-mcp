@@ -619,16 +619,6 @@ export interface SwitcherProps {
   endpointKeyProvided: boolean;
   isCollapsed: boolean;
 }
-export type TLoginLayoutContext = {
-  startupConfig: t.TStartupConfig | null;
-  startupConfigError: unknown;
-  isFetching: boolean;
-  error: string | null;
-  setError: React.Dispatch<React.SetStateAction<string | null>>;
-  headerText: string;
-  setHeaderText: React.Dispatch<React.SetStateAction<string>>;
-};
-
 export type NewConversationParams = {
   template?: Partial<t.TConversation>;
   preset?: Partial<t.TPreset>;
@@ -679,7 +669,6 @@ export type TThread = { id: string; createdAt: string };
 
 declare global {
   interface Window {
-    google_tag_manager?: unknown;
     /** Answers the server emits with the document, ahead of the app's own
      *  scripts, for questions the first render must not guess at. */
     __LIBRECHAT_CONFIG__?: {
