@@ -28,17 +28,12 @@ from .command_preflight import CommandPreflightDecision, preflight_command
 from .deprecated_tools import DeprecatedToolFastMCP as FastMCP
 from .downloads import create_share_link, list_share_links, revoke_share_link
 from .dynamic_mcp import DynamicMCPManager
-from .errors import (
-    PathNotFoundError,
-    ShellExecutableNotFoundError,
-    workspace_path_not_found_error,
-)
+from .errors import tool_exception_payload
 from .fs_ops import (
     delete_path,
     edit_text,
     glob_paths,
     list_dir,
-    missing_path_context,
     prune_temp_dir,
     read_text,
     read_texts,
@@ -299,44 +294,8 @@ def _error_call_result(data: dict[str, Any], message: str) -> CallToolResult:
 
 def _handled_error(exc: Exception) -> CallToolResult:
     audit("tool_error", error=repr(exc))
-    if isinstance(exc, ShellExecutableNotFoundError):
-        message = f"Shell executable not found: {exc.executable}"
-        return _error_call_result(
-            {
-                "status": "executable_not_found",
-                "error_type": "FileNotFoundError",
-                "message": str(exc),
-                "executable": exc.executable,
-                "command": exc.command,
-                "cwd": exc.cwd,
-                "original_error": exc.original_error,
-            },
-            message,
-        )
-    path_error = exc if isinstance(exc, PathNotFoundError) else None
-    if isinstance(exc, FileNotFoundError) and path_error is None:
-        path_error = workspace_path_not_found_error(exc, get_settings().workspace_root)
-    if path_error is not None:
-        with suppress(Exception):
-            context = missing_path_context(path_error.path)
-            return _error_call_result(
-                {
-                    "status": "not_found",
-                    "error_type": "FileNotFoundError",
-                    "message": str(exc),
-                    **context,
-                },
-                f"Path not found: {context['path']}",
-            )
-    message = str(exc) or type(exc).__name__
-    return _error_call_result(
-        {
-            "status": "error",
-            "error_type": type(exc).__name__,
-            "message": message,
-        },
-        message,
-    )
+    data, message = tool_exception_payload(exc)
+    return _error_call_result(data, message)
 
 
 def _sync(coro):  # noqa: ANN001
