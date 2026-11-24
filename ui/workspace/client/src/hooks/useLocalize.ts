@@ -9,7 +9,7 @@ export default function useLocalize() {
   const { t } = useTranslation();
 
   return useCallback(
-    (phraseKey: TranslationKeys, options?: TOptions) => t(phraseKey, options),
+    (phraseKey: TranslationKeys, options?: TOptions) => t(phraseKey, options ?? {}),
     [t],
   );
 }
