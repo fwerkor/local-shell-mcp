@@ -36,8 +36,12 @@ upload integration, Controller settings, and unified Control UI. Services may
 still be needed by those systems after their standalone HTTP routes are removed.
 PWA stale-asset recovery remains enabled without upstream browser telemetry.
 
-For every update, run `npm run check:lsm`, `npm run frontend`, client TypeScript
-checking and the Controller's Python integration tests before publishing.
+The upstream Mongoose data-schemas workspace is not vendored: the Python SQLite
+backend owns persistence. Source-level parity fixtures and upstream source locks
+remain available for testing and review.
+
+For every update, run `bun install --frozen-lockfile`, `bun run frontend`,
+`bun run typecheck` and the Controller's Python integration tests before publishing.
 
 ## Python port source lock
 

@@ -9,14 +9,12 @@
   "workspaces": [
     "client",
     "packages/client",
-    "packages/data-provider",
-    "packages/data-schemas"
+    "packages/data-provider"
   ],
   "scripts": {
     "build": "bun run frontend",
-    "frontend": "bun run build:data-provider && bun run build:data-schemas && bun run build:client-package && bun run build:client",
+    "frontend": "bun run build:data-provider && bun run build:client-package && bun run build:client",
     "build:data-provider": "cd packages/data-provider && bun run b:build",
-    "build:data-schemas": "cd packages/data-schemas && bun x tsdown",
     "build:client-package": "cd packages/client && bun x tsdown",
     "build:client": "cd client && bun run build",
     "frontend:dev": "cd client && bun run dev",
@@ -117,15 +115,6 @@
     "gaxios": {
       "uuid": "^11.1.1"
     }
-  },
-  "nodemonConfig": {
-    "ignore": [
-      "api/data/",
-      "data/",
-      "client/",
-      "admin/",
-      "packages/"
-    ]
   },
   "private": true
 }
