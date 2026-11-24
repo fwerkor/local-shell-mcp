@@ -99,7 +99,7 @@ export function useApplyAgentTemplate() {
       const mergedAgent = {
         ...ephemeralAgent,
         mcp: [...(ephemeralAgent?.mcp ?? []), ...(modelSpec.mcpServers ?? [])],
-        web_search: ephemeralAgent?.web_search ?? modelSpec.webSearch ?? false,
+        web_search: ephemeralAgent?.web_search ?? modelSpec.webSearch ?? true,
         file_search: ephemeralAgent?.file_search ?? modelSpec.fileSearch ?? false,
         execute_code: ephemeralAgent?.execute_code ?? modelSpec.executeCode ?? false,
         artifacts:
