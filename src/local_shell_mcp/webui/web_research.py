@@ -480,11 +480,22 @@ async def web_fetch(owner: str, url: str, *, query: str | None = None,
         pattern = query.strip().casefold()
         if not pattern:
             raise WebResearchError('query cannot be empty')
-        idx = text.casefold().find(pattern)
+        folded = text.casefold()
+        idx = folded.find(pattern)
         if idx < 0:
             return {'url': document['url'], 'title': document['title'], 'query': query,
                     'found': False, 'length': len(text), 'sections': document['sections'][:30]}
-        offset = max(0, idx - 350)
+        # Full Unicode case folding can expand characters (e.g. ß → ss).
+        # Translate the folded index back to the original text before slicing.
+        if len(folded) != len(text):
+            position = 0
+            for original_index, char in enumerate(text):
+                position += len(char.casefold())
+                if position > idx:
+                    idx = original_index
+                    break
+        # Reserve room for the match even when the caller requests a short window.
+        offset = max(0, idx - min(350, max(0, (limit - len(pattern)) // 2)))
     start = min(offset, len(text))
     end = min(len(text), start + limit)
     current_page = None
