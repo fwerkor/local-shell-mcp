@@ -19,10 +19,18 @@ cd ../..
 python scripts/embed-react-webui.py
 ```
 
-The resulting `ui/workspace/frontend.tar.gz` is a deterministic archive of
-compiled React assets without redundant precompressed copies or source maps.
-Official Controller onefile releases embed that file and extract it under
-`.local-shell-mcp/runtime/webui/` only when needed. Worker wheels exclude it.
+The resulting `ui/workspace/frontend.tar.gz` is a **gitignored, generated**
+archive of compiled React assets without redundant precompressed copies or
+source maps. It is never committed to Git. CI and release builds automatically
+compile the React app and regenerate the archive on clean checkouts before
+packaging the Python wheel or standalone Controller. Docker builds also generate
+it from source. Wheels and Controller releases embed the archive; at runtime,
+Controller extracts it under `.local-shell-mcp/runtime/webui/` on demand.
+Neither running the Controller nor running a Worker requires Bun or Node.js.
+
+For a local wheel build, run the commands above first; a bare `pip wheel`
+without a compiled frontend will not build React automatically, because
+Python-only environments may deliberately lack the JavaScript toolchain.
 
 Backend integration is implemented by `src/local_shell_mcp/webui/`. The
 corresponding API contract inventory is in
