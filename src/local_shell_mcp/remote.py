@@ -20,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -3536,36 +3537,37 @@ class _WorkerRequestCancellation:
 _worker_request_context = threading.local()
 
 
-def _worker_download_url_in_cancellable_thread(
-    url: str,
-    path: str,
-    overwrite: bool,
-    expected_bytes: int,
-    expected_sha256: str | None,
-    timeout_s: int | None,
-    external: bool,
-    defer_commit: bool,
+def _worker_request_in_thread(
+    operation: Callable[..., dict[str, Any]],
     cancellation: _WorkerRequestCancellation,
+    args: tuple[Any, ...],
 ) -> dict[str, Any]:
     previous = getattr(_worker_request_context, "cancellation", None)
     _worker_request_context.cancellation = cancellation
     try:
-        return _worker_download_url(
-            url,
-            path,
-            overwrite,
-            expected_bytes,
-            expected_sha256,
-            timeout_s,
-            external,
-            defer_commit,
-        )
+        return operation(*args)
     finally:
         if previous is None:
             with contextlib.suppress(AttributeError):
                 del _worker_request_context.cancellation
         else:
             _worker_request_context.cancellation = previous
+
+
+async def _worker_request_cancellable(
+    operation: Callable[..., dict[str, Any]], *args: Any
+) -> dict[str, Any]:
+    cancellation = _WorkerRequestCancellation()
+    request = asyncio.create_task(
+        asyncio.to_thread(_worker_request_in_thread, operation, cancellation, args)
+    )
+    try:
+        return await asyncio.shield(request)
+    except asyncio.CancelledError:
+        cancellation.cancel()
+        with contextlib.suppress(Exception):
+            await asyncio.shield(request)
+        raise
 
 
 async def _worker_download_url_cancellable(
@@ -3578,48 +3580,10 @@ async def _worker_download_url_cancellable(
     external: bool = False,
     defer_commit: bool = False,
 ) -> dict[str, Any]:
-    cancellation = _WorkerRequestCancellation()
-    request = asyncio.create_task(
-        asyncio.to_thread(
-            _worker_download_url_in_cancellable_thread,
-            url,
-            path,
-            overwrite,
-            expected_bytes,
-            expected_sha256,
-            timeout_s,
-            external,
-            defer_commit,
-            cancellation,
-        )
+    return await _worker_request_cancellable(
+        _worker_download_url, url, path, overwrite, expected_bytes,
+        expected_sha256, timeout_s, external, defer_commit,
     )
-    try:
-        return await asyncio.shield(request)
-    except asyncio.CancelledError:
-        cancellation.cancel()
-        with contextlib.suppress(Exception):
-            await asyncio.shield(request)
-        raise
-
-
-def _worker_put_url_in_cancellable_thread(
-    path: str,
-    url: str,
-    expected_bytes: int,
-    expected_sha256: str | None,
-    timeout_s: int | None,
-    cancellation: _WorkerRequestCancellation,
-) -> dict[str, Any]:
-    previous = getattr(_worker_request_context, "cancellation", None)
-    _worker_request_context.cancellation = cancellation
-    try:
-        return _worker_put_url(path, url, expected_bytes, expected_sha256, timeout_s)
-    finally:
-        if previous is None:
-            with contextlib.suppress(AttributeError):
-                del _worker_request_context.cancellation
-        else:
-            _worker_request_context.cancellation = previous
 
 
 async def _worker_put_url_cancellable(
@@ -3629,25 +3593,9 @@ async def _worker_put_url_cancellable(
     expected_sha256: str | None,
     timeout_s: int | None = None,
 ) -> dict[str, Any]:
-    cancellation = _WorkerRequestCancellation()
-    request = asyncio.create_task(
-        asyncio.to_thread(
-            _worker_put_url_in_cancellable_thread,
-            path,
-            url,
-            expected_bytes,
-            expected_sha256,
-            timeout_s,
-            cancellation,
-        )
+    return await _worker_request_cancellable(
+        _worker_put_url, path, url, expected_bytes, expected_sha256, timeout_s,
     )
-    try:
-        return await asyncio.shield(request)
-    except asyncio.CancelledError:
-        cancellation.cancel()
-        with contextlib.suppress(Exception):
-            await asyncio.shield(request)
-        raise
 
 
 def _worker_post_json_with_curl(
@@ -3814,49 +3762,15 @@ def _worker_error_is_retryable(exc: Exception) -> bool:
     return not isinstance(exc, ValueError)
 
 
-def _worker_post_json_in_cancellable_thread(
-    url: str,
-    payload: dict[str, Any],
-    headers: dict[str, str] | None,
-    timeout: float | None,
-    cancellation: _WorkerRequestCancellation,
-) -> dict[str, Any]:
-    previous = getattr(_worker_request_context, "cancellation", None)
-    _worker_request_context.cancellation = cancellation
-    try:
-        return _worker_post_json(url, payload, headers, timeout)
-    finally:
-        if previous is None:
-            with contextlib.suppress(AttributeError):
-                del _worker_request_context.cancellation
-        else:
-            _worker_request_context.cancellation = previous
-
-
 async def _worker_post_json_cancellable(
     url: str,
     payload: dict[str, Any],
     headers: dict[str, str] | None,
     timeout: float | None,
 ) -> dict[str, Any]:
-    cancellation = _WorkerRequestCancellation()
-    request = asyncio.create_task(
-        asyncio.to_thread(
-            _worker_post_json_in_cancellable_thread,
-            url,
-            payload,
-            headers,
-            timeout,
-            cancellation,
-        )
+    return await _worker_request_cancellable(
+        _worker_post_json, url, payload, headers, timeout,
     )
-    try:
-        return await asyncio.shield(request)
-    except asyncio.CancelledError:
-        cancellation.cancel()
-        with contextlib.suppress(Exception):
-            await asyncio.shield(request)
-        raise
 
 
 async def _worker_post_json_forever(
@@ -3899,6 +3813,9 @@ def _worker_result_outbox_dir() -> Path:
     return _worker_state_dir() / "result-outbox"
 
 
+_WORKER_OUTBOX_WRITE_LOCK = threading.Lock()
+
+
 def _worker_store_result_outbox(result: dict[str, Any]) -> Path:
     job_id = str(result.get("job_id") or "")
     if not job_id:
@@ -3911,22 +3828,29 @@ def _worker_store_result_outbox(result: dict[str, Any]) -> Path:
     target = directory / filename
     temporary = directory / (filename + ".tmp." + uuid.uuid4().hex)
     encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    existing = list(directory.glob("*.json"))
-    existing_bytes = sum(path.stat().st_size for path in existing if path.is_file())
-    if target not in existing and len(existing) >= REMOTE_WORKER_RESULT_OUTBOX_MAX_ITEMS:
-        raise RuntimeError("worker result outbox is full")
-    if target not in existing and existing_bytes + len(encoded) > REMOTE_WORKER_RESULT_OUTBOX_MAX_BYTES:
-        raise RuntimeError("worker result outbox byte limit reached")
-    try:
-        with temporary.open("wb") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        with contextlib.suppress(OSError):
-            temporary.chmod(0o600)
-        temporary.replace(target)
-    finally:
-        temporary.unlink(missing_ok=True)
+    # Multiple execution lanes spool results concurrently; serialize the
+    # quota check and publication, and tolerate a sender removing an ACKed file.
+    with _WORKER_OUTBOX_WRITE_LOCK:
+        existing: dict[Path, int] = {}
+        for path in directory.glob("*.json"):
+            try:
+                existing[path] = path.stat().st_size
+            except FileNotFoundError:
+                continue
+        if target not in existing and len(existing) >= REMOTE_WORKER_RESULT_OUTBOX_MAX_ITEMS:
+            raise RuntimeError("worker result outbox is full")
+        if target not in existing and sum(existing.values()) + len(encoded) > REMOTE_WORKER_RESULT_OUTBOX_MAX_BYTES:
+            raise RuntimeError("worker result outbox byte limit reached")
+        try:
+            with temporary.open("wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            with contextlib.suppress(OSError):
+                temporary.chmod(0o600)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
     return target
 
 
@@ -4164,6 +4088,7 @@ async def _run_worker_job(
 ) -> None:
     expires_at = float(job.get("expires_at") or 0)
     execution_started_at: float | None = None
+    execution_s = 0.0
     execution_finished_at = _utc()
     if expires_at and expires_at < _utc():
         out = {
@@ -4189,8 +4114,6 @@ async def _run_worker_job(
             )
             out = {"job_id": job.get("id"), **_handled_remote_exception(exc)}
         execution_finished_at = _utc()
-    if "execution_s" not in locals():
-        execution_s = 0.0
     if "reset_generation" in job:
         out["reset_generation"] = job["reset_generation"]
     if str(job.get("tool") or "") in REMOTE_RESET_PRESERVED_WORKER_TOOLS:
@@ -4224,19 +4147,23 @@ async def _worker_result_outbox_sender(
     in_progress: set[str],
 ) -> None:
     directory = _worker_result_outbox_dir()
+    last_name = ""
     while True:
         directory.mkdir(parents=True, exist_ok=True)
         candidates = [path for path in sorted(directory.glob("*.json")) if path.name not in in_progress]
         if not candidates:
             await asyncio.sleep(0.25)
             continue
-        path = candidates[0]
+        # Round-robin selection: one unreadable result must not starve all
+        # later files. Keep the damaged file for retry or manual recovery.
+        path = next((candidate for candidate in candidates if candidate.name > last_name), candidates[0])
+        last_name = path.name
         in_progress.add(path.name)
         try:
             try:
                 result = json.loads(await asyncio.to_thread(path.read_text, encoding="utf-8"))
-                if not isinstance(result, dict):
-                    raise ValueError("spooled result is not a JSON object")
+                if not isinstance(result, dict) or not isinstance(result.get("job_id"), str) or not result["job_id"]:
+                    raise ValueError("spooled result is missing a valid job id")
             except Exception as exc:  # noqa: BLE001
                 _worker_log_retry("read result outbox", exc, 1.0)
                 await asyncio.sleep(1.0)
@@ -4255,7 +4182,9 @@ async def _worker_result_outbox_sender(
             data = response.get("data") if isinstance(response, dict) else None
             # accepted=false means the controller already timed out/cancelled it,
             # or this is a harmless retry after an ACK was lost.
-            if isinstance(data, dict) and data.get("accepted") is False:
+            if not isinstance(data, dict) or not isinstance(data.get("accepted"), bool):
+                raise RuntimeError("controller did not acknowledge the spooled result")
+            if data["accepted"] is False:
                 audit("remote_result_outbox_discarded", job_id=result.get("job_id"))
             await asyncio.to_thread(path.unlink, True)
         except asyncio.CancelledError:
