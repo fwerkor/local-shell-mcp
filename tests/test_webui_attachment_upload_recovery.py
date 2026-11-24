@@ -80,7 +80,7 @@ async def test_upload_committed_acknowledgement_failed_preserves_published_bytes
 
 
 def _make_pending(database, ident="file-stale", payload=b"orphan", *, signature=True):
-    path = attachments._safe_attachment_path("alice", ident + ".txt", database.root)
+    path = attachments._safe_attachment_path(ident + ".txt", database.root)
     path.write_bytes(payload)
     stat = path.stat()
     with database.connect() as db:
@@ -498,10 +498,10 @@ def test_context_enforces_binary_rejection_and_raw_text_size_before_read(tmp_pat
 
 def test_agent_context_excludes_missing_unsafe_unprocessed_and_other_owner_resources(uploads, tmp_path):
     """Only processed, on-disk, owner-scoped documents are supplied as context."""
-    existing = attachments._safe_attachment_path("alice", "one.txt", uploads.root)
+    existing = attachments._safe_attachment_path("one.txt", uploads.root)
     existing.write_bytes(b"source")
-    missing = attachments._safe_attachment_path("alice", "two.txt", uploads.root)
-    link = attachments._safe_attachment_path("alice", "three.txt", uploads.root)
+    missing = attachments._safe_attachment_path("two.txt", uploads.root)
+    link = attachments._safe_attachment_path("three.txt", uploads.root)
     outside = tmp_path / "outside.txt"
     outside.write_text("unsafe")
     try:

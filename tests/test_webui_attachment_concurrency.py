@@ -21,7 +21,7 @@ from local_shell_mcp.webui.file_deletion import AttachmentDeletionStore
 
 
 def _blob(database, ident="file-race"):
-    path = attachments._safe_attachment_path("alice", ident + ".txt", database.root)
+    path = attachments._safe_attachment_path(ident + ".txt", database.root)
     path.write_bytes(b"real file bytes")
     with database.connect() as db:
         db.execute("INSERT INTO attachments(id,owner,name,path,content_type,metadata) "

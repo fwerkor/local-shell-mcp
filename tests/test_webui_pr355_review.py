@@ -112,7 +112,7 @@ def test_single_native_attachment_record_updates_without_duplication(web_store):
     run, _ = store.begin("local", {"text": "Export"})
     # Canonical file attachments must be owned Controller blobs, linked to a
     # recorded tool call. An arbitrary SSE event cannot invent a file.
-    path = _safe_attachment_path("local", "report.txt", store.database.root)
+    path = _safe_attachment_path("report.txt", store.database.root)
     path.write_text("ready", encoding="utf-8")
     with store.database.connect() as connection:
         connection.execute(
