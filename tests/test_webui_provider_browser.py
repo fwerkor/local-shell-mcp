@@ -95,12 +95,12 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 await page.get_by_test_id("text-input").fill("Verify configured model.")
                 await page.locator('button[type="submit"]').first.click()
                 if reject_provider:
-                    await page.get_by_test_id("screenshot-target").get_by_text("Model generation failed (HTTPStatusError)", exact=False).wait_for(timeout=15000)
+                    await page.get_by_test_id("screenshot-target").get_by_text("The model provider request failed (HTTPStatusError).", exact=False).wait_for(timeout=15000)
                 else:
                     await page.get_by_test_id("screenshot-target").get_by_text("Model channel works.", exact=True).wait_for(timeout=15000)
                 if reject_provider:
                     await page.reload()
-                    await page.get_by_test_id("screenshot-target").get_by_text("Model generation failed (HTTPStatusError)", exact=False).wait_for(timeout=15000)
+                    await page.get_by_test_id("screenshot-target").get_by_text("The model provider request failed (HTTPStatusError).", exact=False).wait_for(timeout=15000)
                 assert requests and requests[-1]["model"] == "second-model"
                 if reject_provider:
                     # Correcting an invalid credential must recover without a

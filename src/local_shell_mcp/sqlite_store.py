@@ -132,7 +132,8 @@ CREATE TABLE IF NOT EXISTS web_login_tickets (
     owner TEXT NOT NULL,
     scopes TEXT NOT NULL,
     grant_until INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
+    expires_at INTEGER NOT NULL,
+    renewable INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS web_sessions (
     hash TEXT PRIMARY KEY,
@@ -140,7 +141,8 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     scopes TEXT NOT NULL,
     grant_until INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    renewable INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_web_sessions_expiry ON web_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_web_tickets_expiry ON web_login_tickets(expires_at);
@@ -622,6 +624,15 @@ class SQLiteDatabase:
                 self.fts_enabled = False
             else:
                 self.fts_enabled = True
+            # Explicitly distinguish renewable first-party WebUI logins from
+            # bounded OAuth handoffs. Upgraded sessions remain nonrenewable
+            # until the user authenticates again; never elevate old grants.
+            db.execute("BEGIN IMMEDIATE")
+            for name in ("web_login_tickets", "web_sessions"):
+                existing = {row["name"] for row in db.execute(f"PRAGMA table_info({name})")}
+                if "renewable" not in existing:
+                    db.execute(f"ALTER TABLE {name} ADD COLUMN renewable INTEGER NOT NULL DEFAULT 0")
+            db.commit()
             # PR #353 created this table before delegated child conversations
             # needed a separate inherited permission scope. Migrate the real
             # existing Controller DB in-place; serialize concurrent cold starts.

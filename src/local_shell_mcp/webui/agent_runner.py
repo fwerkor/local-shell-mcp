@@ -70,9 +70,10 @@ class AgentRunner:
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
                  on_injected=None, wakeup_lease=None, event_delivery_lease=None,
-                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, web_search_enabled=True):
+                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, webui_cookie=None, web_search_enabled=True):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
+        self.webui_cookie = webui_cookie
         self.web_search_enabled = web_search_enabled
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
         self.on_thought = on_thought
@@ -115,6 +116,17 @@ class AgentRunner:
         self._summary_failures = 0
 
     def _check_grant(self):
+        if self.webui_cookie is not None:
+            from ..settings import get_settings
+            from .auth import WebAuthStore
+
+            session = WebAuthStore(get_settings().state_dir).session(self.webui_cookie)
+            if (session is None or session.owner != self.owner
+                    or not set(self.scopes).issubset(set(session.scopes.split()))):
+                raise RuntimeSafetyError("WebUI session expired or was signed out")
+            # The JWT that began this run may have expired an hour ago; only
+            # the live, revocable browser session controls its ongoing lease.
+            self.grant_expires = session.grant_until
         if self.actor_lease is not None:
             self.actor_lease.assert_current()
         if self.grant_expires is not None and self.grant_expires <= time.time():

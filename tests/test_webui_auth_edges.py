@@ -87,6 +87,8 @@ async def test_auth_routes_reject_unauthorized_and_expire_oauth_grants(tmp_path,
         assert access.status_code == 200, access.text
         token = access.json()["token"]
         claims = jwt.decode(token, options={"verify_signature": False})
+        # This simulated OAuth handoff supplies no bearer Authorization
+        # header, so its grant is explicitly bounded to the original expiry.
         assert claims["exp"] <= now + 100
         assert access.json()["user"]["role"] == "USER"
         assert (await client.post("/api/auth/logout", headers={"Origin": "https://other.example"})).status_code == 403
