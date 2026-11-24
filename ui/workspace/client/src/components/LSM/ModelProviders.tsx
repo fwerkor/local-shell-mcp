@@ -32,8 +32,9 @@ const channelId = (profile: Profile) => profile.name ?? 'legacy:' + profile.prov
 const newDraft = (): Draft => ({ name: '', provider: 'openai', base: kinds[0].defaultUrl,
   models: '', contexts: {}, includeUsage: true, apiKey: '' });
 const errorMessage = (reason: unknown) => {
-  const error = reason as { response?: { data?: { detail?: string } }; message?: string };
-  return error?.response?.data?.detail || error?.message || String(reason);
+  const error = reason as { response?: { data?: { detail?: string; message?: string } | string }; message?: string };
+  const data = error?.response?.data;
+  return (typeof data === 'string' ? data : data?.detail || data?.message) || error?.message || String(reason);
 };
 
 /** Channel instances are distinct from provider protocols; defaults aren't saved channels. */
@@ -44,9 +45,10 @@ export default function ModelProviders() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState<Draft>(newDraft);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [forceDelete, setForceDelete] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
+  const [success, setSuccess] = useState('');
   const url = apiBaseUrl() + '/api/lsm/providers';
   const channels = profiles.filter((profile) => profile.source !== 'default');
   const draftModels = [...new Set(draft.models.split(/[\n,]/).map((model) => model.trim()).filter(Boolean))];
@@ -71,8 +73,9 @@ export default function ModelProviders() {
     setEditor({ original: null });
     setDraft(newDraft());
     setConfirmDelete(null);
+    setForceDelete(null);
     setError('');
-    setSaved(false);
+    setSuccess('');
   };
   const beginEdit = (profile: Profile) => {
     setEditor({ original: profile });
@@ -86,14 +89,15 @@ export default function ModelProviders() {
       apiKey: '',
     });
     setConfirmDelete(null);
+    setForceDelete(null);
     setError('');
-    setSaved(false);
+    setSuccess('');
   };
   const save = async () => {
     if (!editor) return;
     setBusy(true);
     setError('');
-    setSaved(false);
+    setSuccess('');
     try {
       const original = editor.original;
       const name = draft.name.trim();
@@ -122,26 +126,32 @@ export default function ModelProviders() {
       });
       await refresh();
       setEditor(null);
-      setSaved(true);
+      setSuccess('Channel saved.');
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
       setBusy(false);
     }
   };
-  const remove = async (profile: Profile) => {
+  const remove = async (profile: Profile, force = false) => {
     setBusy(true);
     setError('');
-    setSaved(false);
+    setSuccess('');
     try {
       const query = profile.name
         ? 'name=' + encodeURIComponent(profile.name)
         : 'legacy_provider=' + encodeURIComponent(profile.provider);
-      await request.delete(url + '?' + query);
+      await request.delete(url + '?' + query + (force ? '&force=true' : ''));
       await refresh();
       setConfirmDelete(null);
+      setForceDelete(null);
       setEditor(null);
+      setSuccess('Channel deleted. Saved history is retained.');
     } catch (reason) {
+      const response = (reason as { response?: { status?: number; data?: { can_force?: boolean } } })?.response;
+      if (response?.status === 409 && response.data?.can_force === true && profile.name) {
+        setForceDelete(channelId(profile));
+      }
       setError(errorMessage(reason));
     } finally {
       setBusy(false);
@@ -156,7 +166,7 @@ export default function ModelProviders() {
       <button type="button" disabled={busy} onClick={beginAdd} className={button}>Add channel</button>
     </div>
     {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
-    {saved && <p role="status" className="text-sm text-text-primary">Channel saved. <Link className="underline" to="/c/new">Start a new chat and select a model</Link></p>}
+    {success && <p role="status" className="text-sm text-text-primary">{success} <Link className="underline" to="/c/new">Start a new chat and select a model</Link></p>}
     {loading ? <p className="text-sm text-text-secondary">Loading channels…</p> : (
       channels.length ? <ul aria-label="Configured channels" className="divide-y divide-border-light rounded-lg border border-border-light">
         {channels.map((profile) => <li key={channelId(profile)} className="flex flex-wrap items-center justify-between gap-3 p-3">
@@ -171,14 +181,18 @@ export default function ModelProviders() {
             <button type="button" className={button} disabled={busy} onClick={() => beginEdit(profile)} aria-label={'Edit ' + channelLabel(profile)}>Edit</button>
             {profile.source !== 'environment' && (
               confirmDelete === channelId(profile) ? <>
-                <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => void remove(profile)} aria-label={'Confirm delete ' + channelLabel(profile)}>Confirm delete</button>
-                <button type="button" className={button} disabled={busy} onClick={() => setConfirmDelete(null)}>Cancel</button>
-              </> : <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => { setConfirmDelete(channelId(profile)); setEditor(null); setError(''); }} aria-label={'Delete ' + channelLabel(profile)}>Delete</button>
+                {forceDelete === channelId(profile)
+                  ? <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => void remove(profile, true)} aria-label={'Delete anyway ' + channelLabel(profile)}>Delete anyway</button>
+                  : <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => void remove(profile)} aria-label={'Confirm delete ' + channelLabel(profile)}>Confirm delete</button>}
+                <button type="button" className={button} disabled={busy} onClick={() => { setConfirmDelete(null); setForceDelete(null); setError(''); }}>Cancel</button>
+              </> : <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => { setConfirmDelete(channelId(profile)); setForceDelete(null); setEditor(null); setError(''); }} aria-label={'Delete ' + channelLabel(profile)}>Delete</button>
             )}
           </div>
           {confirmDelete === channelId(profile) && <p className="w-full text-xs text-text-secondary">
             {profile.name ? 'Delete this channel and its saved credentials?' : 'Remove this legacy configuration? Built-in defaults will remain for compatibility.'}
-            {' '}Channels used by saved conversations or Agents cannot be deleted.
+            {' '}{forceDelete === channelId(profile)
+              ? 'History will be kept, but conversations and Agents using this channel cannot run until they select another channel. Continue only if you accept this.'
+              : 'Channels in use require an additional confirmation to delete; saved history will be kept.'}
           </p>}
         </li>)}
       </ul> : <p className="rounded-lg border border-dashed border-border-medium p-5 text-sm text-text-secondary">No channels added yet. Select “Add channel” to configure your first model endpoint.</p>

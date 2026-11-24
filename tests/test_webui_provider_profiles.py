@@ -407,3 +407,62 @@ async def test_model_context_limits_in_token_config_and_input_validation(setup_p
             assert invalid.status_code == 400, (limits, invalid.text)
         assert (await client.get('/api/endpoints/token-config', headers=_ADMIN)).json() == {
             'Window Test': {'m1': {'context': 128000}, 'm2': {'context': 8192}}}
+
+
+@pytest.mark.asyncio
+async def test_explicit_force_delete_named_channel_retains_history_without_rerouting(setup_profiles):
+    _, app = setup_profiles
+    from local_shell_mcp.webui.agents import AgentRepository
+    from local_shell_mcp.webui.provider_profiles import profile
+
+    repo = routes._repo()
+    channel = {"name": "Used Research", "provider": "openai",
+               "base_url": "https://research.invalid/v1", "models": ["m"],
+               "api_key": "must-not-be-returned"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        assert (await client.put("/api/lsm/providers", json=channel)).status_code == 200
+        agent = AgentRepository(repo.database).create("owner", {
+            "name": "Historical Agent", "description": "", "provider": "Used Research", "model": "m"})
+        conversation = repo.create_conversation("owner", {
+            "conversationId": "historical-conversation", "title": "Keep my history",
+            "endpoint": "Used Research", "model": "m"})
+        assert conversation["endpoint"] == "Used Research"
+
+        refusal = await client.delete("/api/lsm/providers?name=Used%20Research")
+        assert refusal.status_code == 409
+        assert refusal.json()["can_force"] is True
+        assert "saved conversations" in refusal.json()["detail"]
+        assert "must-not-be-returned" not in refusal.text
+        assert (await client.delete("/api/lsm/providers?name=Used%20Research&force=1")).status_code == 400
+        assert profile("Used Research")["api_key"] == "must-not-be-returned"
+
+        response = await client.delete("/api/lsm/providers?name=Used%20Research&force=true")
+        assert response.status_code == 200, response.text
+        assert "Used Research" not in (await client.get("/api/models")).json()
+        assert "must-not-be-returned" not in response.text
+        with pytest.raises(ValueError, match="Unknown model channel"):
+            profile("Used Research")
+        assert repo.conversation("owner", "historical-conversation")["endpoint"] == "Used Research"
+        assert AgentRepository(repo.database).get("owner", agent["id"])["provider"] == "Used Research"
+        assert AgentRepository(repo.database).versions("owner", agent["id"])[0]["provider"] == "Used Research"
+        # Deleting a used named channel never changes the built-in provider.
+        assert profile("openai")["base_url"] == "https://api.openai.com/v1"
+        assert (await client.delete("/api/lsm/providers?name=Used%20Research&force=true")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_force_delete_referenced_legacy_channel_does_not_fall_back_to_defaults(setup_profiles):
+    _, app = setup_profiles
+    repo = routes._repo()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        assert (await client.put("/api/lsm/providers", json={
+            "provider": "openai", "base_url": "https://legacy.invalid/v1",
+            "models": ["legacy"], "api_key": "old-key"})).status_code == 200
+        repo.create_conversation("owner", {
+            "conversationId": "legacy-chat", "title": "Legacy chat", "model": "legacy", "endpoint": "custom"})
+        refusal = await client.delete("/api/lsm/providers?legacy_provider=openai&force=true")
+        assert refusal.status_code == 409
+        assert refusal.json()["can_force"] is False
+        assert provider_config("custom").url == "https://legacy.invalid/v1/chat/completions"

@@ -175,18 +175,18 @@ def _access(request):
         require_scopes(request.state.principal, ["admin:config"])
 
 
-def _is_referenced(db, name: str, *, legacy: bool = False) -> bool:
-    # Existing Agents, revisions, conversations and persisted runs must not be
-    # orphaned by destructive operations or a rename. Named channels are
-    # case-sensitive; built-in aliases follow profile()'s strip/lower rules.
+def _reference_types(db, name: str, *, legacy: bool = False) -> list[str]:
+    # Retain snapshots and chat history; a forced removal must not rewrite the
+    # original provider identity to point at unrelated credentials.
     references = (
-        ("agents", "json_extract(config,'$.provider')"),
-        ("runs", "json_extract(state,'$.provider')"),
-        ("conversations", "endpoint"),
-        ("agent_versions", "json_extract(snapshot,'$.provider')"),
+        ("agents", "json_extract(config,'$.provider')", "Agents"),
+        ("runs", "json_extract(state,'$.provider')", "run history"),
+        ("conversations", "endpoint", "saved conversations"),
+        ("agent_versions", "json_extract(snapshot,'$.provider')", "Agent revisions"),
     )
     aliases = _LEGACY_ALIASES[name] if legacy else ()
-    for table, field in references:
+    used_by = []
+    for table, field, label in references:
         if legacy:
             placeholders = ",".join("?" for _ in aliases)
             query = f"SELECT 1 FROM {table} WHERE LOWER(TRIM({field})) IN ({placeholders}) LIMIT 1"
@@ -195,8 +195,12 @@ def _is_referenced(db, name: str, *, legacy: bool = False) -> bool:
             query = f"SELECT 1 FROM {table} WHERE {field}=? LIMIT 1"
             params = (name,)
         if db.execute(query, params).fetchone():
-            return True
-    return False
+            used_by.append(label)
+    return used_by
+
+
+def _is_referenced(db, name: str, *, legacy: bool = False) -> bool:
+    return bool(_reference_types(db, name, legacy=legacy))
 
 
 async def provider_profiles(request):
@@ -214,10 +218,24 @@ async def provider_profiles(request):
             if not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or name.lower() in _RESERVED:
                 raise HTTPException(400, detail="Invalid named channel")
             key = _CHANNEL_PREFIX + name
+        # Explicit force removal is limited to named channels: resetting a
+        # referenced built-in alias would silently route old chats to defaults.
+        force = request.query_params.get("force", "false")
+        if force not in {"false", "true"}:
+            raise HTTPException(400, detail="force must be true or false")
         with _repo().database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if _is_referenced(db, legacy or name, legacy=legacy is not None):
-                raise HTTPException(409, detail="Channel is referenced by saved conversations or Agents")
+            references = _reference_types(db, legacy or name, legacy=legacy is not None)
+            if references and (force != "true" or legacy is not None):
+                return JSONResponse({
+                    "detail": "Channel is referenced by " + ", ".join(references) + ". "
+                              + ("Choose another channel in affected chats and Agents before resetting "
+                                 "this built-in channel."
+                                 if legacy is not None else
+                                 "Deleting it keeps history but affected chats and Agents must "
+                                 "select another channel before running again."),
+                    "can_force": legacy is None,
+                }, status_code=409, headers={"Cache-Control": "no-store"})
             db.execute("DELETE FROM settings WHERE owner=? AND key=?", (_OWNER, key))
     elif request.method == "PUT":
         body = await _body(request)

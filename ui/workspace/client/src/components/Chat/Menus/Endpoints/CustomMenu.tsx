@@ -10,6 +10,7 @@ export interface CustomMenuProps extends Ariakit.MenuButtonProps<'div'> {
   onSearch?: (value: string) => void;
   combobox?: Ariakit.ComboboxProps['render'];
   comboboxLabel?: string;
+  searchAction?: React.ReactNode;
   trigger?: Ariakit.MenuButtonProps['render'];
   defaultOpen?: boolean;
 }
@@ -24,6 +25,7 @@ export const CustomMenu = React.forwardRef<HTMLDivElement, CustomMenuProps>(func
     onSearch,
     combobox,
     comboboxLabel,
+    searchAction,
     trigger,
     defaultOpen,
     ...props
@@ -85,21 +87,24 @@ export const CustomMenu = React.forwardRef<HTMLDivElement, CustomMenuProps>(func
           {searchable ? (
             <>
               <div className="sticky top-0 z-10 bg-inherit p-1">
-                <div className="relative">
-                  <Ariakit.Combobox
-                    autoSelect
-                    render={combobox}
-                    className={cn(
-                      'peer flex h-10 w-full items-center justify-center rounded-lg border-none bg-transparent px-2 text-base',
-                      'sm:h-8 sm:text-sm',
-                      'focus:outline-none focus:ring-0 focus-visible:ring-2 focus-visible:ring-text-primary',
+                <div className="flex items-center gap-1">
+                  <div className="relative min-w-0 flex-1">
+                    <Ariakit.Combobox
+                      autoSelect
+                      render={combobox}
+                      className={cn(
+                        'peer flex h-10 w-full items-center justify-center rounded-lg border-none bg-transparent px-2 text-base',
+                        'sm:h-8 sm:text-sm',
+                        'focus:outline-none focus:ring-0 focus-visible:ring-2 focus-visible:ring-text-primary',
+                      )}
+                    />
+                    {comboboxLabel && (
+                      <label className="pointer-events-none absolute left-2.5 top-2.5 text-sm text-text-secondary transition-all duration-200 peer-[:not(:placeholder-shown)]:-top-1.5 peer-[:not(:placeholder-shown)]:left-1.5 peer-[:not(:placeholder-shown)]:bg-presentation peer-[:not(:placeholder-shown)]:text-xs sm:top-1.5">
+                        {comboboxLabel}
+                      </label>
                     )}
-                  />
-                  {comboboxLabel && (
-                    <label className="pointer-events-none absolute left-2.5 top-2.5 text-sm text-text-secondary transition-all duration-200 peer-[:not(:placeholder-shown)]:-top-1.5 peer-[:not(:placeholder-shown)]:left-1.5 peer-[:not(:placeholder-shown)]:bg-presentation peer-[:not(:placeholder-shown)]:text-xs sm:top-1.5">
-                      {comboboxLabel}
-                    </label>
-                  )}
+                  </div>
+                  {searchAction}
                 </div>
               </div>
               <Ariakit.ComboboxList className="p-0.5 pt-0">{children}</Ariakit.ComboboxList>
