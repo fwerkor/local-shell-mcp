@@ -4,9 +4,9 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from starlette.exceptions import HTTPException
 
 from local_shell_mcp.webui import auth, generation_routes
-from starlette.exceptions import HTTPException
 from local_shell_mcp.webui.agent_runner import AgentRunner
 from local_shell_mcp.webui.agent_runtime import RuntimeSafetyError
 from local_shell_mcp.webui.error_diagnostics import generation_failure

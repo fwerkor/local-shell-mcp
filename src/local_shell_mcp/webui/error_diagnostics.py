@@ -13,7 +13,6 @@ from pathlib import Path
 
 from .agent_runtime import RuntimeSafetyError
 
-
 _KNOWN_SAFETY_REASONS = frozenset({
     "Authentication grant expired",
     "WebUI session expired or was signed out",

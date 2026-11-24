@@ -112,8 +112,8 @@ class AgentRunner:
 
     def _check_grant(self):
         if self.webui_cookie is not None:
-            from .auth import WebAuthStore
             from ..settings import get_settings
+            from .auth import WebAuthStore
 
             session = WebAuthStore(get_settings().state_dir).session(self.webui_cookie)
             if (session is None or session.owner != self.owner
