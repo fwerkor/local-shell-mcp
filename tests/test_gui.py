@@ -654,6 +654,7 @@ def test_gui_tool_result_rendering_and_errors():
 
 def test_gui_state_result_bounds_accessibility_metadata():
     import local_shell_mcp.tools as tools
+    from local_shell_mcp.gui import limits as gui_limits
 
     elements = [
         {
@@ -692,9 +693,9 @@ def test_gui_state_result_bounds_accessibility_metadata():
 
     window = result.structuredContent["window"]
     assert window is not None
-    assert len(window["id"].encode("utf-8")) <= tools.GUI_WINDOW_TEXT_FIELD_MAX_BYTES
-    assert len(window["title"].encode("utf-8")) <= tools.GUI_WINDOW_TEXT_FIELD_MAX_BYTES
-    assert len(window["app"].encode("utf-8")) <= tools.GUI_WINDOW_TEXT_FIELD_MAX_BYTES
+    assert len(window["id"].encode("utf-8")) <= gui_limits.GUI_MAX_WINDOW_TEXT_BYTES
+    assert len(window["title"].encode("utf-8")) <= gui_limits.GUI_MAX_WINDOW_TEXT_BYTES
+    assert len(window["app"].encode("utf-8")) <= gui_limits.GUI_MAX_WINDOW_TEXT_BYTES
     assert window["pid"] == 42
     assert "unknown" not in window
     assert "extra" not in window["bounds"]
@@ -702,18 +703,18 @@ def test_gui_state_result_bounds_accessibility_metadata():
     bounded = result.structuredContent["elements"]
     assert bounded
     first = bounded[0]
-    assert len(first["role"].encode("utf-8")) <= tools.GUI_ELEMENT_TEXT_FIELD_MAX_BYTES
-    assert len(first["name"].encode("utf-8")) <= tools.GUI_ELEMENT_TEXT_FIELD_MAX_BYTES
-    assert len(first["automation_id"].encode("utf-8")) <= tools.GUI_ELEMENT_TEXT_FIELD_MAX_BYTES
-    assert len(first["value"].encode("utf-8")) <= tools.GUI_ELEMENT_VALUE_FIELD_MAX_BYTES
-    assert len(first["actions"]) == tools.GUI_ELEMENT_ACTION_MAX_ITEMS
+    assert len(first["role"].encode("utf-8")) <= gui_limits.GUI_MAX_ELEMENT_TEXT_BYTES
+    assert len(first["name"].encode("utf-8")) <= gui_limits.GUI_MAX_ELEMENT_TEXT_BYTES
+    assert len(first["automation_id"].encode("utf-8")) <= gui_limits.GUI_MAX_ELEMENT_TEXT_BYTES
+    assert len(first["value"].encode("utf-8")) <= gui_limits.GUI_MAX_ELEMENT_VALUE_BYTES
+    assert len(first["actions"]) == gui_limits.GUI_MAX_ELEMENT_ACTIONS
     assert all(
-        len(action.encode("utf-8")) <= tools.GUI_ELEMENT_ACTION_MAX_BYTES
+        len(action.encode("utf-8")) <= gui_limits.GUI_MODEL_ACTION_MAX_BYTES
         for action in first["actions"]
     )
     assert "unknown" not in first
     encoded = json.dumps(bounded, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    assert len(encoded) <= tools.GUI_ELEMENTS_TOTAL_BYTES
+    assert len(encoded) <= gui_limits.GUI_MAX_ELEMENTS_TOTAL_BYTES
 
 
 @pytest.mark.asyncio

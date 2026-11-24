@@ -113,3 +113,26 @@ def test_secure_gui_screenshot_file_reports_chmod_failure(
     monkeypatch.setattr(Path, "chmod", fail_chmod)
     with pytest.raises(gui_base.GuiUnavailableError, match="secure"):
         gui_base._secure_gui_screenshot_file(path)
+
+
+@pytest.mark.parametrize("limit", range(10))
+def test_shared_gui_text_limit_is_exact_for_small_utf8_budgets(limit):
+    from local_shell_mcp.gui.limits import truncate_text
+
+    assert len(truncate_text("你好abc", limit).encode("utf-8")) <= limit
+
+
+def test_shared_gui_projection_preserves_distinct_boundary_rules():
+    from local_shell_mcp.gui.limits import bounded_element, bounded_window
+
+    element = {"description": "description", "actions": ["x" * 300], "depth": float("inf")}
+    internal = bounded_element(element)
+    model = bounded_element(element, model_output=True)
+    assert internal["description"] == "description"
+    assert "description" not in model
+    assert len(internal["actions"][0]) == 300
+    assert len(model["actions"][0]) == 128
+    assert model["depth"] == 0
+    window = {"id": "w" * 1025, "title": "window"}
+    assert bounded_window(window) is None
+    assert len(bounded_window(window, model_output=True)["id"]) == 1024

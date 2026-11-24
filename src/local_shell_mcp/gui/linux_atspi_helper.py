@@ -11,17 +11,52 @@ import sys
 import time
 from typing import Any
 
+# The helper runs both as a package module and as a standalone script using
+# the distribution's Python (which may not have the LSM dependencies).
+if __package__:
+    from .limits import (
+        GUI_MAX_DEPTH,
+        GUI_MAX_ELEMENT_ACTIONS,
+        GUI_MAX_ELEMENT_TEXT_BYTES,
+        GUI_MAX_ELEMENTS,
+        GUI_MAX_ELEMENTS_TOTAL_BYTES,
+        GUI_MAX_WINDOW_TEXT_BYTES,
+        GUI_MAX_WINDOWS,
+        GUI_MAX_WINDOWS_TOTAL_BYTES,
+    )
+    from .limits import (
+        json_size as _json_size,
+    )
+    from .limits import (
+        key_parts as _key_parts,
+    )
+    from .limits import (
+        truncate_text as _truncate_text,
+    )
+else:
+    from limits import (  # type: ignore[no-redef]
+        GUI_MAX_DEPTH,
+        GUI_MAX_ELEMENT_ACTIONS,
+        GUI_MAX_ELEMENT_TEXT_BYTES,
+        GUI_MAX_ELEMENTS,
+        GUI_MAX_ELEMENTS_TOTAL_BYTES,
+        GUI_MAX_WINDOW_TEXT_BYTES,
+        GUI_MAX_WINDOWS,
+        GUI_MAX_WINDOWS_TOTAL_BYTES,
+    )
+    from limits import (
+        json_size as _json_size,
+    )
+    from limits import (
+        key_parts as _key_parts,
+    )
+    from limits import (
+        truncate_text as _truncate_text,
+    )
+
 Atspi: Any | None = None
 
-GUI_MAX_ELEMENTS = 1000
-GUI_MAX_DEPTH = 20
-GUI_MAX_WINDOWS = 256
 GUI_MAX_ATSPI_SCAN = GUI_MAX_WINDOWS * 4
-GUI_MAX_WINDOW_TEXT_BYTES = 1024
-GUI_MAX_WINDOWS_TOTAL_BYTES = 128 * 1024
-GUI_MAX_ELEMENT_TEXT_BYTES = 1024
-GUI_MAX_ELEMENTS_TOTAL_BYTES = 64 * 1024
-GUI_MAX_ELEMENT_ACTIONS = 32
 GUI_MAX_RESPONSE_BYTES = 256 * 1024
 
 _KEYSYMS = {
@@ -57,27 +92,6 @@ _MODIFIERS = {
 }
 
 
-def _truncate_text(value: Any, limit: int) -> str:
-    text = str(value or "")
-    encoded = text.encode("utf-8")
-    if len(encoded) <= limit:
-        return text
-    suffix = "..."
-    budget = max(0, limit - len(suffix))
-    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
-
-
-def _json_size(value: Any) -> int:
-    return len(
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            default=str,
-        ).encode("utf-8")
-    )
-
-
 def _keysym(text: str) -> int:
     upper = text.upper()
     if upper in _KEYSYMS:
@@ -89,17 +103,6 @@ def _keysym(text: str) -> int:
         return codepoint
     return 0x01000000 | codepoint
 
-
-def _key_parts(keys: Any) -> list[str]:
-    if isinstance(keys, str):
-        parts = [part.strip() for part in keys.replace("+", " ").split() if part.strip()]
-    elif isinstance(keys, list):
-        parts = [str(part).strip() for part in keys if str(part).strip()]
-    else:
-        raise ValueError("key action requires keys as a string or list")
-    if not parts:
-        raise ValueError("key action requires at least one key")
-    return parts
 
 
 def _atspi() -> Any:
