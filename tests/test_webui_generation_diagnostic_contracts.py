@@ -71,12 +71,14 @@ def test_recovered_terminal_text_preserves_non_prefix_visible_answer():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures('isolated_controller_settings')
 @pytest.mark.parametrize('error', [KeyError('stale'), ValueError('changed'), PermissionError('revoked')])
 async def test_oauth_callback_rejects_stale_recovery(monkeypatch, error):
     from local_shell_mcp import settings
     generation = SimpleNamespace(run_id='run')
     monkeypatch.setattr(routes, '_generation_store', lambda: SimpleNamespace(get=lambda *_: generation))
-    monkeypatch.setattr(settings, 'get_settings', lambda: SimpleNamespace(auth_mode='oauth'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'oauth')
+    settings.get_settings.cache_clear()
     monkeypatch.setattr(auth, '_store', lambda: SimpleNamespace(session=lambda _: SimpleNamespace(
         owner='alice', scopes='shell:read', grant_until=123)))
     resume = AsyncMock(side_effect=error)
@@ -87,9 +89,11 @@ async def test_oauth_callback_rejects_stale_recovery(monkeypatch, error):
                                    action_id='action', call_id='call', version=1)
 
 
+@pytest.mark.usefixtures('isolated_controller_settings')
 def test_browser_grant_rejects_session_revoked_between_reads(monkeypatch):
     from local_shell_mcp import settings
-    monkeypatch.setattr(settings, 'get_settings', lambda: SimpleNamespace(auth_mode='oauth'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'oauth')
+    settings.get_settings.cache_clear()
     session = SimpleNamespace(owner='alice', scopes='shell:read', grant_until=123)
     replies = iter([session, None])
     monkeypatch.setattr(auth, '_store', lambda: SimpleNamespace(session=lambda _: next(replies)))
