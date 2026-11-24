@@ -44,6 +44,37 @@ async def update_conversation(request: Request):
     return JSONResponse(updated)
 
 
+async def conversation_unread(request: Request):
+    """One owner-scoped unread snapshot; read acknowledgments never clear newer results."""
+    owner = _owner(request)
+    with _repo().database.connect() as db:
+        if request.method == "GET":
+            rows = db.execute(
+                "SELECT id,unread_marker FROM conversations WHERE owner=? AND unread_marker IS NOT NULL",
+                (owner,),
+            )
+            return JSONResponse({"unread": {row["id"]: row["unread_marker"] for row in rows}})
+        values = await _body(request)
+        conversation_id = _conversation_id(values)
+        unread = values.get("unread")
+        expected = values.get("expected")
+        if type(unread) is not bool or (expected is not None and not isinstance(expected, str)):
+            raise HTTPException(400, detail="Invalid unread state")
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT unread_marker FROM conversations WHERE id=? AND owner=?",
+                         (conversation_id, owner)).fetchone()
+        if row is None:
+            _not_found()
+        marker = row["unread_marker"]
+        if unread:
+            marker = "manual:" + uuid.uuid4().hex
+        elif expected is None or expected == marker:
+            marker = None
+        db.execute("UPDATE conversations SET unread_marker=? WHERE id=? AND owner=?",
+                   (marker, conversation_id, owner))
+        return JSONResponse({"conversationId": conversation_id, "marker": marker})
+
+
 async def archive_conversation(request: Request):
     owner = _owner(request)
     values = _argument(await _body(request))
@@ -255,6 +286,7 @@ async def generate_title(request: Request):
 
 def conversation_routes() -> list[Route]:
     return [
+        Route("/api/convos/unread", conversation_unread, methods=["GET", "POST"]),
         Route("/api/convos/update", update_conversation, methods=["POST"]),
         Route("/api/convos/archive", archive_conversation, methods=["POST"]),
         Route("/api/convos/archive/all", archive_all, methods=["POST"]),

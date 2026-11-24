@@ -24,6 +24,7 @@ import { Conversations } from '~/components/Conversations';
 import { collectPinnedConversations } from '~/utils';
 import SearchBar from '~/components/Nav/SearchBar';
 import store from '~/store';
+import { UnreadProvider, useUnreadQuery, useSetUnread } from '~/components/Conversations/unread';
 
 const chatsHeaderTrailing = <ChatFilterMenu />;
 
@@ -33,6 +34,12 @@ const ConversationsSection = memo(() => {
   const { setSidebarOpen } = useSidebarToggle();
   const { isAuthenticated } = useAuthContext();
   useTitleGeneration(isAuthenticated);
+  const { data: unreadSnapshot } = useUnreadQuery(isAuthenticated);
+  const setUnread = useSetUnread();
+  const unreadContext = useMemo(
+    () => ({ snapshot: unreadSnapshot, setUnread }),
+    [unreadSnapshot, setUnread],
+  );
 
   const [isChatsExpanded, setIsChatsExpanded] = useLocalStorage('chatsExpanded', true);
 
@@ -165,63 +172,65 @@ const ConversationsSection = memo(() => {
   }, [isSearching, scrollViewport]);
 
   return (
-    <div
-      className="flex h-full min-h-0 flex-col overflow-hidden pb-3 pt-2"
-      role="region"
-      aria-label={localize('com_ui_chat_history')}
-    >
-      {/* The search field owns this row alone; filtering and ordering moved beside the
+    <UnreadProvider value={unreadContext}>
+      <div
+        className="flex h-full min-h-0 flex-col overflow-hidden pb-3 pt-2"
+        role="region"
+        aria-label={localize('com_ui_chat_history')}
+      >
+        {/* The search field owns this row alone; filtering and ordering moved beside the
           Chats heading, where the list they act on is labelled. On mobile the field
           itself lives in the drawer's bottom bar, within thumb reach. */}
-      {!isSmallScreen && search.enabled && (
-        <div className="flex items-center px-3">
-          <SearchBar isSmallScreen={isSmallScreen} />
-        </div>
-      )}
-      <div
-        ref={setScrollViewport}
-        className="scrollbar-gutter-stable min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
-      >
-        {/* `min-h-full` keeps the sections filling a tall sidebar, so the chats
+        {!isSmallScreen && search.enabled && (
+          <div className="flex items-center px-3">
+            <SearchBar isSmallScreen={isSmallScreen} />
+          </div>
+        )}
+        <div
+          ref={setScrollViewport}
+          className="scrollbar-gutter-stable min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+        >
+          {/* `min-h-full` keeps the sections filling a tall sidebar, so the chats
             list still claims the space below them when there is little to show. */}
-        <div ref={setScrollContent} className="flex min-h-full flex-col">
-          {!search.query && (
-            <ProjectsSection toggleNav={toggleNav} isAuthenticated={isAuthenticated} />
-          )}
-          {!search.query && (
-            <PinnedSection
-              conversations={pinnedConversations}
-              toggleNav={toggleNav}
-              isSmallScreen={isSmallScreen}
-              /* Only a successful drain proves the list is whole: a failed later
+          <div ref={setScrollContent} className="flex min-h-full flex-col">
+            {!search.query && (
+              <ProjectsSection toggleNav={toggleNav} isAuthenticated={isAuthenticated} />
+            )}
+            {!search.query && (
+              <PinnedSection
+                conversations={pinnedConversations}
+                toggleNav={toggleNav}
+                isSmallScreen={isSmallScreen}
+                /* Only a successful drain proves the list is whole: a failed later
                  page still publishes partial data and stops fetching. The Chats filters
                  never reach this query, so nothing else can truncate it. */
-              membershipComplete={isPinnedComplete}
-              /* When that drain last ran, which decides whether it is current
+                membershipComplete={isPinnedComplete}
+                /* When that drain last ran, which decides whether it is current
                  enough to prune the stored order against. */
-              membershipUpdatedAt={pinnedUpdatedAt}
+                membershipUpdatedAt={pinnedUpdatedAt}
+              />
+            )}
+            <Conversations
+              conversations={conversations}
+              moveToTop={moveToTop}
+              toggleNav={toggleNav}
+              containerRef={conversationsRef}
+              loadMoreConversations={loadMoreConversations}
+              isLoading={isFetchingNextPage || isLoading}
+              isSearchLoading={isSearchLoading || isPreviousData}
+              isChatsExpanded={isChatsExpanded}
+              setIsChatsExpanded={setIsChatsExpanded}
+              hasNextPage={computedHasNextPage}
+              isError={isError}
+              onRetry={retryConversations}
+              chatsHeaderTrailing={chatsHeaderTrailing}
+              scrollViewport={scrollViewport}
+              scrollContent={scrollContent}
             />
-          )}
-          <Conversations
-            conversations={conversations}
-            moveToTop={moveToTop}
-            toggleNav={toggleNav}
-            containerRef={conversationsRef}
-            loadMoreConversations={loadMoreConversations}
-            isLoading={isFetchingNextPage || isLoading}
-            isSearchLoading={isSearchLoading || isPreviousData}
-            isChatsExpanded={isChatsExpanded}
-            setIsChatsExpanded={setIsChatsExpanded}
-            hasNextPage={computedHasNextPage}
-            isError={isError}
-            onRetry={retryConversations}
-            chatsHeaderTrailing={chatsHeaderTrailing}
-            scrollViewport={scrollViewport}
-            scrollContent={scrollContent}
-          />
+          </div>
         </div>
       </div>
-    </div>
+    </UnreadProvider>
   );
 });
 

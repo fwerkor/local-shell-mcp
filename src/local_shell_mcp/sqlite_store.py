@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     endpoint TEXT,
     archived INTEGER NOT NULL DEFAULT 0,
     pinned INTEGER NOT NULL DEFAULT 0,
+    unread_marker TEXT,
     metadata TEXT NOT NULL DEFAULT '{}',
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
@@ -533,6 +534,11 @@ class SQLiteDatabase:
             # lossy REAL even if Python supplies a string. Append a TEXT
             # identity instead of destructively rebuilding the table.
             db.execute("BEGIN IMMEDIATE")
+            convo_columns = {row["name"] for row in db.execute("PRAGMA table_info(conversations)")}
+            if "unread_marker" not in convo_columns:
+                db.execute("ALTER TABLE conversations ADD COLUMN unread_marker TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_conversations_unread ON conversations(owner) "
+                       "WHERE unread_marker IS NOT NULL")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(attachment_uploads)")}
             if "file_identity" not in columns:
                 db.execute("ALTER TABLE attachment_uploads ADD COLUMN file_identity TEXT")

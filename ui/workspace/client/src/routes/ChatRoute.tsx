@@ -1,3 +1,4 @@
+import { useConversationReadReceipt } from '~/components/Conversations/unread';
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRecoilCallback, useRecoilValue } from 'recoil';
@@ -74,6 +75,7 @@ export default function ChatRoute() {
   } else if (routeState.pending && conversation?.conversationId === conversationId) {
     setRouteState({ conversationId, pending: false });
   }
+  useConversationReadReceipt(conversationId, isAuthenticated && !routeState.pending);
   useAppStartup({ startupConfig, user });
   const { newConversation } = useNewConvo();
   const { showToast } = useToastContext();

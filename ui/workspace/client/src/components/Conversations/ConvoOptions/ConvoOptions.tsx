@@ -12,6 +12,8 @@ import {
 } from '@librechat/client';
 import {
   Ellipsis,
+  Circle,
+  Check,
   Share2,
   CopyPlus,
   Archive,
@@ -39,6 +41,7 @@ import ProjectButton from './ProjectButton';
 import DeleteButton from './DeleteButton';
 import ShareButton from './ShareButton';
 import { cn } from '~/utils';
+import { useConversationUnread } from '../unread';
 /** The overflow menu and the shift-held quick action show the same archive control in two
  *  sizes, and must never disagree about which direction it moves the conversation. */
 function renderArchiveIcon(isLoading: boolean, isArchived: boolean, className: string) {
@@ -80,6 +83,7 @@ function ConvoOptions({
   isShiftHeld?: boolean;
 }) {
   const localize = useLocalize();
+  const { marker, setUnread } = useConversationUnread(conversationId);
   const queryClient = useQueryClient();
   const isSmallScreen = useMediaQuery('(max-width: 768px)');
   const { index, setConversation } = useChatContext();
@@ -302,6 +306,22 @@ function ConvoOptions({
     });
   }, [conversationId, duplicateConversation]);
 
+  const handleUnreadClick = useCallback(async () => {
+    if (!conversationId) {
+      return;
+    }
+    try {
+      await setUnread(conversationId, !marker, marker);
+      setIsPopoverActive(false);
+    } catch {
+      showToast({
+        message: localize('com_ui_error'),
+        severity: NotificationSeverity.ERROR,
+        showIcon: true,
+      });
+    }
+  }, [conversationId, marker, setUnread, setIsPopoverActive, showToast, localize]);
+
   const dropdownItems = useMemo(
     () => [
       {
@@ -324,6 +344,15 @@ function ConvoOptions({
           <Spinner className="size-4" />
         ) : (
           <Pin className="icon-sm mr-2 text-text-primary" aria-hidden="true" />
+        ),
+      },
+      {
+        label: localize(marker ? 'com_ui_convo_mark_read' : 'com_ui_convo_mark_unread'),
+        onClick: handleUnreadClick,
+        icon: marker ? (
+          <Check className="icon-sm mr-2" />
+        ) : (
+          <Circle className="icon-sm mr-2 text-blue-500" />
         ),
       },
       {
@@ -387,6 +416,8 @@ function ConvoOptions({
       shareHandler,
       startupConfig,
       renameHandler,
+      marker,
+      handleUnreadClick,
       deleteHandler,
       isArchiveLoading,
       isArchived,

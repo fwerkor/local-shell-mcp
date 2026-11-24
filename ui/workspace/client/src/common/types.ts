@@ -655,6 +655,7 @@ export type TResData = TBaseResData & {
 };
 
 export type TFinalResData = Omit<TBaseResData, 'conversation'> & {
+  unreadMarker?: string;
   conversation: Partial<t.TConversation> & Pick<t.TConversation, 'conversationId'>;
   requestMessage?: t.TMessage;
   responseMessage?: t.TMessage;
