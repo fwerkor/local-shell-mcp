@@ -89,19 +89,30 @@ async def test_chat_tool_permission_prefs_are_private_and_secret_keys_not_expose
         alice = {"x-test-owner": "alice"}
         bob = {"x-test-owner": "bob"}
         cid = (await client.post("/api/convos", headers=alice, json={"title": "Tools"})).json()["conversationId"]
-        assert (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()["effective"] == {"local": "write"}
+        # Registered machines default to read/write; the local Controller must
+        # always be present. Exact equality would depend on global Worker
+        # registration state, so assert the guaranteed entry instead.
+        assert (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()[
+            "effective"]["local"] == "write"
         assert (await client.get(f"/api/lsm/preferences/{cid}", headers=bob)).status_code == 404
         prefs = {"web": True, "lsm": True, "mcp": False, "memory": False}
         updated = (await client.put(f"/api/lsm/preferences/{cid}", headers=alice, json=prefs)).json()
-        assert all(updated[field] == value for field, value in prefs.items())
+        # `lsm` is a retired feature flag: the payload still accepts it from old
+        # clients but always reports False, so it can never imply machine access.
+        assert all(updated[field] == value
+                   for field, value in prefs.items() if field != "lsm")
+        assert updated["lsm"] is False
         stored = (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()
-        assert all(stored[field] == value for field, value in prefs.items())
-        assert stored["effective"] == {"local": "write"}
+        assert all(stored[field] == value
+                   for field, value in prefs.items() if field != "lsm")
+        assert stored["lsm"] is False
+        assert stored["effective"]["local"] == "write"
         # Legacy flags are retained for old clients but never grant a machine.
         prior = await client.put(f"/api/lsm/preferences/{cid}", headers=alice,
                                  json={"web": False, "lsm": True, "mcp": False, "memory": False})
         assert prior.status_code == 200
-        assert prior.json()["effective"] == {"local": "write"}
+        assert prior.json()["lsm"] is False
+        assert prior.json()["effective"]["local"] == "write"
         assert (await client.get("/api/keys?name=openAI", headers=alice)).status_code == 200
         assert "very-secret-key" not in (await client.get("/api/keys?name=openAI", headers=alice)).text
         assert (await client.get("/api/agents/tools/calls", headers=alice,

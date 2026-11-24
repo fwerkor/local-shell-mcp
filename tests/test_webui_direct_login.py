@@ -11,6 +11,7 @@ import pytest
 from starlette.applications import Starlette
 
 from local_shell_mcp.webui import auth, frontend
+from local_shell_mcp.webui.auth import SESSION_TTL
 
 
 @pytest.mark.asyncio
@@ -158,7 +159,11 @@ async def test_local_bypass_does_not_replace_explicit_oauth_grant(tmp_path, monk
             _, grant = auth.WebAuthStore(get_settings().state_dir).redeem(response.json()["ticket"])
             assert grant.owner == "oauth-alice"
             assert set(grant.scopes.split()) == set(scopes.split())
-            assert grant.grant_until <= int(time.time()) + 300
+            # A fresh OAuth proof opens a separate, revocable browser login whose
+            # idle lifetime is independent of the short-lived bearer used to mint
+            # the ticket. The bearer can never expand the delegated scopes above.
+            assert grant.grant_until > int(time.time()) + 300
+            assert grant.grant_until <= int(time.time()) + SESSION_TTL
             # A local connection cannot turn a forged bearer into a valid grant.
             rejected = await client.post("/api/ui/webui-ticket", headers={"Authorization": "Bearer forged"})
             assert rejected.status_code == 401
