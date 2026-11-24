@@ -70,6 +70,7 @@ function Conversation({
   const [titleInput, setTitleInput] = useState(title || '');
   const [renaming, setRenamingState] = useState(false);
   const [isPopoverActive, setIsPopoverActive] = useState(false);
+  const [contextMenuPoint, setContextMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const [isHovered, setIsHovered] = useState(false);
   // Lazy-load ConvoOptions to avoid running heavy hooks for all conversations
   const [hasInteracted, setHasInteracted] = useState(false);
@@ -226,8 +227,26 @@ function Conversation({
   }, [conversationId, unpinMutation, showToast, localize]);
 
   const handlePopoverOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setContextMenuPoint(null);
+    }
     setIsPopoverActive(open);
   }, []);
+
+  const handleContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      // Preserve native editing actions while the title is being renamed.
+      if (renaming || !conversationId) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setHasInteracted(true);
+      setContextMenuPoint({ x: event.clientX, y: event.clientY });
+      setIsPopoverActive(true);
+    },
+    [conversationId, renaming],
+  );
 
   const handleNavigation = (ctrlOrMetaKey: boolean) => {
     if (ctrlOrMetaKey && !isGenerating) {
@@ -266,6 +285,7 @@ function Conversation({
     conversationId,
     chatProjectId: conversation.chatProjectId,
     isPopoverActive,
+    contextMenuPoint,
     onOpenChange: handlePopoverOpenChange,
     isShiftHeld: isActiveConvo ? isShiftHeld : false,
   };
@@ -325,6 +345,7 @@ function Conversation({
       onPointerLeave={() => setIsHovered(false)}
       onPointerCancel={() => setIsHovered(false)}
       onMouseEnter={handleMouseEnter}
+      onContextMenu={handleContextMenu}
       onFocus={handleMouseEnter}
       onClick={(e) => {
         if (renaming) {

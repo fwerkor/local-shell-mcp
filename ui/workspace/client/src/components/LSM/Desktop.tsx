@@ -12,17 +12,22 @@ export default function Desktop() {
   const localize = useLocalize();
   const { read, write } = useControllerServices();
   const { token } = useAuthContext();
-  const [machine, setMachine] = useState('local');
+  const [machine, setMachine] = useState(() => {
+    try { return window.localStorage.getItem('lsm:desktop-machine') || 'local'; }
+    catch { return 'local'; }
+  });
   const [machines, setMachines] = useState<string[]>(['local']);
   const [windows, setWindows] = useState<RecordValue[]>([]);
   const [windowId, setWindowId] = useState('');
   const [image, setImage] = useState('');
   const [observation, setObservation] = useState<Observation | null>(null);
   const [error, setError] = useState('');
+  const [unavailable, setUnavailable] = useState('');
   const [busy, setBusy] = useState(false);
   const [keys, setKeys] = useState('');
   const imageRef = useRef<HTMLImageElement>(null);
   const urlRef = useRef('');
+  const requestRef = useRef(0);
   useEffect(() => {
     void read<{ machines?: RecordValue[] }>('machines').then(data => {
       setMachines(['local', ...(data.machines ?? []).map(row => String(row.machine || row.name || row.id || '')).filter(m => m && m !== 'local')]);
@@ -30,14 +35,23 @@ export default function Desktop() {
     return () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
   }, []);
   const refreshWindows = async (target = machine) => {
+    const request = ++requestRef.current;
     setBusy(true);
     try {
-      const result = await read<{ windows?: RecordValue[] }>('gui/windows', { machine: target });
-      setWindows(result.windows || []); setError('');
-    } catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
+      const result = await read<{ windows?: RecordValue[]; available?: boolean; reason?: string }>('gui/windows', { machine: target });
+      if (request !== requestRef.current) return;
+      setWindows(result.windows || []);
+      setUnavailable(result.available === false ? result.reason || localize('com_lsm_desktop_unavailable') : '');
+      setError('');
+    } catch (e) {
+      if (request !== requestRef.current) return;
+      setWindows([]); setUnavailable(''); setError(String(e));
+    } finally { if (request === requestRef.current) setBusy(false); }
   };
-  useEffect(() => { setWindowId(''); setImage(''); setObservation(null); void refreshWindows(); }, [machine]);
+  useEffect(() => {
+    setWindowId(''); setImage(''); setObservation(null);
+    void refreshWindows();
+  }, [machine]);
   const frame = async (id = windowId) => {
     if (!id) return;
     setBusy(true);
@@ -81,7 +95,10 @@ export default function Desktop() {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="text-xl font-semibold">{localize('com_lsm_desktop')}</h2><p className="mt-1 text-sm text-text-secondary">{localize('com_lsm_inspect_gui_windows_and_send_approved_actions')}</p></div>
       <div className="flex gap-2">
-        <select aria-label={localize('com_lsm_desktop_machine')} className={button} value={machine} onChange={e => setMachine(e.target.value)}>
+        <select aria-label={localize('com_lsm_desktop_machine')} className={button} value={machine} onChange={e => {
+          try { window.localStorage.setItem('lsm:desktop-machine', e.target.value); } catch { /* Storage is optional. */ }
+          setMachine(e.target.value);
+        }}>
           {machines.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
         <button className={button} onClick={() => void refreshWindows()} disabled={busy}><RefreshCw size={16} /></button>
@@ -91,7 +108,11 @@ export default function Desktop() {
     <div className="grid min-h-64 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
       <aside className="rounded-xl border border-border-light p-3">
         <h3 className="mb-2 text-sm font-semibold">{localize('com_lsm_windows')}</h3>
-        {windows.length === 0 && <p className="p-2 text-sm text-text-secondary">{localize('com_lsm_no_windows_available')}</p>}
+        {unavailable && <div role="status" className="space-y-1 p-2 text-sm text-text-secondary">
+          <p>{unavailable}</p>
+          <p>{localize('com_lsm_desktop_choose_graphical_machine')}</p>
+        </div>}
+        {!unavailable && !error && windows.length === 0 && <p className="p-2 text-sm text-text-secondary">{localize('com_lsm_no_windows_available')}</p>}
         {windows.map((item, index) => {
           const id = String(item.window_id || item.id || '');
           return <button key={id || index} className={'mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-hover ' + (windowId === id ? 'bg-surface-active-alt' : '')}
