@@ -16,6 +16,7 @@ from local_shell_mcp.webui.providers import ProviderConfig
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_controller_settings")
 async def test_graph_member_oauth_recovers_with_child_action_binding(tmp_path, monkeypatch):
     db = SQLiteDatabase(tmp_path / 'state')
     store = GenerationStore(db)

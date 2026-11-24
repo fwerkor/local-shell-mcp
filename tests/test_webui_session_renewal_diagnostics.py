@@ -61,6 +61,7 @@ def test_expired_browser_session_cannot_renew(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_controller_settings")
 @pytest.mark.parametrize("client_name,approved,redirects,renewable", [
     ("WebUI", True, ["https://lsm.example.test/auth/login"], True),
     ("External API", True, ["https://lsm.example.test/auth/login"], False),
