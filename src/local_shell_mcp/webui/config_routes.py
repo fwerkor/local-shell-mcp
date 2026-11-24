@@ -41,7 +41,7 @@ def _endpoint_info(*, memory_available: bool = False) -> dict:
             "order": 0, "type": "agents", "name": "Agents",
             "modelDisplayLabel": "Agent", "allowedProviders": list(configs),
             "maxSubagents": 10,
-            "capabilities": ["tools", "web_search", "subagents", "chain", "ask_user_question", "end_after_tools", *(["memory"] if memory_available else [])],
+            "capabilities": ["tools", "web_search", "subagents", "chain", "ask_user_question", "end_after_tools", "skills", *(["memory"] if memory_available else [])],
             "availableTools": [],
         },
     }
@@ -118,6 +118,7 @@ async def startup_config(request: Request):
             "presets": True,
             "multiConvo": True,
             "bookmarks": True,
+            "schedules": {"use": True, "maxPerUser": 25, "minIntervalMinutes": 5, "requireProject": False},
             "agents": {"use": True, "create": True, "share": False, "public": False},
             "prompts": {"use": False, "create": False, "share": False, "public": False},
             "mcpServers": {"use": True, "create": True, "share": False, "public": False},
@@ -151,7 +152,19 @@ async def models(request: Request):
 
 async def token_configs(request: Request):
     _owner(request)
-    return JSONResponse({})
+    from .provider_profiles import all_profiles
+
+    result = {}
+    for value in all_profiles():
+        name = value.get('name') or ('openAI' if value['provider'] == 'openai' else value['provider'])
+        contexts = value.get('model_contexts', {})
+        if not isinstance(contexts, dict):
+            continue
+        entries = {model: {'context': limit} for model, limit in contexts.items()
+                   if model in value.get('models', ()) and type(limit) is int and 0 < limit <= 2_000_000}
+        if entries:
+            result[name] = entries
+    return JSONResponse(result)
 
 
 async def preferences(request: Request):

@@ -32,6 +32,8 @@ import ItemDialog from './ItemDialog/ItemDialog';
 import { applyFilter } from './items/filtering';
 import { NEW_ACTION_ID } from './items/types';
 import { isEphemeralAgent } from '~/common';
+import LsmExternalMcpServers, { useLsmExternalMcpServers } from './LsmExternalMcpServers';
+import LsmAgentMachineAccess, { useLsmMachines } from './LsmAgentMachineAccess';
 
 interface ToolsMarketplaceDialogProps {
   open: boolean;
@@ -54,6 +56,8 @@ export default function ToolsMarketplaceDialog({
 
   /** Skills are excluded here — they have their own picker (`SkillsDialog`). */
   const { catalog, selected: selectedItems } = useAgentItems({ agentId });
+  const externalMcpServers = useLsmExternalMcpServers();
+  const lsmMachines = useLsmMachines();
 
   const { favoriteKeys, toggle: toggleFavorite } = useToolFavorites();
 
@@ -101,12 +105,13 @@ export default function ToolsMarketplaceDialog({
   const counts = useMemo(
     () => ({
       builtin: catalog.filter((i) => i.kind === 'builtin').length,
-      tool: catalog.filter((i) => i.kind === 'tool').length,
-      mcp: catalog.filter((i) => i.kind === 'mcp').length,
+      tool: catalog.filter((i) => i.kind === 'tool').length +
+        (lsmMachines.data?.machines.length ?? 0),
+      mcp: catalog.filter((i) => i.kind === 'mcp').length + (externalMcpServers.data?.servers.length ?? 0),
       skill: 0,
       action: catalog.filter((i) => i.kind === 'action').length,
     }),
-    [catalog],
+    [catalog, externalMcpServers.data, lsmMachines.data],
   );
 
   const filtered = useMemo(
@@ -243,7 +248,8 @@ export default function ToolsMarketplaceDialog({
               onSelectView={setView}
               onSelectKind={setKind}
               counts={counts}
-              totalCount={catalog.length}
+              totalCount={catalog.length + (externalMcpServers.data?.servers.length ?? 0) +
+                (lsmMachines.data?.machines.length ?? 0)}
               onCreateNew={handleCreateNew}
             />
           )}
@@ -274,20 +280,37 @@ export default function ToolsMarketplaceDialog({
                 onSelectView={setView}
                 onSelectKind={setKind}
                 counts={counts}
-                totalCount={catalog.length}
+                totalCount={catalog.length + (externalMcpServers.data?.servers.length ?? 0) +
+                  (lsmMachines.data?.machines.length ?? 0)}
                 onCreateNew={handleCreateNew}
               />
             )}
             <div className="min-h-0 flex-1 overflow-y-auto p-3 md:p-4">
-              <MarketplaceCatalog
-                items={filtered}
-                selectedIds={selectedIds}
-                onToggle={handleCardClick}
-                onConfigure={handleConfigure}
-                view={view}
-                favoriteKeys={favoriteKeys}
-                onToggleFavorite={toggleFavorite}
-              />
+              {(kind === 'tool' || kind === 'all') && view === 'marketplace' && (
+                <div className="mb-4">
+                  <LsmAgentMachineAccess />
+                </div>
+              )}
+              {(kind === 'mcp' || kind === 'all') && view === 'marketplace' && (
+                <div className="mb-4">
+                  <LsmExternalMcpServers />
+                </div>
+              )}
+              {(filtered.length > 0 || view !== 'marketplace' ||
+                !((kind === 'tool' && (lsmMachines.data?.machines.length ?? 0) > 0) ||
+                  (kind === 'mcp' && (externalMcpServers.data?.servers.length ?? 0) > 0) ||
+                  (kind === 'all' && ((lsmMachines.data?.machines.length ?? 0) > 0 ||
+                    (externalMcpServers.data?.servers.length ?? 0) > 0)))) && (
+                <MarketplaceCatalog
+                  items={filtered}
+                  selectedIds={selectedIds}
+                  onToggle={handleCardClick}
+                  onConfigure={handleConfigure}
+                  view={view}
+                  favoriteKeys={favoriteKeys}
+                  onToggleFavorite={toggleFavorite}
+                />
+              )}
             </div>
           </div>
         </div>

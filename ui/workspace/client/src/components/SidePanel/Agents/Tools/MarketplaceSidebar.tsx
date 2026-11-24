@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import * as Ariakit from '@ariakit/react/menu';
 import { Button, DropdownPopup } from '@librechat/client';
 import { Permissions, PermissionTypes, AgentCapabilities } from 'librechat-data-provider';
-import { LayoutGrid, ListFilter, Wrench, Server, Workflow, Star, User, Plus } from 'lucide-react';
+import { LayoutGrid, ListFilter, Wrench, Server, Workflow, Star, Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { AgentItemKind, ItemFilter } from './items/types';
 import { useLocalize, useHasAccess } from '~/hooks';
@@ -70,7 +70,7 @@ function useMarketplaceNav({
     {
       id: 'tool',
       icon: <Wrench className="size-4" />,
-      label: localize('com_ui_tools_kind_tools'),
+      label: localize('com_lsm_agent_machine_access'),
       active: activeKind === 'tool' && activeView === 'marketplace',
       onClick: () => selectKind('tool'),
       count: counts.tool,
@@ -94,13 +94,6 @@ function useMarketplaceNav({
   ];
 
   const viewEntries: SidebarEntry[] = [
-    {
-      id: 'mine',
-      icon: <User className="size-4" />,
-      label: localize('com_ui_tools_view_made_by_you'),
-      active: activeView === 'mine',
-      onClick: () => selectView('mine'),
-    },
     {
       id: 'favorites',
       icon: <Star className="size-4" />,

@@ -1,4 +1,5 @@
 {
+  "com_error_details_diagnostic": "完整錯誤資訊",
   "chat_direction_left_to_right": "由左至右",
   "chat_direction_right_to_left": "由右至左",
   "com_a11y_ai_composing": "AI 仍在撰寫中",
@@ -1009,6 +1010,7 @@
   "com_ui_context_usage_label_unknown": "脈絡使用量：已使用 {{0}} 個 Token",
   "com_ui_context_usage_snapshot": "脈絡 {{0}} / {{1}}（{{2}}%）",
   "com_ui_context_usage_snapshot_unknown": "脈絡 {{0}}",
+  "com_ui_context_provider_reported": "模型 API 回傳的最近一次請求實際用量（輸入 + 輸出）。下次請求的脈絡可能不同。",
   "com_ui_context_window": "脈絡視窗",
   "com_ui_continue": "繼續",
   "com_ui_continue_chat": "繼續此對話",
@@ -1499,6 +1501,8 @@
   "com_ui_permissions_updated_success": "權限更新成功",
   "com_ui_pin": "釘選",
   "com_ui_pin_error": "無法釘選對話",
+  "com_ui_pinned_favorites": "釘選模型與助理",
+  "com_ui_pinned_conversations": "釘選對話",
   "com_ui_pinned": "已釘選",
   "com_ui_plus_n_more": "另外還有 {{0}} 項",
   "com_ui_preferences_updated": "偏好設定更新成功",

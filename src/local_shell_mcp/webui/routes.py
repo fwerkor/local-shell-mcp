@@ -72,6 +72,7 @@ async def conversations(request: Request):
             archived=query.get("isArchived", "false").lower() in {"true", "1"},
             pinned=query.get("pinned", "false").lower() in {"true", "1"},
             project_id=query.get("projectId"), search=query.get("search"),
+            tags=query.getlist("tags"),
             cursor=query.get("cursor"), limit=_integer(query.get("limit")),
         ))
     if request.method == "DELETE":

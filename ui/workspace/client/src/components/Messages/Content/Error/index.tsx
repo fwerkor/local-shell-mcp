@@ -6,7 +6,7 @@ import type { ErrorPayload } from './parts';
 import { errorCopy, errorRenderers } from './registry';
 import { UnclassifiedError } from './ProviderError';
 import { extractJson, isJson } from '~/utils/json';
-import { readObject, readString } from './parts';
+import { ErrorBody, ErrorDetails, readObject, readString } from './parts';
 import { useErrorSource } from './source';
 import { useLocalize } from '~/hooks';
 
@@ -36,7 +36,7 @@ function getLangChainErrorKey(text: string): TranslationKeys | undefined {
  * `message` is the row when the caller has it; an error content part renders without one and reads
  * its row's identity from `ErrorSourceProvider` instead.
  */
-const Error = ({ text, message: rowMessage }: { text: string; message?: ErrorSource }) => {
+const ErrorContent = ({ text, message: rowMessage }: { text: string; message?: ErrorSource }) => {
   const localize = useLocalize();
   const contextSource = useErrorSource();
   const message = rowMessage ?? contextSource;
@@ -52,6 +52,9 @@ const Error = ({ text, message: rowMessage }: { text: string; message?: ErrorSou
   }
 
   const json = JSON.parse(jsonString) as ErrorPayload;
+  if (readString(json, 'type') === 'lsm_generation_error') {
+    return <>{readString(json, 'message') ?? 'LSM generation failed.'}</>;
+  }
   /**
    * OpenAI-compatible bodies nest their `code` and `type` under `error`. When the top level names
    * neither, that envelope is the payload a renderer reads; a top-level `type`, even a generic one
@@ -78,6 +81,34 @@ const Error = ({ text, message: rowMessage }: { text: string; message?: ErrorSou
   }
 
   return <UnclassifiedError json={json} text={text} message={message} />;
+};
+
+/** Every error retains a collapsed, copyable diagnostic body, including
+ * runtime failures, provider failures and legacy plain-text error records. */
+const Error = ({ text, message }: { text: string; message?: ErrorSource }) => {
+  const localize = useLocalize();
+  const jsonText = extractJson(text);
+  let details = text;
+  if (isJson(jsonText)) {
+    try {
+      const payload = JSON.parse(jsonText) as ErrorPayload;
+      details = readString(payload, 'type') === 'lsm_generation_error'
+        ? (readString(payload, 'details') ?? JSON.stringify(payload, null, 2))
+        : JSON.stringify(payload, null, 2);
+    } catch {
+      // Legacy non-JSON failures still show their original message.
+    }
+  }
+  return (
+    <ErrorBody>
+      <ErrorContent text={text} message={message} />
+      <ErrorDetails label={localize('com_error_details_diagnostic')}>
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono select-text">
+          {details}
+        </pre>
+      </ErrorDetails>
+    </ErrorBody>
+  );
 };
 
 export default Error;

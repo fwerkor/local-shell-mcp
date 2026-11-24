@@ -468,7 +468,7 @@ async def test_validation_policy_and_registry_error_paths(tmp_path, monkeypatch)
         await manager.manage(action="env_set", name="demo")
     with pytest.raises(ValueError, match="value is required"):
         await manager.manage(action="env_set", name="demo", key="X")
-    with pytest.raises(ValueError, match="unknown dynamic MCP server"):
+    with pytest.raises(ValueError, match="MCP server is not available"):
         await manager.search(server="missing")
     with pytest.raises(ValueError, match="<server>:<tool>"):
         await manager.inspect("invalid")

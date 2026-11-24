@@ -178,6 +178,12 @@ def clean_subagents(value: Any, *, max_subagents: int = 10) -> dict:
 def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
     obj = _require(payload, dict, "Agent configuration")
     result = {}
+    if "machine_permissions" in obj:
+        # Reuse the chat ACL vocabulary and identifier validation. This is an
+        # Agent-specific ceiling; a chat grant is still required at execution.
+        from .machine_permissions import validate_access_map
+
+        result["machine_permissions"] = validate_access_map(obj["machine_permissions"])
     nullable_strings = {"name", "description", "instructions", "model",
                         "entryAgentId", "resultAgentId"}
     strings = {"provider", "artifacts", "category", "code_environment_id", "code_workspace_id"}

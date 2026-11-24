@@ -95,12 +95,12 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 await page.get_by_test_id("text-input").fill("Verify configured model.")
                 await page.locator('button[type="submit"]').first.click()
                 if reject_provider:
-                    await page.get_by_test_id("screenshot-target").get_by_text("Model generation failed (HTTPStatusError)", exact=False).wait_for(timeout=15000)
+                    await page.get_by_test_id("screenshot-target").get_by_text("The model provider request failed (HTTPStatusError).", exact=False).wait_for(timeout=15000)
                 else:
                     await page.get_by_test_id("screenshot-target").get_by_text("Model channel works.", exact=True).wait_for(timeout=15000)
                 if reject_provider:
                     await page.reload()
-                    await page.get_by_test_id("screenshot-target").get_by_text("Model generation failed (HTTPStatusError)", exact=False).wait_for(timeout=15000)
+                    await page.get_by_test_id("screenshot-target").get_by_text("The model provider request failed (HTTPStatusError).", exact=False).wait_for(timeout=15000)
                 assert requests and requests[-1]["model"] == "second-model"
                 if reject_provider:
                     # Correcting an invalid credential must recover without a
@@ -240,7 +240,10 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     # Referenced channels show the real conflict and a deliberate
                     # force-delete option instead of an opaque HTTP 409.
                     await page.goto(f"http://127.0.0.1:{port}/c/new", wait_until="domcontentloaded")
-                    await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                    # Channel settings moved into the model selector dropdown.
+                    await page.get_by_test_id("model-selector-button").click()
+                    await page.get_by_test_id("model-selector-settings").click()
+                    await page.get_by_role("heading", name="Channels & models / 渠道与模型").wait_for()
                     await page.get_by_role("button", name="Delete Secondary Research").click()
                     async with page.expect_response(lambda response: response.request.method == "DELETE" and "name=Secondary%20Research" in response.url) as blocked:
                         await page.get_by_role("button", name="Confirm delete Secondary Research").click()

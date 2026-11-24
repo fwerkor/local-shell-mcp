@@ -9,6 +9,7 @@ import shlex
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +23,18 @@ from .fs_ops import resolve_path
 from .settings import get_settings
 from .shell_ops import check_command_policy
 from .state_store import get_state_store
+
+# Scoped to one WebUI Agent request. Ordinary MCP API clients are unaffected.
+# None = all registered servers; an empty set = no external servers.
+_AGENT_ALLOWED_SERVERS: ContextVar[frozenset[str] | None] = ContextVar(
+    "webui_mcp_allowed_servers", default=None,
+)
+
+
+def _server_allowed(name: str) -> bool:
+    allowed = _AGENT_ALLOWED_SERVERS.get()
+    return allowed is None or name in allowed
+
 
 _REGISTRY_VERSION = 1
 _MAX_TOOLS_PER_SERVER = 512
@@ -570,11 +583,11 @@ class DynamicMCPManager:
         tokens = [token for token in query.lower().split() if token]
         async with self._lock:
             servers = self._load()
-        selected = [servers[server]] if server and server in servers else []
+        selected = [servers[server]] if server and server in servers and _server_allowed(server) else []
         if server and not selected:
-            raise ValueError(f"unknown dynamic MCP server: {server}")
+            raise ValueError(f"MCP server is not available: {server}")
         if not server:
-            selected = [item for item in servers.values() if item.enabled]
+            selected = [item for item in servers.values() if item.enabled and _server_allowed(item.name)]
 
         matches: list[tuple[int, dict[str, Any]]] = []
         unrefreshed: list[str] = []
@@ -621,6 +634,8 @@ class DynamicMCPManager:
 
     async def inspect(self, qualified_name: str) -> dict[str, Any]:
         server_name, tool_name = self._split_qualified_name(qualified_name)
+        if not _server_allowed(server_name):
+            raise PermissionError(f"MCP server is disabled for this chat: {server_name}")
         async with self._lock:
             servers = self._load()
             server = servers.get(server_name)
@@ -641,6 +656,8 @@ class DynamicMCPManager:
         timeout_s: int | None = None,
     ) -> dict[str, Any]:
         server_name, tool_name = self._split_qualified_name(qualified_name)
+        if not _server_allowed(server_name):
+            raise PermissionError(f"MCP server is disabled for this chat: {server_name}")
         async with self._lock:
             servers = self._load()
             server = servers.get(server_name)

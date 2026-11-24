@@ -49,7 +49,7 @@ class SubagentConfig:
 class SubagentInvocation:
     agent: dict
     messages: list[dict]
-    selected_tools: tuple[str, ...]
+    selected_tools: tuple[str, ...] | None
     max_turns: int | None
     recursion_limit: int | None
     remaining_depth: int
@@ -314,7 +314,11 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
     messages.append({"role": "user", "content": description})
     invocation = SubagentInvocation(
         agent=copy.deepcopy(config.agent), messages=messages,
-        selected_tools=tuple(config.agent.get("tools") or []),
+        # Machine-configured Agents inherit their native tool set from the
+        # machine ACL; legacy Agents retain a requested tool subset.
+        selected_tools=(tuple(config.agent.get("tools") or [])
+                        if "machine_permissions" not in config.agent and config.agent.get("tools")
+                        else None),
         max_turns=config.max_turns,
         recursion_limit=config.max_turns * 3 if config.max_turns is not None else None,
         remaining_depth=max(0, max_depth - 1) if config.allow_nested else 0,

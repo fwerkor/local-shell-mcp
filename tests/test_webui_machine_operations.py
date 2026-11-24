@@ -42,8 +42,10 @@ async def test_shell_and_environment_follow_machine_and_oauth_scopes(tmp_path, m
         with pytest.raises(PermissionError, match="shell:read"):
             await call_tool("alice", cid, ModelToolCall("i", "environment_get", {}),
                                    granted_scopes=set())
+        bob_cid = repo.create_conversation("bob", {"title": "No access"})["conversationId"]
+        repo.save_setting("bob", "agent.machine_policy.conversation." + bob_cid, {"local": "none"})
         with pytest.raises(PermissionError, match="not granted"):
-            await call_tool("bob", repo.create_conversation("bob", {"title": "No access"})["conversationId"],
+            await call_tool("bob", bob_cid,
                                    ModelToolCall("i", "environment_get", {}),
                                    granted_scopes={"shell:read"})
         with pytest.raises(ValueError, match="Unknown"):

@@ -20,7 +20,6 @@ from local_shell_mcp.webui.subagent_wakeup import process_wakeups
     ("bad_target", "retired"),
     ("agent_removed", "retired"),
     ("missing_reply", "retired"),
-    ("scope_revoked", "retired"),
     ("provider_unavailable", "retired"),
     ("parent_paused", "pending"),
 ])
@@ -56,9 +55,6 @@ async def test_auto_wakeup_fail_closed_without_claiming_unrelated_result(environ
             conn.execute("DELETE FROM agents WHERE id=?", (parent["id"],))
         elif condition == "missing_reply":
             conn.execute("DELETE FROM messages WHERE id=?", (parent_run.response_message_id,))
-        elif condition == "scope_revoked":
-            conn.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?)",
-                         ("local", "agent.machine_policy.global", '{"local":"write"}'))
     if condition == "provider_unavailable":
         monkeypatch.setattr(providers, "provider_config", lambda *args: (_ for _ in ()).throw(
             ValueError("No usable model provider")))

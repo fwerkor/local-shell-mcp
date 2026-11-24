@@ -89,8 +89,12 @@ async def test_agent_http_routes_enforce_identity(tmp_path, monkeypatch):
         alice = {"x-test-principal": "alice"}
         bob = {"x-test-principal": "bob"}
         assert (await client.get("/api/agents")).status_code == 401
-        response = await client.post("/api/agents", headers=alice, json={"provider": "openAI", "model": None, "name": "Research"})
+        response = await client.post("/api/agents", headers=alice, json={
+            "provider": "openAI", "model": None, "name": "Research",
+            "machine_permissions": {"local": "write", "worker1": "read"},
+        })
         assert response.status_code == 201, response.text
+        assert response.json()["machine_permissions"] == {"local": "write", "worker1": "read"}
         aid = response.json()["id"]
         assert (await client.get(f"/api/agents/{aid}", headers=bob)).status_code == 404
         assert len((await client.get("/api/agents", headers=alice)).json()["data"]) == 1

@@ -304,6 +304,49 @@ const AuthContextProvider = ({
     setUserContext,
   ]);
 
+  // A streaming generation may keep the browser busy for hours without
+  // issuing another API request. Refresh the short-lived bearer proactively;
+  // /api/auth/refresh also slides the revocable WebUI cookie on activity.
+  useEffect(() => {
+    if (!token || !isAuthenticated || authConfig?.test === true) {
+      return;
+    }
+    let expiresAt = 0;
+    try {
+      const part = token.split('.')[1];
+      const base64 = part.replace(/-/g, '+').replace(/_/g, '/');
+      const claims = JSON.parse(window.atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='))) as { exp?: number };
+      expiresAt = typeof claims.exp === 'number' ? claims.exp * 1000 : 0;
+    } catch {
+      return;
+    }
+    if (!expiresAt) {
+      return;
+    }
+
+    let refreshing = false;
+    const heartbeat = window.setInterval(() => {
+      if (refreshing || expiresAt - Date.now() > 2 * 60 * 1000) {
+        return;
+      }
+      refreshing = true;
+      refreshToken.mutate(undefined, {
+        onSuccess: (response) => {
+          refreshing = false;
+          if (response?.token && !isExternalRedirectRef.current) {
+            setUserContext({ token: response.token, user: response.user, isAuthenticated: true });
+          }
+        },
+        onError: () => {
+          // Transient connectivity failures retry on the next tick. A request
+          // interceptor will perform the normal 401 recovery if needed.
+          refreshing = false;
+        },
+      });
+    }, 60_000);
+    return () => window.clearInterval(heartbeat);
+  }, [token, isAuthenticated, refreshToken.mutate, setUserContext]);
+
   useEffect(() => {
     const handleTokenUpdate = (event: CustomEvent<string>) => {
       console.log('tokenUpdated event received event');

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from types import SimpleNamespace
 
@@ -350,6 +351,13 @@ def test_main_internal_gui_capture_helper(tmp_path, monkeypatch):
 
 
 def test_main_modes_config_and_errors(tmp_path, monkeypatch):
+    # main() writes these through os.environ, so adopt them into monkeypatch.
+    # Otherwise LOCAL_SHELL_MCP_CONFIG leaks to every later test and points at
+    # this test's deleted tmp_path, breaking unrelated suites.
+    for name in ("LOCAL_SHELL_MCP_CONFIG", "LOCAL_SHELL_MCP_MODE",
+                 "LOCAL_SHELL_MCP_REMOTE_ENABLED"):
+        monkeypatch.setenv(name, os.environ.get(name, ""))
+        monkeypatch.delenv(name, raising=False)
     calls = []
     monkeypatch.setattr(main_module, "run_http", lambda: calls.append("http"))
     monkeypatch.setattr(main_module, "run_mcp", lambda: calls.append("mcp"))

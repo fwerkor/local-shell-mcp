@@ -207,8 +207,8 @@ export const shouldSwapOnHover = ({
   return offsetY <= middleY;
 };
 
-/** Which group of the Pinned section a stored key belongs to. The section
- *  orders its two kinds independently, so a merge has to know them apart. */
+/** Which pinned sidebar group a stored key belongs to. Each group orders
+ *  its rows independently, so a merge has to know them apart. */
 const keyKind = (key: string): 'convo' | 'favorite' =>
   key.startsWith('convo:') ? 'convo' : 'favorite';
 

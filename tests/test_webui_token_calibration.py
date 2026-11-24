@@ -343,3 +343,47 @@ async def test_summary_refuses_provider_truncation(tmp_path, finish):
                          stream_tools=fake_stream, stream_text=fake_stream, on_text=noop, profile=profile)
     with pytest.raises(ValueError, match='truncated'):
         await runner._summarize_history([{'role': 'user', 'content': 'Important old context'}])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('with_tools', [False, True])
+async def test_openai_compatible_usage_option_retries_only_when_unsupported(monkeypatch, with_tools):
+    original = httpx.AsyncClient
+    bodies = []
+
+    def server(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if 'stream_options' in body:
+            return httpx.Response(400, json={'error': {'message': 'Unsupported parameter: stream_options'}})
+        frame = {'choices': [{'delta': {'content': 'answer'}}]}
+        return httpx.Response(200, text=f'data: {json.dumps(frame)}\n\ndata: [DONE]\n\n',
+                              headers={'content-type': 'text/event-stream'})
+
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(server), **kw))
+    config = ProviderConfig('openai', 'compatible', 'https://test.invalid/stream', 'key', include_usage=True)
+    if with_tools:
+        result = [item async for item in stream_model_with_tools(config, [], tools=[{
+            'type': 'function', 'function': {'name': 'demo', 'parameters': {'type': 'object'}}}])]
+    else:
+        result = [item async for item in stream_model(config, [{'role': 'user', 'content': 'hi'}])]
+    assert result == ['answer']
+    assert len(bodies) == 2
+    assert bodies[0]['stream_options'] == {'include_usage': True}
+    assert 'stream_options' not in bodies[1]
+
+
+@pytest.mark.asyncio
+async def test_usage_option_does_not_retry_unrelated_model_error(monkeypatch):
+    original = httpx.AsyncClient
+    requests = []
+
+    def server(request):
+        requests.append(request)
+        return httpx.Response(400, json={'error': {'message': 'Model not found'}})
+
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(server), **kw))
+    config = ProviderConfig('openai', 'bad', 'https://test.invalid/stream', 'key', include_usage=True)
+    with pytest.raises(httpx.HTTPStatusError):
+        _ = [item async for item in stream_model(config, [])]
+    assert len(requests) == 1

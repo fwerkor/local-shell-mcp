@@ -14,17 +14,23 @@ from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState
 from local_shell_mcp.webui.compaction import build_summary_carrier_text
 from local_shell_mcp.webui.context_budget import calculate_budget, context_usage_snapshot
 from local_shell_mcp.webui.generations import GenerationStore
-from local_shell_mcp.webui.providers import ProviderConfig
+from local_shell_mcp.webui.providers import ModelUsage, ProviderConfig
 from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
 @pytest.fixture
-def setup(tmp_path):
+def setup(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path / '.local-shell-mcp')
     store = GenerationStore(db)
     job, fresh = store.begin('alice', {'text': 'What was our plan?', 'model': 'test'})
     assert fresh
-    return db, store, job
+    yield db, store, job
+    get_settings.cache_clear()
 
 
 def _snapshot(job, *, messages=None):
@@ -153,3 +159,79 @@ async def test_runner_publishes_budget_without_triggering_summary(setup):
     assert events[0]['data']['breakdown']['messageCount'] == 1
     assert store.finish('alice', job.run_id, status='complete', text='done')
     assert store.events('alice', job.run_id)[-1][1]['responseMessage']['metadata']['contextUsage'] == events[0]['data']
+
+
+def test_confirmed_provider_snapshot_preserves_unknown_context_limit():
+    from local_shell_mcp.webui.context_budget import provider_usage_snapshot
+
+    event = provider_usage_snapshot(
+        input_tokens=12345, output_tokens=678, provider='openai', model='custom-model',
+        messages=[{'role': 'user', 'content': 'Hello'}], tools=[],
+        max_context_tokens=None, run_id='run-1')
+    assert event['providerInputTokens'] == 12345
+    assert event['providerOutputTokens'] == 678
+    assert event['breakdown']['maxContextTokens'] == 0
+    assert 'contextBudget' not in event
+    assert 'remainingContextTokens' not in event
+
+
+@pytest.mark.asyncio
+async def test_runner_persists_exact_provider_usage_without_known_window(setup):
+    db, store, job = setup
+
+    async def empty(*args, **kwargs):
+        if False:
+            yield None
+
+    async def emit(_):
+        pass
+
+    profile = ProviderConfig('openai', 'unknown-test-model', 'https://invalid.example/v1', '')
+    runner = AgentRunner('alice', job, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=empty, stream_text=empty, on_text=emit, profile=profile)
+    state = AgentLoopState(AgentContext(profile, []),
+                           [{'role': 'user', 'content': 'hello'}])
+    await runner._before_model(state)
+    assert not any(evt.get('event') == 'on_context_usage' for _, evt in store.events('alice', job.run_id))
+    await runner._observe_model_usage(ModelUsage('openai', 1000, 51), state)
+    events = [evt['data'] for _, evt in store.events('alice', job.run_id)
+              if evt.get('event') == 'on_context_usage']
+    assert len(events) == 1
+    assert (events[0]['providerInputTokens'], events[0]['providerOutputTokens']) == (1000, 51)
+    assert events[0]['breakdown']['maxContextTokens'] == 0
+    store.finish('alice', job.run_id, status='complete', text='Response')
+    reopened = WorkspaceRepository(SQLiteDatabase(db.root))
+    messages = reopened.messages('alice', job.conversation_id)['messages']
+    assert messages[-1]['metadata']['contextUsage'] == events[0]
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_saved_model_window_without_agent_parameter(setup, monkeypatch):
+    from local_shell_mcp.webui import provider_profiles
+
+    monkeypatch.setattr(provider_profiles, 'profile', lambda channel: {
+        'model_contexts': {'test': 8192}} if channel == 'openai' else {})
+    db, store, job = setup
+
+    async def empty(*args, **kwargs):
+        if False:
+            yield None
+
+    async def emit(_):
+        pass
+
+    profile = ProviderConfig('openai', 'test', 'https://invalid.example/v1', '')
+    runner = AgentRunner('alice', job, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=empty, stream_text=empty, on_text=emit, profile=profile)
+    state = AgentLoopState(AgentContext(profile, []), [{'role': 'user', 'content': 'hello'}])
+    await runner._before_model(state)
+    snapshots = [evt['data'] for _, evt in store.events('alice', job.run_id)
+                 if evt.get('event') == 'on_context_usage']
+    assert len(snapshots) == 1
+    assert snapshots[0]['breakdown']['maxContextTokens'] == 8192
+    await runner._observe_model_usage(ModelUsage('openai', 1024, 64), state)
+    snapshots = [evt['data'] for _, evt in store.events('alice', job.run_id)
+                 if evt.get('event') == 'on_context_usage']
+    assert len(snapshots) == 2
+    assert snapshots[-1]['providerInputTokens'] == 1024
+    assert snapshots[-1]['breakdown']['maxContextTokens'] == 8192

@@ -74,7 +74,8 @@ class Intent:
 
 def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
             name: str, arguments: dict, scopes: set[str], expires: int | None,
-            *, authorization_conversation_id: str | None = None) -> Intent:
+            *, authorization_conversation_id: str | None = None,
+            agent_id: str | None = None) -> Intent:
     """Atomic ownership reservation prior to *any* native creation RPC."""
     import sqlite3
 
@@ -98,6 +99,8 @@ def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
         db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT * FROM agent_durable_tasks WHERE id=?", (identity,)).fetchone()
         if row:
+            if row["agent_id"] != agent_id:
+                raise PermissionError("Replayed task belongs to another Agent")
             if row["fingerprint"] != fingerprint:
                 raise PermissionError("A replayed tool call cannot change a durable task request")
             if row["state"] not in ("reserved", "active"):
@@ -121,11 +124,11 @@ def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
         try:
             db.execute(
                 "INSERT INTO agent_durable_tasks(id,owner,conversation_id,authorization_conversation_id,"
-                "run_id,call_id,tool,kind,machine,requirements,fingerprint,idempotency_key,key_hash,"
+                "run_id,call_id,agent_id,tool,kind,machine,requirements,fingerprint,idempotency_key,key_hash,"
                 "scopes,grant_expires,state,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (identity, owner, conversation_id, authorization_conversation_id,
-                 run_id, call_id, name, _kind(name), machine,
+                 run_id, call_id, agent_id, name, _kind(name), machine,
                  json.dumps(required), fingerprint, key, key_hash, json.dumps(sorted(scopes)), expires,
                  "reserved", _stamp(), _stamp()),
             )
@@ -276,7 +279,25 @@ def _revoked(row: Any) -> bool:
                 # explicit abort revokes an otherwise still-authorized lease.
                 if run is not None and run["status"] == "aborted":
                     return True
+        agent_id = row["agent_id"]
+        agent_policy = None
+        if agent_id:
+            from .agents import AgentRepository
+            from .lsm_tool_registry import _agent_allows
+
+            agent = AgentRepository(_repo().database).get(row["owner"], agent_id)
+            if agent is None:
+                return True
+            if "machine_permissions" in agent:
+                from .machine_permissions import validate_access_map
+
+                agent_policy = validate_access_map(agent["machine_permissions"])
+            elif "tools" in agent and row["tool"] not in agent["tools"]:
+                # Agents predating machine ACLs retain their explicit tool list.
+                return True
         for machine, operation in json.loads(row["requirements"]).items():
+            if agent_policy is not None and not _agent_allows(agent_policy, machine, operation):
+                return True
             authorize_machine_action(row["owner"], permission_conversation_id, machine, operation,
                                      scopes=set(json.loads(row["scopes"])), expires=row["grant_expires"])
         return False

@@ -8,7 +8,7 @@ import httpx
 import pytest
 from starlette.applications import Starlette
 
-from local_shell_mcp.webui import misc_routes, routes
+from local_shell_mcp.webui import misc_routes, routes, tag_routes
 
 
 @pytest.mark.asyncio
@@ -49,7 +49,7 @@ async def test_disabled_optional_capabilities_never_claim_unsupported_services(t
 
     monkeypatch.setattr(settings, "get_settings", lambda: SimpleNamespace(disable_local=False))
     monkeypatch.setattr(routes, "get_settings", lambda: SimpleNamespace(auth_mode="none", state_dir=tmp_path))
-    app = Starlette(routes=misc_routes.misc_routes())
+    app = Starlette(routes=[*tag_routes.tag_routes(), *misc_routes.misc_routes()])
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/api/banner")).json() is None
         assert (await client.get("/api/search/enable")).json() is True
@@ -89,19 +89,30 @@ async def test_chat_tool_permission_prefs_are_private_and_secret_keys_not_expose
         alice = {"x-test-owner": "alice"}
         bob = {"x-test-owner": "bob"}
         cid = (await client.post("/api/convos", headers=alice, json={"title": "Tools"})).json()["conversationId"]
-        assert (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()["effective"] == {}
+        # Registered machines default to read/write; the local Controller must
+        # always be present. Exact equality would depend on global Worker
+        # registration state, so assert the guaranteed entry instead.
+        assert (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()[
+            "effective"]["local"] == "write"
         assert (await client.get(f"/api/lsm/preferences/{cid}", headers=bob)).status_code == 404
         prefs = {"web": True, "lsm": True, "mcp": False, "memory": False}
         updated = (await client.put(f"/api/lsm/preferences/{cid}", headers=alice, json=prefs)).json()
-        assert all(updated[field] == value for field, value in prefs.items())
+        # `lsm` is a retired feature flag: the payload still accepts it from old
+        # clients but always reports False, so it can never imply machine access.
+        assert all(updated[field] == value
+                   for field, value in prefs.items() if field != "lsm")
+        assert updated["lsm"] is False
         stored = (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()
-        assert all(stored[field] == value for field, value in prefs.items())
-        assert stored["effective"] == {}
+        assert all(stored[field] == value
+                   for field, value in prefs.items() if field != "lsm")
+        assert stored["lsm"] is False
+        assert stored["effective"]["local"] == "write"
         # Legacy flags are retained for old clients but never grant a machine.
         prior = await client.put(f"/api/lsm/preferences/{cid}", headers=alice,
                                  json={"web": False, "lsm": True, "mcp": False, "memory": False})
         assert prior.status_code == 200
-        assert prior.json()["effective"] == {}
+        assert prior.json()["lsm"] is False
+        assert prior.json()["effective"]["local"] == "write"
         assert (await client.get("/api/keys?name=openAI", headers=alice)).status_code == 200
         assert "very-secret-key" not in (await client.get("/api/keys?name=openAI", headers=alice)).text
         assert (await client.get("/api/agents/tools/calls", headers=alice,
@@ -131,8 +142,9 @@ async def test_misc_settings_and_permissions_reject_untrusted_json(tmp_path, mon
                                  json={"web": "true"})).status_code == 400
         assert (await client.put(f"/api/lsm/preferences/{cid}",
                                  json={"machines": {"bad/machine": "read"}})).status_code == 400
+        # Exposure preferences can be updated without requesting OAuth scopes.
         assert (await client.put(f"/api/lsm/preferences/{cid}",
-                                 json={"machines": {"worker1": "read"}})).status_code == 403
+                                 json={"machines": {"worker1": "read"}})).status_code == 200
         assert (await client.get("/api/keys?name=not-supported")).status_code == 404
         with monkeypatch.context() as patched:
             patched.setattr("local_shell_mcp.webui.providers.provider_config",
