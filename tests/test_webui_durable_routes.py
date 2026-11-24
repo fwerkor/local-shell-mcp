@@ -50,6 +50,35 @@ async def test_mutations_schedule_revocation_on_all_route_aliases(client_app):
 
 
 @pytest.mark.asyncio
+async def test_project_assignment_returns_frontend_contract(client_app):
+    app, actions = client_app
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        first = (await client.post("/api/projects", json={"name": "first"})).json()["_id"]
+        second = (await client.post("/api/projects", json={"name": "second"})).json()["_id"]
+        cid = (await client.post("/api/convos", json={"title": "chat"})).json()["conversationId"]
+
+        for destination, previous in ((first, None), (second, first), (None, second)):
+            response = await client.put(
+                f"/api/projects/conversations/{cid}", json={"projectId": destination}
+            )
+            assert response.status_code == 200
+            assignment = response.json()
+            assert assignment["projectId"] == destination
+            assert assignment["previousProjectId"] == previous
+            assert assignment["conversation"]["conversationId"] == cid
+            assert assignment["conversation"]["chatProjectId"] == destination
+            assert (await client.get(f"/api/convos/{cid}")).json()["chatProjectId"] == destination
+
+        assert (await client.put(
+            f"/api/projects/conversations/{cid}", json={"projectId": "missing"}
+        )).status_code == 404
+        assert (await client.put(
+            "/api/projects/conversations/missing", json={"projectId": first}
+        )).status_code == 404
+        assert actions == ["local"] * 3
+
+
+@pytest.mark.asyncio
 async def test_legacy_endpoints_and_error_paths(client_app):
     app, actions = client_app
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
