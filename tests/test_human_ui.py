@@ -1097,6 +1097,64 @@ def test_webui_remote_gui_windows_uses_bootstrap_safe_timeout(tmp_path, monkeypa
         )
     ]
 
+def test_webui_headless_desktop_reports_unavailable_without_http_error(tmp_path, monkeypatch):
+    from local_shell_mcp.gui import GuiUnavailableError
+
+    _configure(tmp_path, monkeypatch)
+
+    class HeadlessGuiManager:
+        async def list_windows(self):
+            raise GuiUnavailableError(
+                "No graphical Linux session was found; DISPLAY/WAYLAND_DISPLAY are unavailable"
+            )
+
+    monkeypatch.setattr(
+        "local_shell_mcp.gui.get_gui_manager", lambda: HeadlessGuiManager()
+    )
+    client = TestClient(build_http_app())
+    response = client.get("/api/ui/gui/windows", params={"machine": "local"})
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["machine"] == "local"
+    assert payload["available"] is False
+    assert payload["windows"] == []
+    assert "DISPLAY/WAYLAND_DISPLAY" in payload["reason"]
+
+
+def test_webui_remote_headless_desktop_reports_unavailable(tmp_path, monkeypatch):
+    import local_shell_mcp.human_ui as human_ui
+
+    _configure(tmp_path, monkeypatch)
+
+    class FakeRemote:
+        async def call(self, machine, tool, args, *, execution_timeout_s, rpc_timeout_s):
+            assert machine == "node"
+            assert tool == "gui_list"
+            assert rpc_timeout_s == 210
+            return {
+                "ok": False,
+                "message": "No graphical Linux session was found",
+                "data": {
+                    "status": "error",
+                    "error_type": "GuiUnavailableError",
+                    "message": "No graphical Linux session was found",
+                },
+            }
+
+    monkeypatch.setattr(human_ui, "remote_manager", lambda: FakeRemote())
+    response = TestClient(build_http_app()).get(
+        "/api/ui/gui/windows", params={"machine": "node"}
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "machine": "node",
+        "available": False,
+        "reason": "No graphical Linux session was found",
+        "windows": [],
+        "capabilities": {},
+    }
+
+
 def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     import local_shell_mcp.human_ui as human_ui
 
@@ -1169,6 +1227,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     payload = windows.json()["data"]
     assert payload["machine"] == "local"
     assert payload["backend"] == "fake-native"
+    assert payload["available"] is True
     assert payload["windows"][0]["id"] == "window:1"
 
     frame = client.get(
