@@ -8,7 +8,7 @@ CLIENT = ROOT / "ui/workspace/client/src"
 
 
 def test_sidebar_has_separate_pinned_groups():
-    source = (CLIENT / "components/Conversations/PinnedSection.tsx").read_text()
+    source = (CLIENT / "components/Conversations/PinnedSection.tsx").read_text(encoding="utf-8")
     assert 'data-pinned-section="favorites"' in source
     assert 'data-pinned-section="conversations"' in source
     assert "displayEntries.filter((entry) => entry.kind === 'favorite')" in source
@@ -23,7 +23,7 @@ def test_sidebar_has_separate_pinned_groups():
 
 def test_pinned_group_labels_are_localized():
     for language in ("en", "zh-Hans", "zh-Hant"):
-        translations = json.loads((CLIENT / f"locales/{language}/translation.json").read_text())
+        translations = json.loads((CLIENT / f"locales/{language}/translation.json").read_text(encoding="utf-8"))
         assert translations["com_ui_pinned_favorites"]
         assert translations["com_ui_pinned_conversations"]
         assert translations["com_ui_pinned_favorites"] != translations["com_ui_pinned_conversations"]
