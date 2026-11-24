@@ -45,3 +45,18 @@ def legacy_file_state_backend(monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def isolated_controller_settings(tmp_path, monkeypatch):
+    """Prevent tests of real controller helpers from touching system state."""
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_ACCESS_TOKEN_TTL_S", "0")
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()

@@ -51,6 +51,7 @@ def _policy(source='messages', *, action='block', pattern='bearer_header'):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_controller_settings")
 async def test_submitted_chat_message_blocked_before_creating_run(runtime):
     db, store, repo, profile, app, tasks = runtime
     repo.save_setting('owner', 'webui.filters.config', _policy())
@@ -84,6 +85,7 @@ async def test_agent_instruction_policy_rechecks_even_if_user_text_is_safe(runti
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_controller_settings")
 async def test_audit_only_chat_records_metadata_and_allows_generation(runtime, monkeypatch):
     db, store, repo, profile, app, tasks = runtime
     repo.save_setting('owner', 'webui.filters.config', _policy(action='audit'))

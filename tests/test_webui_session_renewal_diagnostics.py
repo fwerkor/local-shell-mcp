@@ -61,6 +61,7 @@ def test_expired_browser_session_cannot_renew(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_controller_settings")
 async def test_first_party_oauth_ticket_is_renewable_after_short_bearer(tmp_path, monkeypatch):
     import httpx
     from starlette.applications import Starlette
