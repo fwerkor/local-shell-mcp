@@ -505,6 +505,7 @@ CREATE TABLE IF NOT EXISTS agent_durable_tasks (
     authorization_conversation_id TEXT,
     run_id TEXT,
     call_id TEXT NOT NULL,
+    agent_id TEXT,
     tool TEXT NOT NULL,
     kind TEXT NOT NULL,
     machine TEXT NOT NULL,
@@ -625,11 +626,14 @@ class SQLiteDatabase:
             # needed a separate inherited permission scope. Migrate the real
             # existing Controller DB in-place; serialize concurrent cold starts.
             db.execute("BEGIN IMMEDIATE")
-            if "authorization_conversation_id" not in {
+            durable_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(agent_durable_tasks)")
-            }:
+            }
+            if "authorization_conversation_id" not in durable_columns:
                 db.execute("ALTER TABLE agent_durable_tasks "
                            "ADD COLUMN authorization_conversation_id TEXT")
+            if "agent_id" not in durable_columns:
+                db.execute("ALTER TABLE agent_durable_tasks ADD COLUMN agent_id TEXT")
             # Upgrade pre-retry completion queue rows without losing accepted
             # turns or violating the existing native durable Job migrations.
             existing_wakeup = {

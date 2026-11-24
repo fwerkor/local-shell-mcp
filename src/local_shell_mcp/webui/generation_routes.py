@@ -567,7 +567,7 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
     from .action_oauth import access_token
     from .actions import ActionRepository
     from .checkpoints import SQLiteCheckpointSaver
-    from .machine_permissions import require_machine_scope, resolve_access
+    from .machine_permissions import resolve_access
     from .routes import _repo
 
     database = _database()
@@ -628,12 +628,9 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
             ).fetchone()
         if not persisted:
             return False
-    # Revalidate current LSM machine grants before even contacting an IdP
-    # refresh endpoint or rotating an expired browser authorization state.
+    # Machine exposure is a UI preference, not a requirement to expand the
+    # browser's OAuth grant. Native tool calls enforce their scopes separately.
     policy = resolve_access(owner, generation.conversation_id)
-    for machine, level in policy.items():
-        if level in {"read", "write"}:
-            require_machine_scope(scopes, machine, level, expires=expiry)
     repo = ActionRepository(database)
     if not await access_token(repo, owner, aid):
         from .action_oauth import begin_flow
@@ -650,7 +647,7 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
                       native_file_tools=any(level in {"read", "write"} for level in policy.values()),
                       write_tools=any(level == "write" for level in policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
-                      mcp_enabled=isinstance(flags, dict) and flags.get("mcp") is True,
+                      mcp_enabled=isinstance(flags, dict) and flags.get("mcp", True) is True,
                       resume_namespace=pending.get("namespace", ""), granted_scopes=frozenset(scopes),
                       grant_expires=expiry, oauth_claim=(aid, cid, rev,
                           len(calls) == 1 or payload.get("checkpoint_completed") is True))
@@ -733,10 +730,9 @@ async def start_generation(request: Request):
             validate_model_parameters({'model_parameters': params}, filters)
     except ContentFilterBlocked as blocked:
         return JSONResponse(blocked.response(), status_code=400)
-    # Permission inheritance is resolved against SQLite at the start and
-    # rechecked before every tool. The initial OAuth grant cannot be elevated
-    # by modifying defaults while a generation is in progress.
-    from .machine_permissions import require_machine_scope, resolve_access
+    # Exposure preferences are resolved at startup and rechecked for each
+    # native operation. They do not require a new OAuth scope grant.
+    from .machine_permissions import resolve_access
 
     existing_cid = payload.get("conversationId")
     try:
@@ -751,13 +747,6 @@ async def start_generation(request: Request):
         raise HTTPException(404, detail=str(exc)) from exc
     requested_tools = any(level in {"read", "write"} for level in policy.values())
     scopes, grant_expires = _request_grant(request)
-    if requested_tools:
-        try:
-            for machine, level in policy.items():
-                if level in {"read", "write"}:
-                    require_machine_scope(scopes, machine, level, expires=grant_expires)
-        except PermissionError as exc:
-            raise HTTPException(403, detail=str(exc)) from exc
     try:
         profile = provider_config(kind, model)
         result, fresh = _generation_store().begin(owner, payload, agent, protocol_version=protocol)
@@ -775,7 +764,7 @@ async def start_generation(request: Request):
         from .routes import _repo
 
         flags = _repo().setting(owner, "conversation.permissions." + result.conversation_id, {})
-        mcp_enabled = isinstance(flags, dict) and flags.get("mcp") is True
+        mcp_enabled = isinstance(flags, dict) and flags.get("mcp", True) is True
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
@@ -944,17 +933,13 @@ async def steer_generation(request: Request):
             return JSONResponse({"code": "FORBIDDEN", "generationProtocolVersion": protocol},
                                 status_code=403, headers=_generator_headers(protocol))
         if current is not None:
-            # Model-bound instructions cannot bypass revoked machine scopes
-            # merely because the originating generation still exists.
-            from .machine_permissions import require_machine_scope, resolve_access
+            # Steering does not need authorization for every exposed machine.
+            # Native tool dispatch checks actual use against current scopes.
+            from .machine_permissions import resolve_access
 
-            scopes, expiry = _request_grant(request)
             try:
-                policy = resolve_access(owner, cid)
-                for machine, level in policy.items():
-                    if level in {"read", "write"}:
-                        require_machine_scope(scopes, machine, level, expires=expiry)
-            except (PermissionError, KeyError):
+                resolve_access(owner, cid)
+            except KeyError:
                 return JSONResponse({"code": "FORBIDDEN", "generationProtocolVersion": protocol},
                                     status_code=403, headers=_generator_headers(protocol))
     try:
@@ -1023,7 +1008,7 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     """
     from .checkpoints import SQLiteCheckpointSaver
     from .generation_actor_lease import active_run_ids
-    from .machine_permissions import require_machine_scope, resolve_access
+    from .machine_permissions import resolve_access
     from .routes import _repo
 
     # Detached subagent child generations are owned by their task host.
@@ -1054,9 +1039,6 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     try:
         scopes, expiry = _request_grant(request)
         machine_policy = resolve_access(owner, cid)
-        for machine, level in machine_policy.items():
-            if level in {"read", "write"}:
-                require_machine_scope(scopes, machine, level, expires=expiry)
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
     with _database().connect() as db:
@@ -1077,7 +1059,7 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
         native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
         write_tools=any(level == "write" for level in machine_policy.values()),
         ask_user_enabled=bool(state.get("askUserEnabled")),
-        mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+        mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp", True)),
         resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
         partial_text=(checkpoint_text if checkpoint_text is not None
                       else _generation_store().accumulated_text(owner, generation.run_id)),
@@ -1126,13 +1108,10 @@ async def resume_generation(request: Request):
     try:
         # Confirm the user is still entitled to use the Agent before taking
         # the one-shot SQLite continuation claim.
-        from .machine_permissions import require_machine_scope, resolve_access
+        from .machine_permissions import resolve_access
 
         scopes, expiry = _request_grant(request)
         machine_policy = resolve_access(owner, cid)
-        for machine, level in machine_policy.items():
-            if level in {"read", "write"}:
-                require_machine_scope(scopes, machine, level, expires=expiry)
         claim = store.resume_claim(owner, generation.run_id)
         pending = store.pending_action(owner, generation.run_id)
         if claim is not None and claim.get("actionId") == action_id:
@@ -1231,7 +1210,7 @@ async def resume_generation(request: Request):
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
                       artifacts_mode=state.get("artifactsMode"),
-                      mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+                      mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp", True)),
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
                       granted_scopes=frozenset(scopes), grant_expires=expiry,

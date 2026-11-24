@@ -172,7 +172,7 @@ async def test_restart_preserves_signin_and_bearer_reattachment_runs_action_once
 
 
 @pytest.mark.asyncio
-async def test_machine_scopes_are_rechecked_before_oauth_continuation(scenario):
+async def test_action_oauth_continuation_does_not_expand_machine_grants(scenario):
     ctx = scenario
     state = await _pause(ctx)
     _repo().save_setting("local", "agent.machine_policy.global", {"local": "write"})
@@ -180,14 +180,19 @@ async def test_machine_scopes_are_rechecked_before_oauth_continuation(scenario):
                                  base_url="https://chat.example.org", follow_redirects=False) as client:
         await _login(ctx, state, client)
         path = f"/api/agents/chat/status/{ctx.gen.conversation_id}"
-        denied = await client.get(path, headers={"x-owner": "local", "x-scopes": "shell:read"})
-        assert denied.status_code == 403
-        assert ctx.store.pending_action("local", ctx.gen.run_id) is not None
-        assert not ctx.seen
-        allowed = await client.get(path, headers={"x-owner": "local", "x-scopes": "shell:read shell:write"})
-        assert allowed.status_code == 200, allowed.text
+        # OAuth Actions can resume without granting shell write privileges.
+        resumed = await client.get(path, headers={"x-owner": "local", "x-scopes": "shell:read"})
+        assert resumed.status_code == 200, resumed.text
         await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
         assert len(ctx.seen) == 1 and ctx.model_calls == ["user", "tool"]
+        from local_shell_mcp.webui.lsm_tool_registry import call_tool
+        from local_shell_mcp.webui.providers import ModelToolCall
+
+        with pytest.raises(PermissionError, match="shell:write"):
+            await call_tool("local", ctx.gen.conversation_id,
+                            ModelToolCall("denied-write", "file_write",
+                                          {"path": "unauthorized.txt", "content": "no"}),
+                            granted_scopes={"shell:read"})
 
 
 @pytest.mark.asyncio
@@ -204,16 +209,10 @@ async def test_workspace_cookie_resumes_automatically_without_becoming_machine_g
                                  base_url="https://chat.example.org", follow_redirects=False) as client:
         client.cookies.set(COOKIE, cookie)
         await _login(ctx, state, client)
-        assert ctx.store.latest("local", ctx.gen.conversation_id).status == "requires_action"
-        assert not ctx.seen
-        # Revoke and reissue a stronger authenticated session.
-        web.revoke(cookie)
-        ticket = web.issue_ticket("local", "shell:read shell:write", int(time.time()) + 1800)
-        web.redeem(ticket)
-        response = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
-                                    headers={"x-owner": "local", "x-scopes": "shell:read shell:write"})
-        assert response.status_code == 200
+        # This unrelated OAuth Action may resume under a read-only browser
+        # session; it does not confer native machine write permissions.
         await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        assert ctx.store.latest("local", ctx.gen.conversation_id).status == "complete"
         assert len(ctx.seen) == 1
 
 
@@ -372,8 +371,8 @@ async def test_user_abort_invalidates_outstanding_oauth_callback(scenario):
 
 
 @pytest.mark.asyncio
-async def test_expired_oauth_prompt_requires_machine_grants_before_reissuing(scenario):
-    """A principal without current machine scope cannot rotate IdP state."""
+async def test_expired_oauth_prompt_reissues_without_machine_grants(scenario):
+    """Refresh an Action grant independently of any exposed machine tools."""
     ctx = scenario
     await _pause(ctx)
     _repo().save_setting("local", "agent.machine_policy.global", {"local": "write"})
@@ -385,8 +384,8 @@ async def test_expired_oauth_prompt_requires_machine_grants_before_reissuing(sce
                                  base_url="https://chat.example.org", follow_redirects=False) as client:
         result = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
                                   headers={"x-owner": "local", "x-scopes": "shell:read"})
-        assert result.status_code == 403
-        assert ctx.store.events("local", ctx.gen.run_id) == initial_events
+        assert result.status_code == 200
+        assert len(ctx.store.events("local", ctx.gen.run_id)) == len(initial_events) + 1
         valid = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
                                  headers={"x-owner": "local", "x-scopes": "shell:read shell:write"})
         assert valid.status_code == 200

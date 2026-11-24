@@ -34,9 +34,13 @@ def enabled_machine_policy(tmp_path, monkeypatch):
 
 def test_schema_is_original_mcp_schema_without_internal_context(enabled_machine_policy):
     repo, cid, _ = enabled_machine_policy
-    assert {t["function"]["name"] for t in available_tools(
+    defaults = {t["function"]["name"] for t in available_tools(
         "local", cid, scopes={"shell:read", "shell:write", "shell:execute"},
-    )} == {"session_manage", "plan_manage"}
+    )}
+    # Registered machines are exposed by default; OAuth scopes remain an
+    # independent upper bound on what can be executed.
+    assert {"session_manage", "plan_manage", "file_read", "run_shell"} <= defaults
+    assert "remote_manage" not in defaults
     repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "read"})
     result = available_tools("local", cid, scopes={"shell:read"})
     advertised = {row["function"]["name"]: row["function"] for row in result}

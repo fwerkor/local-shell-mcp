@@ -465,7 +465,7 @@ async def test_graph_http_recovery_rejects_missing_checkpoint(context, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_graph_http_recovery_rechecks_machine_scopes(context, monkeypatch):
+async def test_graph_http_recovery_allows_text_only_sessions_without_shell_grants(context, monkeypatch):
     import httpx
     from starlette.applications import Starlette
 
@@ -486,12 +486,22 @@ async def test_graph_http_recovery_rechecks_machine_scopes(context, monkeypatch)
               {"source": "input"}, {})
     _repo().save_setting("local", "agent.machine_policy.global", {"local": "read"})
     monkeypatch.setattr(generation_routes, "_request_grant", lambda request: (set(), None))
+    monkeypatch.setattr(generation_routes, "provider_config", lambda *args: ProviderConfig(
+        "openai", "root", "https://stub.invalid", ""))
+    started = []
+
+    async def start(*args, **kwargs):
+        started.append((args, kwargs))
+
+    monkeypatch.setattr(generation_routes, "_start_task", start)
     app = Starlette(routes=generation_routes.generation_routes())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         result = await client.post("/api/agents/chat/resume", json={
             "conversationId": generation.conversation_id})
-    assert result.status_code == 403
-    assert generation.run_id not in generation_routes._TASKS
+    assert result.status_code == 200, result.text
+    assert len(started) == 1
+    assert started[0][1]["granted_scopes"] == frozenset()
+    assert started[0][1]["recovery_steers"] is True
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,10 @@ from local_shell_mcp.webui.routes import _repo
 
 @pytest.fixture
 def bound_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "local_shell_mcp.webui.machine_permissions._registered_defaults",
+        lambda: {"local": "write", "worker1": "write", "worker2": "write"},
+    )
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")

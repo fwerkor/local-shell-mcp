@@ -89,19 +89,19 @@ async def test_chat_tool_permission_prefs_are_private_and_secret_keys_not_expose
         alice = {"x-test-owner": "alice"}
         bob = {"x-test-owner": "bob"}
         cid = (await client.post("/api/convos", headers=alice, json={"title": "Tools"})).json()["conversationId"]
-        assert (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()["effective"] == {}
+        assert (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()["effective"] == {"local": "write"}
         assert (await client.get(f"/api/lsm/preferences/{cid}", headers=bob)).status_code == 404
         prefs = {"web": True, "lsm": True, "mcp": False, "memory": False}
         updated = (await client.put(f"/api/lsm/preferences/{cid}", headers=alice, json=prefs)).json()
         assert all(updated[field] == value for field, value in prefs.items())
         stored = (await client.get(f"/api/lsm/preferences/{cid}", headers=alice)).json()
         assert all(stored[field] == value for field, value in prefs.items())
-        assert stored["effective"] == {}
+        assert stored["effective"] == {"local": "write"}
         # Legacy flags are retained for old clients but never grant a machine.
         prior = await client.put(f"/api/lsm/preferences/{cid}", headers=alice,
                                  json={"web": False, "lsm": True, "mcp": False, "memory": False})
         assert prior.status_code == 200
-        assert prior.json()["effective"] == {}
+        assert prior.json()["effective"] == {"local": "write"}
         assert (await client.get("/api/keys?name=openAI", headers=alice)).status_code == 200
         assert "very-secret-key" not in (await client.get("/api/keys?name=openAI", headers=alice)).text
         assert (await client.get("/api/agents/tools/calls", headers=alice,
@@ -131,8 +131,9 @@ async def test_misc_settings_and_permissions_reject_untrusted_json(tmp_path, mon
                                  json={"web": "true"})).status_code == 400
         assert (await client.put(f"/api/lsm/preferences/{cid}",
                                  json={"machines": {"bad/machine": "read"}})).status_code == 400
+        # Exposure preferences can be updated without requesting OAuth scopes.
         assert (await client.put(f"/api/lsm/preferences/{cid}",
-                                 json={"machines": {"worker1": "read"}})).status_code == 403
+                                 json={"machines": {"worker1": "read"}})).status_code == 200
         assert (await client.get("/api/keys?name=not-supported")).status_code == 404
         with monkeypatch.context() as patched:
             patched.setattr("local_shell_mcp.webui.providers.provider_config",

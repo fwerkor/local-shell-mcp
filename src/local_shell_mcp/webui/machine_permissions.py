@@ -1,7 +1,7 @@
 """Owner-scoped per-machine Agent permissions with inherited SQLite defaults.
 
-Only exact machine identifiers are granted. A machine not present in any policy
-is denied, even when added after a user configures global defaults.
+Registered machines default to read/write. Explicit owner, project and chat
+overrides take precedence; an unknown machine is never implicitly granted.
 """
 
 from __future__ import annotations
@@ -46,10 +46,33 @@ def _stored(repo: Any, owner: str, key: str) -> dict[str, str]:
         return {}
 
 
+def _registered_defaults() -> dict[str, str]:
+    """Expose all registered machines by default, including offline Workers.
+
+    The Controller still enforces server-side machine switches and OAuth scopes
+    at each native tool invocation. Nothing is granted to unknown machine IDs.
+    """
+    from ..remote import remote_manager
+
+    defaults = {"local": "write"}
+    try:
+        workers = remote_manager().list_machines().get("machines", ())
+    except Exception:
+        # A temporarily unavailable Worker registry cannot break ordinary
+        # chat. Remote names still need registration before implicit exposure.
+        workers = ()
+    for worker in workers:
+        name = worker.get("name") if isinstance(worker, dict) else None
+        if isinstance(name, str) and _NAME_RE.fullmatch(name):
+            defaults[name] = "write"
+    return defaults
+
+
 def resolve_access(owner: str, conversation_id: str | None = None, *, project_id: str | None = None,
                    repo: Any = None) -> dict[str, str]:
     repository = repo or _repo()
-    policy = _stored(repository, owner, _GLOBAL)
+    policy = _registered_defaults()
+    policy.update(_stored(repository, owner, _GLOBAL))
     if conversation_id is not None:
         convo = repository.conversation(owner, conversation_id)
         if convo is None:
@@ -66,16 +89,6 @@ def resolve_access(owner: str, conversation_id: str | None = None, *, project_id
 
 def access_level(owner: str, conversation_id: str, machine: str, *, repo: Any = None) -> str:
     return resolve_access(owner, conversation_id, repo=repo).get(machine, "none")
-
-
-def _principal_scopes(request: Request) -> set[str]:
-    from ..auth import principal_scopes
-    from ..settings import get_settings
-
-    if get_settings().auth_mode == "none":
-        return {"shell:read", "shell:write", "remote:use"}
-    principal = getattr(request.state, "principal", None)
-    return principal_scopes(principal) if principal is not None and hasattr(principal, "claims") else set()
 
 
 def require_machine_scope(scopes: set[str], machine: str, level: str, *, expires: int | None = None) -> None:
@@ -121,30 +134,9 @@ def authorize_machine_action(
         raise PermissionError("shell:execute permission is required")
 
 
-def _checked(request: Request, permissions: dict[str, str]) -> None:
-    from ..settings import get_settings
-
-    scopes = _principal_scopes(request)
-    settings = get_settings()
-    for machine, level in permissions.items():
-        if level == "none":
-            continue
-        if machine == "local" and settings.disable_local:
-            raise HTTPException(403, detail="Local machine is disabled")
-        if machine != "local" and not settings.remote_enabled:
-            raise HTTPException(403, detail="Remote machines are disabled")
-        try:
-            require_machine_scope(scopes, machine, level)
-        except PermissionError as exc:
-            raise HTTPException(403, detail=str(exc)) from exc
-
-
 async def available_machines(request: Request):
     _owner(request)
     from ..human_ui import _machine_rows
-
-    if "shell:read" not in _principal_scopes(request):
-        raise HTTPException(403, detail="shell:read permission is required")
     from ..settings import get_settings
 
     try:
@@ -160,8 +152,6 @@ async def available_machines(request: Request):
     for row in rows:
         name = row.get("name")
         if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
-            continue
-        if name != "local" and "remote:use" not in _principal_scopes(request):
             continue
         visible.append({"name": name, "status": row.get("status", "unknown")})
     return JSONResponse({"machines": visible})
@@ -182,15 +172,17 @@ async def default_permissions(request: Request):
             value = validate_access_map(body.get("machines"))
         except ValueError as exc:
             raise HTTPException(400, detail=str(exc)) from exc
-        _checked(request, value)
+        # UI toggles are exposure preferences, not OAuth grants. Runtime
+        # dispatch still validates the unchanged principal scopes.
         repository.save_setting(owner, key, value)
         from .durable_tasks import mark_revoked
 
         mark_revoked(owner)
     else:
         value = _stored(repository, owner, key)
-    inherited = {} if key == _GLOBAL else _stored(repository, owner, _GLOBAL)
-    return JSONResponse({"machines": value, "effective": {**inherited, **value}})
+    effective = (resolve_access(owner, repo=repository) if key == _GLOBAL
+                 else resolve_access(owner, project_id=project_id, repo=repository))
+    return JSONResponse({"machines": value, "effective": effective})
 
 
 def machine_permission_routes() -> list[Route]:

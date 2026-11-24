@@ -312,7 +312,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
     """
     from .agents import AgentRepository
     from .ask_user_tools import ask_user_requested
-    from .machine_permissions import require_machine_scope, resolve_access
+    from .machine_permissions import resolve_access
     from .providers import provider_config, selected_provider
     from .storage import WorkspaceRepository
 
@@ -426,9 +426,9 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                 policy = resolve_access(owner, row["parent_conversation_id"],
                                         repo=WorkspaceRepository(database))
                 try:
-                    for machine, level in policy.items():
-                        if level in {"read", "write"}:
-                            require_machine_scope(set(scopes), machine, level, expires=expiry)
+                    # Pure-text wakeups do not require machine OAuth grants.
+                    # Every actual native tool operation revalidates its own
+                    # persisted scopes and effective per-machine policy.
                     profile = provider_config(selected_provider({}, agent), agent.get("model"))
                 except (PermissionError, ValueError):
                     _retire(db, task_id, "Parent provider or delegated permission unavailable")
@@ -491,9 +491,9 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                 policy = resolve_access(owner, row["parent_conversation_id"],
                                         repo=WorkspaceRepository(database))
                 try:
-                    for machine, level in policy.items():
-                        if level in {"read", "write"}:
-                            require_machine_scope(set(scopes), machine, level, expires=expiry)
+                    # Pure-text wakeups do not require machine OAuth grants.
+                    # Every actual native tool operation revalidates its own
+                    # persisted scopes and effective per-machine policy.
                     profile = provider_config(selected_provider({}, agent), agent.get("model"))
                 except (ValueError, PermissionError):
                     _dead_dispatched(db, store, row, task_id, now,
@@ -524,7 +524,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                                    native_file_tools=any(v in {"read", "write"} for v in policy.values()),
                                    write_tools=any(v == "write" for v in policy.values()),
                                    ask_user_enabled=ask_user_requested(agent, {}),
-                                   mcp_enabled=isinstance(flags, dict) and flags.get("mcp") is True,
+                                   mcp_enabled=isinstance(flags, dict) and flags.get("mcp", True) is True,
                                    resume_history=None if new_turn else store.history(
                                        owner, generation.conversation_id,
                                        message_id=generation.user_message_id),

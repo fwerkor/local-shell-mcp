@@ -262,9 +262,11 @@ async def test_steer_http_requires_current_machine_grants_and_agent_ownership(co
     payload = {"conversationId": job.conversation_id, "text": "Trying to steer", "clientSteerId": "guard"}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                 base_url="http://test") as client:
+        # Steering only queues model text; native tool calls still check the
+        # currently authorized scopes when actually dispatched.
         blocked = await client.post("/api/agents/chat/steer", json=payload)
-        assert blocked.status_code == 403 and blocked.json()["code"] == "FORBIDDEN"
-        assert steering.pending("local", job.run_id) == []
+        assert blocked.status_code == 202
+        assert steering.pending("local", job.run_id)[0]["text"] == "Trying to steer"
         monkeypatch.setattr(generation_routes, "_request_grant", lambda _request: (
             frozenset({"shell:read", "shell:write"}), None,
         ))

@@ -112,7 +112,7 @@ async def test_repeated_queue_scans_do_not_duplicate_first_claim(environment):
 
 @pytest.mark.parametrize("mutation", [
     "deleted_generation", "expired_authorization", "removed_parent_agent",
-    "revoked_machine_scope", "provider_unavailable",
+    "provider_unavailable",
 ])
 @pytest.mark.asyncio
 async def test_failed_dispatched_continuation_releases_manual_result(environment, monkeypatch, mutation):
@@ -128,9 +128,6 @@ async def test_failed_dispatched_continuation_releases_manual_result(environment
             conn.execute("UPDATE subagent_tasks SET grant_expires=? WHERE id=?", (time.time() - 1, task_id))
         elif mutation == "removed_parent_agent":
             conn.execute("DELETE FROM agents WHERE id=?", (parent["id"],))
-        elif mutation == "revoked_machine_scope":
-            conn.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?)",
-                         ("local", "agent.machine_policy.global", '{"local":"read"}'))
     if mutation == "provider_unavailable":
         monkeypatch.setattr(providers, "provider_config", lambda *args: (_ for _ in ()).throw(
             ValueError("No provider")))
