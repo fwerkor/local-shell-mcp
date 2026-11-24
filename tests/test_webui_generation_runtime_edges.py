@@ -206,7 +206,7 @@ async def test_agent_without_machine_access_still_has_session_tools(active_gener
 
     async def session_tools_model(profile, history, **kwargs):
         assert {item["function"]["name"] for item in kwargs["tools"]} == {
-            "session_manage", "plan_manage",
+            "session_manage", "plan_manage", "web_search", "web_fetch",
         }
         yield "Plain chat works."
 
