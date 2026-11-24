@@ -240,8 +240,10 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     # Referenced channels show the real conflict and a deliberate
                     # force-delete option instead of an opaque HTTP 409.
                     await page.goto(f"http://127.0.0.1:{port}/c/new", wait_until="domcontentloaded")
+                    # Channel settings moved into the model selector dropdown.
                     await page.get_by_test_id("model-selector-button").click()
                     await page.get_by_test_id("model-selector-settings").click()
+                    await page.get_by_role("heading", name="Channels & models / 渠道与模型").wait_for()
                     await page.get_by_role("button", name="Delete Secondary Research").click()
                     async with page.expect_response(lambda response: response.request.method == "DELETE" and "name=Secondary%20Research" in response.url) as blocked:
                         await page.get_by_role("button", name="Confirm delete Secondary Research").click()
