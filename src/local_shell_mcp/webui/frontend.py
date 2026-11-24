@@ -132,9 +132,14 @@ async def frontend(request: Request) -> Response:
         if not is_spa_path("/" + relative):
             return Response(status_code=404)
         path = root / "index.html"
-    cache = "no-store" if path.name == "index.html" else ("no-cache" if relative.startswith("monaco/") else "public, max-age=3600")
-    headers = {"Cache-Control": cache}
-    return FileResponse(path, headers=headers)
+    if path.name == "index.html":
+        cache = "no-store"
+    elif relative.startswith("monaco/") or relative in {"manifest.webmanifest", "sw.js", "sw-heal.js", "registerSW.js"}:
+        cache = "no-cache"
+    else:
+        cache = "public, max-age=3600"
+    media_type = "application/manifest+json" if path.suffix == ".webmanifest" else None
+    return FileResponse(path, headers={"Cache-Control": cache}, media_type=media_type)
 
 
 class FrontendRoute(Route):
