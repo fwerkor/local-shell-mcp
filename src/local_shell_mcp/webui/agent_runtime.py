@@ -8,6 +8,8 @@ LSM rather than maintaining separate provider or machine execution systems.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -43,6 +45,24 @@ class AgentSuspended(Exception):
 
 
 _MODEL_RETRY_DELAYS = (0.4, 0.4 * 3)
+
+# A model that keeps re-issuing the same call and receiving the same result is
+# making no progress. Stop the run instead of streaming one durable event per
+# iteration; an unbounded loop otherwise writes without limit to SQLite.
+_MAX_REPEATED_TOOL_BATCHES = 2
+
+
+def _tool_batch_signature(calls: list[ModelToolCall], results: list[dict]) -> str:
+    """Fingerprint one tool round-trip: requested calls plus delivered results."""
+    payload = json.dumps(
+        {
+            "calls": [[call.name, call.arguments] for call in calls],
+            "results": results,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _retryable_model_error(error: Exception) -> bool:
@@ -80,6 +100,8 @@ class AgentLoopState:
     completed: bool = False
     graph_commands: list[dict] = field(default_factory=list)
     provider_projection: list[dict] | None = None
+    repeated_tool_batches: int = 0
+    last_tool_batch: str | None = None
 
 
 @dataclass
@@ -121,6 +143,18 @@ async def run_agent_loop(
                 if save_state is not None:
                     await save_state(state, state.pending_calls)
             output = await dispatch(state.pending_calls, state)
+            signature = _tool_batch_signature(state.pending_calls, output.messages)
+            if signature == state.last_tool_batch:
+                state.repeated_tool_batches += 1
+            else:
+                state.last_tool_batch = signature
+                state.repeated_tool_batches = 0
+            if state.repeated_tool_batches >= _MAX_REPEATED_TOOL_BATCHES:
+                raise RuntimeSafetyError(
+                    "The model repeated an identical tool call and received an "
+                    "identical result without making progress; the run was "
+                    "stopped to prevent an unbounded loop.",
+                )
             if output.replace_messages is not None:
                 state.messages = output.replace_messages
             state.messages.extend(output.messages)
