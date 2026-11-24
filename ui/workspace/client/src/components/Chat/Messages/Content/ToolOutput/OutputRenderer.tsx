@@ -5,6 +5,7 @@ import { hasToolCallErrorPrefix, stripToolCallErrorPrefix } from 'librechat-data
 import CopyButton from '~/components/Messages/Content/CopyButton';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
+import useLazyHighlight from '../Parts/useLazyHighlight';
 
 interface ContentBlock {
   type?: string;
@@ -75,6 +76,21 @@ function extractText(raw: string): ExtractedText {
           if (isError(joined)) {
             return { text: cleanError(joined), rawError: joined, error: true, isJson: false };
           }
+          // MCP text content can itself be a JSON-encoded tool result. Highlight
+          // that payload too, rather than treating the enclosing content array
+          // as the only structured layer.
+          if (joined.startsWith('{') || joined.startsWith('[')) {
+            try {
+              return {
+                text: JSON.stringify(JSON.parse(joined), null, 2),
+                rawError: '',
+                error: false,
+                isJson: true,
+              };
+            } catch {
+              // The content is ordinary text, not JSON.
+            }
+          }
           return { text: joined, rawError: '', error: false, isJson: false };
         }
       }
@@ -115,15 +131,22 @@ export default function OutputRenderer({ text, copyText }: OutputRendererProps) 
     setTimeout(() => setIsCopied(false), 3000);
   }, [copyText, displayText]);
 
-  if (!displayText) {
-    return null;
-  }
-
   const lines = displayText.split('\n');
   const needsTruncation = lines.length > TRUNCATE_LINES;
   const visibleText =
     needsTruncation && !isExpanded ? lines.slice(0, VISIBLE_LINES).join('\n') : displayText;
+  // Reuse the lazy highlighter used by code tool calls. It produces safe React
+  // nodes with hljs token classes; a bare `language-json` class does not tokenize
+  // anything. Cap highlighting work on very large expanded results.
+  const highlightedJson = useLazyHighlight(
+    isJson && visibleText.length <= 100_000 ? visibleText : undefined,
+    'json',
+  );
   const structured = !isJson && isStructuredText(displayText);
+
+  if (!displayText) {
+    return null;
+  }
 
   return (
     <div>
@@ -131,7 +154,7 @@ export default function OutputRenderer({ text, copyText }: OutputRendererProps) 
         {isJson ? (
           <pre className="max-h-[300px] overflow-auto rounded text-xs">
             <code className="hljs language-json !whitespace-pre-wrap !break-words">
-              {visibleText}
+              {highlightedJson ?? visibleText}
             </code>
           </pre>
         ) : (

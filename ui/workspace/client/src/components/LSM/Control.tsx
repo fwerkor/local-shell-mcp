@@ -1,7 +1,7 @@
-import { useParams, NavLink, Navigate, Link } from 'react-router-dom';
+import { useParams, NavLink, Navigate } from 'react-router-dom';
 import {
   Activity, Archive, Blocks, FileText, FolderOpen, LayoutDashboard,
-  MessagesSquare, Monitor, Server, TerminalSquare, ShieldCheck, Settings2,
+  Monitor, Server, TerminalSquare, ShieldCheck, Settings2,
 } from 'lucide-react';
 import useLocalize from '~/hooks/useLocalize';
 import Overview from './Overview';
@@ -40,10 +40,6 @@ export function ControlSidebar() {
           <Icon size={17} />{localize(titleKey)}
         </NavLink>
       ))}
-      <div className="my-2 border-t border-border-light" />
-      <Link to="/c/new" className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary">
-        <MessagesSquare size={17} /> {localize('com_lsm_chat')}
-      </Link>
     </div>
   );
 }

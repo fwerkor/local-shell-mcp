@@ -69,8 +69,14 @@ def test_native_control_pages_and_settings_source_are_retained():
 
 
 def test_webui_binary_release_embeds_frontend_and_has_no_backend_node_dependency():
-    package = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-    assert "--add-data ui/workspace/frontend.tar.gz:local_shell_mcp/webui" in package
-    built = WORKSPACE / "frontend.tar.gz"
-    assert built.is_file()
-    assert built.stat().st_size < 40_000_000
+    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "/ui/workspace/frontend.tar.gz" in ignore
+    for filename in ("ci.yml", "release.yml"):
+        workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
+        # Build the archive from source on clean checkouts instead of relying
+        # on an accidentally committed binary artifact.
+        assert "Build integrated React WebUI" in workflow
+        assert "bun run build" in workflow
+        assert "python scripts/embed-react-webui.py" in workflow
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "--add-data ui/workspace/frontend.tar.gz:local_shell_mcp/webui" in release
