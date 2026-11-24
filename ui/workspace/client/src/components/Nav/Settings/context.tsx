@@ -28,7 +28,6 @@ export function useSettingsContext(): SettingsContextValue {
   });
 
   const balanceEnabled = startupConfig?.balance?.enabled === true;
-  const langfuseConnectionAccess = startupConfig?.langfuseConnectionAccess === true;
   const adminPanelURL = startupConfig?.adminPanelURL ?? '';
   const isLocalProvider = user?.provider === 'local';
   const twoFactorEnabled = user?.twoFactorEnabled === true;
@@ -57,7 +56,6 @@ export function useSettingsContext(): SettingsContextValue {
       allowAccountDeletion,
       aboutEnabled,
       engineTTS,
-      langfuseConnectionAccess,
       adminPanelURL,
     }),
     [
@@ -74,7 +72,6 @@ export function useSettingsContext(): SettingsContextValue {
       allowAccountDeletion,
       aboutEnabled,
       engineTTS,
-      langfuseConnectionAccess,
       adminPanelURL,
     ],
   );
