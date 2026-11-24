@@ -1,7 +1,7 @@
 """Authenticated chat attachments stored within LSM's private state tree.
 
 The React workspace uploads directly to the Controller. File bytes stay under
-`.local-shell-mcp/attachments`; SQLite holds the owner-scoped metadata. The
+`.local-shell-mcp/attachments/YYYY/MM` (UTC); SQLite holds owner-scoped metadata. The
 old unreleased LibreChat staging directory and external bridge are unused.
 """
 
@@ -15,6 +15,7 @@ import os
 import re
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -36,20 +37,22 @@ def _upload_recovery_lock(state_dir: Path):
     return SQLiteStateStore(state_dir, migrate_files=False).lock("webui/attachment-upload-recovery")
 
 
-def _safe_attachment_path(owner: str, filename: str, state_dir: Path) -> Path:
+def _safe_attachment_path(filename: str, state_dir: Path) -> Path:
     if not isinstance(filename, str) or not 1 <= len(filename) <= 200:
         raise ValueError("Invalid attachment filename")
     name = filename.replace("\\", "/").split("/")[-1]
     if name in {"", ".", ".."} or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
         raise ValueError("Invalid attachment filename")
     root = state_dir.resolve()
-    recipient = hashlib.sha256(owner.encode("utf-8")).hexdigest()[:32]
-    parent = root / "attachments" / recipient
-    if root not in parent.resolve().parents:
+    now = datetime.now(timezone.utc)
+    parent = root / "attachments" / f"{now.year:04d}" / f"{now.month:02d}"
+    # Reject symlinks at every storage-directory level, including links
+    # pointing elsewhere inside the state tree.
+    if parent.resolve() != parent:
         raise PermissionError("Unsafe attachment directory")
     parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if parent.is_symlink():
-        raise PermissionError("Attachment directory cannot be a symlink")
+    if parent.resolve() != parent:
+        raise PermissionError("Unsafe attachment directory")
     return parent / (uuid.uuid4().hex + "-" + name)
 
 
@@ -191,7 +194,7 @@ async def upload_attachment(request: Request):
         raise HTTPException(400, detail="Attachment must be between 1 byte and 32 MiB")
     try:
         name = request.query_params.get("name", "")
-        _safe_attachment_path(owner, name, settings.state_dir)
+        _safe_attachment_path(name, settings.state_dir)
     except (ValueError, PermissionError) as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     record = await publish_attachment(owner, name, request.headers.get("content-type") or "application/octet-stream",
@@ -205,7 +208,7 @@ async def publish_attachment(owner, name, content_type, chunks, state_dir, *, ex
                              file_id=None, metadata=None, bind=None, process=None):
     """One safe physical publisher shared by native and original React uploads."""
     try:
-        target = _safe_attachment_path(owner, name, state_dir)
+        target = _safe_attachment_path(name, state_dir)
     except (ValueError, PermissionError) as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     file_id = file_id or "file_" + uuid.uuid4().hex
