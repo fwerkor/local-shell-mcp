@@ -168,6 +168,15 @@ jobs:
           bun run typecheck
           bun run build
 
+      - name: Build integrated React WebUI
+        working-directory: ui/workspace
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Generate React release archive
+        run: python scripts/embed-react-webui.py
+
       - name: Build platform wheel
         run: |
           python -m pip install --upgrade pip build

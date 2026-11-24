@@ -3178,6 +3178,8 @@
   "com_lsm_desktop": "Desktop",
   "com_lsm_inspect_gui_windows_and_send_approved_actions": "Inspect GUI windows and send approved actions.",
   "com_lsm_windows": "Windows",
+  "com_lsm_desktop_unavailable": "Desktop is unavailable",
+  "com_lsm_desktop_choose_graphical_machine": "Select a machine with an active graphical session.",
   "com_lsm_no_windows_available": "No windows available",
   "com_lsm_select_a_desktop_window_to_view_its_latest_frame": "Select a desktop window to view its latest frame.",
   "com_lsm_keyboard": "Keyboard",
