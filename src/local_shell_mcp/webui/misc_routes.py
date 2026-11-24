@@ -7,6 +7,8 @@ speech, search, credit or file backend is running.
 
 from __future__ import annotations
 
+import re
+
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -103,6 +105,67 @@ async def balance(request: Request):
     return JSONResponse({"tokenCredits": 0, "autoRefillEnabled": False})
 
 
+_FEATURE_DEFAULT_KEY = "conversation.features.global"
+_DEFAULT_FEATURES = {"web": True, "mcp": True, "memory": True, "mcpServers": None}
+
+
+def _validate_feature_change(body: dict) -> dict:
+    changes = {}
+    for key in ("web", "mcp", "memory"):
+        if key in body:
+            if type(body[key]) is not bool:
+                raise ValueError(f"{key} must be a boolean")
+            changes[key] = body[key]
+    if "mcpServers" in body:
+        servers = body["mcpServers"]
+        if servers is not None and (not isinstance(servers, list) or len(servers) > 128 or
+            any(not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name)
+                for name in servers) or len(set(servers)) != len(servers)):
+            raise ValueError("mcpServers must be null or up to 128 unique server names")
+        changes["mcpServers"] = servers
+    return changes
+
+
+def effective_features(owner: str, conversation_id: str | None = None, *, repo=None) -> dict:
+    repository = repo or _repo()
+    defaults = repository.setting(owner, _FEATURE_DEFAULT_KEY, {})
+    result = {**_DEFAULT_FEATURES, **{k: v for k, v in defaults.items()
+              if k in _DEFAULT_FEATURES}} if isinstance(defaults, dict) else dict(_DEFAULT_FEATURES)
+    if conversation_id:
+        saved = repository.setting(owner, "conversation.permissions." + conversation_id, {})
+        if isinstance(saved, dict):
+            result.update({k: v for k, v in saved.items() if k in _DEFAULT_FEATURES})
+    return result
+
+
+async def feature_defaults(request: Request):
+    owner = _owner(request)
+    repo = _repo()
+    if request.method == "PUT":
+        body = await _body(request)
+        try:
+            changes = _validate_feature_change(body)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+        repo.save_setting(owner, _FEATURE_DEFAULT_KEY,
+                          {**effective_features(owner, repo=repo), **changes})
+    return JSONResponse(effective_features(owner, repo=repo))
+
+
+async def registered_mcp_servers(request: Request):
+    _owner(request)
+    from ..dynamic_mcp import DynamicMCPManager
+    from ..settings import get_settings
+
+    result = await DynamicMCPManager(get_settings().state_dir).manage(action="list")
+    # The composer needs only names, enabled state and counts. Do not expose
+    # commands, paths, URLs or connection configuration to this endpoint.
+    return JSONResponse({"servers": [
+        {"name": server["name"], "enabled": server["enabled"],
+         "tool_count": server["tool_count"]} for server in result["servers"]
+    ]})
+
+
 async def conversation_permissions(request: Request):
     from .machine_permissions import (
         _CONVERSATION,
@@ -119,35 +182,29 @@ async def conversation_permissions(request: Request):
         raise HTTPException(404, detail="Conversation not found")
     key = "conversation.permissions." + conversation_id
     machine_key = _CONVERSATION + conversation_id
-    defaults = {"web": True, "lsm": True, "mcp": True, "memory": True}
     if request.method == "PUT":
         payload = await _body(request)
-        stored_flags = repo.setting(owner, key, {}) or {}
-        if not isinstance(stored_flags, dict):
-            stored_flags = {}
-        flags = {name: payload.get(name, stored_flags.get(name, default))
-                 for name, default in defaults.items()}
-        if any(type(item) is not bool for item in flags.values()):
-            raise HTTPException(400, detail="Permission flags must be booleans")
-        # An old bare `lsm` flag never confers implicit access to every machine.
+        try:
+            changes = _validate_feature_change(payload)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+        # Never grant access to machines from legacy boolean flags.
         if "machines" in payload:
             try:
                 machines = validate_access_map(payload["machines"])
             except ValueError as exc:
                 raise HTTPException(400, detail=str(exc)) from exc
             repo.save_setting(owner, machine_key, machines)
-        repo.save_setting(owner, key, flags)
+        existing = repo.setting(owner, key, {})
+        repo.save_setting(owner, key, {**(existing if isinstance(existing, dict) else {}), **changes})
         if "machines" in payload:
             from .durable_tasks import mark_revoked
 
             mark_revoked(owner)
-    else:
-        flags = repo.setting(owner, key, {}) or {}
-        if not isinstance(flags, dict):
-            flags = {}
+    flags = effective_features(owner, conversation_id, repo=repo)
     stored = _stored(repo, owner, machine_key)
     effective = resolve_access(owner, conversation_id, repo=repo)
-    return JSONResponse({**{name: flags.get(name, default) for name, default in defaults.items()},
+    return JSONResponse({**flags, "lsm": False,
                          "machines": stored, "effective": effective,
                          "projectId": convo.get("projectId")})
 
@@ -207,6 +264,8 @@ def misc_routes() -> list[Route]:
         Route("/api/banner", banner, methods=["GET"]),
         Route("/api/keys", user_key, methods=["GET"]),
         Route("/api/agents/tools/calls", tool_calls, methods=["GET"]),
+        Route("/api/lsm/feature-defaults", feature_defaults, methods=["GET", "PUT"]),
+        Route("/api/lsm/mcp/servers", registered_mcp_servers, methods=["GET"]),
         Route("/api/lsm/preferences/{conversation_id}", conversation_permissions, methods=["GET", "PUT"]),
         Route("/api/files/config", files_config, methods=["GET"]),
         Route("/api/agents/tools/web_search/auth", web_search_auth, methods=["GET"]),

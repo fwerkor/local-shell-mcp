@@ -23,6 +23,7 @@ from .artifact_prompts import agent_instructions, artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
+from .misc_routes import effective_features
 from .providers import (
     ProviderConfig,
     provider_config,
@@ -598,7 +599,6 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
     from .actions import ActionRepository
     from .checkpoints import SQLiteCheckpointSaver
     from .machine_permissions import resolve_access
-    from .routes import _repo
 
     database = _database()
     with database.connect() as conn:
@@ -672,7 +672,7 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
                        reissue={"tool_name": payload["tool_name"]})
         return False
     profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
-    flags = _repo().setting(owner, "conversation.permissions." + generation.conversation_id, {}) or {}
+    flags = effective_features(owner, generation.conversation_id)
     started = await _start_task(owner, generation, profile, agent,
                       native_file_tools=any(level in {"read", "write"} for level in policy.values()),
                       write_tools=any(level == "write" for level in policy.values()),
@@ -791,10 +791,8 @@ async def start_generation(request: Request):
     protocol = min(protocol, result.protocol_version)
     if fresh:
         ask_user_enabled = ask_user_requested(agent, payload)
-        from .routes import _repo
 
-        flags = _repo().setting(owner, "conversation.permissions." + result.conversation_id, {})
-        mcp_enabled = isinstance(flags, dict) and flags.get("mcp", True) is True
+        mcp_enabled = effective_features(owner, result.conversation_id)["mcp"]
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
@@ -1039,7 +1037,6 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     from .checkpoints import SQLiteCheckpointSaver
     from .generation_actor_lease import active_run_ids
     from .machine_permissions import resolve_access
-    from .routes import _repo
 
     # Detached subagent child generations are owned by their task host.
     # Foreground reconnect may observe SSE, but never claim their actor lease.
@@ -1089,7 +1086,7 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
         native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
         write_tools=any(level == "write" for level in machine_policy.values()),
         ask_user_enabled=bool(state.get("askUserEnabled")),
-        mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp", True)),
+        mcp_enabled=bool(effective_features(owner, cid)["mcp"]),
         resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
         partial_text=(checkpoint_text if checkpoint_text is not None
                       else _generation_store().accumulated_text(owner, generation.run_id)),
@@ -1233,14 +1230,13 @@ async def resume_generation(request: Request):
         detail = str(exc)
         conflict = detail in {"Conflicting human action retry", "Stale human action"}
         raise HTTPException(409 if conflict else 400, detail=detail) from exc
-    from .routes import _repo
 
     await _start_task(owner, resumed, profile, agent,
                       native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
                       artifacts_mode=state.get("artifactsMode"),
-                      mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp", True)),
+                      mcp_enabled=bool(effective_features(owner, cid)["mcp"]),
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
                       granted_scopes=frozenset(scopes), grant_expires=expiry,

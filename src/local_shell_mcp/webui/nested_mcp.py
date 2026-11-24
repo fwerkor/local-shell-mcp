@@ -7,6 +7,7 @@ Agent action; mcp_manage is never presented to the model.
 
 from __future__ import annotations
 
+from ..dynamic_mcp import _AGENT_ALLOWED_SERVERS
 from .lsm_tool_registry import _invoke_registered, registered_definitions
 from .providers import ModelToolCall
 
@@ -22,13 +23,40 @@ def _check_mcp_access(owner: str, conversation_id: str, scopes: set[str], *, exe
 
     if _repo().conversation(owner, conversation_id) is None:
         raise PermissionError("Conversation not found")
-    flags = _repo().setting(owner, "conversation.permissions." + conversation_id, {})
-    if not isinstance(flags, dict) or flags.get("mcp", True) is not True:
+    from .misc_routes import effective_features
+
+    if not effective_features(owner, conversation_id)["mcp"]:
         raise PermissionError("Nested MCP tools are disabled for this conversation")
     if "shell:read" not in scopes:
         raise PermissionError("shell:read is required to discover external tools")
     if execution and "shell:execute" not in scopes:
         raise PermissionError("shell:execute is required to invoke an external tool")
+
+
+def _allowed(owner: str, conversation_id: str, arguments: dict) -> frozenset[str] | None:
+    from .misc_routes import effective_features
+
+    selected = effective_features(owner, conversation_id)["mcpServers"]
+    if selected is None:
+        return None
+    allowed = frozenset(selected)
+    # Reject named targets before dispatch, including inspect and approved
+    # calls that may be resumed after a user's setting was changed.
+    name = arguments.get("name")
+    server = arguments.get("server")
+    target = name.split(":", 1)[0] if isinstance(name, str) else server
+    if target is not None and target not in allowed:
+        raise PermissionError(f"MCP server is disabled for this chat: {target}")
+    return allowed
+
+
+async def _invoke_selected(owner: str, conversation_id: str, scopes: set[str],
+                           name: str, arguments: dict) -> str:
+    token = _AGENT_ALLOWED_SERVERS.set(_allowed(owner, conversation_id, arguments))
+    try:
+        return await _invoke_registered(owner, conversation_id, name, arguments, scopes=scopes)
+    finally:
+        _AGENT_ALLOWED_SERVERS.reset(token)
 
 
 async def discover(owner: str, conversation_id: str, scopes: set[str], call: ModelToolCall) -> str:
@@ -38,7 +66,7 @@ async def discover(owner: str, conversation_id: str, scopes: set[str], call: Mod
         raise PermissionError("MCP execution requires explicit approval")
     if not isinstance(call.arguments, dict):
         raise ValueError("MCP discovery arguments must be an object")
-    return await _invoke_registered(owner, conversation_id, call.name, call.arguments, scopes=scopes)
+    return await _invoke_selected(owner, conversation_id, scopes, call.name, call.arguments)
 
 
 async def approved_call(owner: str, conversation_id: str, scopes: set[str], call: ModelToolCall) -> str:
@@ -52,4 +80,4 @@ async def approved_call(owner: str, conversation_id: str, scopes: set[str], call
         raise ValueError("Invalid qualified external MCP tool name or arguments")
     # This function is only reached after the immutable SQLite action ID and
     # the user's explicit approve decision have been validated by resume.
-    return await _invoke_registered(owner, conversation_id, "mcp_tool_call", arguments, scopes=scopes)
+    return await _invoke_selected(owner, conversation_id, scopes, "mcp_tool_call", arguments)

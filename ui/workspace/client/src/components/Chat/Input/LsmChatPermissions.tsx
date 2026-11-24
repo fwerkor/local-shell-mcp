@@ -83,12 +83,6 @@ function MachineAccessRow({
   );
 }
 
-const flagLabels: ReadonlyArray<{ key: keyof Flags; label: string }> = [
-  { key: 'web', label: '网络搜索' },
-  { key: 'mcp', label: '外部 MCP' },
-  { key: 'memory', label: '对话记忆' },
-];
-
 /** A UI-only exposure preference. Tokens and OAuth scopes are never modified. */
 export default function LsmChatPermissions({
   conversationId,
@@ -227,15 +221,6 @@ export default function LsmChatPermissions({
     mutation.mutate({ url, value });
   };
 
-  const saveFlag = (field: keyof Flags, enabled: boolean) => {
-    if (!chat.data || mutation.isLoading) return;
-    mutation.mutate({
-      url: `/api/lsm/preferences/${encodeURIComponent(chatId)}`,
-      value: { machines: chat.data.machines,
-        web: chat.data.web, mcp: chat.data.mcp, memory: chat.data.memory, [field]: enabled },
-    });
-  };
-
   const projectName = projects.data?.projects.find((item) => item.id === associatedProject)?.name;
   const isUnavailable = selected.isError || machines.isError ||
     (active === 'project' && (project.isError || projects.isError));
@@ -324,24 +309,6 @@ export default function LsmChatPermissions({
                   ))}
                 </div>
               </>
-            )}
-            {hasChat && active === 'chat' && (
-              <div className="mt-3 border-t border-border-light pt-3">
-                <h3 className="mb-1 text-xs font-semibold text-text-secondary">其它能力</h3>
-                {flagLabels.map(({ key, label }) => (
-                  <label key={key} className="flex cursor-pointer items-center justify-between rounded-md py-2 text-sm">
-                    <span>{label}</span>
-                    <span className="relative inline-flex items-center">
-                      <input type="checkbox" className="peer sr-only" aria-label={label}
-                        checked={chat.data?.[key] ?? false}
-                        disabled={!chat.data || mutation.isLoading}
-                        onChange={(event) => saveFlag(key, event.target.checked)} />
-                      <span className="h-5 w-9 rounded-full bg-surface-tertiary transition-colors peer-checked:bg-text-primary peer-focus-visible:outline peer-focus-visible:outline-2 peer-disabled:opacity-50" />
-                      <span className="pointer-events-none absolute left-0.5 top-0.5 size-4 rounded-full bg-surface-primary shadow-sm transition-transform peer-checked:translate-x-4" />
-                    </span>
-                  </label>
-                ))}
-              </div>
             )}
             {isUnavailable || mutation.isError ? (
               <p role="alert" className="mt-2 text-xs text-status-error">权限加载或保存失败，请重试。</p>

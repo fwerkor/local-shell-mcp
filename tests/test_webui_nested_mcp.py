@@ -144,6 +144,7 @@ async def test_nested_mcp_can_be_explicitly_disabled_and_management_tool_absent(
 
     repo = _repo()
     cid = repo.create_conversation("local", {"title": "No MCP"})["conversationId"]
+    # New conversations have MCP enabled by default; an explicit off must win.
     repo.save_setting("local", "conversation.permissions." + cid, {"mcp": False})
     registry = MockRegistry()
     monkeypatch.setattr(core_tools, "DynamicMCPManager", lambda *args, **kwargs: registry)
