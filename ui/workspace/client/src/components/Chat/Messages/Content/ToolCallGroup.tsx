@@ -32,6 +32,7 @@ import { StackedToolIcons } from './ToolOutput';
 import { mapAttachments } from '~/utils/map';
 import { getSourceDomains } from './sources';
 import SearchVerticals from './verticals';
+import { shouldExpandToolGroup } from './toolGroupExpansion';
 import store from '~/store';
 
 interface ToolCallGroupProps {
@@ -116,6 +117,10 @@ export default function ToolCallGroup({
    *  a tool entry here. */
   const hasPendingApproval = useMemo(
     () => parts.some(({ part }) => hasPendingApprovalInPart(part)),
+    [parts],
+  );
+  const hasPendingAuthRequest = useMemo(
+    () => parts.some(({ part }) => hasPendingAuthInPart(part)),
     [parts],
   );
   const activityLabel = getBatchActivityLabelPart(labelPart?.part);
@@ -273,26 +278,17 @@ export default function ToolCallGroup({
   }, [toolMetadata, localize, mcpServerNames]);
 
   const autoExpand = useRecoilValue(store.autoExpandTools);
-  /** A labeled activity block is summarized by its header, so it collapses
-   *  even at a single tool call — agent runs are full of one-call batches,
-   *  and leaving those expanded defeats the grouping. */
-  /** Every group has >= 1 tool; collapse a completed one by default just like
-   *  a multi-tool group, so a lone tool-with-thinking group (a skill, say)
-   *  stays visually consistent with the larger groups around it. */
-  /** A folded-in THINK part only renders inside this body, so auto-collapsing
-   *  a completed reasoning-bearing group leaves "Open Thinking Dropdowns by
-   *  Default" with no visible effect until the user opens the action group by
-   *  hand (on reload the body is not even mounted). */
-  const autoCollapse =
-    !autoExpand &&
-    !(showThinking && hasReasoning) &&
-    allCompleted &&
-    (count >= 1 || activityLabelText.length > 0);
-  const suppressAutoExpand = withinActivityPhase && !hasPendingApproval;
+  /** A tool group starts folded, even while its calls are running or its
+   *  outputs are streaming. Explicit auto-expand preference and pending user
+   *  actions are the only exceptions; a saved manual toggle always wins. */
+  const shouldExpandByDefault = shouldExpandToolGroup({
+    autoExpand,
+    withinActivityPhase,
+    hasPendingApproval,
+    hasPendingAuthRequest,
+  });
   const initialState = initialExpansionState?.userOverride === true ? initialExpansionState : null;
-  const [isExpanded, setIsExpanded] = useState(
-    initialState?.isExpanded ?? (autoExpand || (!autoCollapse && !suppressAutoExpand)),
-  );
+  const [isExpanded, setIsExpanded] = useState(initialState?.isExpanded ?? shouldExpandByDefault);
   const [userOverride, setUserOverride] = useState(initialState != null);
   const [shouldRenderBody, setShouldRenderBody] = useState(isExpanded);
   const previousIsExpandedRef = useRef(isExpanded);
@@ -318,10 +314,14 @@ export default function ToolCallGroup({
   }, [isExpanded, notifyLayoutChange]);
 
   useEffect(() => {
-    if (autoCollapse && !userOverride) {
-      setIsExpanded(false);
+    if (userOverride) {
+      return;
     }
-  }, [autoCollapse, userOverride]);
+    if (shouldExpandByDefault) {
+      setShouldRenderBody(true);
+    }
+    setIsExpanded(shouldExpandByDefault);
+  }, [shouldExpandByDefault, userOverride]);
 
   const handleToggle = useCallback(() => {
     const nextExpanded = !isExpanded;
@@ -496,22 +496,6 @@ export default function ToolCallGroup({
     failed: activityFailed ? 1 : activitySummary.failedCount,
     cancelled: activitySummary.cancelledCount,
   });
-
-  const hasActiveToolCall = useMemo(
-    () => isSubmitting && toolMetadata.some((m) => m && !m.hasOutput),
-    [toolMetadata, isSubmitting],
-  );
-  const hasPendingAuthRequest = useMemo(
-    () => parts.some(({ part }) => hasPendingAuthInPart(part)),
-    [parts],
-  );
-
-  useEffect(() => {
-    if (hasActiveToolCall && !userOverride && !suppressAutoExpand) {
-      setShouldRenderBody(true);
-      setIsExpanded(true);
-    }
-  }, [hasActiveToolCall, userOverride, suppressAutoExpand]);
 
   return (
     <div className="mb-2 mt-1" ref={rootRef}>
