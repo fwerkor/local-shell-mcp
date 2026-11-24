@@ -226,6 +226,16 @@ class GenerationStore:
             elif not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                                 (conversation_id, owner)).fetchone():
                 raise KeyError("Conversation not found")
+            elif state["model"] or payload.get("endpoint"):
+                # A later turn can switch model without recreating the chat. Keep
+                # the conversation's saved selection in sync with the actual
+                # request, including when the frontend did not send /convos/update.
+                db.execute(
+                    "UPDATE conversations SET model=CASE WHEN ? THEN ? ELSE model END, "
+                    "endpoint=COALESCE(?,endpoint),updated_at=? WHERE id=? AND owner=?",
+                    (bool(state["model"]), state["model"], payload.get("endpoint"),
+                     now, conversation_id, owner),
+                )
             if manual_compaction and not db.execute(
                 'SELECT 1 FROM messages WHERE id=? AND conversation_id=?',
                 (user_message_id, conversation_id),

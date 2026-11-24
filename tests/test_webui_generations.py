@@ -66,6 +66,24 @@ def test_generation_transaction_and_event_replay(database):
     assert store.recover_orphans() == 0
 
 
+def test_followup_updates_conversation_model_without_recreating_chat(database):
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
+    repo = WorkspaceRepository(database)
+    original = repo.create_conversation("alice", {
+        "endpoint": "openAI", "model": "previous-model", "title": "Existing chat",
+    })
+    cid = original["conversationId"]
+    job, fresh = GenerationStore(database).begin("alice", {
+        "conversationId": cid, "endpoint": "custom", "model": "new-model", "text": "Next turn",
+    })
+    assert fresh and job.conversation_id == cid
+    restored = repo.conversation("alice", cid)
+    assert restored["model"] == "new-model"
+    assert restored["endpoint"] == "custom"
+    assert restored["title"] == "Existing chat"
+
+
 def test_generation_rejects_bad_prompt_and_keeps_clean_database(database):
     store = GenerationStore(database)
     with pytest.raises(ValueError):
