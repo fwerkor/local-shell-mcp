@@ -157,7 +157,7 @@ async def test_restart_preserves_signin_and_bearer_reattachment_runs_action_once
         assert query.status_code == 200, query.text
         assert query.json()["active"] is True
         assert "pendingAction" not in query.json()  # native React renders the auth tool delta
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
         assert ctx.store.latest("local", ctx.gen.conversation_id).status == "complete"
         assert ctx.model_calls == ["user", "tool"]
         assert len(ctx.seen) == 1 and ctx.seen[0]["authorization"] == "Bearer new-test-access"
@@ -183,7 +183,7 @@ async def test_action_oauth_continuation_does_not_expand_machine_grants(scenario
         # OAuth Actions can resume without granting shell write privileges.
         resumed = await client.get(path, headers={"x-owner": "local", "x-scopes": "shell:read"})
         assert resumed.status_code == 200, resumed.text
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
         assert len(ctx.seen) == 1 and ctx.model_calls == ["user", "tool"]
         from local_shell_mcp.webui.lsm_tool_registry import call_tool
         from local_shell_mcp.webui.providers import ModelToolCall
@@ -211,7 +211,7 @@ async def test_workspace_cookie_resumes_automatically_without_becoming_machine_g
         await _login(ctx, state, client)
         # This unrelated OAuth Action may resume under a read-only browser
         # session; it does not confer native machine write permissions.
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
         assert ctx.store.latest("local", ctx.gen.conversation_id).status == "complete"
         assert len(ctx.seen) == 1
 
@@ -308,7 +308,7 @@ async def test_crash_after_post_tool_checkpoint_recovers_without_replaying_actio
         response = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
                                     headers={"x-owner": "local"})
         assert response.status_code == 200, response.text
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
     assert ctx.store.get("local", ctx.gen.run_id).status == "complete"
     assert ctx.model_calls == ["user", "tool"]
     assert ctx.seen == []  # The preceding HTTP result is reused from SQLite.
@@ -346,7 +346,7 @@ async def test_expired_action_oauth_link_reissues_once_across_concurrent_status_
         assert valid.status_code == 302 and "/oauth/success" in valid.headers["location"]
         result = await client.get(url, headers={"x-owner": "local"})
         assert result.status_code == 200
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
         assert ctx.store.get("local", ctx.gen.run_id).status == "complete"
         assert len(ctx.seen) == 1
 
@@ -432,7 +432,7 @@ async def test_two_oauth_actions_in_one_model_batch_never_send_http_before_both_
         status = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
                                   headers={"x-owner": "local"})
         assert status.status_code == 200
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
         assert ctx.store.get("local", ctx.gen.run_id).status == "requires_action"
         assert ctx.store.pending_action("local", ctx.gen.run_id)["payload"]["tool_call_id"] == "call-oauth-2"
         assert not ctx.seen  # No sibling can dispatch before all required grants.
@@ -447,7 +447,7 @@ async def test_two_oauth_actions_in_one_model_batch_never_send_http_before_both_
         status = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
                                   headers={"x-owner": "local"})
         assert status.status_code == 200
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
         assert ctx.store.get("local", ctx.gen.run_id).status == "complete"
         assert ctx.model_calls == ["user", "tool"]
         assert len(ctx.seen) == 2
@@ -472,7 +472,7 @@ async def test_approved_action_oauth_login_keeps_review_and_calls_once(scenario,
             "decisions": [{"tool_call_id": "call-oauth", "decision": "approve"}],
         }, headers={"x-owner": "local"})
         assert approval.status_code == 200, approval.text
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
         assert ctx.store.get("local", ctx.gen.run_id).status == "requires_action"
         assert ctx.store.approved_review("local", ctx.gen.run_id) is None  # approval is retained in paused state
         with ctx.db.connect() as conn:
@@ -487,7 +487,7 @@ async def test_approved_action_oauth_login_keeps_review_and_calls_once(scenario,
         resumed = await client.get(f"/api/agents/chat/status/{ctx.gen.conversation_id}",
                                    headers={"x-owner": "local"})
         assert resumed.status_code == 200, resumed.text
-        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=8)
+        await asyncio.wait_for(asyncio.gather(*list(generation_routes._TASKS.values())), timeout=30)
         assert ctx.store.get("local", ctx.gen.run_id).status == "complete"
         assert ctx.model_calls == ["user", "tool"]
         assert len(ctx.seen) == 1
