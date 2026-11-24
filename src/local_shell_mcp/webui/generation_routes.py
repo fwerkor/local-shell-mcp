@@ -165,6 +165,40 @@ def _recovered_terminal_steps(store, owner: str, run_id: str, visible_text: str)
     return recovered
 
 
+def _generation_error_report(exc: Exception, generation: Generation, profile: ProviderConfig) -> str:
+    """Persist actionable error details without exposing credentials or URLs.
+
+    Exception strings can contain raw upstream headers, request bodies or
+    credentials. Expose only whitelisted transport diagnostics; the run ID
+    permits correlating a failed turn with the Controller's server logs.
+    """
+    import httpx
+
+    kind = type(exc).__name__
+    if isinstance(exc, httpx.RemoteProtocolError):
+        # The two well-known httpcore diagnostics contain no request secrets.
+        raw = str(exc)
+        if raw == 'Server disconnected without sending a response.':
+            cause = raw
+        elif raw.startswith('peer closed connection without sending complete message body'):
+            cause = 'The upstream HTTP response ended before its body was complete.'
+        else:
+            cause = 'The upstream HTTP connection closed unexpectedly.'
+    elif isinstance(exc, httpx.HTTPStatusError):
+        cause = f'The upstream model API returned HTTP {exc.response.status_code}.'
+    elif isinstance(exc, httpx.TimeoutException):
+        cause = 'The model API connection or response exceeded its timeout.'
+    elif isinstance(exc, httpx.RequestError):
+        cause = 'The model API connection failed.'
+    else:
+        cause = 'The Controller stopped model generation; inspect the server logs for the traceback.'
+    return (f'Model generation failed ({kind})\n'
+            f'Exception: {type(exc).__module__}.{kind}\n'
+            f'Reason: {cause}\n'
+            f'Model: {profile.model}\n'
+            f'Run ID: {generation.run_id}')
+
+
 async def _run_model(
     owner: str, generation: Generation, profile: ProviderConfig,
     *, instructions: str = "", parameters: dict | None = None,
@@ -332,7 +366,8 @@ async def _run_model(
                              approved_batch=approved_batch, on_injected=on_injected,
                              on_tool_completed=on_tool_completed,
                              wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
-                             actor_lease=actor_lease, recovery_steers=recovery_steers)
+                             actor_lease=actor_lease, recovery_steers=recovery_steers,
+                             web_search_enabled=generation.web_search_enabled)
         # Only the first entry determines this run's prefix. After human
         # actions, resume_history/checkpoints already contain prior run steps.
         original_boundary = len(history) if resume_history is None else len(
@@ -415,9 +450,11 @@ async def _run_model(
             except Exception:
                 return
         # Do not put provider tokens, request metadata or secrets in response.
-        log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
+        error_report = _generation_error_report(exc, generation, profile)
+        log.warning("Model generation failed for %s: %s", generation.run_id,
+                    error_report.replace('\n', '; '))
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=f"Model generation failed ({type(exc).__name__})",
+                    error=error_report,
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
                                                              "".join(text_parts)), actor_lease=actor_lease)
     finally:

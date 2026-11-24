@@ -1,3 +1,4 @@
+import axios from 'axios';
 import request from './request';
 
 export const endpoint = '/api/lsm/controller';
@@ -14,15 +15,36 @@ export function qs(params: Record<string, string | number | undefined>): string 
   const result = search.toString();
   return result ? '?' + result : '';
 }
+/** Preserve the controller's JSON error instead of hiding it behind AxiosError 400. */
+export function controllerError(error: unknown): Error {
+  if (axios.isAxiosError(error)) {
+    const data: unknown = error.response?.data;
+    if (data && typeof data === 'object') {
+      const envelope = data as { message?: unknown; error?: unknown };
+      const detail = envelope.message || envelope.error;
+      if (typeof detail === 'string' && detail.trim()) return new Error(detail);
+    }
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export async function read<T>(route: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
-  const result = await request.get<Envelope<T>>(endpoint + '/' + route + qs(params));
-  if (!result.ok) throw new Error(result.message || result.error || 'Controller request failed');
-  return result.data;
+  try {
+    const result = await request.get<Envelope<T>>(endpoint + '/' + route + qs(params));
+    if (!result.ok) throw new Error(result.message || result.error || 'Controller request failed');
+    return result.data;
+  } catch (error) {
+    throw controllerError(error);
+  }
 }
 export async function write<T>(route: string, body: RecordValue): Promise<T> {
-  const result = (await request.post(endpoint + '/' + route, body)) as Envelope<T>;
-  if (!result.ok) throw new Error(result.message || result.error || 'Controller action failed');
-  return result.data;
+  try {
+    const result = (await request.post(endpoint + '/' + route, body)) as Envelope<T>;
+    if (!result.ok) throw new Error(result.message || result.error || 'Controller action failed');
+    return result.data;
+  } catch (error) {
+    throw controllerError(error);
+  }
 }
 export async function binaryRequest(
   route: string, token: string | undefined, options: RequestInit = {},
@@ -35,7 +57,12 @@ export async function binaryRequest(
     },
     credentials: 'same-origin',
   });
-  if (!response.ok) throw new Error('LSM request failed (' + response.status + ')');
+  if (!response.ok) {
+    const data = await response.json().catch(() => null) as { message?: unknown; error?: unknown } | null;
+    const detail = data?.message || data?.error;
+    throw new Error(typeof detail === 'string' && detail.trim()
+      ? detail : 'LSM request failed (' + response.status + ')');
+  }
   return response;
 }
 export const asText = (value: unknown): string => {

@@ -14,6 +14,8 @@ export type ConvoActionsProps = {
   isActiveConvo: boolean;
   isShiftHeld?: boolean;
   isPopoverActive: boolean;
+  /** A right-click anchors the existing overflow actions to the pointer. */
+  contextMenuPoint: { x: number; y: number } | null;
   /** True once the pointer or focus has reached the row. */
   hasInteracted: boolean;
   retainView: () => void;

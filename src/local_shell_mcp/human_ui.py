@@ -688,6 +688,15 @@ async def _remote_call(
         rpc_timeout_s=rpc_timeout_s,
     )
     if not result.get("ok", False):
+        data = result.get("data")
+        if (
+            tool == "gui_list"
+            and isinstance(data, dict)
+            and data.get("error_type") == "GuiUnavailableError"
+        ):
+            from .gui import GuiUnavailableError
+
+            raise GuiUnavailableError(str(data.get("message") or "Remote GUI unavailable"))
         raise RuntimeError(result.get("message") or f"Remote operation failed: {tool}")
     data = result.get("data")
     if isinstance(data, dict) and data.get("status") == "error":
@@ -1331,11 +1340,11 @@ async def api_file_action(request: Request) -> Response:
 
 
 async def api_gui_windows(request: Request) -> Response:
+    from .gui import GuiUnavailableError, get_gui_manager
+
     machine = str(request.query_params.get("machine") or "local")
     try:
         _require_ui_scopes(request, "shell:read", machine=machine)
-        from .gui import get_gui_manager
-
         remote_args = (
             {
                 "_allow_dependency_install": _ui_principal_allows(
@@ -1355,7 +1364,17 @@ async def api_gui_windows(request: Request) -> Response:
         )
         if not isinstance(payload, dict):
             raise TypeError("GUI window listing returned an invalid payload")
-        return _json_ok({"machine": machine, **payload})
+        return _json_ok({"machine": machine, "available": True, **payload})
+    except GuiUnavailableError as exc:
+        # A headless controller is a valid deployment.  Report its absent
+        # display as an unavailable Desktop, not a malformed HTTP request.
+        return _json_ok({
+            "machine": machine,
+            "available": False,
+            "reason": str(exc),
+            "windows": [],
+            "capabilities": {},
+        })
     except Exception as exc:
         return _json_error(exc)
 

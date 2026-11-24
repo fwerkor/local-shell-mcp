@@ -1,5 +1,4 @@
 import { useGetModelsQuery } from 'librechat-data-provider/react-query';
-import { Link } from 'react-router-dom';
 import { memo, useRef, useMemo, useEffect, useState, useCallback } from 'react';
 import { useWatch } from 'react-hook-form';
 import { useRecoilState, useRecoilValue, useRecoilCallback } from 'recoil';
@@ -682,10 +681,6 @@ const ChatForm = memo(function ChatForm({
               onRestoreToComposer={restoreReclaimedSteer}
             />
           )}
-          <div className="mb-2 text-right text-xs text-text-secondary">
-            {!hasConfiguredModels && <span>Configure a model to send messages. </span>}
-            <Link className="underline hover:text-text-primary" to="/control/settings#models">Channels &amp; models / 渠道与模型</Link>
-          </div>
           {(project || codeWorkspace.visible) && (
             <div
               data-testid="composer-context-rail"
