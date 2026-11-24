@@ -110,6 +110,41 @@ def context_usage_snapshot(messages: list[dict], tools: list[dict],
     }
 
 
+def provider_usage_snapshot(*, input_tokens: int, output_tokens: int,
+                            provider: str, model: str, messages: list[dict],
+                            tools: list[dict], max_context_tokens: int | None,
+                            run_id: str, agent_id: str | None = None,
+                            reserve_ratio: float = DEFAULT_RESERVE_RATIO,
+                            calibration_ratio: float = 1.0) -> dict:
+    """Snapshot of confirmed request usage; unknown window size stays unknown.
+
+    The total is a provider-reported request total, not a tokenizer guess about
+    the next prompt. The category breakdown (where available) remains estimated.
+    """
+    if max_context_tokens is not None:
+        snapshot = context_usage_snapshot(
+            messages, tools, max_context_tokens, reserve_ratio=reserve_ratio,
+            run_id=run_id, agent_id=agent_id, calibration_ratio=calibration_ratio)
+    else:
+        snapshot = {
+            'runId': run_id,
+            **({'agentId': agent_id} if agent_id else {}),
+            'breakdown': {
+                'maxContextTokens': 0, 'instructionTokens': 0,
+                'systemMessageTokens': 0, 'dynamicInstructionTokens': 0,
+                'toolSchemaTokens': 0, 'summaryTokens': 0,
+                'toolCount': len(tools), 'messageCount': len(messages),
+                'messageTokens': 0, 'availableForMessages': 0,
+            },
+        }
+    snapshot.update({
+        'provider': provider, 'model': model,
+        'providerInputTokens': input_tokens,
+        'providerOutputTokens': output_tokens,
+    })
+    return snapshot
+
+
 def should_trigger_summarization(*, messages_to_refine_count: int,
                                  trigger: dict | None = None,
                                  max_context_tokens: int | None = None,

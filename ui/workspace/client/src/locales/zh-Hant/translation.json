@@ -1009,6 +1009,7 @@
   "com_ui_context_usage_label_unknown": "脈絡使用量：已使用 {{0}} 個 Token",
   "com_ui_context_usage_snapshot": "脈絡 {{0}} / {{1}}（{{2}}%）",
   "com_ui_context_usage_snapshot_unknown": "脈絡 {{0}}",
+  "com_ui_context_provider_reported": "模型 API 回傳的最近一次請求實際用量（輸入 + 輸出）。下次請求的脈絡可能不同。",
   "com_ui_context_window": "脈絡視窗",
   "com_ui_continue": "繼續",
   "com_ui_continue_chat": "繼續此對話",

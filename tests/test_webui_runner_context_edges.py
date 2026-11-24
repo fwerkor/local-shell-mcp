@@ -18,7 +18,12 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
 @pytest.fixture
-def runtime(tmp_path):
+def runtime(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path / '.local-shell-mcp')
     store = GenerationStore(db)
     profile = ProviderConfig('openai', 'test', 'http://127.0.0.1:10000/v1/chat/completions', '')
@@ -35,7 +40,8 @@ def runtime(tmp_path):
     runner = AgentRunner('a', job, db, store, scopes=set(), grant_expires=None,
                          stream_tools=empty_stream, stream_text=empty_stream,
                          on_text=emit, profile=profile)
-    return db, store, setting, profile, runner
+    yield db, store, setting, profile, runner
+    get_settings.cache_clear()
 
 
 def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, monkeypatch):

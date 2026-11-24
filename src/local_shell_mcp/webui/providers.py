@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
 
@@ -68,7 +69,7 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
         raise ValueError("Unsupported model provider")
     return ProviderConfig(kind, name, url, token,
                           include_usage=kind == 'openai' and (
-                              value.get('include_usage') is True or urlsplit(base).hostname == 'api.openai.com'))
+                              value.get('include_usage') is not False))
 
 
 async def _data_frames(response) -> AsyncIterator[str]:
@@ -84,6 +85,26 @@ async def _data_frames(response) -> AsyncIterator[str]:
             data.append(line[5:].lstrip(" "))
     if data:
         yield "\n".join(data)
+
+
+@asynccontextmanager
+async def _provider_stream(client, url: str, *, body: dict, headers: dict):
+    """Request streaming usage where supported; retry only explicit unsupported-option errors.
+
+    A 4xx caused by a key, model, or tool schema is never retried or hidden.
+    The fallback starts before any tokens have been delivered to the caller.
+    """
+    async with client.stream("POST", url, json=body, headers=headers) as response:
+        if response.status_code in {400, 422} and 'stream_options' in body:
+            problem = (await response.aread())[:4096].lower()
+            if b'stream_options' in problem or b'include_usage' in problem:
+                without_usage = {key: value for key, value in body.items() if key != 'stream_options'}
+                async with client.stream("POST", url, json=without_usage, headers=headers) as retry:
+                    retry.raise_for_status()
+                    yield retry
+                return
+        response.raise_for_status()
+        yield response
 
 
 def _openai_messages(messages: list[dict]) -> list[dict]:
@@ -260,9 +281,8 @@ async def stream_model(
     finish_reason = None
     async with (
         httpx.AsyncClient(timeout=timeout) as http,
-        http.stream("POST", config.url, json=body, headers=headers) as response,
+        _provider_stream(http, config.url, body=body, headers=headers) as response,
     ):
-        response.raise_for_status()
         async for frame in _data_frames(response):
             if frame == "[DONE]":
                 break
@@ -392,9 +412,8 @@ async def stream_model_with_tools(
     usage_snapshot = None
     async with (
         httpx.AsyncClient(timeout=timeout) as client,
-        client.stream("POST", config.url, headers=headers, json=body) as response,
+        _provider_stream(client, config.url, body=body, headers=headers) as response,
     ):
-        response.raise_for_status()
         async for frame in _data_frames(response):
             if frame == "[DONE]":
                 break

@@ -427,6 +427,30 @@ async def test_legacy_reset_protects_case_insensitive_runtime_aliases(setup_prof
 
 
 @pytest.mark.asyncio
+async def test_model_context_limits_in_token_config_and_input_validation(setup_profiles):
+    _, app = setup_profiles
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='https://lsm.invalid') as client:
+        data = {'name': 'Window Test', 'provider': 'openai',
+                'base_url': 'https://gateway.invalid/v1', 'api_key': 'secret',
+                'models': ['m1', 'm2'], 'model_contexts': {'m1': 128000, 'm2': 8192}}
+        response = await client.put('/api/lsm/providers', headers=_ADMIN, json=data)
+        assert response.status_code == 200, response.text
+        assert provider_config('Window Test').include_usage is True
+        assert (await client.get('/api/endpoints/token-config', headers=_ADMIN)).json() == {
+            'Window Test': {'m1': {'context': 128000}, 'm2': {'context': 8192}}}
+        listed = (await client.get('/api/lsm/providers', headers=_ADMIN)).json()['providers']
+        assert next(item for item in listed if item.get('name') == 'Window Test')['model_contexts'] == data['model_contexts']
+        for limits in ({'unknown': 100}, {'m1': 0}, {'m1': -1}, {'m1': True},
+                       {'m1': 2_000_001}, {'m1': '8192'}, ['m1', 8192]):
+            invalid = await client.put('/api/lsm/providers', headers=_ADMIN,
+                                       json={**data, 'model_contexts': limits})
+            assert invalid.status_code == 400, (limits, invalid.text)
+        assert (await client.get('/api/endpoints/token-config', headers=_ADMIN)).json() == {
+            'Window Test': {'m1': {'context': 128000}, 'm2': {'context': 8192}}}
+
+
+@pytest.mark.asyncio
 async def test_explicit_force_delete_named_channel_retains_history_without_rerouting(setup_profiles):
     _, app = setup_profiles
     from local_shell_mcp.webui.agents import AgentRepository

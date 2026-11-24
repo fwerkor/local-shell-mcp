@@ -130,6 +130,7 @@ export default function Breakdown({
     percent = Math.min(Math.max(view.percent, 0), 100);
   }
   const { snapshot, snapshotActive, branchUsage, hasUsage } = view;
+  const providerReported = view.providerInputTokens != null;
   /** Show the all-branches total only when it (a) exceeds the active branch —
    *  epsilon guards against float summation order surfacing a spurious row in an
    *  unbranched conversation — and (b) has COMPLETE cost coverage, so a sibling
@@ -258,7 +259,14 @@ export default function Breakdown({
    *  Deferred tools keep their family's slot and are hatched — same identity,
    *  held out of the active set. */
   const segments: Array<MeterSegment & { label: string }> =
-    breakdown == null
+    providerReported
+      ? [
+          { id: 'provider-input', label: localize('com_ui_input'),
+            value: view.providerInputTokens ?? 0, slot: 1 },
+          { id: 'provider-output', label: localize('com_ui_output'),
+            value: view.providerOutputTokens ?? 0, slot: 2 },
+        ]
+      : breakdown == null
       ? []
       : [
           {
@@ -447,7 +455,22 @@ export default function Breakdown({
               className="space-y-1.5"
               data-testid={breakdown ? 'context-breakdown' : 'context-estimate'}
             >
-              {breakdown ? (
+              {providerReported ? (
+                <>
+                  {segments.map(({ id, label, value, ...segment }) => (
+                    <Row key={id} id={id} label={label} value={value}
+                      max={maxTokens} segment={segment} onHoverChange={setHoveredSegment} />
+                  ))}
+                  {freeTokens != null && <Row label={localize('com_ui_context_free')}
+                    value={freeTokens} max={maxTokens} track />}
+                  {maxTokens == null && <p className="text-xs text-text-secondary">
+                    {localize('com_ui_context_unknown')}
+                  </p>}
+                  <p className="text-xs text-text-secondary">
+                    {localize('com_ui_context_provider_reported')}
+                  </p>
+                </>
+              ) : breakdown ? (
                 <>
                   {segments.map(({ id, label, value, ...segment }) => {
                     const shouldRender =

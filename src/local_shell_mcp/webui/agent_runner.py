@@ -1019,11 +1019,62 @@ class AgentRunner:
             })
         return summary
 
+    def _context_limit(self, state: AgentLoopState, settings: dict | None = None) -> int | None:
+        """Resolve the explicit agent limit first, then this channel's model limit."""
+        if settings is None:
+            from .storage import WorkspaceRepository
+            settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+        params = state.context.parameters or {}
+        agents = settings.get('agents') or {}
+        raw = (params.get('max_context_tokens') or params.get('maxContextTokens')
+               or agents.get('maxContextTokens'))
+        if type(raw) in (int, float) and 0 < raw <= 2_000_000:
+            return int(raw)
+        from .provider_profiles import profile
+
+        channel = (state.context.agent or {}).get('provider')
+        if not channel:
+            with self.database.connect() as db:
+                row = db.execute('SELECT state FROM runs WHERE id=?', (self.generation.run_id,)).fetchone()
+            channel = (json.loads(row['state']).get('provider') if row else None)
+        if not isinstance(channel, str) or not channel:
+            return None
+        try:
+            stored = profile(channel)
+        except ValueError:
+            return None
+        limit = (stored.get('model_contexts') or {}).get(state.context.profile.model)
+        return limit if type(limit) is int and 0 < limit <= 2_000_000 else None
+
     async def _observe_model_usage(self, usage: ModelUsage, state: AgentLoopState) -> None:
         """Update cumulative raw/provider ratio only on genuine usage frames."""
         if self.namespace or usage.provider != state.context.profile.provider:
             return
-        from .context_budget import calculate_budget
+        if usage.input_tokens <= 0:
+            return
+        from .context_budget import calculate_budget, provider_usage_snapshot
+
+        # Persist actual provider counts on every confirmed primary call, even
+        # when the model has no configured context limit. The previous path
+        # only saved a calibrated estimate and skipped unknown limits entirely.
+        try:
+            from .storage import WorkspaceRepository
+            settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+            options = settings.get('summarization') or {}
+            ratio = options.get('reserveRatio', 0.05) if isinstance(options, dict) else 0.05
+            calibration = self.store.token_calibration(self.owner, self.generation.run_id,
+                state.context.profile.provider, state.context.profile.model)
+            snapshot = provider_usage_snapshot(
+                input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
+                provider=usage.provider, model=state.context.profile.model,
+                messages=state.provider_projection or state.messages, tools=state.context.tools,
+                max_context_tokens=self._context_limit(state, settings),
+                reserve_ratio=ratio, calibration_ratio=calibration.ratio,
+                run_id=self.generation.run_id,
+                agent_id=(state.context.agent or {}).get('id'))
+            self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
+        except Exception as exc:
+            logging.getLogger(__name__).warning('Provider context usage unavailable (%s)', type(exc).__name__)
 
         profile = state.context.profile
         try:
@@ -1098,10 +1149,8 @@ class AgentRunner:
         if self.namespace:
             return
         settings = repository.setting(self.owner, 'endpoints', {}) or {}
-        agent_settings = settings.get('agents') or {}
-        params = state.context.parameters or {}
-        max_raw = params.get('max_context_tokens') or params.get('maxContextTokens') or agent_settings.get('maxContextTokens')
-        if not isinstance(max_raw, (int, float)) or isinstance(max_raw, bool) or not 0 < max_raw <= 2000000:
+        max_raw = self._context_limit(state, settings)
+        if max_raw is None:
             return
         calibration = self.store.token_calibration(
             self.owner, self.generation.run_id,

@@ -152,7 +152,19 @@ async def models(request: Request):
 
 async def token_configs(request: Request):
     _owner(request)
-    return JSONResponse({})
+    from .provider_profiles import all_profiles
+
+    result = {}
+    for value in all_profiles():
+        name = value.get('name') or ('openAI' if value['provider'] == 'openai' else value['provider'])
+        contexts = value.get('model_contexts', {})
+        if not isinstance(contexts, dict):
+            continue
+        entries = {model: {'context': limit} for model, limit in contexts.items()
+                   if model in value.get('models', ()) and type(limit) is int and 0 < limit <= 2_000_000}
+        if entries:
+            result[name] = entries
+    return JSONResponse(result)
 
 
 async def preferences(request: Request):

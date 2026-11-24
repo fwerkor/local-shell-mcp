@@ -48,6 +48,9 @@ export interface TokenUsageView {
   percent: number;
   /** True when derived from per-message counts instead of a backend snapshot */
   isEstimate: boolean;
+  /** Last model call's provider-confirmed request usage (distinct from message-history estimates). */
+  providerInputTokens?: number;
+  providerOutputTokens?: number;
   snapshot: ContextSnapshot | null;
   snapshotActive: boolean;
   branchTotals: BranchTotals;
@@ -305,7 +308,18 @@ export default function useTokenUsage({
     }
     if (effective != null) {
       const breakdown = effective.breakdown;
-      const maxTokens = normalizeTokenCount(effective.contextBudget ?? breakdown.maxContextTokens);
+      const configuredMax = normalizeTokenCount(
+        limits.maxContextTokens ?? breakdown.maxContextTokens ?? effective.contextBudget,
+      );
+      const maxTokens = configuredMax > 0 ? configuredMax : undefined;
+      const providerInputTokens =
+        Number.isSafeInteger(effective.providerInputTokens) && effective.providerInputTokens! > 0
+          ? effective.providerInputTokens
+          : undefined;
+      const providerOutputTokens = providerInputTokens != null &&
+        Number.isSafeInteger(effective.providerOutputTokens) && effective.providerOutputTokens! >= 0
+          ? effective.providerOutputTokens
+          : undefined;
       const instructionTokens = normalizeTokenCount(
         effective.effectiveInstructionTokens ?? breakdown.instructionTokens,
       );
@@ -321,7 +335,7 @@ export default function useTokenUsage({
        *  snapshot publishes would put used below the instruction and summary
        *  shares the breakdown subtracts, hiding the Messages row. */
       const baseUsed =
-        remainingContextTokens != null
+        remainingContextTokens != null && maxTokens != null
           ? Math.max(maxTokens - remainingContextTokens, breakdownUsed)
           : breakdownUsed;
       /** The snapshot is pre-invoke: in-flight output rides on `liveTokens` (0
@@ -329,13 +343,17 @@ export default function useTokenUsage({
        *  `completedOutputTokens`, and retained tool results on
        *  `retainedToolTokens`. */
       const usedTokens = normalizeTokenCount(
-        Math.max(0, baseUsed) + liveOutput + completedOutput + retainedToolTokens,
+        providerInputTokens != null
+          ? providerInputTokens + (providerOutputTokens ?? 0)
+          : Math.max(0, baseUsed) + liveOutput + completedOutput + retainedToolTokens,
       );
       return {
         usedTokens,
         maxTokens,
-        percent: maxTokens > 0 ? Math.min((usedTokens / maxTokens) * 100, 100) : 0,
-        isEstimate: false,
+        percent: maxTokens != null ? Math.min((usedTokens / maxTokens) * 100, 100) : 0,
+        isEstimate: providerInputTokens == null,
+        providerInputTokens,
+        providerOutputTokens,
         snapshot: effective,
         snapshotActive: true,
         branchTotals,
