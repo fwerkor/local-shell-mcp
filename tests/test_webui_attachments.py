@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -19,7 +19,7 @@ from local_shell_mcp.webui.attachments import _safe_attachment_path
 def test_attachments_have_monthly_private_paths(tmp_path):
     first = _safe_attachment_path("../../../notes.txt", tmp_path / ".local-shell-mcp")
     second = _safe_attachment_path("notes.txt", tmp_path / ".local-shell-mcp")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assert first.parent == second.parent == tmp_path / ".local-shell-mcp" / "attachments" / f"{now.year:04d}" / f"{now.month:02d}"
     assert first != second
     assert first.name.endswith("-notes.txt")
@@ -136,7 +136,7 @@ def test_attachment_directory_symlinks_are_not_followed(tmp_path):
     container.mkdir()
     outsider = tmp_path / "outsider"
     outsider.mkdir()
-    unsafe = container / f"{datetime.now(timezone.utc).year:04d}"
+    unsafe = container / f"{datetime.now(UTC).year:04d}"
     unsafe.symlink_to(outsider, target_is_directory=True)
     with pytest.raises(PermissionError, match="Unsafe"):
         _safe_attachment_path("notes.txt", state)

@@ -15,7 +15,7 @@ import os
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -44,7 +44,7 @@ def _safe_attachment_path(filename: str, state_dir: Path) -> Path:
     if name in {"", ".", ".."} or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
         raise ValueError("Invalid attachment filename")
     root = state_dir.resolve()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     parent = root / "attachments" / f"{now.year:04d}" / f"{now.month:02d}"
     # Reject symlinks at every storage-directory level, including links
     # pointing elsewhere inside the state tree.
