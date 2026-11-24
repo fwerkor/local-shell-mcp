@@ -8,12 +8,30 @@ LSM rather than maintaining separate provider or machine execution systems.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
 from .semantic_index import SemanticSnapshot
+
+log = logging.getLogger(__name__)
+
+
+def _retryable_provider_disconnect(error: Exception) -> bool:
+    """Retry transient HTTP transport failures only before any model event.
+
+    A model response may already contain executed tool calls, visible text or
+    signed reasoning. Retrying after the first event would duplicate content or
+    invalidate provider state; HTTP status errors are never transient here.
+    """
+    import httpx
+
+    return isinstance(error, (
+        httpx.RemoteProtocolError, httpx.ConnectError, httpx.ConnectTimeout,
+        httpx.ReadError, httpx.ReadTimeout,
+    ))
 
 
 class RuntimeSafetyError(PermissionError):
@@ -24,7 +42,7 @@ class AgentSuspended(Exception):
     """A durable human interrupt has been saved; leave the generation parked."""
 
 
-_MODEL_RETRY_DELAYS = (0.5, 1.5)
+_MODEL_RETRY_DELAYS = (0.4, 0.4 * 3)
 
 
 def _retryable_model_error(error: Exception) -> bool:
@@ -158,11 +176,13 @@ async def run_agent_loop(
         # are observable, so replaying them could duplicate output or actions.
         # A new model attempt keeps the graph turn and completed tool results.
         for attempt in range(len(_MODEL_RETRY_DELAYS) + 1):
+            received_event = False
             source = stream_tools(context.profile, projected, tools=context.tools,
                                   **sampling) if context.tools else \
                 stream_text(context.profile, projected, **sampling)
             try:
                 async for item in source:
+                    received_event = True
                     if isinstance(item, ModelToolCall):
                         calls.append(item)
                     elif isinstance(item, ModelUsage):
@@ -189,7 +209,7 @@ async def run_agent_loop(
                         preempted = True
                         break
             except Exception as error:
-                if (attempt == len(_MODEL_RETRY_DELAYS) or text_parts or calls or reasoning
+                if (attempt == len(_MODEL_RETRY_DELAYS) or received_event
                         or not _retryable_model_error(error)):
                     raise
                 # Honor revocation and user interrupts even during backoff.
@@ -197,6 +217,8 @@ async def run_agent_loop(
                     (on_stream_chunk is not None and await on_stream_chunk())):
                     preempted = True
                     break
+                log.warning("Model transport %s before first event; retry %d/2 (model=%s)",
+                            type(error).__name__, attempt + 1, context.profile.model)
                 await asyncio.sleep(_MODEL_RETRY_DELAYS[attempt])
                 continue
             finally:
