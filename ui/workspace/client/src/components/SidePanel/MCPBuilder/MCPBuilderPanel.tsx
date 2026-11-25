@@ -2,20 +2,13 @@ import { useState, useRef, useMemo, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { useRecoilValue } from 'recoil';
 import { useLocation } from 'react-router-dom';
-import { SystemRoles, PermissionTypes, Permissions } from 'librechat-data-provider';
+import { PermissionTypes, Permissions } from 'librechat-data-provider';
 import { Button, FilterInput, OGDialogTrigger, TooltipAnchor } from '@librechat/client';
-import {
-  useLocalize,
-  useMCPServerManager,
-  useHasAccess,
-  useAuthContext,
-  activateCatalog,
-} from '~/hooks';
+import { useLocalize, useMCPServerManager, useHasAccess, activateCatalog } from '~/hooks';
 import MCPConfigDialog from '~/components/MCP/MCPConfigDialog';
-import { PanelFooter, PanelContent } from '~/components/ui';
+import { PanelContent } from '~/components/ui';
 import MCPServerCardSkeleton from './MCPServerCardSkeleton';
 import { useMCPRefresh } from '~/hooks/MCP/useMCPRefresh';
-import MCPAdminSettings from './MCPAdminSettings';
 import MCPServerDialog from './MCPServerDialog';
 import MCPServerList from './MCPServerList';
 import store from '~/store';
@@ -33,7 +26,6 @@ export default function MCPBuilderPanel() {
       activateCatalog('mcpServers');
     }
   }, [panelVisible]);
-  const { user } = useAuthContext();
   const { availableMCPServers, isLoading, getServerStatusIconProps, getConfigDialogProps } =
     useMCPServerManager({ observeToolAuthorization: panelVisible });
   useMCPRefresh({ enabled: panelVisible && !isLoading && availableMCPServers.length > 0 });
@@ -120,12 +112,6 @@ export default function MCPBuilderPanel() {
 
       {/* Config Dialog for custom user vars */}
       {configDialogProps && <MCPConfigDialog {...configDialogProps} />}
-
-      {user?.role === SystemRoles.ADMIN && (
-        <PanelFooter>
-          <MCPAdminSettings />
-        </PanelFooter>
-      )}
     </div>
   );
 }

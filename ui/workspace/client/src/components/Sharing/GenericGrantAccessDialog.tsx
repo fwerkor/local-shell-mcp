@@ -30,7 +30,6 @@ import {
 } from '~/hooks';
 import { computeShareChanges, dedupeNewShares, principalKey } from './shareChanges';
 import UnifiedPeopleSearch from './PeoplePicker/UnifiedPeopleSearch';
-import PeoplePickerAdminSettings from './PeoplePickerAdminSettings';
 import PublicSharingToggle from './PublicSharingToggle';
 import { SelectedPrincipalsList } from './PeoplePicker';
 import { cn } from '~/utils';
@@ -431,7 +430,6 @@ export default function GenericGrantAccessDialog({
 
         <OGDialogFooter className="shrink-0 gap-3 bg-transparent px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:space-x-0 sm:px-6">
           <div className="flex flex-col-reverse gap-2 sm:flex-row">
-            <PeoplePickerAdminSettings />
             {resourceId && resourceUrl && (
               <TooltipAnchor
                 description={
