@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -15,16 +16,18 @@ from local_shell_mcp.settings import get_settings
 from local_shell_mcp.webui.attachments import _safe_attachment_path
 
 
-def test_attachments_have_per_owner_private_paths(tmp_path):
-    first = _safe_attachment_path("alice", "../../../notes.txt", tmp_path / ".local-shell-mcp")
-    second = _safe_attachment_path("bob", "notes.txt", tmp_path / ".local-shell-mcp")
-    assert first.parent != second.parent
+def test_attachments_have_monthly_private_paths(tmp_path):
+    first = _safe_attachment_path("../../../notes.txt", tmp_path / ".local-shell-mcp")
+    second = _safe_attachment_path("notes.txt", tmp_path / ".local-shell-mcp")
+    now = datetime.now(UTC)
+    assert first.parent == second.parent == tmp_path / ".local-shell-mcp" / "attachments" / f"{now.year:04d}" / f"{now.month:02d}"
+    assert first != second
     assert first.name.endswith("-notes.txt")
     assert first.is_relative_to(tmp_path / ".local-shell-mcp")
     assert not (tmp_path / "notes.txt").exists()
     for name in ("", ".", "..", "\x00hidden", "a\nb", "a" * 201):
         with pytest.raises(ValueError):
-            _safe_attachment_path("alice", name, tmp_path / ".local-shell-mcp")
+            _safe_attachment_path(name, tmp_path / ".local-shell-mcp")
 
 
 @pytest.mark.asyncio
@@ -127,18 +130,16 @@ async def test_controller_chat_attachment_upload_and_sqlite_metadata(tmp_path, m
 
 
 def test_attachment_directory_symlinks_are_not_followed(tmp_path):
-    import hashlib
-
     state = tmp_path / ".local-shell-mcp"
     state.mkdir()
     container = state / "attachments"
     container.mkdir()
     outsider = tmp_path / "outsider"
     outsider.mkdir()
-    unsafe = container / hashlib.sha256(b"alice").hexdigest()[:32]
+    unsafe = container / f"{datetime.now(UTC).year:04d}"
     unsafe.symlink_to(outsider, target_is_directory=True)
     with pytest.raises(PermissionError, match="Unsafe"):
-        _safe_attachment_path("alice", "notes.txt", state)
+        _safe_attachment_path("notes.txt", state)
     assert list(outsider.iterdir()) == []
 
 

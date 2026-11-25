@@ -396,3 +396,70 @@ def test_empty_append_is_safe(tmp_path: Path) -> None:
     assert store.read_bytes("audit.jsonl") == b""
     assert store.append_bytes("audit.jsonl", b"x") == 1
     assert store.size_bytes("audit.jsonl") == 1
+
+
+def test_sqlite_prefix_matches_literal_case_sensitive_keys(tmp_path: Path) -> None:
+    store = SQLiteStateStore(tmp_path)
+    keys = ["Job/1", "job/1", "job/%", "job/_", "job/\\", "任务/日志"]
+    for key in keys:
+        store.write_bytes(key, b"x")
+    assert store.list_keys() == sorted(keys)
+    assert store.list_keys("Job/") == ["Job/1"]
+    assert store.list_keys("job/") == sorted(k for k in keys if k.startswith("job/"))
+    assert store.list_keys("job/%") == ["job/%"]
+    assert store.list_keys("job/\\") == ["job/\\"]
+    assert store.list_keys("任务/") == ["任务/日志"]
+
+
+def test_sqlite_read_is_one_snapshot_during_concurrent_replacement(tmp_path: Path, monkeypatch) -> None:
+    from contextlib import contextmanager
+
+    store = SQLiteStateStore(tmp_path)
+    store.write_bytes("key", b"old:")
+    store.append_bytes("key", b"suffix")
+    connect = store.database.connect
+    replaced = False
+
+    def replace_after_first_row():
+        nonlocal replaced
+        if replaced:
+            return
+        replaced = True
+        with connect() as writer:
+            writer.execute("UPDATE state SET value=? WHERE key='key'", (b"new:",))
+            writer.execute("UPDATE state_append_chunks SET value=? WHERE key='key'", (b"result",))
+
+    class Cursor:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def fetchone(self):
+            row = self.cursor.fetchone()
+            replace_after_first_row()
+            return row
+
+        def __iter__(self):
+            for row in self.cursor:
+                replace_after_first_row()
+                yield row
+
+    class Reader:
+        def __init__(self, db):
+            self.db = db
+
+        def execute(self, sql, parameters):
+            return Cursor(self.db.execute(sql, parameters))
+
+    @contextmanager
+    def interleaved_connect():
+        with connect() as db:
+            yield Reader(db)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store.database, "connect", interleaved_connect)
+        assert store.read_bytes("key") == b"old:suffix"
+    assert replaced
+    assert store.read_bytes("key") == b"new:result"
+    store.write_bytes("empty", b"")
+    assert store.read_bytes("empty") == b""
+    assert store.read_bytes("absent") is None

@@ -170,3 +170,70 @@ async def test_spooled_result_retains_reset_generation_and_mutation_preservation
         with pytest.raises(asyncio.CancelledError):
             await sender
     assert attempts == 3 if tool != "run_shell_tool" else attempts < 3
+
+
+async def test_invalid_outbox_entry_does_not_block_valid_results(outbox, monkeypatch):
+    broken = outbox / "000-invalid.json"
+    broken.write_text("{}", encoding="utf-8")
+    valid = remote._worker_store_result_outbox({"job_id": "healthy"})
+
+    async def submit(result, *args):
+        assert result["job_id"] == "healthy"
+        return {"ok": True, "data": {"accepted": True}}
+
+    monkeypatch.setattr(remote, "_submit_worker_result_with_heartbeat", submit)
+    sender = asyncio.create_task(
+        remote._worker_result_outbox_sender("https://controller.test", {}, 1, set())
+    )
+    try:
+        async def wait_until_drained():
+            while valid.exists():
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(wait_until_drained(), 5)
+        assert broken.exists()
+    finally:
+        sender.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await sender
+
+
+async def test_missing_ack_does_not_delete_outbox_result(outbox, monkeypatch):
+    path = remote._worker_store_result_outbox({"job_id": "not-acknowledged"})
+    failure = asyncio.Event()
+
+    async def submit(*args):
+        return {"ok": True, "data": {}}
+
+    monkeypatch.setattr(remote, "_submit_worker_result_with_heartbeat", submit)
+    monkeypatch.setattr(remote, "_worker_log_retry", lambda *args: failure.set())
+    sender = asyncio.create_task(
+        remote._worker_result_outbox_sender("https://controller.test", {}, 1, set())
+    )
+    try:
+        await asyncio.wait_for(failure.wait(), 3)
+        assert path.exists()
+    finally:
+        sender.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await sender
+
+
+def test_concurrent_spooling_respects_item_limit(outbox, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    monkeypatch.setattr(remote, "REMOTE_WORKER_RESULT_OUTBOX_MAX_ITEMS", 1)
+    barrier = Barrier(4)
+
+    def spool(index):
+        barrier.wait(timeout=5)
+        try:
+            remote._worker_store_result_outbox({"job_id": str(index)})
+            return True
+        except RuntimeError as exc:
+            assert "outbox is full" in str(exc)
+            return False
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        assert sum(executor.map(spool, range(4))) == 1
+    assert len(list(outbox.glob("*.json"))) == 1

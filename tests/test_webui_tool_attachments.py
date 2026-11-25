@@ -39,7 +39,7 @@ def workspace(tmp_path, monkeypatch):
 
 
 def file(db, ident, owner="alice", status="pending"):
-    path = attachments._safe_attachment_path(owner, ident + ".txt", db.root)
+    path = attachments._safe_attachment_path(ident + ".txt", db.root)
     path.write_text("untrusted tool output", encoding="utf-8")
     with db.connect() as sql:
         sql.execute(

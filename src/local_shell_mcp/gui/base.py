@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import math
 import os
 import platform
@@ -20,25 +19,55 @@ from ..fs_ops import (
     release_temp_file_lease,
     temp_dir,
 )
+from .limits import (
+    GUI_MAX_DEPTH as GUI_MAX_DEPTH,
+)
+from .limits import (
+    GUI_MAX_ELEMENT_TEXT_BYTES as GUI_MAX_ELEMENT_TEXT_BYTES,
+)
+from .limits import (
+    GUI_MAX_ELEMENT_VALUE_BYTES as GUI_MAX_ELEMENT_VALUE_BYTES,
+)
+from .limits import (
+    GUI_MAX_ELEMENTS as GUI_MAX_ELEMENTS,
+)
+from .limits import (
+    GUI_MAX_ELEMENTS_TOTAL_BYTES as GUI_MAX_ELEMENTS_TOTAL_BYTES,
+)
+from .limits import (
+    GUI_MAX_WINDOW_ID_BYTES as GUI_MAX_WINDOW_ID_BYTES,
+)
+from .limits import (
+    GUI_MAX_WINDOW_TEXT_BYTES as GUI_MAX_WINDOW_TEXT_BYTES,
+)
+from .limits import (
+    GUI_MAX_WINDOWS as GUI_MAX_WINDOWS,
+)
+from .limits import (
+    GUI_MAX_WINDOWS_TOTAL_BYTES as GUI_MAX_WINDOWS_TOTAL_BYTES,
+)
+from .limits import (
+    bounded_element as _bounded_element_record,
+)
+from .limits import (
+    bounded_records,
+)
+from .limits import (
+    bounded_window as _bounded_window_record,
+)
+from .limits import (
+    truncate_text as _truncate_gui_text,  # noqa: F401
+)
 
 GUI_STATE_TTL_S = 30.0
 GUI_STATE_CACHE_LIMIT = 32
-GUI_MAX_ELEMENTS = 1000
-GUI_MAX_DEPTH = 20
 GUI_MAX_ACTIONS = 32
 GUI_MAX_TOTAL_WAIT_S = 30.0
 GUI_MAX_TEXT_BYTES = 4096
 GUI_MAX_KEY_PARTS = 16
 GUI_MAX_KEYS_BYTES = 256
-GUI_MAX_WINDOWS = 256
-GUI_MAX_WINDOW_ID_BYTES = 1024
-GUI_MAX_WINDOW_TEXT_BYTES = 1024
-GUI_MAX_WINDOWS_TOTAL_BYTES = 128 * 1024
 GUI_MAX_CAPTURE_DIMENSION = 16_384
 GUI_MAX_CAPTURE_PIXELS = 64_000_000
-GUI_MAX_ELEMENT_TEXT_BYTES = 1024
-GUI_MAX_ELEMENT_VALUE_BYTES = 2048
-GUI_MAX_ELEMENTS_TOTAL_BYTES = 64 * 1024
 
 _COORDINATE_ACTIONS = {
     "click",
@@ -139,118 +168,17 @@ def _backend_for_platform() -> GuiBackend:
     raise GuiUnavailableError(f"GUI automation is unsupported on {system or platform.platform()}")
 
 
-def _truncate_gui_text(value: Any, limit: int) -> str:
-    text = str(value or "")
-    encoded = text.encode("utf-8")
-    if len(encoded) <= limit:
-        return text
-    suffix = "..."
-    budget = max(0, limit - len(suffix))
-    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
-
-
-def _bounded_element_record(element: dict[str, Any]) -> dict[str, Any]:
-    bounded: dict[str, Any] = {}
-    for key in ("id", "role", "name", "automation_id"):
-        if key in element:
-            bounded[key] = _truncate_gui_text(element.get(key), GUI_MAX_ELEMENT_TEXT_BYTES)
-    for key in ("value", "description"):
-        if key in element:
-            bounded[key] = _truncate_gui_text(element.get(key), GUI_MAX_ELEMENT_VALUE_BYTES)
-    for key in ("enabled", "focused", "editable", "offscreen", "depth"):
-        if key in element:
-            bounded[key] = element.get(key)
-    bounds = element.get("bounds")
-    if isinstance(bounds, dict):
-        bounded["bounds"] = {
-            key: bounds.get(key)
-            for key in ("x", "y", "width", "height")
-            if key in bounds
-        }
-    actions = element.get("actions")
-    if isinstance(actions, list):
-        bounded["actions"] = [
-            _truncate_gui_text(item, GUI_MAX_ELEMENT_TEXT_BYTES)
-            for item in actions[:32]
-        ]
-    return bounded
-
-
 def _bounded_elements(
     elements: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], set[str]]:
-    bounded: list[dict[str, Any]] = []
-    kept_ids: set[str] = set()
-    used = 2
-    for raw in elements[:GUI_MAX_ELEMENTS]:
-        if not isinstance(raw, dict):
-            continue
-        record = _bounded_element_record(raw)
-        encoded = json.dumps(
-            record,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            default=str,
-        ).encode("utf-8")
-        extra = len(encoded) + (1 if bounded else 0)
-        if used + extra > GUI_MAX_ELEMENTS_TOTAL_BYTES:
-            break
-        bounded.append(record)
-        used += extra
-        element_id = record.get("id")
-        if isinstance(element_id, str):
-            kept_ids.add(element_id)
-    return bounded, kept_ids
-
-
-def _bounded_window_record(window: dict[str, Any]) -> dict[str, Any] | None:
-    bounded: dict[str, Any] = {}
-    if "id" in window:
-        window_id = str(window.get("id") or "")
-        if len(window_id.encode("utf-8")) > GUI_MAX_WINDOW_ID_BYTES:
-            return None
-        bounded["id"] = window_id
-    for key in ("title", "app"):
-        if key in window:
-            bounded[key] = _truncate_gui_text(window.get(key), GUI_MAX_WINDOW_TEXT_BYTES)
-    if "pid" in window:
-        try:
-            bounded["pid"] = int(window.get("pid"))
-        except (TypeError, ValueError):
-            bounded["pid"] = 0
-    bounds = window.get("bounds")
-    if isinstance(bounds, dict):
-        bounded["bounds"] = {
-            key: bounds.get(key)
-            for key in ("x", "y", "width", "height")
-            if key in bounds
-        }
-    return bounded
+    bounded = bounded_records(elements[:GUI_MAX_ELEMENTS], _bounded_element_record, GUI_MAX_ELEMENTS_TOTAL_BYTES)
+    return bounded, {record["id"] for record in bounded if isinstance(record.get("id"), str)}
 
 
 def _bounded_window_records(windows: Any) -> list[dict[str, Any]]:
     if not isinstance(windows, list):
         return []
-    bounded: list[dict[str, Any]] = []
-    used = 2
-    for raw in windows[:GUI_MAX_WINDOWS]:
-        if not isinstance(raw, dict):
-            continue
-        record = _bounded_window_record(raw)
-        if record is None:
-            continue
-        encoded = json.dumps(
-            record,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            default=str,
-        ).encode("utf-8")
-        extra = len(encoded) + (1 if bounded else 0)
-        if used + extra > GUI_MAX_WINDOWS_TOTAL_BYTES:
-            break
-        bounded.append(record)
-        used += extra
-    return bounded
+    return bounded_records(windows[:GUI_MAX_WINDOWS], _bounded_window_record, GUI_MAX_WINDOWS_TOTAL_BYTES)
 
 
 def _normalize_screenshot_coordinates(path: Path, window: dict[str, Any]) -> None:

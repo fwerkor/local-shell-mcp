@@ -34,8 +34,9 @@ def context(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
-def insert_file(db, root: Path, name: str, data: bytes, mimetype: str = 'image/png'):
-    folder = root / 'attachments' / hashlib.sha256(b'local').hexdigest()[:32]
+def insert_file(db, root: Path, name: str, data: bytes, mimetype: str = 'image/png', *, legacy=False):
+    folder = (root / 'attachments' / hashlib.sha256(b'local').hexdigest()[:32]
+              if legacy else root / 'attachments' / '2026' / '11')
     folder.mkdir(parents=True, exist_ok=True)
     dest = folder / name
     dest.write_bytes(data)
@@ -50,7 +51,7 @@ def insert_file(db, root: Path, name: str, data: bytes, mimetype: str = 'image/p
 async def test_owned_png_and_pdf_transient_model_parts(context):
     db, _, _, root = context
     image = insert_file(db, root, 'photo.png', b'\x89PNG\r\n\x1a\n' + b'media', 'text/plain')
-    pdf = insert_file(db, root, 'handout.pdf', b'%PDF-1.4\nexample', 'application/octet-stream')
+    pdf = insert_file(db, root, 'handout.pdf', b'%PDF-1.4\nexample', 'application/octet-stream', legacy=True)
     item = {'text': 'Analyze', 'quotes': ['A quoted passage'], 'files': [image, pdf]}
     blocks = await encode_steer_media(db, 'local', item, root)
     assert blocks[0]['text'].endswith('Analyze')
@@ -256,8 +257,7 @@ async def test_media_budget_and_storage_move_degrade_without_losing_steer(contex
     assert result[1]['type'] == 'text'
     assert 'data:' not in str(result)
     # Valid recorded file path but bytes missing after deferred removal.
-    folder = root / 'attachments' / hashlib.sha256(b'local').hexdigest()[:32]
-    (folder / 'big.png').unlink()
+    (root / 'attachments' / '2026' / '11' / 'big.png').unlink()
     assert len(await encode_steer_media(db, 'local', {
         'text': 'Unchanged', 'files': [too_large]}, root)) == 2
 

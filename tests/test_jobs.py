@@ -1746,3 +1746,50 @@ def test_job_runner_without_console_streams_preserves_log_and_receipt(
     receipt = json.loads(status_file.read_text(encoding="utf-8"))
     assert receipt["exit_code"] == 0
     assert receipt["output_bytes"] == len(b"worker output")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("receipt_during_capture", [True, False])
+async def test_job_tail_reconciles_disappearing_pane_before_declaring_lost(
+    tmp_path, monkeypatch, receipt_during_capture
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    active = True
+
+    async def start(cwd=".", name=None, command=None):
+        return {"session_id": "short-job", "backend": "tmux-system"}
+
+    async def shells():
+        return {"sessions": [{"session_id": "short-job"}] if active else []}
+
+    monkeypatch.setattr(jobs_module, "start_shell", start)
+    monkeypatch.setattr(jobs_module, "list_shells", shells)
+    job = await start_job("echo done")
+    with jobs_module._store_transaction() as store:
+        row = jobs_module._find_job(store, job["job_id"])
+        from pathlib import Path
+        receipt = Path(row["status_path"])
+        log = Path(row["log_path"])
+
+    def complete():
+        log.write_text("done\n")
+        receipt.write_text(json.dumps({"exit_code": 0, "completed_at": time.time()}))
+
+    async def capture(*args):
+        nonlocal active
+        active = False
+        if receipt_during_capture:
+            complete()
+        raise RuntimeError("can't find pane")
+
+    monkeypatch.setattr(jobs_module, "read_shell", capture)
+    result = await tail_job(job["job_id"])
+    if not receipt_during_capture:
+        assert result["job"]["status"] == "running"
+        complete()
+        result = await tail_job(job["job_id"])
+    assert result["job"]["status"] == "succeeded"
+    assert result["job"]["exit_code"] == 0
+    assert result["output"] == "done\n"
