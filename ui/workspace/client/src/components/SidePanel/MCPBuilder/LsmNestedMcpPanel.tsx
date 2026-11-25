@@ -213,9 +213,9 @@ export default function LsmNestedMcpPanel() {
                     <select aria-label={localize('com_lsm_mcp_credential_type')} className={fieldStyle} value={credentialKind} onChange={e => setCredentialKind(e.target.value as typeof credentialKind)}>
                       <option value="header">{localize('com_lsm_mcp_header')}</option><option value="env">{localize('com_lsm_mcp_environment')}</option>
                     </select>
-                    <input aria-label={localize('com_lsm_mcp_credential_name')} className={fieldStyle} placeholder="Name" value={credentialKey} onChange={e => setCredentialKey(e.target.value)} />
+                    <input aria-label={localize('com_lsm_mcp_credential_name')} className={fieldStyle} placeholder={localize('com_lsm_ui_name')} value={credentialKey} onChange={e => setCredentialKey(e.target.value)} />
                   </div>
-                  <input aria-label={localize('com_lsm_mcp_credential_value')} type="password" autoComplete="off" className={fieldStyle} placeholder="Value" value={credentialValue} onChange={e => setCredentialValue(e.target.value)} />
+                  <input aria-label={localize('com_lsm_mcp_credential_value')} type="password" autoComplete="off" className={fieldStyle} placeholder={localize('com_lsm_ui_value')} value={credentialValue} onChange={e => setCredentialValue(e.target.value)} />
                   <button className={buttonStyle} disabled={pending || !credentialKey || !credentialValue}
                     onClick={() => void manage(credentialKind === 'header' ? 'header_set' : 'env_set', server, credentialKey, credentialValue)}>
                     {localize('com_lsm_mcp_save_credential')}

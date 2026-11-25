@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import useLocalize from '~/hooks/useLocalize';
+import type { TranslationKeys } from '~/hooks/useLocalize';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiBaseUrl, request, QueryKeys } from 'librechat-data-provider';
 import SamplingFields, { samplingDraft, parseSampling } from '~/components/Endpoints/SamplingFields';
@@ -40,14 +42,12 @@ const statusPath = (url: string, flow: string) => url + '/oauth/status?flow=' + 
 
 const input = 'w-full rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary';
 const button = 'rounded-lg border border-border-medium px-3 py-2 text-sm text-text-primary hover:bg-surface-secondary disabled:opacity-40';
-const kinds: { value: Kind; label: string; defaultUrl: string }[] = [
-  { value: 'openai', label: 'OpenAI Chat Completions', defaultUrl: 'https://api.openai.com/v1' },
-  { value: 'openai-responses', label: 'OpenAI Responses', defaultUrl: 'https://api.openai.com/v1' },
-  { value: 'anthropic', label: 'Anthropic native', defaultUrl: 'https://api.anthropic.com/v1' },
-  { value: 'google', label: 'Google Gemini native', defaultUrl: 'https://generativelanguage.googleapis.com/v1beta' },
+const kinds: { value: Kind; label: TranslationKeys; defaultUrl: string }[] = [
+  { value: 'openai', label: 'com_lsm_channel_protocol_openai', defaultUrl: 'https://api.openai.com/v1' },
+  { value: 'openai-responses', label: 'com_lsm_channel_protocol_responses', defaultUrl: 'https://api.openai.com/v1' },
+  { value: 'anthropic', label: 'com_lsm_channel_protocol_anthropic', defaultUrl: 'https://api.anthropic.com/v1' },
+  { value: 'google', label: 'com_lsm_channel_protocol_google', defaultUrl: 'https://generativelanguage.googleapis.com/v1beta' },
 ];
-const protocolLabel = (provider: Kind) => kinds.find((kind) => kind.value === provider)?.label ?? provider;
-const channelLabel = (profile: Profile) => profile.name ?? protocolLabel(profile.provider) + ' (legacy)';
 const channelId = (profile: Profile) => profile.name ?? 'legacy:' + profile.provider;
 const newDraft = (): Draft => ({ name: '', provider: 'openai', base: kinds[0].defaultUrl,
   autoDiscover: true, reportedContexts: {},
@@ -64,6 +64,12 @@ const errorMessage = (reason: unknown) => {
 
 /** Channel instances are distinct from provider protocols; defaults aren't saved channels. */
 export default function ModelProviders() {
+  const localize = useLocalize();
+  const protocolLabel = (provider: Kind) => {
+    const key = kinds.find((kind) => kind.value === provider)?.label;
+    return key ? localize(key) : provider;
+  };
+  const channelLabel = (profile: Profile) => profile.name ?? localize('com_lsm_channel_legacy_name', { protocol: protocolLabel(profile.provider) });
   const client = useQueryClient();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -331,7 +337,7 @@ export default function ModelProviders() {
     try {
       const original = editor.original;
       const name = draft.name.trim();
-      if ((!original || original.name) && !name) throw new Error('Channel name is required');
+      if ((!original || original.name) && !name) throw new Error(localize('com_lsm_channel_name_required'));
       const models = draftModels;
       const contexts = draft.contexts;
       const modelContexts: Record<string, number> = {};
@@ -340,11 +346,11 @@ export default function ModelProviders() {
         if (!raw) continue;
         const tokens = Number(raw);
         if (!Number.isInteger(tokens) || tokens < 1 || tokens > 2_000_000) {
-          throw new Error('Context window must be 1–2,000,000 tokens');
+          throw new Error(localize('com_lsm_channel_context_invalid'));
         }
         modelContexts[model] = tokens;
       }
-      if (!draft.autoDiscover && !models.length) throw new Error('At least one model identifier is required');
+      if (!draft.autoDiscover && !models.length) throw new Error(localize('com_lsm_channel_models_required'));
       const modelSampling = Object.fromEntries(models
         .map((model) => [model, parseSampling(draft.sampling[model] ?? samplingDraft(), draft.provider)] as const)
         .filter(([, value]) => Object.keys(value).length > 0));
@@ -361,7 +367,7 @@ export default function ModelProviders() {
       });
       await refresh();
       setEditor(null);
-      setSuccess('Channel saved.');
+      setSuccess(localize('com_lsm_channel_saved'));
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -381,7 +387,7 @@ export default function ModelProviders() {
       setConfirmDelete(null);
       setForceDelete(null);
       setEditor(null);
-      setSuccess('Channel deleted. Saved history is retained.');
+      setSuccess(localize('com_lsm_channel_deleted'));
     } catch (reason) {
       const response = (reason as { response?: { status?: number; data?: { can_force?: boolean } } })?.response;
       if (response?.status === 409 && response.data?.can_force === true && profile.name) {
@@ -396,11 +402,11 @@ export default function ModelProviders() {
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="space-y-1">
         
-        <p className="text-sm text-text-secondary">Each channel has its own name, protocol, endpoint, credentials and models.</p>
+        <p className="text-sm text-text-secondary">{localize('com_lsm_channel_description')}</p>
       </div>
       <div className="relative">
         <button type="button" disabled={busy || authorization != null} onClick={() => setAddMenu((value) => !value)}
-          aria-label="Add channel" aria-expanded={addMenu} aria-haspopup="menu" className={button}>Add channel ▾</button>
+          aria-label={localize('com_lsm_channel_add')} aria-expanded={addMenu} aria-haspopup="menu" className={button}>{localize('com_lsm_channel_add')} ▾</button>
         {addMenu && <div role="menu" className="absolute right-0 z-20 mt-1 min-w-52 rounded-lg border border-border-medium bg-surface-primary p-1 shadow-lg">
           <button role="menuitem" type="button" onClick={beginAdd} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">Manual configuration</button>
           {accountMethods.map((method) => <button role="menuitem" type="button" key={method.id}
@@ -410,15 +416,15 @@ export default function ModelProviders() {
     </div>
     {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
     {success && <p role="status" className="text-sm text-text-primary">{success}</p>}
-    {loading ? <p className="text-sm text-text-secondary">Loading channels…</p> : (
-      channels.length ? <ul aria-label="Configured channels" className="divide-y divide-border-light rounded-lg border border-border-light">
+    {loading ? <p className="text-sm text-text-secondary">{localize('com_lsm_channel_loading')}</p> : (
+      channels.length ? <ul aria-label={localize('com_lsm_channel_configured')} className="divide-y divide-border-light rounded-lg border border-border-light">
         {channels.map((profile) => <li key={channelId(profile)} className="flex flex-wrap items-center justify-between gap-3 p-3">
           <div className="min-w-0 flex-1">
             <p className="break-words font-medium text-text-primary">{channelLabel(profile)}</p>
-            <p className="text-xs text-text-secondary">{protocolLabel(profile.provider)} · {profile.models.length} model{profile.models.length === 1 ? '' : 's'}
+            <p className="text-xs text-text-secondary">{protocolLabel(profile.provider)} · {localize('com_lsm_channel_model_count', { count: profile.models.length })}
               {profile.auth_method && ' · ' + (accountMethods.find((method) => method.id === profile.auth_method)?.defaultName ?? profile.auth_method) + ' account'}
-              {profile.source === 'environment'  ? ' · Environment-configured' : ''}
-              {profile.source === 'saved' ? ' · Legacy configuration' : ''}
+              {profile.source === 'environment'  ? localize('com_lsm_channel_environment') : ''}
+              {profile.source === 'saved' ? localize('com_lsm_channel_legacy') : ''}
             </p>
             {profile.oauth_error && <p className="text-xs text-status-error">Account authorization expired · sign in again</p>}
             {profile.auto_discover && <p className="text-xs text-text-secondary">
@@ -428,28 +434,28 @@ export default function ModelProviders() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {profile.auto_discover && <button type="button" className={button} disabled={busy || editor != null}
-              onClick={() => void refreshSaved(profile)} aria-label={'Refresh ' + channelLabel(profile)}>Refresh</button>}
+              onClick={() => void refreshSaved(profile)} aria-label={'Refresh ' + channelLabel(profile)}>{localize('com_ui_refresh')}</button>}
             {accountMethods.filter((method) => method.id === profile.auth_method).map((method) =>
               <button type="button" key={method.id} className={button} disabled={busy || authorization != null}
                 onClick={() => selectAccount(method, profile)}>Reauthorize</button>)}
-            <button type="button" className={button} disabled={busy || authorization != null} onClick={() => beginEdit(profile)} aria-label={'Edit ' + channelLabel(profile)}>Edit</button>
+            <button type="button" className={button} disabled={busy || authorization != null} onClick={() => beginEdit(profile)} aria-label={localize('com_lsm_channel_edit_name', { name: channelLabel(profile) })}>{localize('com_ui_edit')}</button>
             {profile.source !== 'environment' && (
               confirmDelete === channelId(profile) ? <>
                 {forceDelete === channelId(profile)
-                  ? <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => void remove(profile, true)} aria-label={'Delete anyway ' + channelLabel(profile)}>Delete anyway</button>
-                  : <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => void remove(profile)} aria-label={'Confirm delete ' + channelLabel(profile)}>Confirm delete</button>}
-                <button type="button" className={button} disabled={busy} onClick={() => { setConfirmDelete(null); setForceDelete(null); setError(''); }}>Cancel</button>
-              </> : <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => { setConfirmDelete(channelId(profile)); setForceDelete(null); setEditor(null); setError(''); }} aria-label={'Delete ' + channelLabel(profile)}>Delete</button>
+                  ? <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => void remove(profile, true)} aria-label={localize('com_lsm_channel_delete_anyway_name', { name: channelLabel(profile) })}>{localize('com_lsm_channel_delete_anyway')}</button>
+                  : <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => void remove(profile)} aria-label={localize('com_lsm_channel_confirm_delete_name', { name: channelLabel(profile) })}>{localize('com_lsm_channel_confirm_delete')}</button>}
+                <button type="button" className={button} disabled={busy} onClick={() => { setConfirmDelete(null); setForceDelete(null); setError(''); }}>{localize('com_ui_cancel')}</button>
+              </> : <button type="button" className={button + ' text-status-error'} disabled={busy} onClick={() => { setConfirmDelete(channelId(profile)); setForceDelete(null); setEditor(null); setError(''); }} aria-label={localize('com_lsm_channel_delete_name', { name: channelLabel(profile) })}>{localize('com_ui_delete')}</button>
             )}
           </div>
           {confirmDelete === channelId(profile) && <p className="w-full text-xs text-text-secondary">
-            {profile.name ? 'Delete this channel and its saved credentials?' : 'Remove this legacy configuration? Built-in defaults will remain for compatibility.'}
+            {profile.name ? localize('com_lsm_channel_delete_confirm') : localize('com_lsm_channel_delete_legacy_confirm')}
             {' '}{forceDelete === channelId(profile)
-              ? 'History will be kept, but conversations and Agents using this channel cannot run until they select another channel. Continue only if you accept this.'
-              : 'Channels in use require an additional confirmation to delete; saved history will be kept.'}
+              ? localize('com_lsm_channel_delete_force_help')
+              : localize('com_lsm_channel_delete_help')}
           </p>}
         </li>)}
-      </ul> : <p className="rounded-lg border border-dashed border-border-medium p-5 text-sm text-text-secondary">No channels added yet. Select “Add channel” to configure your first model endpoint.</p>
+      </ul> : <p className="rounded-lg border border-dashed border-border-medium p-5 text-sm text-text-secondary">{localize('com_lsm_channel_empty')}</p>
     )}
     {authorization && (authorization.manual ?
       <div role="dialog" aria-modal="true" aria-label="Connect account" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -473,7 +479,7 @@ export default function ModelProviders() {
               {authorization.authorizationUrl && <a className="block underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">Reopen authorization page</a>}
             </>}
           {oauthError && <p role="alert" className="text-status-error">{oauthError}</p>}
-          <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>Cancel</button>
+          <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>{localize('com_ui_cancel')}</button>
         </section>
       </div> :
       <div className="space-y-2 rounded-lg border border-border-medium p-3 text-sm text-text-primary">
@@ -481,30 +487,30 @@ export default function ModelProviders() {
         {authorization.authorizationUrl && <a className="underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">Reopen authorization page</a>}
         {oauthError && <p role="alert" className="text-status-error">{oauthError}</p>}
         {!authorization.flow && !oauthBusy && <button type="button" className={button} onClick={() => void beginOAuth(authorization)}>Start authorization</button>}
-        <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>Cancel</button>
+        <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>{localize('com_ui_cancel')}</button>
       </div>)}
-    {editor && <form aria-label="Channel configuration" className="space-y-4 rounded-lg border border-border-medium bg-surface-secondary p-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <h3 className="font-semibold text-text-primary">{editor.original ? 'Edit ' + channelLabel(editor.original) : 'Add channel'}</h3>
+    {editor && <form aria-label={localize('com_lsm_channel_configuration')} className="space-y-4 rounded-lg border border-border-medium bg-surface-secondary p-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <h3 className="font-semibold text-text-primary">{editor.original ? localize('com_lsm_channel_edit_name', { name: channelLabel(editor.original) }) : localize('com_lsm_channel_add')}</h3>
       <div inert={busy ? '' : undefined} className="grid min-w-0 gap-4 sm:grid-cols-2">
-        {(!editor.original || editor.original.name) && <label className="space-y-1 text-sm text-text-primary"><span>Channel name</span>
-          <input aria-label="Channel name" className={input} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Research Gateway" maxLength={64} required />
+        {(!editor.original || editor.original.name) && <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_name')}</span>
+          <input aria-label={localize('com_lsm_channel_name')} className={input} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={localize('com_lsm_channel_name_example')} maxLength={64} required />
         </label>}
-        <label className="space-y-1 text-sm text-text-primary"><span>Provider protocol</span>
-          <select aria-label="Model provider" className={input} value={draft.provider} disabled={Boolean(editor.original)} onChange={(event) => {
+        <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_protocol')}</span>
+          <select aria-label={localize('com_lsm_channel_provider')} className={input} value={draft.provider} disabled={Boolean(editor.original)} onChange={(event) => {
             const provider = event.target.value as Kind;
             setDraft({ ...draft, provider, base: kinds.find((kind) => kind.value === provider)?.defaultUrl ?? '' });
           }}>
-            {kinds.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}
+            {kinds.map((kind) => <option key={kind.value} value={kind.value}>{localize(kind.label)}</option>)}
           </select>
         </label>
-        <label className="space-y-1 text-sm text-text-primary"><span>API base URL</span>
-          <input aria-label="Model API base URL" className={input} value={draft.base} disabled={Boolean(original?.auth_method)} onChange={(event) => setDraft({ ...draft, base: event.target.value })} required />
+        <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_base_url')}</span>
+          <input aria-label={localize('com_lsm_channel_model_base_url')} className={input} value={draft.base} disabled={Boolean(original?.auth_method)} onChange={(event) => setDraft({ ...draft, base: event.target.value })} required />
         </label>
         {original?.auth_method ? <div className="space-y-1 text-sm text-text-primary">
           <span>Account authorization</span>
           <p className="text-text-secondary">{original.oauth_error ? 'Reauthorization required' : 'Connected · credentials refresh automatically'}</p>
-        </div> : <label className="space-y-1 text-sm text-text-primary"><span>API key</span>
-          <input type="password" autoComplete="new-password" aria-label="Model API key" className={input} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={editor.original?.configured ? 'Leave blank to keep current key' : 'Optional for local services'} />
+        </div> : <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_key')}</span>
+          <input type="password" autoComplete="new-password" aria-label={localize('com_lsm_channel_model_key')} className={input} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={editor.original?.configured ? localize('com_lsm_channel_keep_key') : localize('com_lsm_channel_optional_key')} />
         </label>}
         <div className="space-y-3 sm:col-span-2">
           <label className="flex items-center justify-between gap-3 text-sm font-medium text-text-primary">
@@ -521,16 +527,16 @@ export default function ModelProviders() {
               </p>
               <button type="button" disabled={busy || preview === 'loading' || !base}
                 onClick={() => setPreviewRevision((value) => value + 1)} className={button}
-                aria-label="Refresh model information">Refresh</button>
+                aria-label="Refresh model information">{localize('com_ui_refresh')}</button>
             </div>
             {previewError && <p role="alert" className="text-xs text-status-error">{previewError} Turn off automatic discovery to configure models manually.</p>}
             <p className="text-xs text-text-tertiary">Refreshed by the server every 10 minutes. Existing data is retained if a refresh fails.</p>
-          </> : <label className="space-y-1 text-sm text-text-primary"><span>Models (one per line)</span>
-            <textarea aria-label="Model identifiers" className={input} value={draft.models}
+          </> : <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_models')}</span>
+            <textarea aria-label={localize('com_lsm_channel_identifiers')} className={input} value={draft.models}
               onChange={(event) => setDraft({ ...draft, models: event.target.value })} rows={3} required />
           </label>}
           {draftModels.length > 0 && <div className="max-h-80 space-y-2 overflow-y-auto">
-            <p className="text-sm text-text-primary">Context window (tokens)</p>
+            <p className="text-sm text-text-primary">{localize('com_lsm_channel_context_window')}</p>
             {draftModels.map((model) => <label key={model} className="flex items-center gap-3 text-xs text-text-secondary">
               <span className="min-w-0 flex-1 break-all">{model}
                 {draft.autoDiscover && draft.reportedContexts[model] != null &&
@@ -538,8 +544,8 @@ export default function ModelProviders() {
               </span>
               <input className={input + ' max-w-40'} type="number" min={1} max={2000000}
                 placeholder={draft.autoDiscover && draft.reportedContexts[model] != null ?
-                  String(draft.reportedContexts[model]) : 'Unknown'}
-                aria-label={'Context window for ' + model} value={draft.contexts[model] ?? ''}
+                  String(draft.reportedContexts[model]) : localize('com_ui_unknown')}
+                aria-label={localize('com_lsm_channel_context_model', { model })} value={draft.contexts[model] ?? ''}
                 onChange={(event) => setDraft({ ...draft,
                   contexts: { ...draft.contexts, [model]: event.target.value } })} />
             </label>)}
@@ -547,7 +553,7 @@ export default function ModelProviders() {
           </div>}
         </div>
         {draftModels.length > 0 && <details className="space-y-3 rounded-lg border border-border-light p-3 sm:col-span-2">
-          <summary className="cursor-pointer text-sm font-medium text-text-primary">Model defaults / 模型默认参数</summary>
+          <summary className="cursor-pointer text-sm font-medium text-text-primary">{localize('com_lsm_channel_defaults')}</summary>
           {draftModels.map((model) => <div key={model} className="space-y-2">
             <p className="break-all text-sm text-text-secondary">{model}</p>
             <SamplingFields provider={draft.provider} prefix={model} value={draft.sampling[model] ?? samplingDraft()}
@@ -556,10 +562,10 @@ export default function ModelProviders() {
           </div>)}
         </details>}
       </div>
-      <p className="text-xs text-text-secondary">{editor.original?.name ? 'Renaming a channel in use is restricted to protect Agent and conversation references. ' : ''}Keys are stored on the server and never returned here; an empty key preserves an existing one.</p>
+      <p className="text-xs text-text-secondary">{editor.original?.name ? localize('com_lsm_channel_rename_help') : ''}{' '}{localize('com_lsm_channel_key_help')}</p>
       <div className="flex flex-wrap gap-2">
-        <button type="submit" disabled={busy || !draft.base.trim()} className={button}>{busy ? 'Saving…' : 'Save model channel'}</button>
-        <button type="button" disabled={busy} className={button} onClick={() => { setEditor(null); setError(''); }}>Cancel</button>
+        <button type="submit" disabled={busy || !draft.base.trim()} className={button}>{busy ? localize('com_lsm_channel_saving') : localize('com_lsm_channel_save')}</button>
+        <button type="button" disabled={busy} className={button} onClick={() => { setEditor(null); setError(''); }}>{localize('com_ui_cancel')}</button>
       </div>
     </form>}
   </div>;

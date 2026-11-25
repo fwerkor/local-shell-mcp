@@ -351,7 +351,7 @@ const AttachFileMenu = ({
         <Ariakit.MenuButton
           disabled={isUploadDisabled}
           id="attach-file-menu-button"
-          aria-label="Attach File Options"
+          aria-label={localize('com_lsm_ui_attach_file_options')}
           aria-keyshortcuts={uploadFileAriaKey}
           className={cn(
             'flex size-theme-control items-center justify-center rounded-theme-control-round p-1 transition-colors duration-theme-fast hover:bg-surface-composer-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary focus-visible:ring-opacity-50',

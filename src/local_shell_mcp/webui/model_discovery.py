@@ -40,11 +40,29 @@ def _chat_compatible(model: str, item: dict, kind: str = "openai") -> bool:
     if isinstance(endpoints, list) and endpoints:
         suffix = 'responses' if kind == 'openai-responses' else 'chat/completions'
         return any(isinstance(e, str) and e.rstrip('/').endswith(suffix) for e in endpoints)
+    # Local inference servers can describe non-generative models by task
+    # rather than publishing supported_endpoints.
+    non_chat = {
+        'embed', 'embedding', 'embeddings', 'rerank', 'reranking', 'score',
+        'classify', 'classification', 'reward', 'pooling', 'transcription',
+        'speech', 'text-to-speech', 'image-generation', 'moderation',
+    }
+    for key in ('task', 'model_type', 'type'):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip().lower().replace('_', '-') in non_chat:
+            return False
+    tasks = item.get('supported_tasks')
+    if isinstance(tasks, list) and tasks:
+        normalized = {t.strip().lower().replace('_', '-') for t in tasks if isinstance(t, str)}
+        if normalized and normalized <= non_chat:
+            return False
     # Older catalogs often expose only IDs, including non-chat OpenAI models.
     leaf = model.lower().rsplit('/', 1)[-1]
+    if re.fullmatch(r'(?:babbage|davinci)(?:-\d+)?|gpt-3\.5-turbo-instruct(?:-\d+)?', leaf):
+        return False
     return not re.search(
         r'(?:^|[-_.])(?:embeddings?|rerank(?:er)?|whisper|tts|transcri(?:be|ption)|'
-        r'dall-e|image|moderation|realtime)(?:$|[-_.0-9])', leaf
+        r'dall-e|image|moderation|realtime|text-search|code-search|sora)(?:$|[-_.0-9])', leaf
     )
 
 

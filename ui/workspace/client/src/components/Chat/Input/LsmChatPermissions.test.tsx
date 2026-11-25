@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
 import LsmChatPermissions from './LsmChatPermissions';
+import { changeLanguageSafely } from '~/locales/i18n';
 
 jest.mock('librechat-data-provider', () => ({
   request: { get: jest.fn(), put: jest.fn() },
@@ -19,7 +20,8 @@ function mount(conversationId: string, projectId?: string) {
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await changeLanguageSafely('zh-Hans');
   get.mockReset();
   put.mockReset();
   put.mockImplementation((_url: string, payload: unknown) => Promise.resolve(payload));
@@ -55,7 +57,8 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await changeLanguageSafely('en');
   document.documentElement.classList.remove('dark');
 });
 
@@ -115,4 +118,12 @@ it('shows inherited machine access in a saved chat and leaves token scopes untou
   }));
   expect(put.mock.calls[0][1]).not.toHaveProperty('scopes');
   expect(put.mock.calls[0][1]).not.toHaveProperty('token');
+});
+
+it('renders permissions in the selected non-Chinese language', async () => {
+  await changeLanguageSafely('en');
+  mount('new');
+  fireEvent.click(screen.getByRole('button', { name: 'Tool permissions' }));
+  expect(screen.getByRole('button', { name: 'Instance defaults' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'local Read/write' })).toBeInTheDocument();
 });

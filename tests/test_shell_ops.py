@@ -56,9 +56,9 @@ async def test_run_shell_tool_returns_output_after_command_timeout(tmp_path, mon
         {
             "command": python_shell_command(
                 'import sys, time; print("partial-out", flush=True); '
-                'print("partial-err", file=sys.stderr, flush=True); time.sleep(5)'
+                'print("partial-err", file=sys.stderr, flush=True); time.sleep(10)'
             ),
-            "timeout_s": 1,
+            "timeout_s": 3,
         },
     )
     payload = json.loads(response[0][0].text)

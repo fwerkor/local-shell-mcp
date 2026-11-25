@@ -544,6 +544,13 @@ async def test_model_discovery_uses_saved_key_only_at_original_endpoint(setup_pr
             {'id': 'gpt-image-1'}, {'id': 'vendor/reranker-v2'},
             {'id': 'arbitrary', 'architecture': {'output_modalities': ['image']}},
             {'id': 'other', 'supported_endpoints': ['/v1/embeddings']},
+            {'id': 'opaque-pool', 'task': 'embed'},
+            {'id': 'opaque-score', 'supported_tasks': ['score', 'rerank']},
+            {'id': 'opaque-multi', 'supported_tasks': ['generate', 'embed']},
+            {'id': 'opaque-tts', 'model_type': 'text_to_speech'},
+            {'id': 'davinci-002'}, {'id': 'gpt-3.5-turbo-instruct'},
+            {'id': 'sora-2'}, {'id': 'text-search-ada-doc-001'},
+
             {'id': 'explicit-chat', 'supported_endpoints': ['/v1/chat/completions']},
         ]})
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original_client(transport=httpx.MockTransport(respond), **kw))
@@ -557,7 +564,7 @@ async def test_model_discovery_uses_saved_key_only_at_original_endpoint(setup_pr
         probe = {'provider': 'openai', 'base_url': body['base_url'], 'existing_channel': 'Discovery'}
         result = await client.post(path, headers=_ADMIN, json=probe)
         assert result.status_code == 200, result.text
-        assert result.json() == {'models': ['flash', 'pro', 'unknown', 'output-only', 'too-big', 'explicit-chat'],
+        assert result.json() == {'models': ['flash', 'pro', 'unknown', 'output-only', 'too-big', 'opaque-multi', 'explicit-chat'],
                                  'model_contexts': {'flash': 1048576, 'pro': 128000}}
         assert result.headers['cache-control'] == 'no-store'
         assert 'secret' not in result.text

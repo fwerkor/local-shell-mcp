@@ -274,7 +274,7 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
         <Ariakit.MenuButton
           disabled={isDisabled}
           id="tools-dropdown-button"
-          aria-label="Tools Options"
+          aria-label={localize('com_lsm_ui_tool_options')}
           className={cn(
             'flex size-theme-control items-center justify-center rounded-theme-control-round p-1 transition-colors duration-theme-fast hover:bg-surface-composer-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary focus-visible:ring-opacity-50',
             isPopoverActive && 'bg-surface-composer-hover',
