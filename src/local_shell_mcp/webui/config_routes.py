@@ -104,16 +104,13 @@ async def startup_config(request: Request):
     # toggles only to an authorized identity matches the original two-stage
     # startup config rather than leaking backend plugin settings before login.
     try:
-        owner = _owner(request)
+        _owner(request)
     except HTTPException:
         return JSONResponse(settings)
     from .build_info import about_build_info
     from .memory import memory_enabled
-    repo = _repo()
-    has_memory = memory_enabled(repo, owner)
-    summarization = (repo.setting(owner, "endpoints", {}) or {}).get("summarization")
+    has_memory = memory_enabled(_repo(), _owner(request))
     settings.update({
-        "compactionEnabled": not (isinstance(summarization, dict) and summarization.get("enabled") is False),
         **(await asyncio.to_thread(about_build_info)),
         "interface": {
             "modelSelect": True,
@@ -137,6 +134,8 @@ async def startup_config(request: Request):
         "mcpServers": {},
         "titleGenerationTiming": "final",
     })
+    summarization = (_repo().setting(_owner(request), "endpoints", {}) or {}).get("summarization")
+    settings["compactionEnabled"] = not (isinstance(summarization, dict) and summarization.get("enabled") is False)
     return JSONResponse(settings)
 
 
