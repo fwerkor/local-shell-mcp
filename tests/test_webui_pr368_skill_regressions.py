@@ -418,7 +418,7 @@ def test_skill_runtime_manual_and_deployment_guard_branches(state, monkeypatch):
     assert all(item['id'] != 'deployment:deployed' for item in active_skills(db, 'alice', None))
     from local_shell_mcp import skill_ops
 
-    monkeypatch.setattr(skill_ops, 'list_installed_skills', skill_runtime.list_installed_skills)
+    monkeypatch.setattr(skill_ops, 'list_installed_skills', lambda settings=None: skill_runtime.list_installed_skills())
     token = skill_ops.managed_skill_context.set((db, 'alice', None))
     try:
         assert not skill_ops.list_skills()['skills']
