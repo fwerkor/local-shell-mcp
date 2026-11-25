@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon, MCPIcon } from '@librechat/client';
-import { Brain, Check, Globe, Settings2, TerminalSquareIcon } from 'lucide-react';
+import { Check, Globe, Settings2, TerminalSquareIcon } from 'lucide-react';
 import {
   Permissions,
   ArtifactModes,
@@ -9,15 +9,9 @@ import {
   defaultAgentCapabilities,
 } from 'librechat-data-provider';
 import type { MenuItemProps } from '~/common';
-import {
-  useLocalize,
-  useHasAccess,
-  useAuthContext,
-  useAgentCapabilities,
-} from '~/hooks';
+import { useLocalize, useHasAccess, useAgentCapabilities } from '~/hooks';
 import ArtifactsSubMenu from '~/components/Chat/Input/ArtifactsSubMenu';
 import { useBadgeRowContext } from '~/Providers';
-import { useGetStartupConfig } from '~/data-provider';
 import { cn } from '~/utils';
 
 interface ToolsDropdownProps {
@@ -31,7 +25,6 @@ const getMainLandmark = () => document.querySelector<HTMLElement>('main');
 
 const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownProps) => {
   const localize = useLocalize();
-  const { user } = useAuthContext();
   const context = useBadgeRowContext();
 
   const { codeEnabled, webSearchEnabled, artifactsEnabled, fileSearchEnabled } =
@@ -57,18 +50,14 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
     permission: Permissions.USE,
   });
 
-  const { data: startupConfig } = useGetStartupConfig();
-  const showMemory = startupConfig?.interface?.memories === true && user?.personalization?.memories !== false;
-
   const [isPopoverActive, setIsPopoverActive] = useState(false);
   const isDisabled = disabled ?? false;
-  const { memory, webSearch, artifacts, fileSearch, features, codeInterpreter } = context ?? {};
+  const { webSearch, artifacts, fileSearch, features, codeInterpreter } = context ?? {};
 
   const { isPinned: isSearchPinned, setIsPinned: setIsSearchPinned } = webSearch ?? {};
   const { isPinned: isCodePinned, setIsPinned: setIsCodePinned } = codeInterpreter ?? {};
   const { isPinned: isFileSearchPinned, setIsPinned: setIsFileSearchPinned } = fileSearch ?? {};
   const { isPinned: isArtifactsPinned, setIsPinned: setIsArtifactsPinned } = artifacts ?? {};
-  const { isPinned: isMemoryPinned, setIsPinned: setIsMemoryPinned } = memory ?? {};
 
   const handleWebSearchToggle = useCallback(() => {
     const newValue = !webSearch?.toggleState;
@@ -111,11 +100,6 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
       artifacts?.debouncedChange({ value: ArtifactModes.CUSTOM });
     }
   }, [artifacts]);
-
-  const handleMemoryToggle = useCallback(() => {
-    const newValue = !memory?.toggleState;
-    memory?.debouncedChange({ value: newValue });
-  }, [memory]);
 
   const dropdownItems: MenuItemProps[] = [];
 
@@ -183,41 +167,6 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
               </div>
             </button>
           </div>
-        </div>
-      ),
-    });
-  }
-
-  if (showMemory) {
-    dropdownItems.push({
-      onClick: handleMemoryToggle,
-      ariaChecked: memory?.toggleState === true,
-      disabled: !features?.canEdit,
-      hideOnClick: false,
-      render: (props) => (
-        <div {...props} data-testid="tools-menu-memory">
-          <div className="flex items-center gap-2">
-            <Brain className="icon-md" aria-hidden="true" />
-            {memory?.toggleState === true && <Check className="icon-sm" aria-hidden="true" />}
-            <span>{localize('com_ui_memory')}</span>
-          </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsMemoryPinned?.(!isMemoryPinned);
-            }}
-            className={cn(
-              'rounded p-1 transition-all duration-200',
-              'hover:bg-surface-secondary hover:shadow-sm',
-              !isMemoryPinned && 'text-text-secondary hover:text-text-primary',
-            )}
-            aria-label={isMemoryPinned ? localize('com_ui_unpin') : localize('com_ui_pin')}
-          >
-            <div className="h-4 w-4">
-              <PinIcon unpin={isMemoryPinned} />
-            </div>
-          </button>
         </div>
       ),
     });

@@ -391,6 +391,8 @@ async def test_post_tool_crash_recovered_steer_follows_cached_tool_result(contex
 
     resumed._dispatch = dispatch
     await resumed.run(original)
+    assert presented[0]['role'] == 'system' and 'Current native machine access restrictions' in presented[0]['content']
+    presented = presented[1:]
     roles = [msg['role'] for msg in presented]
     assert roles[:4] == ['user', 'assistant', 'tool', 'user']
     assert presented[3]['steerId'] == new['steerId']

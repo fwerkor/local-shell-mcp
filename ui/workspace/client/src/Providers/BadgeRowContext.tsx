@@ -12,7 +12,6 @@ interface BadgeRowContextType {
   conversationId?: string | null;
   storageContextKey?: string;
   agentsConfig?: TAgentsEndpoint | null;
-  memory: ReturnType<typeof useToolToggle>;
   webSearch: ReturnType<typeof useToolToggle>;
   artifacts: ReturnType<typeof useToolToggle>;
   fileSearch: ReturnType<typeof useToolToggle>;
@@ -196,21 +195,7 @@ export default function BadgeRowProvider({
     isAuthenticated: true,
   });
 
-  /** Memory hook - per-conversation toggle for the inline memory tools */
-  const memory = useToolToggle({
-    conversationId,
-    storageContextKey,
-    toolKey: Tools.memory,
-    localStorageKey: LocalStorageKeys.LAST_MEMORY_TOGGLE_,
-    controlled: {
-      value: features.current?.memory ?? false,
-      onChange: (value) => features.toggle('memory', value),
-    },
-    isAuthenticated: true,
-  });
-
   const value: BadgeRowContextType = {
-    memory,
     webSearch,
     artifacts,
     fileSearch,
