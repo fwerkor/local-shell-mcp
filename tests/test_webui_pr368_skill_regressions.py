@@ -430,6 +430,18 @@ def test_skill_runtime_manual_and_deployment_guard_branches(state, monkeypatch):
         skill_ops.managed_skill_context.reset(token)
     repo.save_setting('alice', 'webui.skill.states', {})
     allowed = skill_runtime._policy_allows
+    monkeypatch.setattr(skill_ops, 'load_installed_skill', lambda *args: {'content': 'blocked body'})
+    monkeypatch.setattr(skill_ops, 'read_installed_skill_file', lambda *args: {'content': 'blocked body'})
+    monkeypatch.setattr(skill_runtime, '_policy_allows',
+                        lambda filters, **kw: kw.get('body') != 'blocked body')
+    token = skill_ops.managed_skill_context.set((db, 'alice', None))
+    try:
+        with pytest.raises(ValueError, match='blocked by configured policy'):
+            skill_ops.load_skill('deployed')
+        with pytest.raises(ValueError, match='blocked by configured policy'):
+            skill_ops.read_skill('deployed', 'reference.md')
+    finally:
+        skill_ops.managed_skill_context.reset(token)
     monkeypatch.setattr(skill_runtime, '_policy_allows',
                         lambda filters, **kwargs: False if (
                             'deployment' in kwargs.get('description', '') or

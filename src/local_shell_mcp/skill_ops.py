@@ -225,6 +225,16 @@ def _require_deployment_skill(context, name):
         raise ValueError('Skill is not enabled or does not exist')
 
 
+def _check_deployment_content(context, result):
+    from .webui.skill_runtime import WorkspaceRepository, _policy_allows, configured_filters
+
+    database, owner, _ = context
+    if not _policy_allows(configured_filters(WorkspaceRepository(database), owner),
+                          body=result['content']):
+        raise ValueError('Skill content blocked by configured policy')
+    return result
+
+
 def load_skill(name: str, settings: Settings | None = None) -> dict[str, Any]:
     context = managed_skill_context.get()
     if context is not None and name.startswith("managed/"):
@@ -233,7 +243,8 @@ def load_skill(name: str, settings: Settings | None = None) -> dict[str, Any]:
         return managed_result(*context, name)
     if context is not None:
         _require_deployment_skill(context, name)
-    return load_installed_skill(name, settings)
+    result = load_installed_skill(name, settings)
+    return _check_deployment_content(context, result) if context is not None else result
 
 
 def read_skill(name: str, path: str, settings: Settings | None = None) -> dict[str, Any]:
@@ -244,4 +255,5 @@ def read_skill(name: str, path: str, settings: Settings | None = None) -> dict[s
         return managed_result(*context, name, path=path)
     if context is not None:
         _require_deployment_skill(context, name)
-    return read_installed_skill_file(name, path, settings)
+    result = read_installed_skill_file(name, path, settings)
+    return _check_deployment_content(context, result) if context is not None else result
