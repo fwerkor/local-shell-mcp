@@ -29,6 +29,21 @@ describe('WebUI locales', () => {
     expect(document.documentElement.lang).toBe(locale);
   });
 
+  it.each(supportedLocales)('loads retained dynamic and common keys in %s', async (locale) => {
+    await changeLanguageSafely(locale);
+    for (const key of [
+      'com_ui_special_var_current_date',
+      'com_ui_special_var_desc_current_date',
+      'com_ui_context_window',
+      'com_ui_projects',
+    ] as const) {
+      const value = i18n.getResource(locale, 'translation', key);
+      expect(typeof value).toBe('string');
+      expect(value).not.toBe('');
+      expect(i18n.t(key)).toBe(value);
+    }
+  });
+
   it('sets RTL direction when loading Arabic', async () => {
     await changeLanguageSafely('ar');
     expect(document.documentElement.dir).toBe('rtl');
