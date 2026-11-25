@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import re
 import shlex
@@ -18,6 +19,7 @@ from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.types import ServerNotification, ToolListChangedNotification
 
 from .fs_ops import resolve_path
 from .settings import get_settings
@@ -37,6 +39,10 @@ def _server_allowed(name: str) -> bool:
 
 
 _REGISTRY_VERSION = 1
+_REFRESH_INTERVAL_S = 60
+_REGISTRY_CHECK_INTERVAL_S = 2
+_MAX_RETRY_INTERVAL_S = 300
+logger = logging.getLogger(__name__)
 _MAX_TOOLS_PER_SERVER = 512
 _MAX_TOOL_DESCRIPTOR_BYTES = 256 * 1024
 _MAX_TOOL_CACHE_BYTES_PER_SERVER = 4 * 1024 * 1024
@@ -245,8 +251,8 @@ class DynamicMCPManager:
     """Persistent registry and progressive-disclosure gateway for external MCP servers.
 
     Configurations and cached tool schemas are persisted. External stdio/HTTP connections are
-    opened only for refresh and tool calls, so dynamic servers never expand this MCP server's
-    own tools/list surface and do not require long-lived child processes.
+    opened for discovery and tool calls. The Controller owns discovery connections;
+    dynamic servers never expand this MCP server's own tools/list surface.
     """
 
     def __init__(self, state_dir: Path, *, max_timeout_s: int = 3600) -> None:
@@ -331,7 +337,10 @@ class DynamicMCPManager:
                 raise ValueError("command is only valid for stdio MCP servers")
 
     @asynccontextmanager
-    async def _session(self, server: DynamicMCPServer) -> AsyncIterator[ClientSession]:
+    async def _session(
+        self, server: DynamicMCPServer, *, message_handler: Any = None
+    ) -> AsyncIterator[ClientSession]:
+        options = {"message_handler": message_handler} if message_handler else {}
         if server.transport == "stdio":
             env = {key: value for key, value in os.environ.items() if key.upper() in _INHERITED_ENV_KEYS}
             env.update(server.env)
@@ -343,7 +352,7 @@ class DynamicMCPManager:
             )
             async with (
                 stdio_client(params) as (read_stream, write_stream),
-                ClientSession(read_stream, write_stream) as session,
+                ClientSession(read_stream, write_stream, **options) as session,
             ):
                 await session.initialize()
                 yield session
@@ -356,47 +365,51 @@ class DynamicMCPManager:
 
             async with sse_client(server.url or "", headers=dict(server.headers)) as streams:
                 read_stream, write_stream = streams
-                async with ClientSession(read_stream, write_stream) as session:
+                async with ClientSession(read_stream, write_stream, **options) as session:
                     await session.initialize()
                     yield session
             return
 
         async with streamablehttp_client(server.url or "", headers=dict(server.headers)) as streams:
             read_stream, write_stream, _ = streams
-            async with ClientSession(read_stream, write_stream) as session:
+            async with ClientSession(read_stream, write_stream, **options) as session:
                 await session.initialize()
                 yield session
 
     async def _fetch_tools(self, server: DynamicMCPServer) -> list[dict[str, Any]]:
+        async with asyncio.timeout(min(30, self._max_timeout_s)):
+            async with self._session(server) as session:
+                return await self._list_tools(session)
+
+    @staticmethod
+    async def _list_tools(session: ClientSession) -> list[dict[str, Any]]:
         tools: list[dict[str, Any]] = []
         cached_bytes = 0
         cursor: str | None = None
-        async with asyncio.timeout(min(30, self._max_timeout_s)):
-            async with self._session(server) as session:
-                while True:
-                    response = await session.list_tools(cursor=cursor)
-                    for tool in response.tools:
-                        if len(tools) >= _MAX_TOOLS_PER_SERVER:
-                            raise ValueError(
-                                f"dynamic MCP server exposes more than {_MAX_TOOLS_PER_SERVER} tools"
-                            )
-                        descriptor = _tool_json(tool)
-                        descriptor_bytes = _serialized_json_bytes(descriptor)
-                        if descriptor_bytes > _MAX_TOOL_DESCRIPTOR_BYTES:
-                            raise ValueError(
-                                "dynamic MCP tool descriptor exceeds "
-                                f"{_MAX_TOOL_DESCRIPTOR_BYTES} bytes"
-                            )
-                        cached_bytes += descriptor_bytes
-                        if cached_bytes > _MAX_TOOL_CACHE_BYTES_PER_SERVER:
-                            raise ValueError(
-                                "dynamic MCP tool cache exceeds "
-                                f"{_MAX_TOOL_CACHE_BYTES_PER_SERVER} bytes per server"
-                            )
-                        tools.append(descriptor)
-                    cursor = response.nextCursor
-                    if not cursor:
-                        break
+        while True:
+            response = await session.list_tools(cursor=cursor)
+            for tool in response.tools:
+                if len(tools) >= _MAX_TOOLS_PER_SERVER:
+                    raise ValueError(
+                        f"dynamic MCP server exposes more than {_MAX_TOOLS_PER_SERVER} tools"
+                    )
+                descriptor = _tool_json(tool)
+                descriptor_bytes = _serialized_json_bytes(descriptor)
+                if descriptor_bytes > _MAX_TOOL_DESCRIPTOR_BYTES:
+                    raise ValueError(
+                        "dynamic MCP tool descriptor exceeds "
+                        f"{_MAX_TOOL_DESCRIPTOR_BYTES} bytes"
+                    )
+                cached_bytes += descriptor_bytes
+                if cached_bytes > _MAX_TOOL_CACHE_BYTES_PER_SERVER:
+                    raise ValueError(
+                        "dynamic MCP tool cache exceeds "
+                        f"{_MAX_TOOL_CACHE_BYTES_PER_SERVER} bytes per server"
+                    )
+                tools.append(descriptor)
+            cursor = response.nextCursor
+            if not cursor:
+                break
         return tools
 
     async def manage(
@@ -554,27 +567,121 @@ class DynamicMCPManager:
             if server is None:
                 raise ValueError(f"unknown dynamic MCP server: {name}")
             config = DynamicMCPServer.from_json(server.to_json())
-            config_key = _config_key(config)
         if config.transport == "stdio" and get_settings().disable_local:
             raise ValueError(
                 "stdio dynamic MCP servers are unavailable when local access is disabled; "
                 "use streamable_http"
             )
         tools = await self._fetch_tools(config)
+        return await self._store_tools(config, tools)
+
+    async def _store_tools(
+        self, config: DynamicMCPServer, tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        name = config.name
         async with self._lock:
             servers = self._load()
             current = servers.get(name)
             if current is None:
                 raise ValueError(f"dynamic MCP server was removed while refreshing: {name}")
-            if _config_key(current) != config_key:
+            if (_config_key(current) != _config_key(config)
+                    or current.updated_at != config.updated_at
+                    or current.enabled != config.enabled):
                 raise RuntimeError(
                     f"dynamic MCP server configuration changed while refreshing: {name}"
                 )
+            # A competing refresh may have completed after this request began.
+            if current.refreshed_at != config.refreshed_at:
+                return {"server": current.public(), "refreshed": False}
             current.tools = tools
             current.refreshed_at = _now_iso()
-            current.updated_at = current.refreshed_at
             self._save(servers)
             return {"server": current.public(), "refreshed": True}
+
+    async def _watch_server(self, config: DynamicMCPServer) -> None:
+        changed = asyncio.Event()
+
+        async def on_message(message: Any) -> None:
+            if isinstance(message, ServerNotification) and isinstance(
+                message.root, ToolListChangedNotification
+            ):
+                # Never await list_tools inside the SDK receive loop.
+                changed.set()
+
+        retry = _REGISTRY_CHECK_INTERVAL_S
+        while True:
+            try:
+                if config.transport == "stdio":
+                    if get_settings().disable_local:
+                        return
+                    check_command_policy(shlex.join([config.command or "", *config.args]))
+                async with asyncio.timeout(min(30, self._max_timeout_s)) as deadline:
+                    async with self._session(config, message_handler=on_message) as session:
+                        deadline.reschedule(None)
+                        capabilities = session.get_server_capabilities()
+                        supports_changes = bool(
+                            capabilities and capabilities.tools and capabilities.tools.listChanged
+                        )
+                        while True:
+                            changed.clear()
+                            async with self._lock:
+                                current = self._load().get(config.name)
+                            if (current is None or not current.enabled
+                                    or current.updated_at != config.updated_at
+                                    or _config_key(current) != _config_key(config)):
+                                return
+                            async with asyncio.timeout(min(30, self._max_timeout_s)):
+                                tools = await self._list_tools(session)
+                            await self._store_tools(current, tools)
+                            retry = _REGISTRY_CHECK_INTERVAL_S
+                            if not supports_changes:
+                                break
+                            with contextlib.suppress(TimeoutError):
+                                await asyncio.wait_for(changed.wait(), _REFRESH_INTERVAL_S)
+                # Servers without list_changed support need no idle connection.
+                # Reopen them periodically, also detecting startup-only tool sets.
+                await asyncio.sleep(_REFRESH_INTERVAL_S)
+            except Exception as exc:
+                # Do not log credentials embedded in transport exceptions.
+                logger.warning("MCP discovery failed for %s (%s)", config.name, type(exc).__name__)
+                await asyncio.sleep(retry)
+                retry = min(retry * 2, _MAX_RETRY_INTERVAL_S)
+
+    async def serve_refresh(self) -> None:
+        """Own one discovery watcher per enabled registration until shutdown."""
+        watchers: dict[str, tuple[DynamicMCPServer, asyncio.Task[None]]] = {}
+        try:
+            while True:
+                try:
+                    async with self._lock:
+                        servers = self._load()
+                except Exception as exc:
+                    logger.warning("MCP registry refresh failed (%s)", type(exc).__name__)
+                    await asyncio.sleep(_REGISTRY_CHECK_INTERVAL_S)
+                    continue
+                eligible = {
+                    name: server for name, server in servers.items()
+                    if server.enabled and not (
+                        server.transport == "stdio" and get_settings().disable_local
+                    )
+                }
+                for name, (config, task) in list(watchers.items()):
+                    current = eligible.get(name)
+                    if (current is None or task.done()
+                            or current.updated_at != config.updated_at
+                            or _config_key(current) != _config_key(config)):
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+                        del watchers[name]
+                for name, server in eligible.items():
+                    if name not in watchers:
+                        watchers[name] = (server, asyncio.create_task(self._watch_server(server)))
+                await asyncio.sleep(_REGISTRY_CHECK_INTERVAL_S)
+        finally:
+            tasks = [task for _, task in watchers.values()]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def search(
         self, query: str = "", *, server: str | None = None, limit: int = 20

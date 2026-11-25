@@ -185,9 +185,17 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
 
             recovery_task = asyncio.create_task(serve(), name="agent-durable-task-recovery")
         async with inner_app.router.lifespan_context(inner_app):
+            from .dynamic_mcp import DynamicMCPManager
+
+            mcp_refresh_task = asyncio.create_task(
+                DynamicMCPManager(current.state_dir, max_timeout_s=current.max_timeout_s).serve_refresh(),
+                name="dynamic-mcp-discovery",
+            )
             try:
                 yield
             finally:
+                mcp_refresh_task.cancel()
+                await asyncio.gather(mcp_refresh_task, return_exceptions=True)
                 if enabled:
                     from .webui.background_tools import shutdown_background_tools
                     from .webui.event_triggers import shutdown_event_workers

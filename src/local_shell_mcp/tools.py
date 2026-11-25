@@ -4446,7 +4446,7 @@ def _register_dynamic_mcp_tools(
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def mcp_tool_inspect(name: str) -> ToolResult:
-        """Return the full cached schema for one dynamic MCP tool named <server>:<tool>. Refresh the server with mcp_manage if its cached schema is stale."""
+        """Return the full cached schema for one dynamic MCP tool named <server>:<tool>. The Controller automatically refreshes cached schemas; mcp_manage can force a refresh."""
         return await _tool_call(manager.inspect, name)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
