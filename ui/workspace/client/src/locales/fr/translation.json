@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Valeur",
   "com_lsm_ui_system_details_unavailable": "Détails du système indisponibles",
   "com_lsm_ui_resize_sidebar": "Redimensionner la barre latérale",
-  "com_lsm_channel_protocol_openai": "Compatible OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Indigène anthropique",
   "com_lsm_channel_protocol_google": "Natif de Google Gemini",
   "com_lsm_channel_legacy_name": "{{protocol}} (hérité)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Confirmer la suppression : {{name}}",
   "com_lsm_channel_delete_name": "Supprimer {{name}}",
   "com_lsm_channel_context_model": "Fenêtre contextuelle pour {{model}}",
-  "com_lsm_channel_model_count": "Modèles : {{count}}"
+  "com_lsm_channel_model_count": "Modèles : {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

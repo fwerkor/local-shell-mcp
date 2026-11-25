@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "القيمة",
   "com_lsm_ui_system_details_unavailable": "تفاصيل النظام غير متوفرة",
   "com_lsm_ui_resize_sidebar": "تغيير حجم الشريط الجانبي",
-  "com_lsm_channel_protocol_openai": "متوافق مع OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "مواطن أنثروبي",
   "com_lsm_channel_protocol_google": "جوجل الجوزاء الأصلي",
   "com_lsm_channel_legacy_name": "{{protocol}} (تراث)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "تأكيد الحذف: {{name}}",
   "com_lsm_channel_delete_name": "حذف {{name}}",
   "com_lsm_channel_context_model": "نافذة السياق لـ {{model}}",
-  "com_lsm_channel_model_count": "الموديلات: {{count}}"
+  "com_lsm_channel_model_count": "الموديلات: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

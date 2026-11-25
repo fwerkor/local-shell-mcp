@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Hodnota",
   "com_lsm_ui_system_details_unavailable": "Podrobnosti o systému nejsou k dispozici",
   "com_lsm_ui_resize_sidebar": "Změnit velikost postranního panelu",
-  "com_lsm_channel_protocol_openai": "kompatibilní s OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antropický domorodec",
   "com_lsm_channel_protocol_google": "Nativní Google Gemini",
   "com_lsm_channel_legacy_name": "{{protocol}} (starší verze)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Potvrďte smazání: {{name}}",
   "com_lsm_channel_delete_name": "Smazat {{name}}",
   "com_lsm_channel_context_model": "Kontextové okno pro {{model}}",
-  "com_lsm_channel_model_count": "Modely: {{count}}"
+  "com_lsm_channel_model_count": "Modely: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

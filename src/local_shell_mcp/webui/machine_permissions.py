@@ -24,6 +24,10 @@ _PROJECT = "agent.machine_policy.project."
 _CONVERSATION = "agent.machine_policy.conversation."
 
 
+class MachineReadOnlyError(PermissionError):
+    """The requested operation exceeds a read-only machine grant."""
+
+
 def validate_access_map(value: Any) -> dict[str, str]:
     if not isinstance(value, dict) or len(value) > 128:
         raise ValueError("Machine permissions must be an object with at most 128 entries")
@@ -137,7 +141,7 @@ def authorize_machine_action(
     if granted == "none":
         raise PermissionError(f"Access to machine {machine} is not granted")
     if operation in {"write", "execute"} and granted != "write":
-        raise PermissionError(f"Machine {machine} is read-only")
+        raise MachineReadOnlyError(f"Machine {machine} is read-only")
     # The per-machine grant never expands the OAuth principal's own rights.
     require_machine_scope(scopes, machine, "write" if operation != "read" else "read", expires=expires)
     if operation == "execute" and "shell:execute" not in scopes:

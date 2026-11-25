@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "ความคุ้มค่า",
   "com_lsm_ui_system_details_unavailable": "รายละเอียดระบบไม่พร้อมใช้งาน",
   "com_lsm_ui_resize_sidebar": "ปรับขนาดแถบด้านข้าง",
-  "com_lsm_channel_protocol_openai": "รองรับ OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "พื้นเมืองมานุษยวิทยา",
   "com_lsm_channel_protocol_google": "Google ราศีเมถุนพื้นเมือง",
   "com_lsm_channel_legacy_name": "{{protocol}} (ดั้งเดิม)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "ยืนยันการลบ: {{name}}",
   "com_lsm_channel_delete_name": "ลบ {{name}}",
   "com_lsm_channel_context_model": "หน้าต่างบริบทสำหรับ {{model}}",
-  "com_lsm_channel_model_count": "รุ่น: {{count}}"
+  "com_lsm_channel_model_count": "รุ่น: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Nilai",
   "com_lsm_ui_system_details_unavailable": "Detail sistem tidak tersedia",
   "com_lsm_ui_resize_sidebar": "Ubah ukuran bilah sisi",
-  "com_lsm_channel_protocol_openai": "Kompatibel dengan OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Penduduk asli antropis",
   "com_lsm_channel_protocol_google": "Asli Google Gemini",
   "com_lsm_channel_legacy_name": "{{protocol}} (warisan)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Konfirmasi penghapusan: {{name}}",
   "com_lsm_channel_delete_name": "Hapus {{name}}",
   "com_lsm_channel_context_model": "Jendela konteks untuk {{model}}",
-  "com_lsm_channel_model_count": "Model: {{count}}"
+  "com_lsm_channel_model_count": "Model: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

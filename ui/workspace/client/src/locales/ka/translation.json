@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "ღირებულება",
   "com_lsm_ui_system_details_unavailable": "სისტემის დეტალები მიუწვდომელია",
   "com_lsm_ui_resize_sidebar": "გვერდითი ზოლის ზომის შეცვლა",
-  "com_lsm_channel_protocol_openai": "OpenAI-თან თავსებადი",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "ანთროპიული მკვიდრი",
   "com_lsm_channel_protocol_google": "Google Gemini მშობლიური",
   "com_lsm_channel_legacy_name": "{{protocol}} (მემკვიდრეობა)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "დაადასტურეთ წაშლა: {{name}}",
   "com_lsm_channel_delete_name": "წაშალეთ {{name}}",
   "com_lsm_channel_context_model": "კონტექსტური ფანჯარა {{model}}-სთვის",
-  "com_lsm_channel_model_count": "მოდელები: {{count}}"
+  "com_lsm_channel_model_count": "მოდელები: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

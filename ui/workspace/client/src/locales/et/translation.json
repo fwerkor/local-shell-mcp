@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Väärtus",
   "com_lsm_ui_system_details_unavailable": "Süsteemi üksikasjad pole saadaval",
   "com_lsm_ui_resize_sidebar": "Muuda külgriba suurust",
-  "com_lsm_channel_protocol_openai": "OpenAI-ga ühilduv",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antroopne põliselanik",
   "com_lsm_channel_protocol_google": "Google Gemini emakeel",
   "com_lsm_channel_legacy_name": "{{protocol}} (pärand)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Kinnitage kustutamine: {{name}}",
   "com_lsm_channel_delete_name": "Kustuta {{name}}",
   "com_lsm_channel_context_model": "{{model}} kontekstiaken",
-  "com_lsm_channel_model_count": "Mudelid: {{count}}"
+  "com_lsm_channel_model_count": "Mudelid: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

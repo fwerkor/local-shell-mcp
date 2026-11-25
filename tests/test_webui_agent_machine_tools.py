@@ -112,7 +112,7 @@ async def test_machine_acl_enforced_on_dispatch_and_revocation(machine_agent, mo
         )
 
     assert await call("file_read", {"machine": "local", "path": "test.txt"}) == '{"ok": true}'
-    with pytest.raises(PermissionError, match="Agent has no write"):
+    with pytest.raises(registry.ToolPermissionDenied, match="read-only"):
         await call("file_write", {"machine": "local", "path": "a.txt", "content": "x"})
     with pytest.raises(PermissionError, match="read-only"):
         await call("file_write", {"machine": "worker1", "path": "a.txt", "content": "x"})
@@ -334,7 +334,7 @@ async def test_agent_default_machine_permission_inheritance(machine_agent, monke
     assert await call("file_read", "local", path="file.txt") == '{"ok":true}'
     agents.update("local", agent["id"], {"machine_default_permission": "read"})
     assert await call("file_read", "new-worker", path="file.txt") == '{"ok":true}'
-    with pytest.raises(PermissionError, match="Agent has no write"):
+    with pytest.raises(registry.ToolPermissionDenied, match="read-only"):
         await call("file_write", "new-worker", path="file.txt", content="x")
     agents.update("local", agent["id"], {"machine_default_permission": "write"})
     with pytest.raises(PermissionError, match="read-only"):

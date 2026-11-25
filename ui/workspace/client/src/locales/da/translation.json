@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Værdi",
   "com_lsm_ui_system_details_unavailable": "Systemoplysninger er ikke tilgængelige",
   "com_lsm_ui_resize_sidebar": "Tilpas sidebjælke",
-  "com_lsm_channel_protocol_openai": "OpenAI-kompatibel",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antropisk indfødt",
   "com_lsm_channel_protocol_google": "Google Gemini indfødt",
   "com_lsm_channel_legacy_name": "{{protocol}} (legacy)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Bekræft sletning: {{name}}",
   "com_lsm_channel_delete_name": "Slet {{name}}",
   "com_lsm_channel_context_model": "Kontekstvindue for {{model}}",
-  "com_lsm_channel_model_count": "Modeller: {{count}}"
+  "com_lsm_channel_model_count": "Modeller: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

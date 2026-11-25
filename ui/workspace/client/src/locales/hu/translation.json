@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Érték",
   "com_lsm_ui_system_details_unavailable": "A rendszer részletei nem érhetők el",
   "com_lsm_ui_resize_sidebar": "Oldalsáv átméretezése",
-  "com_lsm_channel_protocol_openai": "OpenAI kompatibilis",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antropikus bennszülött",
   "com_lsm_channel_protocol_google": "Google Gemini natív",
   "com_lsm_channel_legacy_name": "{{protocol}} (örökölt)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Erősítse meg a törlést: {{name}}",
   "com_lsm_channel_delete_name": "{{name}} törlése",
   "com_lsm_channel_context_model": "A {{model}} környezeti ablaka",
-  "com_lsm_channel_model_count": "Modellek: {{count}}"
+  "com_lsm_channel_model_count": "Modellek: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

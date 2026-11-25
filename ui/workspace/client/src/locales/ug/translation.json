@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "قىممەت",
   "com_lsm_ui_system_details_unavailable": "سىستېما تەپسىلاتلىرىنى ئىشلەتكىلى بولمايدۇ",
   "com_lsm_ui_resize_sidebar": "يانبالداقنى چوڭايتىڭ",
-  "com_lsm_channel_protocol_openai": "OpenAI ماس كېلىدۇ",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "ئانتروپتىك يەرلىك",
   "com_lsm_channel_protocol_google": "Google Gemini يەرلىك",
   "com_lsm_channel_legacy_name": "{{protocol}} (مىراس)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "ئۆچۈرۈشنى جەزملەشتۈرۈڭ: {{name}}",
   "com_lsm_channel_delete_name": "{{name}} نى ئۆچۈرۈڭ",
   "com_lsm_channel_context_model": "{{model}} نىڭ مەزمۇن كۆزنىكى",
-  "com_lsm_channel_model_count": "مودېللار: {{count}}"
+  "com_lsm_channel_model_count": "مودېللار: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

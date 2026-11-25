@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "價值",
   "com_lsm_ui_system_details_unavailable": "系統詳細資訊不可用",
   "com_lsm_ui_resize_sidebar": "調整側邊欄大小",
-  "com_lsm_channel_protocol_openai": "相容 OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "人為原住民",
   "com_lsm_channel_protocol_google": "谷歌雙子座原生",
   "com_lsm_channel_legacy_name": "{{protocol}}（舊版）",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "確認刪除：{{name}}",
   "com_lsm_channel_delete_name": "刪除{{name}}",
   "com_lsm_channel_context_model": "{{model}} 的上下文視窗",
-  "com_lsm_channel_model_count": "型號：{{count}}"
+  "com_lsm_channel_model_count": "型號：{{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

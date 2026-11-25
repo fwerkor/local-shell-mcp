@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Vrednost",
   "com_lsm_ui_system_details_unavailable": "Podrobnosti o sistemu niso na voljo",
   "com_lsm_ui_resize_sidebar": "Spremenite velikost stranske vrstice",
-  "com_lsm_channel_protocol_openai": "Združljiv z OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antropni domačin",
   "com_lsm_channel_protocol_google": "Google Gemini domači",
   "com_lsm_channel_legacy_name": "{{protocol}} (podedovano)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Potrdite brisanje: {{name}}",
   "com_lsm_channel_delete_name": "Izbriši {{name}}",
   "com_lsm_channel_context_model": "Kontekstno okno za {{model}}",
-  "com_lsm_channel_model_count": "Modeli: {{count}}"
+  "com_lsm_channel_model_count": "Modeli: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

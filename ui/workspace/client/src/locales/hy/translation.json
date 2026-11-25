@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Արժեք",
   "com_lsm_ui_system_details_unavailable": "Համակարգի մանրամասներն անհասանելի են",
   "com_lsm_ui_resize_sidebar": "Չափափոխել կողագոտին",
-  "com_lsm_channel_protocol_openai": "OpenAI-ի հետ համատեղելի",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Անտրոպիկ բնիկ",
   "com_lsm_channel_protocol_google": "Google Gemini-ի բնիկ",
   "com_lsm_channel_legacy_name": "{{protocol}} (ժառանգություն)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Հաստատեք ջնջումը. {{name}}",
   "com_lsm_channel_delete_name": "Ջնջել {{name}}",
   "com_lsm_channel_context_model": "Համատեքստային պատուհան {{model}}-ի համար",
-  "com_lsm_channel_model_count": "Մոդելներ՝ {{count}}"
+  "com_lsm_channel_model_count": "Մոդելներ՝ {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

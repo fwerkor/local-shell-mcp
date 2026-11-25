@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Waarde",
   "com_lsm_ui_system_details_unavailable": "Systeemgegevens niet beschikbaar",
   "com_lsm_ui_resize_sidebar": "Formaat van zijbalk wijzigen",
-  "com_lsm_channel_protocol_openai": "OpenAI-compatibel",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antropische inheemse",
   "com_lsm_channel_protocol_google": "Google Gemini-native",
   "com_lsm_channel_legacy_name": "{{protocol}} (verouderd)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Verwijdering bevestigen: {{name}}",
   "com_lsm_channel_delete_name": "{{name}} verwijderen",
   "com_lsm_channel_context_model": "Contextvenster voor {{model}}",
-  "com_lsm_channel_model_count": "Modellen: {{count}}"
+  "com_lsm_channel_model_count": "Modellen: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

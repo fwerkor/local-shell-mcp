@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "ערך",
   "com_lsm_ui_system_details_unavailable": "פרטי המערכת אינם זמינים",
   "com_lsm_ui_resize_sidebar": "שנה את גודל סרגל הצד",
-  "com_lsm_channel_protocol_openai": "תואם OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "יליד אנתרופי",
   "com_lsm_channel_protocol_google": "יליד Google Gemini",
   "com_lsm_channel_legacy_name": "{{protocol}} (מורשת)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "אשר מחיקה: {{name}}",
   "com_lsm_channel_delete_name": "מחק את {{name}}",
   "com_lsm_channel_context_model": "חלון הקשר עבור {{model}}",
-  "com_lsm_channel_model_count": "דגמים: {{count}}"
+  "com_lsm_channel_model_count": "דגמים: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

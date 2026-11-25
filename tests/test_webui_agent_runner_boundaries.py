@@ -234,3 +234,33 @@ async def test_native_skill_tools_read_files_and_respect_local_access(runner_par
     }
     with pytest.raises(RuntimeSafetyError, match='not granted'):
         await invoke('skill_list', {})
+
+
+@pytest.mark.asyncio
+async def test_readonly_browser_start_is_a_tool_failure_not_a_run_failure(runner_parts, monkeypatch):
+    from local_shell_mcp.webui import lsm_tool_registry, machine_permissions
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
+    db, store, generation = runner_parts
+    monkeypatch.setattr(machine_permissions, "_registered_defaults", lambda: {"local": "write"})
+    WorkspaceRepository(db).save_setting(
+        "local", "agent.machine_policy.conversation." + generation.conversation_id, {"local": "read"},
+    )
+
+    async def unexpected_dispatch(*args, **kwargs):
+        pytest.fail("A denied browser start must never dispatch")
+
+    monkeypatch.setattr(lsm_tool_registry, "_invoke_registered", unexpected_dispatch)
+
+    async def model(profile, messages, **kwargs):
+        if not any(m.get("role") == "tool" for m in messages):
+            yield ModelToolCall("denied-start", "browser_session", {"action": "start"})
+        else:
+            assert messages[-1]["tool_call_id"] == "denied-start"
+            assert messages[-1]["content"].startswith("Blocked: ")
+            assert "read-only" in messages[-1]["content"]
+            yield "The machine is read-only; the browser was not started."
+
+    obj = runner(runner_parts, model, scopes={"shell:read", "shell:write", "browser:use"})
+    messages = await obj.run(store.history("local", generation.conversation_id))
+    assert messages[-1]["content"] == "The machine is read-only; the browser was not started."

@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Arvo",
   "com_lsm_ui_system_details_unavailable": "Järjestelmätietoja ei ole saatavilla",
   "com_lsm_ui_resize_sidebar": "Muuta sivupalkin kokoa",
-  "com_lsm_channel_protocol_openai": "OpenAI-yhteensopiva",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antrooppinen syntyperäinen",
   "com_lsm_channel_protocol_google": "Google Gemini natiivi",
   "com_lsm_channel_legacy_name": "{{protocol}} (vanha)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Vahvista poistaminen: {{name}}",
   "com_lsm_channel_delete_name": "Poista {{name}}",
   "com_lsm_channel_context_model": "Kontekstiikkuna mallille {{model}}",
-  "com_lsm_channel_model_count": "Mallit: {{count}}"
+  "com_lsm_channel_model_count": "Mallit: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

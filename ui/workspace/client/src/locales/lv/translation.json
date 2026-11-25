@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Vērtība",
   "com_lsm_ui_system_details_unavailable": "Sistēmas informācija nav pieejama",
   "com_lsm_ui_resize_sidebar": "Mainīt sānjoslas izmērus",
-  "com_lsm_channel_protocol_openai": "Saderīgs ar OpenAI",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antropiskais pamatiedzīvotājs",
   "com_lsm_channel_protocol_google": "Google Gemini dzimtā",
   "com_lsm_channel_legacy_name": "{{protocol}} (mantots)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Apstipriniet dzēšanu: {{name}}",
   "com_lsm_channel_delete_name": "Dzēst {{name}}",
   "com_lsm_channel_context_model": "{{model}} konteksta logs",
-  "com_lsm_channel_model_count": "Modeļi: {{count}}"
+  "com_lsm_channel_model_count": "Modeļi: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

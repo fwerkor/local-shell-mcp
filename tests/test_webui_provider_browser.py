@@ -77,8 +77,11 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 await page.get_by_label("Model provider", exact=True).select_option("openai")
                 await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
                 await page.get_by_label("Model API key").fill("private-test-token")
+                switch = page.get_by_role("switch", name="Automatically discover model information")
+                if await switch.is_checked():
+                    await switch.click()
                 await page.get_by_label("Model identifiers").fill("first-model\nsecond-model")
-                await page.get_by_text("Model defaults / 模型默认参数", exact=True).click()
+                await page.get_by_text("Model defaults", exact=True).click()
                 await page.get_by_label("second-model Temperature", exact=True).fill("0.4")
                 await page.get_by_label("second-model Max Output Tokens", exact=True).fill("144")
                 async with page.expect_response(lambda response: response.request.method == "PUT" and response.url.endswith("/api/lsm/providers")) as saved:
@@ -122,6 +125,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.get_by_test_id("model-selector-settings").click()
                     await page.get_by_role("button", name="Edit Primary Research").click()
                     await page.get_by_label("Model API key").fill("recovered-test-token")
+                    switch = page.get_by_role("switch", name="Automatically discover model information")
+                    if await switch.is_checked():
+                        await switch.click()
                     await page.get_by_label("Model identifiers").fill("recovered-model")
                     async with page.expect_response(lambda response: response.request.method == "PUT" and response.url.endswith("/api/lsm/providers")) as recovered_saved:
                         await page.get_by_role("button", name="Save model channel").click()
@@ -150,6 +156,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.get_by_label("Model provider").select_option("openai")
                     await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
                     await page.get_by_label("Model API key").fill("secondary-private-token")
+                    switch = page.get_by_role("switch", name="Automatically discover model information")
+                    if await switch.is_checked():
+                        await switch.click()
                     await page.get_by_label("Model identifiers").fill("independent-model")
                     async with page.expect_response(lambda response: response.request.method == "PUT" and response.url.endswith("/api/lsm/providers")) as named_saved:
                         await page.get_by_role("button", name="Save model channel").click()
@@ -159,6 +168,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     # Rename and edit an unused channel through the actual UI.
                     await page.get_by_role("button", name="Edit Secondary Research").click()
                     await page.get_by_label("Channel name").fill("Secondary Renamed")
+                    switch = page.get_by_role("switch", name="Automatically discover model information")
+                    if await switch.is_checked():
+                        await switch.click()
                     await page.get_by_label("Model identifiers").fill("independent-model" + chr(10) + "extra-model")
                     await page.get_by_role("button", name="Save model channel").click()
                     await page.get_by_role("button", name="Edit Secondary Renamed").wait_for()
@@ -166,6 +178,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                         f"http://127.0.0.1:{port}/api/models")).json())
                     await page.get_by_role("button", name="Edit Secondary Renamed").click()
                     await page.get_by_label("Channel name").fill("Secondary Research")
+                    switch = page.get_by_role("switch", name="Automatically discover model information")
+                    if await switch.is_checked():
+                        await switch.click()
                     await page.get_by_label("Model identifiers").fill("independent-model")
                     await page.get_by_role("button", name="Save model channel").click()
                     await page.get_by_role("button", name="Edit Secondary Research").wait_for()
@@ -174,11 +189,14 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.get_by_role("button", name="Add channel").click()
                     await page.get_by_label("Channel name").fill("Temporary Research")
                     await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
+                    switch = page.get_by_role("switch", name="Automatically discover model information")
+                    if await switch.is_checked():
+                        await switch.click()
                     await page.get_by_label("Model identifiers").fill("temporary-model")
                     await page.get_by_role("button", name="Save model channel").click()
                     await page.get_by_role("button", name="Delete Temporary Research").click()
-                    assert await page.get_by_role("button", name="Confirm delete Temporary Research").is_visible()
-                    await page.get_by_role("button", name="Confirm delete Temporary Research").click()
+                    assert await page.get_by_role("button", name="Confirm delete: Temporary Research").is_visible()
+                    await page.get_by_role("button", name="Confirm delete: Temporary Research").click()
                     await page.get_by_role("button", name="Delete Temporary Research").wait_for(state="detached")
                     assert "Temporary Research" not in (await (await page.request.get(
                         f"http://127.0.0.1:{port}/api/models")).json())
@@ -268,7 +286,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.get_by_role("heading", name="Channels & models").wait_for()
                     await page.get_by_role("button", name="Delete Secondary Research").click()
                     async with page.expect_response(lambda response: response.request.method == "DELETE" and "name=Secondary%20Research" in response.url) as blocked:
-                        await page.get_by_role("button", name="Confirm delete Secondary Research").click()
+                        await page.get_by_role("button", name="Confirm delete: Secondary Research").click()
                     assert (await blocked.value).status == 409
                     await page.get_by_role("alert").get_by_text("Channel is referenced by", exact=False).wait_for()
                     await page.get_by_role("button", name="Delete anyway Secondary Research").click()

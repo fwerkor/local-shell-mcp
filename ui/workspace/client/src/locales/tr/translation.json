@@ -3322,7 +3322,7 @@
   "com_lsm_ui_value": "Değer",
   "com_lsm_ui_system_details_unavailable": "Sistem ayrıntıları mevcut değil",
   "com_lsm_ui_resize_sidebar": "Kenar çubuğunu yeniden boyutlandır",
-  "com_lsm_channel_protocol_openai": "OpenAI uyumlu",
+  "com_lsm_channel_protocol_openai": "OpenAI Chat Completions",
   "com_lsm_channel_protocol_anthropic": "Antropik yerli",
   "com_lsm_channel_protocol_google": "Google Gemini yerlisi",
   "com_lsm_channel_legacy_name": "{{protocol}} (eski)",
@@ -3370,5 +3370,6 @@
   "com_lsm_channel_confirm_delete_name": "Silme işlemini onaylayın: {{name}}",
   "com_lsm_channel_delete_name": "{{name}}'yi sil",
   "com_lsm_channel_context_model": "{{model}} için bağlam penceresi",
-  "com_lsm_channel_model_count": "Modeller: {{count}}"
+  "com_lsm_channel_model_count": "Modeller: {{count}}",
+  "com_lsm_channel_protocol_responses": "OpenAI Responses"
 }

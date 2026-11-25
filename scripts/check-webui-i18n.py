@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Validate the chat WebUI's lazy-loaded translation catalogs."""
-from collections import Counter
 import json
-from pathlib import Path
 import re
 import sys
+from collections import Counter
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "ui/workspace/client/src"
 LOCALES = ROOT / "locales"
