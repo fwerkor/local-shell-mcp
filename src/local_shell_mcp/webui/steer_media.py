@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import os
 import stat
 from pathlib import Path
@@ -35,14 +34,15 @@ def _detected_type(blob: bytes) -> str | None:
     return None
 
 
-def _load_owned_file(path: str, root: Path, owner: str, limit: int) -> bytes:
+def _load_owned_file(path: str, root: Path, limit: int) -> bytes:
     """Read trusted SQLite bytes; never trust client-supplied URL/path/MIME."""
     attachment_root = root / "attachments"
-    owner_dir = attachment_root / hashlib.sha256(owner.encode()).hexdigest()[:32]
     candidate = Path(path)
-    if (attachment_root.is_symlink() or owner_dir.is_symlink() or candidate.is_symlink() or
-        not candidate.resolve().is_relative_to(owner_dir)):
-        raise PermissionError("Attachment is outside the owner directory")
+    # Ownership was checked by the caller's SQLite query. Both legacy and
+    # date-based directories are valid, but never follow storage symlinks.
+    if (not candidate.is_relative_to(attachment_root) or
+        candidate.resolve() != candidate):
+        raise PermissionError("Attachment is outside the storage directory")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(candidate, flags)
     try:
@@ -78,7 +78,7 @@ async def encode_steer_media(database, owner: str, item: dict, state_dir: Path) 
             continue
         name = row["name"]
         try:
-            data = await asyncio.to_thread(_load_owned_file, row["path"], state_dir.resolve(), owner,
+            data = await asyncio.to_thread(_load_owned_file, row["path"], state_dir.resolve(),
                                            min(_MAX_ONE_INLINE_BYTES, remaining))
             detected = _detected_type(data)
             if detected is not None:

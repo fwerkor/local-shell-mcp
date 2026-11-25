@@ -1,11 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { Spinner } from '@librechat/client';
-import { Constants } from 'librechat-data-provider';
 import type { TConversation } from 'librechat-data-provider';
 import type { CurrencyConfig } from '~/utils';
 import useCompactConversation, { supportsCompaction } from '~/hooks/Chat/useCompactConversation';
-import { useGetLangfuseSessionLinkQuery, useGetStartupConfig } from '~/data-provider';
+import { useGetStartupConfig } from '~/data-provider';
 import useTokenUsage from '~/hooks/Chat/useTokenUsage';
 import CompactAction from './CompactAction';
 import { formatTokens, cn } from '~/utils';
@@ -30,12 +29,10 @@ function TokenUsageIndicator({
   isSubmitting,
   showCost,
   currency,
-  langfuseConnectionAccess,
   compactionEnabled,
 }: TokenUsageProps & {
   showCost: boolean;
   currency?: CurrencyConfig;
-  langfuseConnectionAccess: boolean;
   compactionEnabled: boolean;
 }) {
   const localize = useLocalize();
@@ -113,18 +110,6 @@ function TokenUsageIndicator({
    *  when the branch changes under the pointer, so a delayed show cannot open
    *  the popover for a conversation the user has navigated away from. */
   useEffect(() => cancelTimers, [cancelTimers, conversationId]);
-
-  const canResolveLangfuseSession =
-    langfuseConnectionAccess &&
-    popoverOpen &&
-    !isSubmitting &&
-    conversationId !== '' &&
-    conversationId !== Constants.NEW_CONVO &&
-    conversationId !== Constants.PENDING_CONVO;
-  const { data: langfuseSession } = useGetLangfuseSessionLinkQuery(
-    conversationId,
-    canResolveLangfuseSession,
-  );
 
   /** Hide until the branch has data — keeps a fresh, message-less chat clean and
    *  lets the indicator animate into view once the first tokens land. */
@@ -246,7 +231,6 @@ function TokenUsageIndicator({
             showCost={showCost}
             compactionAvailable={compactionAvailable}
             currency={currency}
-            langfuseSessionUrl={langfuseSession?.url ?? undefined}
           />
           {compactionAvailable && (
             <>
@@ -278,7 +262,6 @@ const TokenUsage = memo(function TokenUsage(props: TokenUsageProps) {
       {...props}
       showCost={startupConfig.interface?.contextCost === true}
       currency={startupConfig.interface?.currency}
-      langfuseConnectionAccess={startupConfig.langfuseConnectionAccess === true}
       /** Same `summarization.enabled` switch that governs the automatic detour,
        *  advertised positively: a server that does not know the capability
        *  (a cached config from an older release) must not receive the request,

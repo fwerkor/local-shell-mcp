@@ -742,7 +742,8 @@ jobs:
           load: true
           tags: local-shell-mcp:ci-${{ matrix.suffix }}
           cache-from: type=gha,scope=ci-docker-${{ matrix.suffix }}
-          cache-to: type=gha,mode=max,scope=ci-docker-${{ matrix.suffix }}
+          # Cache export is best-effort; image build and runtime smoke tests remain required.
+          cache-to: type=gha,mode=max,scope=ci-docker-${{ matrix.suffix }},ignore-error=true
 
       - name: Smoke test lean Docker runtime
         run: |

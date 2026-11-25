@@ -52,6 +52,7 @@ _WORKER_PYTHON_FILES = {
     "gui/__init__.py",
     "desktop_stream.py",
     "gui/base.py",
+    "gui/limits.py",
     "gui/linux.py",
     "gui/linux_atspi_helper.py",
     "gui/linux_eis.py",

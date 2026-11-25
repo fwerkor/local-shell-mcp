@@ -3,9 +3,8 @@ import * as Ariakit from '@ariakit/react';
 import { PermissionTypes, Permissions } from 'librechat-data-provider';
 import { DropdownPopup, TooltipAnchor, Button } from '@librechat/client';
 import { BookmarkFilledIcon, BookmarkIcon } from '@radix-ui/react-icons';
-import { Ellipsis, PlusCircle, HatGlasses, Check, ChartNoAxesGantt } from 'lucide-react';
+import { Ellipsis, PlusCircle, HatGlasses, Check } from 'lucide-react';
 import type { TStartupConfig } from 'librechat-data-provider';
-import type { TraceControl } from '~/components/Chat/Trace';
 import type * as t from '~/common';
 import { BookmarkContext } from '~/Providers/BookmarkContext';
 import useBookmarkItems from '~/hooks/Chat/useBookmarkItems';
@@ -23,12 +22,9 @@ import { cn } from '~/utils';
  */
 export default function HeaderMenu({
   startupConfig,
-  trace,
   className,
 }: {
   startupConfig?: TStartupConfig;
-  /** Owned by the header, which also renders the desktop trace button from it. */
-  trace?: TraceControl;
   className?: string;
 }) {
   const localize = useLocalize();
@@ -88,15 +84,6 @@ export default function HeaderMenu({
       label: localize('com_ui_add_multi_conversation'),
       icon: <PlusCircle className="size-4 text-text-secondary" />,
       onClick: multiConvo.addConversation,
-    });
-  }
-
-  if (trace?.show === true) {
-    pushGroup({
-      id: 'header-trace',
-      label: localize('com_ui_trace_view'),
-      icon: <ChartNoAxesGantt className="size-4 text-text-secondary" />,
-      onClick: trace.open,
     });
   }
 
