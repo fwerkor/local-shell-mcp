@@ -141,3 +141,58 @@ async def test_generation_reasoning_visible_during_stream_and_after_reconnect(
                            chunk for kind, chunk in segments if kind == 'think')
     finally:
         get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_visible_prose_remains_between_reasoning_and_tool_rounds(tmp_path, monkeypatch):
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'none')
+    monkeypatch.setattr('local_shell_mcp.webui.machine_permissions._registered_defaults',
+                        lambda: {'local': 'write'})
+    get_settings.cache_clear()
+    try:
+        store = GenerationStore(shared_database(get_settings().state_dir))
+        generation, _ = store.begin('local', {'text': 'Check twice'})
+        round_count = 0
+        snapshots = []
+
+        async def provider(*args, **kwargs):
+            nonlocal round_count
+            round_count += 1
+            if round_count > 1:
+                snapshots.append(store.resume_snapshot('local', generation.run_id)[0]['aggregatedContent'])
+            yield ModelThought('thinking', text=f'Thought {round_count}')
+            yield f'Visible {round_count}.'
+            if round_count < 3:
+                yield ModelToolCall(f'call-{round_count}', 'file_list', {'path': '.'})
+
+        monkeypatch.setattr(generation_routes, 'stream_model', provider)
+        monkeypatch.setattr(generation_routes, 'stream_model_with_tools', provider)
+        profile = ProviderConfig('openai', 'reasoning-test', 'https://provider.test/v1', 'secret')
+        await generation_routes._run_model('local', generation, profile, mcp_enabled=True,
+                                           granted_scopes=frozenset({'shell:read', 'shell:write'}))
+        assert store.latest('local', generation.conversation_id).status == 'complete', store.events('local', generation.run_id)[-1]
+        assert round_count == 3
+
+        def sequence(parts):
+            return [(p['type'], p.get('text') or p.get('think') or p.get('tool_call', {}).get('id'))
+                    for p in parts if p.get('text') or p.get('think') or p.get('tool_call')]
+
+        expected = [('think', 'Thought 1'), ('text', 'Visible 1.'), ('tool_call', 'call-1'),
+                    ('think', 'Thought 2'), ('text', 'Visible 2.'), ('tool_call', 'call-2'),
+                    ('think', 'Thought 3'), ('text', 'Visible 3.')]
+        assert sequence(snapshots[0]) == expected[:3]
+        assert sequence(snapshots[1]) == expected[:6]
+        snapshot, _ = store.resume_snapshot('local', generation.run_id)
+        assert sequence(snapshot['aggregatedContent']) == expected
+        events = [event for _, event in store.events('local', generation.run_id)]
+        final = next(event['responseMessage'] for event in reversed(events) if 'responseMessage' in event)
+        assert sequence(final['content']) == expected
+        assert final['text'] == 'Visible 1.Visible 2.Visible 3.'
+        with store.database.connect() as db:
+            saved = db.execute('SELECT content FROM messages WHERE id=?',
+                               (generation.response_message_id,)).fetchone()
+        assert sequence(json.loads(saved['content'])) == expected
+    finally:
+        get_settings.cache_clear()

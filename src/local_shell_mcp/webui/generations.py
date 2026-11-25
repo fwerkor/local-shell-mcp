@@ -936,7 +936,11 @@ class GenerationStore:
                     # React allocates a content slot at the opening step, even
                     # if its first text chunk arrives after a completed tool.
                     text_slot_by_step[data["id"]] = len(content_parts)
-                    content_parts.append({"type": "text", "text": "", "phase": "final_answer"})
+                    creation = (data.get("stepDetails") or {}).get("message_creation") or {}
+                    if creation.get("content_type") == "think":
+                        content_parts.append({"type": "think", "think": ""})
+                    else:
+                        content_parts.append({"type": "text", "text": "", "phase": "final_answer"})
                 elif data.get("type") == "tool_calls" and data["id"] not in tool_slot_by_step:
                     calls = (data.get("stepDetails") or {}).get("tool_calls") or []
                     if calls and isinstance(calls[0], dict):
