@@ -34,7 +34,7 @@ def workspace(tmp_path, monkeypatch):
 
 
 def saved_file(database, ident="file-source"):
-    path = attachments._safe_attachment_path("alice", ident + ".txt", database.root)
+    path = attachments._safe_attachment_path(ident + ".txt", database.root)
     path.write_bytes(b"immutable original document")
     with database.connect() as db:
         db.execute(

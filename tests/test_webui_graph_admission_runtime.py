@@ -109,7 +109,7 @@ def attach_agent_context(repo, database, agent, text):
     from local_shell_mcp.webui import attachments
 
     identity = "file-" + agent["id"]
-    path = attachments._safe_attachment_path("local", identity + ".txt", database.root)
+    path = attachments._safe_attachment_path(identity + ".txt", database.root)
     path.write_text(text)
     with database.connect() as sql:
         sql.execute("INSERT INTO attachments(id,owner,name,path,content_type,metadata) VALUES(?,?,?,?,?,?)", (

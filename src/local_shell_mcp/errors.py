@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
+from typing import Any
 
 
 class PathNotFoundError(FileNotFoundError):
@@ -61,3 +63,40 @@ def workspace_path_not_found_error(
         if not candidate.exists():
             return PathNotFoundError(candidate)
     return None
+
+
+def tool_exception_payload(exc: Exception) -> tuple[dict[str, Any], str]:
+    """Shared error details for local MCP and remote Worker responses."""
+    if isinstance(exc, ShellExecutableNotFoundError):
+        return {
+            "status": "executable_not_found",
+            "error_type": "FileNotFoundError",
+            "message": str(exc),
+            "executable": exc.executable,
+            "command": exc.command,
+            "cwd": exc.cwd,
+            "original_error": exc.original_error,
+        }, str(exc)
+    path_error = exc if isinstance(exc, PathNotFoundError) else None
+    if isinstance(exc, FileNotFoundError) and path_error is None:
+        from .settings import get_settings
+
+        path_error = workspace_path_not_found_error(exc, get_settings().workspace_root)
+    if path_error is not None:
+        # fs_ops imports the exception classes above; defer the reverse import.
+        from .fs_ops import missing_path_context
+
+        with contextlib.suppress(Exception):
+            context = missing_path_context(path_error.path)
+            return {
+                "status": "not_found",
+                "error_type": "FileNotFoundError",
+                "message": str(exc),
+                **context,
+            }, f"Path not found: {context['path']}"
+    message = str(exc) or type(exc).__name__
+    return {
+        "status": "error",
+        "error_type": type(exc).__name__,
+        "message": message,
+    }, message

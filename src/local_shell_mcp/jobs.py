@@ -1825,18 +1825,19 @@ async def tail_job(job_id: str, lines: int = 200) -> dict[str, Any]:
         try:
             tail = await read_shell(session_id, lines)
             output = str(tail.get("output", ""))
-        except Exception as exc:
+        except Exception:
+            # A short command can exit between listing sessions and capturing
+            # its pane. The capture failure is not a completion verdict.
+            # Recheck the durable receipt and session state through the same
+            # reconciliation path used by list/get, including receipt grace.
+            active = _active_session_ids(await list_shells())
             with _store_transaction() as store:
                 current = _find_job(store, job_id)
-                if (
-                    current.get("status") == "running"
-                    and str(current.get("session_id") or "") == session_id
-                ):
-                    current["status"] = "lost"
-                    current["updated_at"] = _utc()
-                    current["completed_at"] = current["updated_at"]
-                    current["error"] = str(exc)
+                if str(current.get("session_id") or "") == session_id:
+                    _refresh_job_status(current, active)
                 public_job = _public_job(current)
+                log_path = current.get("log_path")
+            output = _read_log_tail(log_path, lines)
     result = {"job": public_job, "output": output}
     if public_job.get("status") in TERMINAL_STATUSES:
         result["message"] = (

@@ -1,8 +1,10 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Skeleton } from '@librechat/client';
-import { apiBaseUrl } from 'librechat-data-provider';
+import { apiBaseUrl, request } from 'librechat-data-provider';
 import { cn, toAbsoluteFilePath } from '~/utils';
+import { useLocalize } from '~/hooks';
 import DialogImage from './DialogImage';
+import { isControllerAttachmentImage, readAttachmentImage } from './attachmentImage';
 
 /** Max display height for chat images (Tailwind JIT class) */
 export const IMAGE_MAX_H = 'max-h-[45vh]' as const;
@@ -47,7 +49,11 @@ const Image = ({
   width?: number;
   height?: number;
 }) => {
+  const localize = useLocalize();
   const [isOpen, setIsOpen] = useState(false);
+  const [attachment, setAttachment] = useState<{ source: string; url: string; size: number }>();
+  const [failedSource, setFailedSource] = useState<string>();
+  const [loadedSource, setLoadedSource] = useState<string>();
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   /** Root-relative server paths (`/images/...` static, `/api/...` downloads and
@@ -55,7 +61,63 @@ const Image = ({
    *  subpath deployment. */
   const absoluteImageUrl = useMemo(() => toAbsoluteFilePath(imagePath, apiBaseUrl()), [imagePath]);
 
+  const protectedImage = isControllerAttachmentImage(
+    absoluteImageUrl,
+    toAbsoluteFilePath('/api/files/download/', apiBaseUrl()),
+    window.location.href,
+  );
+  const displayUrl = protectedImage
+    ? attachment?.source === absoluteImageUrl
+      ? attachment.url
+      : undefined
+    : absoluteImageUrl;
+  const failed = failedSource === absoluteImageUrl;
+
+  useEffect(() => {
+    if (!protectedImage) {
+      return;
+    }
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    setFailedSource(undefined);
+    setLoadedSource(undefined);
+    setAttachment(undefined);
+    request
+      .authenticatedFetch(absoluteImageUrl, { signal: controller.signal, redirect: 'error' })
+      .then(readAttachmentImage)
+      .then((blob) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        objectUrl = URL.createObjectURL(blob);
+        setAttachment({ source: absoluteImageUrl, url: objectUrl, size: blob.size });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setFailedSource(absoluteImageUrl);
+        }
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [absoluteImageUrl, protectedImage]);
+
   const downloadImage = async () => {
+    if (protectedImage) {
+      if (!displayUrl || failed) {
+        return;
+      }
+      const link = document.createElement('a');
+      link.href = displayUrl;
+      link.download = altText || 'image.png';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return;
+    }
     try {
       const response = await fetch(absoluteImageUrl);
       if (!response.ok) {
@@ -93,7 +155,11 @@ const Image = ({
   const dims = width && height ? { width, height } : dimensionCache.get(absoluteImageUrl);
   const hasDimensions = !!(dims?.width && dims?.height);
   const heightStyle = hasDimensions ? computeHeightStyle(dims.width, dims.height) : undefined;
-  const showSkeleton = hasDimensions && !paintedUrls.has(absoluteImageUrl);
+  const showSkeleton =
+    !failed &&
+    hasDimensions &&
+    (!displayUrl || loadedSource !== displayUrl) &&
+    (protectedImage || !paintedUrls.has(absoluteImageUrl));
 
   return (
     <div className={alignRight ? 'ml-auto' : undefined}>
@@ -103,6 +169,7 @@ const Image = ({
         aria-label={`View ${altText} in dialog`}
         aria-haspopup="dialog"
         onClick={() => setIsOpen(true)}
+        disabled={!displayUrl || failed}
         className={cn(
           'relative mt-1 w-full max-w-lg cursor-pointer overflow-hidden rounded-lg border border-border-light text-text-secondary-alt shadow-md transition-shadow',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-text-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface-primary',
@@ -111,22 +178,39 @@ const Image = ({
         style={heightStyle}
       >
         {showSkeleton && <Skeleton className="absolute inset-0" aria-hidden="true" />}
-        <img
-          alt={altText}
-          src={absoluteImageUrl}
-          onLoad={() => paintedUrls.add(absoluteImageUrl)}
-          className={cn(
-            'relative block text-transparent',
-            hasDimensions
-              ? 'size-full object-contain'
-              : cn('h-auto w-auto max-w-full', IMAGE_MAX_H),
-          )}
-        />
+        {failed ? (
+          <span role="alert" className="relative block p-3">
+            {localize('com_ui_error')}: {altText}
+          </span>
+        ) : displayUrl ? (
+          <img
+            alt={altText}
+            src={displayUrl}
+            onLoad={() => {
+              setLoadedSource(displayUrl);
+              if (!protectedImage) {
+                paintedUrls.add(absoluteImageUrl);
+              }
+            }}
+            onError={() => setFailedSource(absoluteImageUrl)}
+            className={cn(
+              'relative block text-transparent',
+              hasDimensions
+                ? 'size-full object-contain'
+                : cn('h-auto w-auto max-w-full', IMAGE_MAX_H),
+            )}
+          />
+        ) : (
+          <span className="relative block p-3">{localize('com_ui_loading')}</span>
+        )}
       </button>
       <DialogImage
-        isOpen={isOpen}
+        isOpen={isOpen && !!displayUrl && !failed}
         onOpenChange={setIsOpen}
-        src={absoluteImageUrl}
+        src={displayUrl}
+        byteSize={
+          protectedImage && attachment?.source === absoluteImageUrl ? attachment.size : undefined
+        }
         downloadImage={downloadImage}
         args={args}
         triggerRef={triggerRef}

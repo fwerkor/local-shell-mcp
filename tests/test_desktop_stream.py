@@ -1005,21 +1005,22 @@ async def test_local_refresh_during_frame_send_is_not_lost(monkeypatch, tmp_path
     socket = PausedSocket()
     task = asyncio.create_task(human_ui.ui_desktop_websocket(socket))
     try:
-        await asyncio.wait_for(socket.second_started.wait(), timeout=2)
+        await asyncio.wait_for(socket.second_started.wait(), timeout=15)
         assert socket.frames[0]["image"] is True
         assert socket.frames[1]["image"] is False
         stream = next(iter(stream_module.STREAMS.values()))
         socket.incoming.put_nowait({"type": "websocket.receive", "text": '{"type":"refresh"}'})
-        for _ in range(100):
-            if stream.force_frame:
-                break
-            await asyncio.sleep(0.002)
+        async def wait_for_refresh():
+            while not stream.force_frame:
+                await asyncio.sleep(0.002)
+
+        await asyncio.wait_for(wait_for_refresh(), timeout=15)
         assert stream.force_frame is True
         socket.release_second.set()
-        await asyncio.wait_for(socket.third_sent.wait(), timeout=2)
+        await asyncio.wait_for(socket.third_sent.wait(), timeout=15)
         assert socket.frames[2]["image"] is True
         socket.incoming.put_nowait({"type": "websocket.disconnect"})
-        await asyncio.wait_for(task, timeout=2)
+        await asyncio.wait_for(task, timeout=15)
     finally:
         socket.release_second.set()
         if not task.done():

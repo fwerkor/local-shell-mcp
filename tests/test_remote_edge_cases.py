@@ -63,8 +63,10 @@ async def test_remote_call_disabled_and_failure_shapes(
     assert manager.calls[-1][1]["rpc_timeout_s"] == 9.0
 
 def test_remote_handled_exception_shapes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from local_shell_mcp import fs_ops
+
     monkeypatch.setattr(
-        remote_module,
+        fs_ops,
         "missing_path_context",
         lambda path: {"path": str(path), "cwd": str(tmp_path)},
     )
