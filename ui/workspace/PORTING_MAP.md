@@ -114,13 +114,11 @@ Memory、Context、资源生命周期、Agent Builder全部设置、完整conver
 
 原版`useLazyHighlight.ts`直接使用lowlight 2的命名导出`lowlight`。升级rehype插件后显式声明该直接依赖，避免错误拾取插件内部lowlight 3；保留原hook代码及行为。
 
-## 可复现全量源码清单
+## 上游源码映射
 
-`PORTING_INVENTORY.json`由`scripts/inventory-librechat-port.py`从两个固定源码树生成，
-列出生产后端、共享schema、SDK运行时与相关Agent前端模块的每个路径及SHA-256。
-未建立函数级映射的条目明确标为未移植/待源码审计，不以文件数量估算功能完成率。
-首批详细映射还新增了PluginController和原Ask User manifest两个来源，问答目录与临时
-Agent的可选开关已接通；这与LSM机器执行权限是相互独立的检查。
+经审查的源码映射及SHA-256保存在`UPSTREAM_LOCK.json`中，
+不以文件数量估算功能完成率。首批详细映射还新增了PluginController和原Ask User manifest
+两个来源，问答目录与临时Agent的可选开关已接通；这与LSM机器执行权限是相互独立的检查。
 
 发行审计另外发现原CI/Release依赖已提交的旧React压缩包，未随当前源码重新构建、Docker未打包React源码。
 已补充build-only React构建和确定性archive步骤，并使单二进制smoke检查`/c/new`。
@@ -454,7 +452,7 @@ wakeup/外部队列/跨 Controller 事件协议已经移植；后者仍单列为
 `subagentCompletionWakeup.ts`、`subagentThreads.ts`、
 `api/server/services/Endpoints/agents/subagentThreadStore.js` 和
 `packages/api/src/agents/triggers/README.md`。SHA-256 和逐符号对应见
-`UPSTREAM_LOCK.json`、`PORTING_INVENTORY.json`；`@librechat/agents@4.0.1`
+`UPSTREAM_LOCK.json`；`@librechat/agents@4.0.1`
 的工具 Schema 保持原版 JS 真实类差分不变。
 
 `webui/subagent_wakeup.py` 使用统一 SQLite 中的 `subagent_wakeups` 作为
