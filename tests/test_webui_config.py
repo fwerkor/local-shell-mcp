@@ -45,6 +45,10 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
         assert startup["lsmVersion"] == __version__
         assert startup["interface"]["agents"]["use"] is True
         assert startup["interface"]["contextUsage"] is True
+        assert startup["interface"]["schedules"] == {
+            "use": True, "create": True, "maxPerUser": 25,
+            "minIntervalMinutes": 5, "requireProject": False,
+        }
         endpoints = (await client.get("/api/endpoints", headers=alice)).json()
         assert endpoints["agents"]["type"] == "agents"
         assert "openAI" in endpoints
