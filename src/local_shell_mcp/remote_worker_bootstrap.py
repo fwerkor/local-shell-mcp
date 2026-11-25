@@ -16,6 +16,90 @@ import sys
 import time
 from pathlib import Path
 
+_REAPER_PID_ENV = "LOCAL_SHELL_MCP_WORKER_REAPER_PID"
+_LOCK_FD_ENV = "LOCAL_SHELL_MCP_WORKER_LOCK_FD"
+
+
+def needs_worker_reaper() -> bool:
+    if sys.platform != "linux":
+        return False
+    if os.getpid() == 1:
+        return True
+    # An old standalone bootstrap may itself be PID 1. Its newly upgraded
+    # worker must adopt descendants rather than relying on that old bootstrap.
+    return (
+        os.getppid() == 1
+        and os.environ.get("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED") == "1"
+        and os.environ.get(_REAPER_PID_ENV) != str(os.getppid())
+    )
+
+
+def supervise_worker(argv: list[str]) -> int:
+    """Own orphan reaping in a separate process, never in the worker's event loop."""
+    supervisor_pid = os.getpid()
+    child_setup = None
+    if supervisor_pid != 1:
+        import ctypes
+
+        # PR_SET_CHILD_SUBREAPER: adopt orphaned descendants before the legacy
+        # PID 1 bootstrap does. No privileges are needed on Linux.
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(36, 1, 0, 0, 0) != 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+
+        def child_setup() -> None:
+            # A legacy bootstrap can SIGKILL this reaper during rollback.
+            # Bind the actual worker lifetime to the reaper, including the
+            # race where the parent dies before prctl is installed.
+            if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error))
+            if os.getppid() != supervisor_pid:
+                os.kill(os.getpid(), signal.SIGKILL)
+
+    env = os.environ.copy()
+    env[_REAPER_PID_ENV] = str(os.getpid())
+    inherited_lock = env.get(_LOCK_FD_ENV)
+    pass_fds = (int(inherited_lock),) if inherited_lock else ()
+    process: subprocess.Popen | None = None
+    queued_signals: list[int] = []
+
+    def forward(signum: int, frame: object) -> None:  # noqa: ARG001
+        if process is None:
+            queued_signals.append(signum)
+        elif process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(process.pid, signum)
+
+    previous = {}
+    try:
+        previous[signal.SIGCHLD] = signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT):
+            previous[sig] = signal.signal(sig, forward)
+        process = subprocess.Popen(argv, env=env, pass_fds=pass_fds, preexec_fn=child_setup)
+        if inherited_lock:
+            # The worker must be the sole owner of the inherited flock.
+            os.close(int(inherited_lock))
+            os.environ.pop(_LOCK_FD_ENV, None)
+        for signum in queued_signals:
+            forward(signum, None)
+        # This dedicated process owns exactly one tracked child. All other
+        # children were adopted from it. Never run this loop in the worker
+        # itself: waitpid(-1) would race subprocess/asyncio there.
+        while True:
+            pid, status = os.waitpid(-1, 0)
+            if pid == process.pid:
+                process.returncode = os.waitstatus_to_exitcode(status)
+                return (
+                    process.returncode
+                    if process.returncode >= 0
+                    else 128 - process.returncode
+                )
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
 
 def _is_windows() -> bool:
     return os.name == "nt"
@@ -98,6 +182,8 @@ def _wait_for_worker(process: subprocess.Popen[bytes], pending: Path) -> int:
 
 
 def main() -> int:
+    if needs_worker_reaper():
+        return supervise_worker([sys.executable, str(Path(__file__).resolve())])
     state = _state_dir()
     pending = state / "runtime.pending.json"
     attempted = state / "runtime.attempted"
