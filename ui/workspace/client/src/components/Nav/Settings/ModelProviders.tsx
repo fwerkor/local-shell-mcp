@@ -398,6 +398,15 @@ export default function ModelProviders() {
       setBusy(false);
     }
   };
+  const callbackFields = <>
+    <label className="block space-y-1"><span>Full callback URL</span>
+      <textarea className={input} autoComplete="off" spellCheck={false} rows={3}
+        value={callback} onChange={(event) => setCallback(event.target.value)}
+        disabled={callbackSent} placeholder="http://127.0.0.1:…/auth/callback?…" />
+    </label>
+    <button type="button" className={button} disabled={oauthBusy || callbackSent || !callback.trim()}
+      onClick={() => void submitCallback()}>{callbackSent ? 'Completing authorization…' : 'Complete authorization'}</button>
+  </>;
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="space-y-1">
@@ -469,13 +478,7 @@ export default function ModelProviders() {
           </ol>
           {!authorization.flow ? <button type="button" className={button} disabled={oauthBusy} onClick={() => void beginOAuth(authorization)}>Start authorization</button> :
             <>
-              <label className="block space-y-1"><span>Full callback URL</span>
-                <textarea className={input} autoComplete="off" spellCheck={false} rows={3}
-                  value={callback} onChange={(event) => setCallback(event.target.value)}
-                  disabled={callbackSent} placeholder="http://127.0.0.1:…/auth/callback?…" />
-              </label>
-              <button type="button" className={button} disabled={oauthBusy || callbackSent || !callback.trim()}
-                onClick={() => void submitCallback()}>{callbackSent ? 'Completing authorization…' : 'Complete authorization'}</button>
+              {callbackFields}
               {authorization.authorizationUrl && <a className="block underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">Reopen authorization page</a>}
             </>}
           {oauthError && <p role="alert" className="text-status-error">{oauthError}</p>}
@@ -487,6 +490,11 @@ export default function ModelProviders() {
         {authorization.authorizationUrl && <a className="underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">Reopen authorization page</a>}
         {oauthError && <p role="alert" className="text-status-error">{oauthError}</p>}
         {!authorization.flow && !oauthBusy && <button type="button" className={button} onClick={() => void beginOAuth(authorization)}>Start authorization</button>}
+        {authorization.flow && <details className="space-y-2">
+          <summary className="cursor-pointer">Callback not received?</summary>
+          <p>If the browser cannot reach the local callback listener (for example, when the Controller runs in a container), copy the full callback URL from the address bar and paste it here. Do not share it elsewhere.</p>
+          {callbackFields}
+        </details>}
         <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>{localize('com_ui_cancel')}</button>
       </div>)}
     {editor && <form aria-label={localize('com_lsm_channel_configuration')} className="space-y-4 rounded-lg border border-border-medium bg-surface-secondary p-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>

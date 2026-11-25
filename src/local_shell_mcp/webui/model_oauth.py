@@ -387,7 +387,7 @@ async def oauth_start(request):
     except ValueError:
         local = host.lower() == "localhost"
     manual = not local or body.get("manual") is True
-    if manual and request.url.scheme != "https":
+    if not local and request.url.scheme != "https":
         from ..settings import get_settings
         configured = urlsplit(get_settings().public_base_url or "")
         if configured.scheme != "https":
@@ -438,7 +438,7 @@ async def oauth_start(request):
         task = asyncio.create_task(finish())
         task.add_done_callback(lambda _: close())
         _FLOWS[flow_id] = {"owner": _owner(request), "expires": time.monotonic() + TTL + 60,
-                           "task": task, "submit": submit if manual else None, "channel": name.casefold()}
+                           "task": task, "submit": submit, "channel": name.casefold()}
         return JSONResponse({"flow": flow_id, "authorization_url": url, "manual": manual}, headers={"Cache-Control": "no-store"})
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, detail=str(exc)) from None

@@ -82,10 +82,30 @@ async def test_loopback_uses_listener(setup_profiles, exchange):
         assert result["manual"] is False
         path = PATH + "/status?flow=" + result["flow"]
         raw = callback(result)
-        assert (await client.post(path, json={"callback_url": raw})).status_code == 409
+        assert (await client.post(path, json={"callback_url": raw.replace("state=", "other=")})).status_code == 400
         async with httpx.AsyncClient(trust_env=False) as browser:
             assert (await browser.get(raw)).status_code == 200
         assert (await complete(client, path))["status"] == "complete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("manual", [False, True])
+async def test_loopback_manual_fallback(setup_profiles, exchange, manual):
+    _, app = setup_profiles
+    calls, saved = exchange
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost", headers=_ADMIN) as client:
+        response = await client.post(PATH + "/start", json={"method": "chatgpt", "name": "Container", "manual": manual})
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result["manual"] is manual
+        path = PATH + "/status?flow=" + result["flow"]
+        raw = callback(result)
+        assert (await client.post(path, json={"callback_url": raw.replace("state=", "other=")})).status_code == 400
+        assert (await client.post(path, json={"callback_url": raw})).status_code == 200
+        assert (await client.post(path, json={"callback_url": raw})).status_code in {400, 409}
+        assert await complete(client, path) == {"status": "complete", "name": "Container"}
+        assert len(calls) == 1
+        assert saved == [("chatgpt", "Container")]
 
 
 @pytest.mark.asyncio

@@ -213,3 +213,28 @@ it('shows the remote callback instructions before opening the official authoriza
     popup.mockRestore();
   }
 });
+
+it('allows pasting the same callback when the local listener is unreachable', async () => {
+  const popup = jest.spyOn(window, 'open').mockReturnValue(null);
+  try {
+    post.mockResolvedValueOnce({ flow: 'container-flow', authorization_url: 'https://auth.openai.com/example', manual: false });
+    get.mockImplementation(async (target) => target.includes('/oauth/status') ?
+      { status: 'pending' } : { providers: [] });
+    mount();
+    await screen.findByText(/No channels added yet/);
+    fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Continue with ChatGPT' }));
+    const start = screen.queryByRole('button', { name: 'Start authorization' });
+    if (start) fireEvent.click(start);
+    fireEvent.click(await screen.findByText('Callback not received?'));
+    const field = await screen.findByLabelText('Full callback URL');
+    fireEvent.change(field, { target: { value: 'http://127.0.0.1:1455/auth/callback?code=mock&state=mock' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Complete authorization' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(path + '/oauth/status?flow=container-flow', {
+      callback_url: 'http://127.0.0.1:1455/auth/callback?code=mock&state=mock',
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  } finally {
+    popup.mockRestore();
+  }
+});
