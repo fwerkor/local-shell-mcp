@@ -493,8 +493,6 @@ const ChatForm = memo(function ChatForm({
         consumed = steering.interruptAndSend(text);
       } else if (kind === 'preempt') {
         consumed = steering.interruptSteer(text);
-      } else if (steering.effectiveAction === 'steer') {
-        consumed = steering.queueFromComposer(text);
       } else {
         consumed = steering.steerFromComposer(text);
       }
