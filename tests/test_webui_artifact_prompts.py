@@ -175,7 +175,7 @@ async def test_live_artifact_generation_sse_persistence_and_next_turn(tmp_path, 
             yield "Edited HTML read back."
         else:
             assert history[0]["role"] == "system"
-            assert "application/vnd.react" in history[0]["content"]
+            assert "application/vnd.react" in next(message["content"] for message in history if message["role"] == "system" and "Artifact" in message["content"])
             for part in (source[:55], source[55:]):
                 yield part
 
@@ -320,7 +320,7 @@ async def test_artifact_mode_survives_real_ask_user_pause_and_http_resume(tmp_pa
         assert "ask_user_question" in {
             tool["function"]["name"] for tool in kwargs["tools"]
         }
-        systems = [message["content"] for message in history if message["role"] == "system"]
+        systems = [message["content"] for message in history if message["role"] == "system" and "Additional Artifact Instructions" in message["content"]]
         assert len(systems) == 1
         assert "## Additional Artifact Instructions for React Components" in systems[0]
         observed_system_prompts.extend(systems)

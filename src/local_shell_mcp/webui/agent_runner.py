@@ -1176,9 +1176,25 @@ class AgentRunner:
             logging.getLogger(__name__).warning('Token calibration failed (%s)', type(exc).__name__)
 
     def _project_model_messages(self, state: AgentLoopState) -> list[dict]:
+        from .agents import AgentRepository
         from .fading_projection import project_faded_provider_messages
+        from .machine_permissions import machine_access_context
+        from .storage import WorkspaceRepository
 
-        return project_faded_provider_messages(state.messages, state.context.fading_tier)
+        agent = state.context.agent
+        if (agent or {}).get("id"):
+            # The dispatch gate also reloads the Agent ACL for every action.
+            current = AgentRepository(self.database).get(self.owner, agent["id"])
+            agent = current if current is not None else {"machine_default_permission": "none"}
+        restrictions = machine_access_context(
+            self.owner, self.authorization_conversation_id, agent=agent,
+            scopes=set(self.scopes), expires=self.grant_expires,
+            repo=WorkspaceRepository(self.database),
+        )
+        projected = project_faded_provider_messages(state.messages, state.context.fading_tier)
+        if restrictions:
+            return [{"role": "system", "content": restrictions}, *projected]
+        return projected
 
     def _update_fading_tier(self, state: AgentLoopState, budget, calibration, config, window: int) -> None:
         from .fading import (

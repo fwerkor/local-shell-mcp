@@ -17,12 +17,17 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
 @pytest.fixture
-def fade_state(tmp_path):
+def fade_state(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path / '.local-shell-mcp')
     store = GenerationStore(db)
     job, _ = store.begin('alice', {'text': 'Use a tool'})
     profile = ProviderConfig('openai', 'mock-model', 'http://127.0.0.1:9000/chat', '')
-    return db, store, job, profile
+    yield db, store, job, profile
+    get_settings.cache_clear()
 
 
 def _history():
@@ -114,7 +119,9 @@ async def test_runtime_fading_reduces_provider_messages_only_and_keeps_checkpoin
         project_messages=runner._project_model_messages)
     assert state.context.fading_tier['masked'] is True
     assert store.fading_tier('alice', job.run_id, 'default', 'openai', 'mock-model') == state.context.fading_tier
-    assert observed and len(observed[0][2]['content']) < len(original[2]['content'])
+    assert observed
+    tool_message = next(message for message in observed[0] if message['role'] == 'tool')
+    assert len(tool_message['content']) < len(original[2]['content'])
     assert state.messages[2]['content'] == original[2]['content']
     assert state.messages[-1]['content'] == 'Answered the final question.'
     events = [event for _, event in store.events('alice', job.run_id)
