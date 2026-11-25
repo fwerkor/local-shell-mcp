@@ -5,7 +5,6 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import type t from 'librechat-data-provider';
 import { useDocumentTitle, useHasAccess, useLocalize, TranslationKeys } from '~/hooks';
 import { useGetEndpointsQuery, useGetAgentCategoriesQuery } from '~/data-provider';
-import MarketplaceAdminSettings from './MarketplaceAdminSettings';
 import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
 import { SidePanelGroup } from '~/components/SidePanel';
 import CategoryTabs from './CategoryTabs';
@@ -221,14 +220,11 @@ const AgentMarketplace: React.FC<AgentMarketplaceProps> = ({ className = '' }) =
                 {isSmallScreen ? (
                   <div className="mx-auto mb-3 flex max-w-2xl items-center justify-between gap-2">
                     <OpenSidebar />
-                    <MarketplaceAdminSettings compact />
                   </div>
                 ) : null}
                 {/* Search bar */}
                 <div className="mx-auto flex max-w-2xl gap-2 pb-6">
                   <SearchBar value={searchQuery} onSearch={handleSearch} />
-                  {/* TODO: Remove this once we have a better way to handle admin settings */}
-                  {!isSmallScreen && <MarketplaceAdminSettings />}
                 </div>
 
                 {/* Category tabs */}

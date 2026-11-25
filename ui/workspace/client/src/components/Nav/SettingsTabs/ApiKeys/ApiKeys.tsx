@@ -12,7 +12,6 @@ import {
 } from '@librechat/client';
 import CreateKeyDialog from './CreateKeyDialog';
 import { useLocalize } from '~/hooks';
-import Admin from './Admin';
 import List from './List';
 
 export default function ApiKeys() {
@@ -41,7 +40,6 @@ export default function ApiKeys() {
           </OGDialogHeader>
           <List onCreate={() => setCreateOpen(true)} />
           <div className="flex items-center gap-2">
-            <Admin />
             <Button size="sm" className="ml-auto gap-1.5" onClick={() => setCreateOpen(true)}>
               <Plus className="h-4 w-4" aria-hidden="true" />
               {localize('com_ui_create_api_key')}
