@@ -2,28 +2,23 @@ import React, { createContext, useContext, useEffect, useMemo, useRef } from 're
 import { useSetRecoilState } from 'recoil';
 import { Tools, Constants, LocalStorageKeys, AgentCapabilities } from 'librechat-data-provider';
 import type { TAgentsEndpoint, TEphemeralAgent } from 'librechat-data-provider';
-import {
-  useMCPServerManager,
-  useSearchApiKeyForm,
-  useGetAgentsConfig,
-  useToolToggle,
-} from '~/hooks';
+import { useSearchApiKeyForm, useGetAgentsConfig, useToolToggle } from '~/hooks';
 import { getTimestampedValue } from '~/utils/timestamps';
 import { useGetStartupConfig } from '~/data-provider';
 import { ephemeralAgentByConvoId } from '~/store';
+import useLsmChatFeatures from '~/hooks/Plugins/useLsmChatFeatures';
 
 interface BadgeRowContextType {
   conversationId?: string | null;
   storageContextKey?: string;
   agentsConfig?: TAgentsEndpoint | null;
-  skills: ReturnType<typeof useToolToggle>;
   memory: ReturnType<typeof useToolToggle>;
   webSearch: ReturnType<typeof useToolToggle>;
   artifacts: ReturnType<typeof useToolToggle>;
   fileSearch: ReturnType<typeof useToolToggle>;
   codeInterpreter: ReturnType<typeof useToolToggle>;
   searchApiKeyForm: ReturnType<typeof useSearchApiKeyForm>;
-  mcpServerManager: ReturnType<typeof useMCPServerManager>;
+  features: ReturnType<typeof useLsmChatFeatures>;
 }
 
 const BadgeRowContext = createContext<BadgeRowContextType | undefined>(undefined);
@@ -37,7 +32,6 @@ interface BadgeRowProviderProps {
   isSubmitting?: boolean;
   conversationId?: string | null;
   specName?: string | null;
-  observeToolAuthorization?: boolean;
 }
 
 export default function BadgeRowProvider({
@@ -45,7 +39,6 @@ export default function BadgeRowProvider({
   isSubmitting,
   conversationId,
   specName,
-  observeToolAuthorization = false,
 }: BadgeRowProviderProps) {
   const lastContextKeyRef = useRef<string>('');
   const hasInitializedRef = useRef(false);
@@ -99,18 +92,12 @@ export default function BadgeRowProvider({
       lastContextKeyRef.current = storageSuffix;
 
       const codeToggleKey = `${LocalStorageKeys.LAST_CODE_TOGGLE_}${storageSuffix}`;
-      const webSearchToggleKey = `${LocalStorageKeys.LAST_WEB_SEARCH_TOGGLE_}${storageSuffix}`;
       const fileSearchToggleKey = `${LocalStorageKeys.LAST_FILE_SEARCH_TOGGLE_}${storageSuffix}`;
       const artifactsToggleKey = `${LocalStorageKeys.LAST_ARTIFACTS_TOGGLE_}${storageSuffix}`;
-      const skillsToggleKey = `${LocalStorageKeys.LAST_SKILLS_TOGGLE_}${storageSuffix}`;
-      const memoryToggleKey = `${LocalStorageKeys.LAST_MEMORY_TOGGLE_}${storageSuffix}`;
 
       const codeToggleValue = getTimestampedValue(codeToggleKey);
-      const webSearchToggleValue = getTimestampedValue(webSearchToggleKey);
       const fileSearchToggleValue = getTimestampedValue(fileSearchToggleKey);
       const artifactsToggleValue = getTimestampedValue(artifactsToggleKey);
-      const skillsToggleValue = getTimestampedValue(skillsToggleKey);
-      const memoryToggleValue = getTimestampedValue(memoryToggleKey);
 
       const initialValues: Record<string, boolean | string> = {};
 
@@ -119,17 +106,6 @@ export default function BadgeRowProvider({
           initialValues[Tools.execute_code] = JSON.parse(codeToggleValue);
         } catch (e) {
           console.error('Failed to parse code toggle value:', e);
-        }
-      }
-
-      if (webSearchToggleValue === null) {
-        initialValues[Tools.web_search] = true;
-      }
-      if (webSearchToggleValue !== null) {
-        try {
-          initialValues[Tools.web_search] = JSON.parse(webSearchToggleValue);
-        } catch (e) {
-          console.error('Failed to parse web search toggle value:', e);
         }
       }
 
@@ -149,47 +125,13 @@ export default function BadgeRowProvider({
         }
       }
 
-      if (skillsToggleValue !== null) {
-        try {
-          initialValues[AgentCapabilities.skills] = JSON.parse(skillsToggleValue);
-        } catch (e) {
-          console.error('Failed to parse skills toggle value:', e);
-        }
-      }
-
-      if (memoryToggleValue !== null) {
-        try {
-          initialValues[Tools.memory] = JSON.parse(memoryToggleValue);
-        } catch (e) {
-          console.error('Failed to parse memory toggle value:', e);
-        }
-      }
-
       const hasOverrides = Object.keys(initialValues).length > 0;
-
-      /** Read persisted MCP values from localStorage */
-      let mcpOverrides: string[] | null = null;
-      const mcpStorageKey = `${LocalStorageKeys.LAST_MCP_}${storageSuffix}`;
-      const mcpRaw = localStorage.getItem(mcpStorageKey);
-      if (mcpRaw !== null) {
-        try {
-          const parsed = JSON.parse(mcpRaw);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            mcpOverrides = parsed;
-          }
-        } catch (e) {
-          console.error('Failed to parse MCP values:', e);
-        }
-      }
 
       setEphemeralAgent((prev) => {
         if (prev == null) {
           /** ephemeralAgent is null — use localStorage defaults */
-          if (hasOverrides || mcpOverrides) {
+          if (hasOverrides) {
             const result: TEphemeralAgent = { ...initialValues };
-            if (mcpOverrides) {
-              result.mcp = mcpOverrides;
-            }
             return result;
           }
           return prev;
@@ -203,10 +145,6 @@ export default function BadgeRowProvider({
             result[toolKey] = value;
             changed = true;
           }
-        }
-        if (mcpOverrides && result.mcp === undefined) {
-          result.mcp = mcpOverrides;
-          changed = true;
         }
         return changed ? result : prev;
       });
@@ -223,6 +161,8 @@ export default function BadgeRowProvider({
     isAuthenticated: true,
   });
 
+  const features = useLsmChatFeatures(conversationId);
+
   /** WebSearch hooks */
   const searchApiKeyForm = useSearchApiKeyForm({});
 
@@ -231,6 +171,10 @@ export default function BadgeRowProvider({
     storageContextKey,
     toolKey: Tools.web_search,
     localStorageKey: LocalStorageKeys.LAST_WEB_SEARCH_TOGGLE_,
+    controlled: {
+      value: features.current?.web ?? false,
+      onChange: (value) => features.toggle('web', value),
+    },
     isAuthenticated: true,
   });
 
@@ -252,34 +196,20 @@ export default function BadgeRowProvider({
     isAuthenticated: true,
   });
 
-  /** Skills hook - using a custom key since it's not a Tool but a capability */
-  const skills = useToolToggle({
-    conversationId,
-    storageContextKey,
-    toolKey: AgentCapabilities.skills,
-    localStorageKey: LocalStorageKeys.LAST_SKILLS_TOGGLE_,
-    isAuthenticated: true,
-  });
-
   /** Memory hook - per-conversation toggle for the inline memory tools */
   const memory = useToolToggle({
     conversationId,
     storageContextKey,
     toolKey: Tools.memory,
     localStorageKey: LocalStorageKeys.LAST_MEMORY_TOGGLE_,
+    controlled: {
+      value: features.current?.memory ?? false,
+      onChange: (value) => features.toggle('memory', value),
+    },
     isAuthenticated: true,
   });
 
-  const mcpServerManager = useMCPServerManager({
-    conversationId,
-    storageContextKey,
-    specName,
-    ownsChatSelection: true,
-    observeToolAuthorization,
-  });
-
   const value: BadgeRowContextType = {
-    skills,
     memory,
     webSearch,
     artifacts,
@@ -289,7 +219,7 @@ export default function BadgeRowProvider({
     storageContextKey,
     codeInterpreter,
     searchApiKeyForm,
-    mcpServerManager,
+    features,
   };
 
   return <BadgeRowContext.Provider value={value}>{children}</BadgeRowContext.Provider>;

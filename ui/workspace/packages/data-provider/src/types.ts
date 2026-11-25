@@ -123,7 +123,6 @@ export type TEphemeralAgent = {
   file_search?: boolean;
   execute_code?: boolean;
   artifacts?: string;
-  skills?: boolean;
   memory?: boolean;
   /** Equip the ephemeral agent with the `ask_user_question` HITL tool. */
   ask_user_question?: boolean;

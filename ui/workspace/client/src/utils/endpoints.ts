@@ -348,10 +348,10 @@ export function applyModelSpecEphemeralAgent({
   const key = (convoId ?? Constants.NEW_CONVO) || Constants.NEW_CONVO;
   const agent: t.TEphemeralAgent = {
     mcp: modelSpec.mcpServers ?? [],
-    web_search: modelSpec.webSearch ?? true,
+    web_search: modelSpec.webSearch,
+    memory: modelSpec.memory,
     file_search: modelSpec.fileSearch ?? false,
     execute_code: modelSpec.executeCode ?? false,
-    memory: modelSpec.memory ?? false,
     artifacts: modelSpec.artifacts === true ? 'default' : modelSpec.artifacts || '',
   };
 
@@ -361,10 +361,8 @@ export function applyModelSpecEphemeralAgent({
   if (key !== Constants.NEW_CONVO) {
     const toolStorageMap: Array<[keyof t.TEphemeralAgent, string]> = [
       ['execute_code', LocalStorageKeys.LAST_CODE_TOGGLE_],
-      ['web_search', LocalStorageKeys.LAST_WEB_SEARCH_TOGGLE_],
       ['file_search', LocalStorageKeys.LAST_FILE_SEARCH_TOGGLE_],
       ['artifacts', LocalStorageKeys.LAST_ARTIFACTS_TOGGLE_],
-      ['memory', LocalStorageKeys.LAST_MEMORY_TOGGLE_],
     ];
 
     for (const [toolKey, storagePrefix] of toolStorageMap) {

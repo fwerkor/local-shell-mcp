@@ -11,7 +11,8 @@ from starlette.routing import Route
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui import routes, skill_routes, skill_tree_routes, tag_routes
-from local_shell_mcp.webui.skill_runtime import active_skills, catalog, load
+from local_shell_mcp.webui.skill_runtime import active_skills, catalog
+from local_shell_mcp.webui.skill_runtime import load_managed as load
 from local_shell_mcp.webui.storage import WorkspaceRepository, _json
 
 
@@ -410,18 +411,37 @@ def test_skill_runtime_manual_and_deployment_guard_branches(state, monkeypatch):
                         lambda: {'skills': [{'name': 'deployed', 'description': 'test deployment'}]})
     monkeypatch.setattr(skill_runtime, 'load_installed_skill',
                         lambda name: {'content': 'Deployed documentation'})
-    monkeypatch.setattr(skill_runtime, 'read_installed_skill_file',
-                        lambda name, path: {'content': 'Supporting deployment text'})
-    assert load(db, 'alice', None, 'deployed') == 'Deployed documentation'
-    assert load(db, 'alice', None, 'deployed',
-                path='references/guide.md') == 'Supporting deployment text'
     assert 'Deployed documentation' in skill_runtime.manual_context(
         db, 'alice', None, ['deployment:deployed'])
 
     repo.save_setting('alice', 'webui.skill.states', {'deployment:deployed': False})
     assert all(item['id'] != 'deployment:deployed' for item in active_skills(db, 'alice', None))
+    from local_shell_mcp import skill_ops
+
+    monkeypatch.setattr(skill_ops, 'list_installed_skills', lambda settings=None: skill_runtime.list_installed_skills())
+    token = skill_ops.managed_skill_context.set((db, 'alice', None))
+    try:
+        assert not skill_ops.list_skills()['skills']
+        with pytest.raises(ValueError, match='not enabled'):
+            skill_ops.load_skill('deployed')
+        with pytest.raises(ValueError, match='not enabled'):
+            skill_ops.read_skill('deployed', 'reference.md')
+    finally:
+        skill_ops.managed_skill_context.reset(token)
     repo.save_setting('alice', 'webui.skill.states', {})
     allowed = skill_runtime._policy_allows
+    monkeypatch.setattr(skill_ops, 'load_installed_skill', lambda *args: {'content': 'blocked body'})
+    monkeypatch.setattr(skill_ops, 'read_installed_skill_file', lambda *args: {'content': 'blocked body'})
+    monkeypatch.setattr(skill_runtime, '_policy_allows',
+                        lambda filters, **kw: kw.get('body') != 'blocked body')
+    token = skill_ops.managed_skill_context.set((db, 'alice', None))
+    try:
+        with pytest.raises(ValueError, match='blocked by configured policy'):
+            skill_ops.load_skill('deployed')
+        with pytest.raises(ValueError, match='blocked by configured policy'):
+            skill_ops.read_skill('deployed', 'reference.md')
+    finally:
+        skill_ops.managed_skill_context.reset(token)
     monkeypatch.setattr(skill_runtime, '_policy_allows',
                         lambda filters, **kwargs: False if (
                             'deployment' in kwargs.get('description', '') or
@@ -450,7 +470,7 @@ async def test_managed_supporting_file_binary_content_cannot_inject(state):
                               files={'file': ('binary.dat', b'\xff\xfe', 'application/octet-stream')})
         assert posted.status_code == 200
     with pytest.raises(ValueError, match='binary'):
-        skill_runtime.load(repo.database, 'alice', None, 'binary-check',
+        skill_runtime.load_managed(repo.database, 'alice', None, 'binary-check',
                            path='references/binary.dat')
 
 
@@ -483,8 +503,6 @@ async def test_colliding_deployment_and_managed_skills_are_both_loadable(state, 
                         lambda: {'skills': [{'name': 'collision', 'description': 'Deployed version'}]})
     monkeypatch.setattr(skill_runtime, 'load_installed_skill',
                         lambda name: {'content': 'Deployment-specific instructions'})
-    monkeypatch.setattr(skill_runtime, 'read_installed_skill_file',
-                        lambda name, path: {'content': 'Deployment reference'})
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
                                  base_url='http://example.test') as c:
         created = await c.post('/api/skills', json={
@@ -494,11 +512,8 @@ async def test_colliding_deployment_and_managed_skills_are_both_loadable(state, 
         assert created.status_code == 201
         managed_id = created.json()['_id']
     listing = catalog(repo.database, 'alice', None)
-    assert managed_id + ': Managed version' in listing
-    assert 'deployment:collision: Deployed version' in listing
+    assert 'managed/' + managed_id + ' (collision): Managed version' in listing
+    assert 'collision: Deployed version' in listing
     assert load(repo.database, 'alice', None, managed_id) == 'Managed-specific instructions'
-    assert load(repo.database, 'alice', None, 'deployment:collision') == 'Deployment-specific instructions'
-    assert load(repo.database, 'alice', None, 'deployment:collision',
-                path='references/guide.md') == 'Deployment reference'
-    with pytest.raises(ValueError, match='Ambiguous'):
-        load(repo.database, 'alice', None, 'collision')
+    assert 'Deployment-specific instructions' in skill_runtime.manual_context(
+        repo.database, 'alice', None, ['deployment:collision'])

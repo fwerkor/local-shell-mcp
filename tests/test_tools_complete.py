@@ -242,9 +242,9 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     ):
         monkeypatch.setattr(tools, name, async_value)
     for name in (
-        "list_installed_skills",
-        "load_installed_skill",
-        "read_installed_skill_file",
+        "list_skills",
+        "load_skill",
+        "read_skill",
         "list_dir",
         "glob_paths",
         "read_texts",
@@ -418,7 +418,7 @@ async def test_tool_wrapper_error_paths_and_remote_disabled(tmp_path, monkeypatc
     monkeypatch.setattr(tools, "grep", fail_async)
     monkeypatch.setattr(tools, "read_text", fail_sync)
     monkeypatch.setattr(tools, "run_shell", fail_async)
-    monkeypatch.setattr(tools, "list_installed_skills", fail_sync)
+    monkeypatch.setattr(tools, "list_skills", fail_sync)
     monkeypatch.setattr(tools, "public_run_shell", fail_async)
     monkeypatch.setattr(tools, "_run_python", fail_async)
     monkeypatch.setattr(tools, "start_shell", fail_async)

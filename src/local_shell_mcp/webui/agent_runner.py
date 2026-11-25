@@ -58,10 +58,6 @@ from .subagents import (
     subagent_tools,
 )
 
-# The hosted Agent has an owner/Agent-aware Skill tool. Native MCP aliases
-# bypass per-user activation and must remain exclusive to external MCP clients.
-_HOSTED_SKILL_ALIASES = frozenset({'skill_list', 'skill_load', 'skill_read'})
-
 
 class AgentRunner:
     def __init__(self, owner, generation, database, store, *, scopes, grant_expires,
@@ -194,6 +190,11 @@ class AgentRunner:
         admit_agent_graph(self.owner, self.graph_definition, self.repository)
         selected = set(selected_tools if selected_tools is not None else (agent or {}).get("tools") or [])
         unrestricted = agent is None and selected_tools is None
+        # Migrate the old Skill capability selection to the registered names.
+        if {"skill", "skills"} & selected or (
+            (agent or {}).get("skills_enabled") is True
+        ):
+            selected.update({"skill_list", "skill_load", "skill_read"})
         # Legacy agents retain their per-tool allowlist. Agents configured in
         # the new builder expose all audited native tools allowed by both ACLs.
         from .machine_permissions import agent_access_policy
@@ -207,10 +208,20 @@ class AgentRunner:
                                  agent_default_permission=machine_default)
         machine_exposed = selected_tools is None and machine_configured
         tools = [tool for tool in native
-                 if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
-                 and (unrestricted or machine_exposed or tool["function"]["name"] in selected
-                      or tool["function"]["name"] in {"session_manage", "plan_manage"})]
-        if self.web_search_enabled:
+                 if (unrestricted or machine_exposed or tool["function"]["name"] in selected
+                     or tool["function"]["name"] in {"session_manage", "plan_manage"})]
+        from .misc_routes import effective_features
+        from .storage import WorkspaceRepository
+
+        settings = WorkspaceRepository(self.database)
+        features = effective_features(self.owner, self.authorization_conversation_id, repo=settings)
+        # An explicitly saved composer preference supersedes stale ephemeral
+        # model-spec flags; legacy request flags still apply without a preference.
+        web_default = settings.setting(self.owner, 'conversation.features.global', {})
+        web_chat = settings.setting(self.owner, 'conversation.permissions.' + self.authorization_conversation_id, {}) if self.authorization_conversation_id else {}
+        explicit_web = any(isinstance(value, dict) and type(value.get('web')) is bool
+                           for value in (web_default, web_chat))
+        if features["web"] and (self.web_search_enabled or explicit_web):
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled and (agent or {}).get("mcp_servers") != []:
@@ -219,8 +230,6 @@ class AgentRunner:
             tools += [tool for tool in nested_tools()
                       if unrestricted or machine_exposed or mcp_exposed
                       or tool["function"]["name"] in selected]
-        from .storage import WorkspaceRepository
-        settings = WorkspaceRepository(self.database)
         from .content_filters import validate_agent_instructions, validate_model_parameters
 
         filters = configured_filters(settings, self.owner)
@@ -231,19 +240,11 @@ class AgentRunner:
         parameters = merge_sampling(profile.sampling, (agent or {}).get('model_parameters') or self.initial_parameters)
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
-        from .misc_routes import effective_features
         if ((unrestricted or 'memory' in selected)
-                and effective_features(self.owner, self.authorization_conversation_id,
-                                       repo=settings)['memory']
+                and features['memory']
                 and memory_enabled(settings, self.owner, tools=True)):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
-        from .skill_runtime import SKILL_TOOL, active_skills
-
-        if ((unrestricted or 'skills' in selected or 'skill' in selected
-             or (agent or {}).get('skills_enabled') is True)
-                and active_skills(self.database, self.owner, agent)):
-            tools.append(SKILL_TOOL)
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
@@ -477,21 +478,15 @@ class AgentRunner:
         from .nested_mcp import approved_call, discover
 
         self._check_grant()
-        # A restored checkpoint may still contain a pre-upgrade native schema.
-        # Reject these aliases at dispatch as well as filtering them from prompts.
-        if call.name in _HOSTED_SKILL_ALIASES:
-            raise RuntimeSafetyError("Use the hosted skill tool for enabled Skills")
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
-        if call.name == 'skill':
-            from .skill_runtime import load
-
-            return load(self.database, self.owner, state.context.agent,
-                        call.arguments.get('name'), path=call.arguments.get('path'))
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
-            if not memory_enabled(settings, self.owner, tools=True):
+            from .misc_routes import effective_features
+
+            if (not effective_features(self.owner, self.authorization_conversation_id, repo=settings)["memory"]
+                    or not memory_enabled(settings, self.owner, tools=True)):
                 raise RuntimeSafetyError('Memory tools are disabled')
             config = {**(memory_config(settings, self.owner) or {}),
                       'filters': configured_filters(settings, self.owner)}
@@ -501,7 +496,13 @@ class AgentRunner:
                 self.memory_artifacts[call.call_id] = artifact
             return result
         if call.name in {"web_search", "web_fetch"}:
+            from .misc_routes import effective_features
+            from .storage import WorkspaceRepository
             from .web_research import invoke_web_tool
+
+            if not effective_features(self.owner, self.authorization_conversation_id,
+                                      repo=WorkspaceRepository(self.database))["web"]:
+                raise RuntimeSafetyError("Web search is disabled for this conversation")
 
             return await invoke_web_tool(self.owner, call.name, call.arguments)
         if call.name == "check_background_task":
@@ -557,14 +558,21 @@ class AgentRunner:
                 if self.background_deny:
                     raise RuntimeSafetyError("Background execution is disabled in this child context")
 
-                origin_agent_id = (state.context.agent or {}).get("id")
+                origin_agent = copy.deepcopy(state.context.agent)
+                origin_agent_id = (origin_agent or {}).get("id")
 
                 async def detached_dispatch(c, scopes, expires, authorization):
-                    return await invoke_native(self.owner, self.generation.conversation_id, c,
-                                               granted_scopes=set(scopes), grant_expires=expires,
-                                               run_id=self.generation.run_id,
-                                               authorization_conversation_id=authorization,
-                                               agent_id=origin_agent_id)
+                    from ..skill_ops import managed_skill_context
+
+                    token = managed_skill_context.set((self.database, self.owner, origin_agent))
+                    try:
+                        return await invoke_native(self.owner, self.generation.conversation_id, c,
+                                                   granted_scopes=set(scopes), grant_expires=expires,
+                                                   run_id=self.generation.run_id,
+                                                   authorization_conversation_id=authorization,
+                                                   agent_id=origin_agent_id)
+                    finally:
+                        managed_skill_context.reset(token)
 
                 return await start_tool_task(self.database, self.owner,
                                              self.generation.conversation_id,
@@ -618,6 +626,9 @@ class AgentRunner:
                                          source_agent_id=current["id"])
             return build_handoff_command(edge, current["id"], current.get("name") or current["id"],
                                          call.name, call.arguments, call.call_id, state.messages)
+        from ..skill_ops import managed_skill_context
+
+        token = managed_skill_context.set((self.database, self.owner, state.context.agent))
         try:
             from .action_spec import is_action_tool
             if is_action_tool(call.name):
@@ -663,6 +674,8 @@ class AgentRunner:
             # Native/provider exceptions may contain credentials or headers.
             # Keep their type for recovery without copying secrets to the model.
             return "Tool failed (" + type(error).__name__ + ")"
+        finally:
+            managed_skill_context.reset(token)
 
     async def _child(self, invocation, *, profile=None, parameters=None, parent_approval_mode=None):
         async def quiet(text):

@@ -19,14 +19,13 @@ import { useChatBadges } from '~/hooks';
 import ToolDialogs from './ToolDialogs';
 import FileSearch from './FileSearch';
 import Artifacts from './Artifacts';
-import MCPSelect from './MCPSelect';
 import WebSearch from './WebSearch';
 import Memory from './Memory';
-import Skills from './Skills';
 import store from '~/store';
 
 interface BadgeRowProps {
   showEphemeralBadges?: boolean;
+  showTools?: boolean;
   onChange: (badges: Pick<BadgeItem, 'id'>[]) => void;
   onToggle?: (badgeId: string, currentActive: boolean) => void;
   conversationId?: string | null;
@@ -144,6 +143,7 @@ const dragReducer = (state: DragState, action: DragAction): DragState => {
 
 function BadgeRow({
   showEphemeralBadges,
+  showTools,
   conversationId,
   specName,
   isSubmitting,
@@ -328,10 +328,11 @@ function BadgeRow({
       conversationId={conversationId}
       specName={specName}
       isSubmitting={isSubmitting}
-      observeToolAuthorization={showEphemeralBadges === true}
     >
       <div ref={containerRef} className="relative flex flex-wrap items-center gap-2">
-        {showEphemeralBadges === true && <ToolsDropdown />}
+        {(showTools || showEphemeralBadges) && (
+          <ToolsDropdown showEphemeralTools={showEphemeralBadges === true} />
+        )}
         {tempBadges.map((badge, index) => (
           <React.Fragment key={badge.id}>
             {dragState.draggedBadge && dragState.insertIndex === index && ghostBadge && (
@@ -376,10 +377,8 @@ function BadgeRow({
             <WebSearch />
             <CodeInterpreter />
             <FileSearch />
-            <Skills />
             <Memory />
             <Artifacts />
-            <MCPSelect />
           </>
         )}
         {ghostBadge && (

@@ -1,9 +1,9 @@
 import React, { memo } from 'react';
 import { Brain } from 'lucide-react';
 import { CheckboxButton } from '@librechat/client';
-import { defaultAgentCapabilities } from 'librechat-data-provider';
-import { useLocalize, useHasMemoryAccess, useAgentCapabilities, useAuthContext } from '~/hooks';
+import { useLocalize, useAuthContext } from '~/hooks';
 import { useBadgeRowContext } from '~/Providers';
+import { useGetStartupConfig } from '~/data-provider';
 import { badgeAccents } from './accents';
 
 function Memory() {
@@ -12,21 +12,19 @@ function Memory() {
   const context = useBadgeRowContext();
   const { toggleState: memoryActive, debouncedChange, isPinned } = context?.memory ?? {};
 
-  const canUseMemory = useHasMemoryAccess();
-
-  const { memoryEnabled } = useAgentCapabilities(
-    context?.agentsConfig?.capabilities ?? defaultAgentCapabilities,
-  );
+  const { data: startupConfig } = useGetStartupConfig();
+  const canUseMemory = startupConfig?.interface?.memories === true;
 
   const hasOptedOut = user?.personalization?.memories === false;
 
-  if (!canUseMemory || !memoryEnabled || hasOptedOut) {
+  if (!canUseMemory || hasOptedOut) {
     return null;
   }
 
   return (
     (memoryActive || isPinned) && (
       <CheckboxButton
+        disabled={!context?.features.canEdit}
         checked={memoryActive}
         setValue={debouncedChange}
         label={localize('com_ui_memory')}

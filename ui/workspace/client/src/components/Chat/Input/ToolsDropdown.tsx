@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import * as Ariakit from '@ariakit/react';
-import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon } from '@librechat/client';
-import { Brain, Globe, ScrollText, Settings2, TerminalSquareIcon } from 'lucide-react';
+import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon, MCPIcon } from '@librechat/client';
+import { Brain, Check, Globe, Settings2, TerminalSquareIcon } from 'lucide-react';
 import {
   Permissions,
   ArtifactModes,
@@ -13,37 +13,29 @@ import {
   useLocalize,
   useHasAccess,
   useAuthContext,
-  useHasMemoryAccess,
   useAgentCapabilities,
 } from '~/hooks';
 import ArtifactsSubMenu from '~/components/Chat/Input/ArtifactsSubMenu';
-import MCPSubMenu from '~/components/Chat/Input/MCPSubMenu';
-import { useGetStartupConfig } from '~/data-provider';
 import { useBadgeRowContext } from '~/Providers';
+import { useGetStartupConfig } from '~/data-provider';
 import { cn } from '~/utils';
 
 interface ToolsDropdownProps {
   disabled?: boolean;
+  showEphemeralTools?: boolean;
 }
 
 /** Ariakit portals to document.body by default, which puts the menu outside every landmark.
  *  Returning null falls back to that default. */
 const getMainLandmark = () => document.querySelector<HTMLElement>('main');
 
-const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
+const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownProps) => {
   const localize = useLocalize();
   const { user } = useAuthContext();
   const context = useBadgeRowContext();
-  const { data: startupConfig } = useGetStartupConfig();
 
-  const {
-    codeEnabled,
-    memoryEnabled,
-    webSearchEnabled,
-    artifactsEnabled,
-    fileSearchEnabled,
-    skillsEnabled,
-  } = useAgentCapabilities(context?.agentsConfig?.capabilities ?? defaultAgentCapabilities);
+  const { codeEnabled, webSearchEnabled, artifactsEnabled, fileSearchEnabled } =
+    useAgentCapabilities(context?.agentsConfig?.capabilities ?? defaultAgentCapabilities);
 
   const canUseWebSearch = useHasAccess({
     permissionType: PermissionTypes.WEB_SEARCH,
@@ -65,24 +57,17 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     permission: Permissions.USE,
   });
 
-  const canUseSkills = useHasAccess({
-    permissionType: PermissionTypes.SKILLS,
-    permission: Permissions.USE,
-  });
-
-  const canUseMemory = useHasMemoryAccess();
-  const showMemory = canUseMemory && memoryEnabled && user?.personalization?.memories !== false;
+  const { data: startupConfig } = useGetStartupConfig();
+  const showMemory = startupConfig?.interface?.memories === true && user?.personalization?.memories !== false;
 
   const [isPopoverActive, setIsPopoverActive] = useState(false);
   const isDisabled = disabled ?? false;
-  const { skills, memory, webSearch, artifacts, fileSearch, mcpServerManager, codeInterpreter } =
-    context ?? {};
+  const { memory, webSearch, artifacts, fileSearch, features, codeInterpreter } = context ?? {};
 
   const { isPinned: isSearchPinned, setIsPinned: setIsSearchPinned } = webSearch ?? {};
   const { isPinned: isCodePinned, setIsPinned: setIsCodePinned } = codeInterpreter ?? {};
   const { isPinned: isFileSearchPinned, setIsPinned: setIsFileSearchPinned } = fileSearch ?? {};
   const { isPinned: isArtifactsPinned, setIsPinned: setIsArtifactsPinned } = artifacts ?? {};
-  const { isPinned: isSkillsPinned, setIsPinned: setIsSkillsPinned } = skills ?? {};
   const { isPinned: isMemoryPinned, setIsPinned: setIsMemoryPinned } = memory ?? {};
 
   const handleWebSearchToggle = useCallback(() => {
@@ -127,21 +112,14 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     }
   }, [artifacts]);
 
-  const handleSkillsToggle = useCallback(() => {
-    const newValue = !skills?.toggleState;
-    skills?.debouncedChange({ value: newValue });
-  }, [skills]);
-
   const handleMemoryToggle = useCallback(() => {
     const newValue = !memory?.toggleState;
     memory?.debouncedChange({ value: newValue });
   }, [memory]);
 
-  const mcpPlaceholder = startupConfig?.interface?.mcpServers?.placeholder;
-
   const dropdownItems: MenuItemProps[] = [];
 
-  if (fileSearchEnabled && canUseFileSearch) {
+  if (showEphemeralTools && fileSearchEnabled && canUseFileSearch) {
     dropdownItems.push({
       onClick: handleFileSearchToggle,
       hideOnClick: false,
@@ -176,11 +154,14 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
   if (canUseWebSearch && webSearchEnabled) {
     dropdownItems.push({
       onClick: handleWebSearchToggle,
+      ariaChecked: webSearch?.toggleState === true,
+      disabled: !features?.canEdit,
       hideOnClick: false,
       render: (props) => (
         <div {...props}>
           <div className="flex items-center gap-2">
             <Globe className="icon-md" aria-hidden="true" />
+            {webSearch?.toggleState === true && <Check className="icon-sm" aria-hidden="true" />}
             <span>{localize('com_ui_web_search')}</span>
           </div>
           <div className="flex items-center gap-1">
@@ -207,46 +188,17 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     });
   }
 
-  if (canUseSkills && skillsEnabled) {
-    dropdownItems.push({
-      onClick: handleSkillsToggle,
-      hideOnClick: false,
-      render: (props) => (
-        <div {...props} data-testid="tools-menu-skills">
-          <div className="flex items-center gap-2">
-            <ScrollText className="icon-md" aria-hidden="true" />
-            <span>{localize('com_ui_skills')}</span>
-          </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsSkillsPinned?.(!isSkillsPinned);
-            }}
-            className={cn(
-              'rounded p-1 transition-all duration-200',
-              'hover:bg-surface-secondary hover:shadow-sm',
-              !isSkillsPinned && 'text-text-secondary hover:text-text-primary',
-            )}
-            aria-label={isSkillsPinned ? localize('com_ui_unpin') : localize('com_ui_pin')}
-          >
-            <div className="h-4 w-4">
-              <PinIcon unpin={isSkillsPinned} />
-            </div>
-          </button>
-        </div>
-      ),
-    });
-  }
-
   if (showMemory) {
     dropdownItems.push({
       onClick: handleMemoryToggle,
+      ariaChecked: memory?.toggleState === true,
+      disabled: !features?.canEdit,
       hideOnClick: false,
       render: (props) => (
         <div {...props} data-testid="tools-menu-memory">
           <div className="flex items-center gap-2">
             <Brain className="icon-md" aria-hidden="true" />
+            {memory?.toggleState === true && <Check className="icon-sm" aria-hidden="true" />}
             <span>{localize('com_ui_memory')}</span>
           </div>
           <button
@@ -271,7 +223,7 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     });
   }
 
-  if (canRunCode && codeEnabled) {
+  if (showEphemeralTools && canRunCode && codeEnabled) {
     dropdownItems.push({
       onClick: handleCodeInterpreterToggle,
       hideOnClick: false,
@@ -305,7 +257,7 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     });
   }
 
-  if (artifactsEnabled && setIsArtifactsPinned != null) {
+  if (showEphemeralTools && artifactsEnabled && setIsArtifactsPinned != null) {
     dropdownItems.push({
       hideOnClick: false,
       render: (props) => (
@@ -322,12 +274,45 @@ const ToolsDropdown = ({ disabled }: ToolsDropdownProps) => {
     });
   }
 
-  const { availableMCPServers } = mcpServerManager ?? {};
-  if (canUseMcp && availableMCPServers && availableMCPServers.length > 0) {
+  if (canUseMcp && features) {
+    const { current, registered, canEdit, toggle, toggleServer } = features;
     dropdownItems.push({
-      hideOnClick: false,
-      render: (props) => <MCPSubMenu {...props} placeholder={mcpPlaceholder} />,
+      label: localize('com_lsm_external_mcp_title'),
+      icon: <MCPIcon className="icon-md" aria-hidden="true" />,
+      subItems: [
+        {
+          label: localize('com_ui_enabled'),
+          ariaChecked: current?.mcp ?? false,
+          icon: current?.mcp ? <Check className="icon-md" /> : <span className="icon-md" />,
+          disabled: !canEdit,
+          hideOnClick: false,
+          onClick: () => toggle('mcp', !current?.mcp),
+        },
+        ...registered.map((server) => ({
+          label: `${server.name} (${server.tool_count})`,
+          ariaChecked:
+            server.enabled &&
+            (current?.mcpServers == null || current.mcpServers.includes(server.name)),
+          icon:
+            server.enabled &&
+            (current?.mcpServers == null || current.mcpServers.includes(server.name)) ? (
+              <Check className="icon-md" />
+            ) : (
+              <span className="icon-md" />
+            ),
+          disabled: !canEdit || !current?.mcp || !server.enabled,
+          hideOnClick: false,
+          onClick: () =>
+            toggleServer(
+              server.name,
+              !(current?.mcpServers == null || current.mcpServers.includes(server.name)),
+            ),
+        })),
+      ],
     });
+  }
+  if (features?.isError) {
+    dropdownItems.push({ label: localize('com_ui_error_updating_preferences'), disabled: true });
   }
 
   if (dropdownItems.length === 0) {

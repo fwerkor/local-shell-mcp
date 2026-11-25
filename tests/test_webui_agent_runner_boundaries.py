@@ -1,6 +1,8 @@
 """Original runner guard branches with real owner-scoped SQLite state."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from local_shell_mcp.settings import get_settings
@@ -35,10 +37,10 @@ async def noop(text):
     pass
 
 
-def runner(runner_parts, model, *, ask=False, detached=False, text=None):
+def runner(runner_parts, model, *, ask=False, detached=False, text=None, scopes=()):
     db, store, run = runner_parts
     provider = ProviderConfig('openai', 'mock', 'http://localhost:8900/v1/chat/completions', '')
-    return AgentRunner('local', run, db, store, scopes=set(), grant_expires=None,
+    return AgentRunner('local', run, db, store, scopes=set(scopes), grant_expires=None,
                        stream_tools=model, stream_text=text or model, on_text=noop,
                        profile=provider, ask_user_enabled=ask, background_deny=detached)
 
@@ -166,13 +168,69 @@ async def test_managed_skill_is_callable_in_the_real_agent_loop(runner_parts):
         seen.append((messages, kwargs))
         if not any(msg.get('role') == 'tool' for msg in messages):
             tools = kwargs.get('tools', [])
-            assert any(t.get('function', {}).get('name') == 'skill' for t in tools)
-            yield ModelToolCall('skill-1', 'skill', {'name': 'test-skill'})
+            assert {'skill_list', 'skill_load', 'skill_read'} <= {t['function']['name'] for t in tools}
+            assert 'skill' not in {t['function']['name'] for t in tools}
+            yield ModelToolCall('skill-1', 'skill_load', {'name': 'managed/skill-in-loop'})
         else:
-            assert messages[-1]['content'] == 'Read the spec first.'
+            assert json.loads(messages[-1]['content'])['data']['content'] == 'Read the spec first.'
             yield 'Skill instructions applied.'
 
-    obj = runner(runner_parts, model)
+    obj = runner(runner_parts, model, scopes={'shell:read'})
     completed = await obj.run(store.history('local', generation.conversation_id))
     assert completed[-1]['content'] == 'Skill instructions applied.'
     assert len(seen) == 2
+
+
+@pytest.mark.asyncio
+async def test_native_skill_tools_read_files_and_respect_local_access(runner_parts):
+    from local_shell_mcp.webui.storage import WorkspaceRepository, _json, _now
+
+    db, store, generation = runner_parts
+    skill = get_settings().workspace_root / '.agents' / 'skills' / 'native-test'
+    skill.mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: native-test\ndescription: Native test\n---\nNative instructions', encoding='utf-8')
+    (skill / 'guide.md').write_text('Native guide', encoding='utf-8')
+    with db.connect() as conn:
+        now = _now()
+        for owner in ('local', 'other'):
+            conn.execute('INSERT INTO webui_skills(id,owner,name,record,created_at,updated_at) '
+                         'VALUES(?,?,?,?,?,?)', ('db-' + owner, owner, 'native-test',
+                         _json({'description': 'Managed test', 'body': 'Managed instructions'}), now, now))
+        conn.execute('INSERT INTO webui_skill_files(id,owner,skill_id,path,data,mime,created_at,updated_at) '
+                     'VALUES(?,?,?,?,?,?,?,?)',
+                     ('reference', 'local', 'db-local', 'guide.md', b'Managed guide', 'text/plain', now, now))
+
+    obj = runner(runner_parts, None, scopes={'shell:read'})
+    context = obj._context(None, profile=obj.initial_profile)
+    state = AgentLoopState(context, [])
+
+    async def invoke(name, args):
+        return json.loads(await obj._invoke(ModelToolCall('skill-call', name, args), state))
+
+    result = await invoke('skill_list', {})
+    assert result['ok'], result
+    names = {item['name'] for item in result['data']['skills']}
+    assert {'native-test', 'managed/db-local'} <= names
+    assert 'managed/db-other' not in names
+    for name, instructions, guide in (
+        ('native-test', 'Native instructions', 'Native guide'),
+        ('managed/db-local', 'Managed instructions', 'Managed guide'),
+    ):
+        loaded = await invoke('skill_load', {'name': name})
+        assert instructions in loaded['data']['content']
+        assert 'guide.md' in loaded['data']['related_files']
+        read = await invoke('skill_read', {'name': name, 'path': 'guide.md'})
+        assert read['data']['content'] == guide
+    assert (await invoke('skill_load', {'name': 'managed/db-other'}))['isError']
+    repo = WorkspaceRepository(db)
+    repo.save_setting('local', 'webui.skill.states', {'db-local': False})
+    assert (await invoke('skill_load', {'name': 'managed/db-local'}))['isError']
+    assert (await invoke('skill_load', {'name': 'native-test'}))['ok']
+
+    repo.save_setting('local', 'agent.machine_policy.conversation.' + generation.conversation_id,
+                      {'local': 'none'})
+    assert not {'skill_list', 'skill_load', 'skill_read'} & {
+        t['function']['name'] for t in obj._context(None, profile=obj.initial_profile).tools
+    }
+    with pytest.raises(RuntimeSafetyError, match='not granted'):
+        await invoke('skill_list', {})

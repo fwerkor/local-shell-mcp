@@ -68,7 +68,6 @@ import CollapseChat from './CollapseChat';
 import QuoteButton from './QuoteButton';
 import TokenUsage from './TokenUsage';
 import LsmChatPermissions from './LsmChatPermissions';
-import LsmChatFeatures from './LsmChatFeatures';
 import StopButton from './StopButton';
 import SendButton from './SendButton';
 import EditBadges from './EditBadges';
@@ -184,7 +183,9 @@ const ChatForm = memo(function ChatForm({
 
   const { requiresKey } = useRequiresKey();
   const { data: modelInventory } = useGetModelsQuery();
-  const hasConfiguredModels = Object.values(modelInventory ?? {}).some((models) => Array.isArray(models) && models.length > 0);
+  const hasConfiguredModels = Object.values(modelInventory ?? {}).some(
+    (models) => Array.isArray(models) && models.length > 0,
+  );
   const methods = useChatFormContext();
   const {
     generateConversation,
@@ -630,21 +631,23 @@ const ChatForm = memo(function ChatForm({
    *  for typed, dictated, and shortcut-bound submissions. */
   const submitComposerText = useCallback(
     (data: { text: string }): false | void =>
-      (!endpoint || !hasConfiguredModels) ? false : submitFromComposer(
-        {
-          answerMode,
-          steering,
-          submitMessage: (message) => {
-            const result = submitMessage(message);
-            if (result !== false) {
-              clearAllDrafts(getPendingDraftId(index));
-            }
-            return result;
-          },
-          reset: () => methods.reset(),
-        },
-        data,
-      ),
+      !endpoint || !hasConfiguredModels
+        ? false
+        : submitFromComposer(
+            {
+              answerMode,
+              steering,
+              submitMessage: (message) => {
+                const result = submitMessage(message);
+                if (result !== false) {
+                  clearAllDrafts(getPendingDraftId(index));
+                }
+                return result;
+              },
+              reset: () => methods.reset(),
+            },
+            data,
+          ),
     [answerMode, steering, submitMessage, methods, index, endpoint, hasConfiguredModels],
   );
 
@@ -791,7 +794,7 @@ const ChatForm = memo(function ChatForm({
                 onClose={pastedTextEdit.closeEditor}
                 onSave={pastedTextEdit.saveEdit}
               />
-              {(
+              {
                 <div className={cn('flex', isRTL ? 'flex-row-reverse' : 'flex-row')}>
                   <div
                     className="relative flex-1"
@@ -850,7 +853,7 @@ const ChatForm = memo(function ChatForm({
                     />
                   </div>
                 </div>
-              )}
+              }
               <div
                 className={cn(
                   '@container flex flex-wrap items-center gap-2 px-2 pb-2',
@@ -867,6 +870,7 @@ const ChatForm = memo(function ChatForm({
                   />
                 </div>
                 <BadgeRow
+                  showTools={index === 0}
                   showEphemeralBadges={
                     !!endpoint &&
                     !hideBadgeRow &&
@@ -891,12 +895,8 @@ const ChatForm = memo(function ChatForm({
                   <PendingToolApprovalButton conversationId={conversationId} />
                 )}
                 <div className="grow" />
-                {index === 0 && <LsmChatFeatures conversationId={conversationId} />}
                 {index === 0 && (
-                  <LsmChatPermissions
-                    conversationId={conversationId}
-                    projectId={project?._id}
-                  />
+                  <LsmChatPermissions conversationId={conversationId} projectId={project?._id} />
                 )}
                 <TokenUsage index={index} conversation={conversation} isSubmitting={isSubmitting} />
                 {SpeechToText && (

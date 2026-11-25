@@ -1,6 +1,7 @@
 """Fixed operations for discovering and loading installed agent skills."""
 
 import os
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -196,3 +197,63 @@ def read_installed_skill_file(
         "source_path": str(source.path),
         **payload,
     }
+
+
+# Only the hosted Agent supplies an owner context; external MCP retains the
+# filesystem registry and never sees a different user's SQLite records.
+managed_skill_context: ContextVar = ContextVar("managed_skill_context", default=None)
+
+
+def list_skills(settings: Settings | None = None) -> dict[str, Any]:
+    result = list_installed_skills(settings)
+    context = managed_skill_context.get()
+    if context is not None:
+        from .webui.skill_runtime import active_skills, managed_records
+
+        enabled = {skill['name'] for skill in active_skills(*context)
+                   if skill['id'].startswith('deployment:') and not skill['disableModelInvocation']}
+        result["skills"] = [skill for skill in result["skills"] if skill['name'] in enabled]
+        result["skills"].extend(managed_records(*context))
+    return result
+
+
+def _require_deployment_skill(context, name):
+    from .webui.skill_runtime import active_skills
+
+    if not any(skill['id'] == 'deployment:' + name and not skill['disableModelInvocation']
+               for skill in active_skills(*context)):
+        raise ValueError('Skill is not enabled or does not exist')
+
+
+def _check_deployment_content(context, result):
+    from .webui.skill_runtime import WorkspaceRepository, _policy_allows, configured_filters
+
+    database, owner, _ = context
+    if not _policy_allows(configured_filters(WorkspaceRepository(database), owner),
+                          body=result['content']):
+        raise ValueError('Skill content blocked by configured policy')
+    return result
+
+
+def load_skill(name: str, settings: Settings | None = None) -> dict[str, Any]:
+    context = managed_skill_context.get()
+    if context is not None and name.startswith("managed/"):
+        from .webui.skill_runtime import managed_result
+
+        return managed_result(*context, name)
+    if context is not None:
+        _require_deployment_skill(context, name)
+    result = load_installed_skill(name, settings)
+    return _check_deployment_content(context, result) if context is not None else result
+
+
+def read_skill(name: str, path: str, settings: Settings | None = None) -> dict[str, Any]:
+    context = managed_skill_context.get()
+    if context is not None and name.startswith("managed/"):
+        from .webui.skill_runtime import managed_result
+
+        return managed_result(*context, name, path=path)
+    if context is not None:
+        _require_deployment_skill(context, name)
+    result = read_installed_skill_file(name, path, settings)
+    return _check_deployment_content(context, result) if context is not None else result

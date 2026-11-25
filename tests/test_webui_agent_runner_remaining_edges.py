@@ -187,7 +187,7 @@ async def test_non_dict_summarization_configuration_uses_safe_defaults(runner_st
     assert store.fading_tier('local', job.run_id, 'default', 'openai', 'mock') is not None
 
 
-def test_native_skill_aliases_never_bypass_hosted_activation(runner_state, monkeypatch):
+def test_native_skill_tools_follow_normal_registry(runner_state, monkeypatch):
     from local_shell_mcp.webui import lsm_tool_registry, skill_runtime
     from local_shell_mcp.webui.storage import _json, _now
 
@@ -207,27 +207,76 @@ def test_native_skill_aliases_never_bypass_hosted_activation(runner_state, monke
                          'body': 'Trusted by activation',
                      }), now, now))
     shown = {tool['function']['name'] for tool in runner._context(None, profile=profile).tools}
-    assert 'skill' in shown
-    assert 'file_read' in shown
-    assert not shown.intersection({'skill_list', 'skill_load', 'skill_read'})
-    # These schemas can be present in an old checkpoint and must fail closed.
+    assert 'skill' not in shown
+    assert {'file_read', 'skill_list', 'skill_load', 'skill_read'} <= shown
+    restricted = {tool['function']['name'] for tool in
+                  runner._context(None, profile=profile, selected_tools=[]).tools}
+    assert not {'skill_list', 'skill_load', 'skill_read', 'file_read'} & restricted
+    delegated = {tool['function']['name'] for tool in runner._context(
+        {'id': 'legacy', 'skills_enabled': True, 'tools': ['file_read']}, profile=profile,
+        selected_tools=('file_read',)).tools}
+    assert {'skill_list', 'skill_load', 'skill_read', 'file_read'} <= delegated
+    # A disabled managed record does not remove the native tool definitions.
     WorkspaceRepository(db).save_setting('local', 'webui.skill.states', {'managed': False})
     hidden = {tool['function']['name'] for tool in runner._context(None, profile=profile).tools}
     assert 'skill' not in hidden
-    assert not hidden.intersection({'skill_list', 'skill_load', 'skill_read'})
+    assert {'skill_list', 'skill_load', 'skill_read'} <= hidden
 
 
 @pytest.mark.asyncio
-async def test_restored_native_skill_aliases_are_rejected(runner_state, monkeypatch):
+async def test_native_skill_tools_use_normal_dispatch(runner_state, monkeypatch):
     from local_shell_mcp.webui import lsm_tool_registry
 
     _, _, _, profile, runner = runner_state
-    async def forbidden(*args, **kwargs):
-        raise AssertionError('Native Skill tool must never run from the hosted Agent')
+    async def native(owner, conversation, call, **kwargs):
+        return call.name
 
-    monkeypatch.setattr(lsm_tool_registry, 'call_tool', forbidden)
+    monkeypatch.setattr(lsm_tool_registry, 'call_tool', native)
     for name in ('skill_list', 'skill_load', 'skill_read'):
         context = AgentContext(profile, [{'type': 'function', 'function': {'name': name}}])
         state = AgentLoopState(context, [{'role': 'user', 'content': 'Inspect skills'}])
-        with pytest.raises(RuntimeSafetyError, match='hosted skill tool'):
-            await runner._invoke(ModelToolCall('old-call', name, {'name': 'managed'}), state)
+        assert await runner._invoke(ModelToolCall('native-call', name, {}), state) == name
+
+
+def test_server_web_preference_controls_tool_exposure(runner_state):
+    db, _, job, profile, runner = runner_state
+    repo = WorkspaceRepository(db)
+    def names():
+        return {tool['function']['name'] for tool in runner._context(None, profile=profile).tools}
+
+    assert {'web_search', 'web_fetch'} <= names()
+    repo.save_setting('local', 'conversation.permissions.' + job.conversation_id, {'web': False})
+    assert not {'web_search', 'web_fetch'} & names()
+    repo.save_setting('local', 'conversation.permissions.' + job.conversation_id, {'web': True})
+    assert {'web_search', 'web_fetch'} <= names()
+
+
+@pytest.mark.asyncio
+async def test_background_skill_dispatch_preserves_hosted_context(runner_state, monkeypatch):
+    from local_shell_mcp.skill_ops import managed_skill_context
+    from local_shell_mcp.webui import background_tools, lsm_tool_registry
+
+    database, _, _, profile, runner = runner_state
+    agent = {'id': 'saved', 'skills_enabled': True, 'skills_scope': 'none'}
+    runner._injected_background_names['saved'] = frozenset({'skill_load'})
+    tools = [{'function': {'name': 'skill_load', 'parameters': {'properties': {
+        'run_in_background': {'type': 'boolean'},
+    }}}}]
+    state = AgentLoopState(AgentContext(profile, tools, agent=agent), [])
+    observed = []
+
+    async def native(owner, conversation, call, **kwargs):
+        observed.append(managed_skill_context.get())
+        assert 'run_in_background' not in call.arguments
+        return 'loaded'
+
+    async def start(*args, scopes, grant_expires, dispatch, **kwargs):
+        assert managed_skill_context.get() is None
+        return await dispatch(args[5], scopes, grant_expires, args[3])
+
+    monkeypatch.setattr(lsm_tool_registry, 'call_tool', native)
+    monkeypatch.setattr(background_tools, 'start_tool_task', start)
+    call = ModelToolCall('bg', 'skill_load', {'name': 'x', 'run_in_background': True})
+    assert await runner._invoke(call, state) == 'loaded'
+    assert observed == [(database, 'local', agent)]
+    assert managed_skill_context.get() is None
