@@ -36,7 +36,9 @@ def needs_worker_reaper() -> bool:
 
 def supervise_worker(argv: list[str]) -> int:
     """Own orphan reaping in a separate process, never in the worker's event loop."""
-    if os.getpid() != 1:
+    supervisor_pid = os.getpid()
+    child_setup = None
+    if supervisor_pid != 1:
         import ctypes
 
         # PR_SET_CHILD_SUBREAPER: adopt orphaned descendants before the legacy
@@ -45,6 +47,16 @@ def supervise_worker(argv: list[str]) -> int:
         if libc.prctl(36, 1, 0, 0, 0) != 0:
             error = ctypes.get_errno()
             raise OSError(error, os.strerror(error))
+
+        def child_setup() -> None:
+            # A legacy bootstrap can SIGKILL this reaper during rollback.
+            # Bind the actual worker lifetime to the reaper, including the
+            # race where the parent dies before prctl is installed.
+            if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error))
+            if os.getppid() != supervisor_pid:
+                os.kill(os.getpid(), signal.SIGKILL)
 
     env = os.environ.copy()
     env[_REAPER_PID_ENV] = str(os.getpid())
@@ -65,7 +77,7 @@ def supervise_worker(argv: list[str]) -> int:
         previous[signal.SIGCHLD] = signal.signal(signal.SIGCHLD, signal.SIG_DFL)
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT):
             previous[sig] = signal.signal(sig, forward)
-        process = subprocess.Popen(argv, env=env, pass_fds=pass_fds)
+        process = subprocess.Popen(argv, env=env, pass_fds=pass_fds, preexec_fn=child_setup)
         if inherited_lock:
             # The worker must be the sole owner of the inherited flock.
             os.close(int(inherited_lock))

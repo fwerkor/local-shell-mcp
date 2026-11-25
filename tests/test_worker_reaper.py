@@ -86,8 +86,9 @@ def test_supervisor_reaps_and_forwards_signals(monkeypatch, pid, lock_fd, status
     closed = []
     forwarded = []
 
-    def spawn(argv, *, env, pass_fds):
+    def spawn(argv, *, env, pass_fds, preexec_fn):
         assert argv == ["worker"]
+        assert (preexec_fn is None) == (pid == 1)
         assert env[bootstrap._REAPER_PID_ENV] == str(pid)
         assert pass_fds == ((int(lock_fd),) if lock_fd else ())
         assert handlers[signal.SIGCHLD] == signal.SIG_DFL
@@ -270,3 +271,39 @@ raise SystemExit(19)
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 19, result.stderr
+
+
+def test_forced_reaper_death_kills_worker(tmp_path):
+    import fcntl
+
+    ready = tmp_path / "ready"
+    lock_path = tmp_path / "worker.lock"
+    worker = f"""
+import fcntl, pathlib, signal, time
+lock = open({str(lock_path)!r}, 'w')
+fcntl.flock(lock, fcntl.LOCK_EX)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path({str(ready)!r}).touch()
+time.sleep(60)
+"""
+    process = subprocess.Popen(_reaper_command(worker))
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists():
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(.01)
+        process.kill()
+        process.wait(timeout=5)
+        with lock_path.open("r") as lock:
+            deadline = time.monotonic() + 5
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    assert time.monotonic() < deadline, "worker survived forced reaper termination"
+                    time.sleep(.01)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
