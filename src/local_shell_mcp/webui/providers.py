@@ -210,8 +210,8 @@ def _openai_reasoning_fragments(delta: dict) -> list[str]:
     Prefer the single text field when vendors also send structured copies;
     encrypted reasoning, signatures and token counts are not readable text.
     """
-    for field in ("reasoning_content", "reasoning"):
-        value = delta.get(field)
+    for key in ("reasoning_content", "reasoning"):
+        value = delta.get(key)
         if isinstance(value, str) and value:
             return [value]
     details = delta.get("reasoning_details")
