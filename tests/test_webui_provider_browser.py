@@ -289,7 +289,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                         await page.get_by_role("button", name="Confirm delete: Secondary Research").click()
                     assert (await blocked.value).status == 409
                     await page.get_by_role("alert").get_by_text("Channel is referenced by", exact=False).wait_for()
-                    await page.get_by_role("button", name="Delete anyway Secondary Research").click()
+                    await page.get_by_role("button", name="Delete anyway: Secondary Research").click()
                     await page.get_by_role("button", name="Delete Secondary Research").wait_for(state="detached")
                     assert "Secondary Research" not in (await (await page.request.get(
                         f"http://127.0.0.1:{port}/api/models")).json())

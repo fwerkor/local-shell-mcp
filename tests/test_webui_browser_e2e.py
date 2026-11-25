@@ -170,21 +170,21 @@ async def test_real_react_machine_permission_scopes_and_inheritance(tmp_path, mo
                 await selector.wait_for(timeout=15_000)
                 await selector.click()
                 await page.get_by_role("button", name="local Read only").wait_for(timeout=10_000)
-                await page.get_by_role("button", name="Instance defaults").click()
+                await page.get_by_role("group", name="Permission scope").get_by_role("button", name="Instance defaults", exact=True).click()
                 await page.get_by_role("button", name="local Read only").click()
                 for _ in range(100):
                     if (await http.get("/api/lsm/permissions/defaults")).json().get("machines", {}).get("local") == "read":
                         break
                     await asyncio.sleep(0.03)
                 assert (await http.get("/api/lsm/permissions/defaults")).json()["machines"]["local"] == "read"
-                await page.get_by_role("button", name="Project defaults").click()
+                await page.get_by_role("group", name="Permission scope").get_by_role("button", name="Project defaults", exact=True).click()
                 await page.get_by_role("button", name="local Read/write").click()
                 for _ in range(100):
                     if (await http.get(f"/api/lsm/permissions/projects/{project_id}")).json().get("machines", {}).get("local") == "write":
                         break
                     await asyncio.sleep(0.03)
                 assert (await http.get(f"/api/lsm/permissions/projects/{project_id}")).json()["machines"]["local"] == "write"
-                await page.get_by_role("button", name="Current chat").click()
+                await page.get_by_role("group", name="Permission scope").get_by_role("button", name="Current chat", exact=True).click()
                 await page.get_by_role("button", name="local None").click()
                 for _ in range(100):
                     if (await http.get(f"/api/lsm/preferences/{conversation_id}")).json().get("machines", {}).get("local") == "none":
