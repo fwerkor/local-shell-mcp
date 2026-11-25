@@ -283,7 +283,7 @@ async def test_delegated_agent_receives_only_its_selected_skill_catalog(state, m
     await runner.run([{'role': 'system', 'content': 'Child system message'},
                       {'role': 'user', 'content': 'Question'}])
     assert model_messages
-    first = model_messages[0][0]['content']
+    first = '\n'.join(m['content'] for m in model_messages[0] if m['role'] == 'system')
     assert 'Child system message' in first
     assert 'Always use selected instructions' in first
     assert 'Do not inject these instructions' not in first
@@ -369,8 +369,8 @@ async def test_manual_skill_selection_survives_storage_and_reaches_model(state, 
     )
     await runner.run([{'role': 'user', 'content': 'Use the manual Skill'}])
     assert captured
-    assert 'Perform the manually selected task.' in captured[0][0]['content']
-    assert 'Manually selected Skills' in captured[0][0]['content']
+    assert 'Perform the manually selected task.' in '\n'.join(m['content'] for m in captured[0] if m['role'] == 'system')
+    assert 'Manually selected Skills' in '\n'.join(m['content'] for m in captured[0] if m['role'] == 'system')
     # A non-selected turn does not inherit the previous turn's transient catalog.
     assert not any('Perform the manually selected task.' in (str(message.get('content')))
                    for message in store.history('alice', generation.conversation_id))

@@ -1,29 +1,16 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { matchSorter } from 'match-sorter';
 import { PermissionTypes, Permissions } from 'librechat-data-provider';
-import {
-  Button,
-  Checkbox,
-  Dropdown,
-  FilterInput,
-  TooltipAnchor,
-  OGDialogTrigger,
-  useToastContext,
-} from '@librechat/client';
+import { Button, Dropdown, FilterInput, TooltipAnchor, OGDialogTrigger } from '@librechat/client';
 import type { TUserMemory } from 'librechat-data-provider';
-import {
-  useUpdateMemoryPreferencesMutation,
-  useMemoriesQuery,
-  useGetUserQuery,
-} from '~/data-provider';
+import { useMemoriesQuery } from '~/data-provider';
 import { useLocalize, useHasAccess } from '~/hooks';
 import { PanelContent } from '~/components/ui';
 import MemoryCardSkeleton from './MemoryCardSkeleton';
 import MemoryCreateDialog from './MemoryCreateDialog';
 import MemoryUsageBadge from './MemoryUsageBadge';
 import MemoryList from './MemoryList';
-import { cn } from '~/utils';
 
 /** Partition filter sentinels; any other value is an agent id */
 const PARTITION_ALL = 'all';
@@ -31,41 +18,10 @@ const PARTITION_PERSONAL = 'personal';
 
 export default function MemoryPanel() {
   const localize = useLocalize();
-  const { data: userData } = useGetUserQuery();
   const { data: memData, isLoading } = useMemoriesQuery();
-  const { showToast } = useToastContext();
   const [searchQuery, setSearchQuery] = useState('');
   const [partitionFilter, setPartitionFilter] = useState(PARTITION_ALL);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [referenceSavedMemories, setReferenceSavedMemories] = useState(true);
-
-  const updateMemoryPreferencesMutation = useUpdateMemoryPreferencesMutation({
-    onSuccess: () => {
-      showToast({
-        message: localize('com_ui_preferences_updated'),
-        status: 'success',
-      });
-    },
-    onError: () => {
-      showToast({
-        message: localize('com_ui_error_updating_preferences'),
-        status: 'error',
-      });
-      setReferenceSavedMemories((prev) => !prev);
-    },
-  });
-
-  useEffect(() => {
-    if (userData?.personalization?.memories !== undefined) {
-      setReferenceSavedMemories(userData.personalization.memories);
-    }
-  }, [userData?.personalization?.memories]);
-
-  const handleMemoryToggle = (checked: boolean) => {
-    setReferenceSavedMemories(checked);
-    updateMemoryPreferencesMutation.mutate({ memories: checked });
-  };
-
   const hasReadAccess = useHasAccess({
     permissionType: PermissionTypes.MEMORIES,
     permission: Permissions.READ,
@@ -79,11 +35,6 @@ export default function MemoryPanel() {
   const hasCreateAccess = useHasAccess({
     permissionType: PermissionTypes.MEMORIES,
     permission: Permissions.CREATE,
-  });
-
-  const hasOptOutAccess = useHasAccess({
-    permissionType: PermissionTypes.MEMORIES,
-    permission: Permissions.OPT_OUT,
   });
 
   const memories: TUserMemory[] = useMemo(() => memData?.memories ?? [], [memData]);
@@ -150,7 +101,7 @@ export default function MemoryPanel() {
       aria-label={localize('com_ui_memories')}
       className="flex h-full w-full flex-col overflow-hidden pt-2"
     >
-      {/* Sticky header: filter, partition, usage + toggle */}
+      {/* Sticky header: filter, partition, usage */}
       <div className="shrink-0 space-y-2 px-3 pb-2">
         {/* Header: Filter + Create Button */}
         <div className="flex items-center gap-2">
@@ -197,43 +148,12 @@ export default function MemoryPanel() {
           />
         )}
 
-        {/* Controls: Usage Badge + Memory Toggle */}
-        {(showUsageBadge || hasOptOutAccess) && (
-          <div className="flex items-center justify-between">
-            {/* Usage Badge */}
-            {showUsageBadge && (
-              <MemoryUsageBadge
-                percentage={memData?.usagePercentage ?? 0}
-                tokenLimit={tokenLimit}
-                totalTokens={memData?.totalTokens ?? 0}
-              />
-            )}
-
-            {/* Memory Toggle */}
-            {hasOptOutAccess && (
-              <Button
-                size="sm"
-                variant="outline"
-                className={cn(
-                  showUsageBadge ? 'ml-auto' : 'w-full',
-                  referenceSavedMemories && 'bg-surface-hover hover:bg-surface-hover',
-                )}
-                onClick={() => handleMemoryToggle(!referenceSavedMemories)}
-                aria-label={localize('com_ui_use_memory')}
-                aria-pressed={referenceSavedMemories}
-                disabled={updateMemoryPreferencesMutation.isLoading}
-              >
-                <Checkbox
-                  checked={referenceSavedMemories}
-                  tabIndex={-1}
-                  aria-hidden="true"
-                  aria-label={localize('com_ui_use_memory')}
-                  className="pointer-events-none"
-                />
-                {localize('com_ui_use_memory')}
-              </Button>
-            )}
-          </div>
+        {showUsageBadge && (
+          <MemoryUsageBadge
+            percentage={memData?.usagePercentage ?? 0}
+            tokenLimit={tokenLimit}
+            totalTokens={memData?.totalTokens ?? 0}
+          />
         )}
       </div>
 
