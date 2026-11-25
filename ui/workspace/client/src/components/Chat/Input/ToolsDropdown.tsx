@@ -13,11 +13,11 @@ import {
   useLocalize,
   useHasAccess,
   useAuthContext,
-  useHasMemoryAccess,
   useAgentCapabilities,
 } from '~/hooks';
 import ArtifactsSubMenu from '~/components/Chat/Input/ArtifactsSubMenu';
 import { useBadgeRowContext } from '~/Providers';
+import { useGetStartupConfig } from '~/data-provider';
 import { cn } from '~/utils';
 
 interface ToolsDropdownProps {
@@ -34,7 +34,7 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
   const { user } = useAuthContext();
   const context = useBadgeRowContext();
 
-  const { codeEnabled, memoryEnabled, webSearchEnabled, artifactsEnabled, fileSearchEnabled } =
+  const { codeEnabled, webSearchEnabled, artifactsEnabled, fileSearchEnabled } =
     useAgentCapabilities(context?.agentsConfig?.capabilities ?? defaultAgentCapabilities);
 
   const canUseWebSearch = useHasAccess({
@@ -57,8 +57,8 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
     permission: Permissions.USE,
   });
 
-  const canUseMemory = useHasMemoryAccess();
-  const showMemory = canUseMemory && memoryEnabled && user?.personalization?.memories !== false;
+  const { data: startupConfig } = useGetStartupConfig();
+  const showMemory = startupConfig?.interface?.memories === true && user?.personalization?.memories !== false;
 
   const [isPopoverActive, setIsPopoverActive] = useState(false);
   const isDisabled = disabled ?? false;

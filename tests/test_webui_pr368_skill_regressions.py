@@ -416,6 +416,18 @@ def test_skill_runtime_manual_and_deployment_guard_branches(state, monkeypatch):
 
     repo.save_setting('alice', 'webui.skill.states', {'deployment:deployed': False})
     assert all(item['id'] != 'deployment:deployed' for item in active_skills(db, 'alice', None))
+    from local_shell_mcp import skill_ops
+
+    monkeypatch.setattr(skill_ops, 'list_installed_skills', skill_runtime.list_installed_skills)
+    token = skill_ops.managed_skill_context.set((db, 'alice', None))
+    try:
+        assert not skill_ops.list_skills()['skills']
+        with pytest.raises(ValueError, match='not enabled'):
+            skill_ops.load_skill('deployed')
+        with pytest.raises(ValueError, match='not enabled'):
+            skill_ops.read_skill('deployed', 'reference.md')
+    finally:
+        skill_ops.managed_skill_context.reset(token)
     repo.save_setting('alice', 'webui.skill.states', {})
     allowed = skill_runtime._policy_allows
     monkeypatch.setattr(skill_runtime, '_policy_allows',

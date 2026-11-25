@@ -208,10 +208,21 @@ def list_skills(settings: Settings | None = None) -> dict[str, Any]:
     result = list_installed_skills(settings)
     context = managed_skill_context.get()
     if context is not None:
-        from .webui.skill_runtime import managed_records
+        from .webui.skill_runtime import active_skills, managed_records
 
+        enabled = {skill['name'] for skill in active_skills(*context)
+                   if skill['id'].startswith('deployment:') and not skill['disableModelInvocation']}
+        result["skills"] = [skill for skill in result["skills"] if skill['name'] in enabled]
         result["skills"].extend(managed_records(*context))
     return result
+
+
+def _require_deployment_skill(context, name):
+    from .webui.skill_runtime import active_skills
+
+    if not any(skill['id'] == 'deployment:' + name and not skill['disableModelInvocation']
+               for skill in active_skills(*context)):
+        raise ValueError('Skill is not enabled or does not exist')
 
 
 def load_skill(name: str, settings: Settings | None = None) -> dict[str, Any]:
@@ -220,6 +231,8 @@ def load_skill(name: str, settings: Settings | None = None) -> dict[str, Any]:
         from .webui.skill_runtime import managed_result
 
         return managed_result(*context, name)
+    if context is not None:
+        _require_deployment_skill(context, name)
     return load_installed_skill(name, settings)
 
 
@@ -229,4 +242,6 @@ def read_skill(name: str, path: str, settings: Settings | None = None) -> dict[s
         from .webui.skill_runtime import managed_result
 
         return managed_result(*context, name, path=path)
+    if context is not None:
+        _require_deployment_skill(context, name)
     return read_installed_skill_file(name, path, settings)

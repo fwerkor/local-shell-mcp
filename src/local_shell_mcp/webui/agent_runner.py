@@ -205,7 +205,13 @@ class AgentRunner:
 
         settings = WorkspaceRepository(self.database)
         features = effective_features(self.owner, self.authorization_conversation_id, repo=settings)
-        if self.web_search_enabled and features["web"]:
+        # An explicitly saved composer preference supersedes stale ephemeral
+        # model-spec flags; legacy request flags still apply without a preference.
+        web_default = settings.setting(self.owner, 'conversation.features.global', {})
+        web_chat = settings.setting(self.owner, 'conversation.permissions.' + self.authorization_conversation_id, {}) if self.authorization_conversation_id else {}
+        explicit_web = any(isinstance(value, dict) and type(value.get('web')) is bool
+                           for value in (web_default, web_chat))
+        if features["web"] and (self.web_search_enabled or explicit_web):
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
