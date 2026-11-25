@@ -70,7 +70,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 assert await textarea.input_value() == "Keep my draft while I configure a model."
                 await page.get_by_test_id("model-selector-button").click()
                 await page.get_by_test_id("model-selector-settings").click()
-                await page.get_by_role("heading", name="Channels & models / 渠道与模型").wait_for()
+                await page.get_by_role("heading", name="Channels & models").wait_for()
                 await page.get_by_text("No channels added yet", exact=False).wait_for()
                 await page.get_by_role("button", name="Add channel").click()
                 await page.get_by_label("Channel name").fill("Primary Research")
@@ -83,7 +83,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 response = await saved.value
                 assert response.status == 200, await response.text()
                 assert "private-test-token" not in await response.text()
-                await page.get_by_role("link", name="Start a new chat and select a model").click()
+                await page.get_by_role("button", name="Close Settings").click()
                 await page.get_by_test_id("model-selector-button").click()
                 await page.locator("#model-search").fill("first-model")
                 await page.get_by_text("first-model", exact=True).first.click()
@@ -111,7 +111,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.get_by_label("Model API key").fill("recovered-test-token")
                     await page.get_by_label("Model identifiers").fill("recovered-model")
                     await page.get_by_role("button", name="Save model channel").click()
-                    await page.get_by_role("link", name="Start a new chat and select a model").click()
+                    await page.get_by_role("button", name="Close Settings").click()
                     await page.get_by_test_id("model-selector-button").get_by_text("recovered-model", exact=True).wait_for(timeout=15000)
                     await page.get_by_test_id("text-input").fill("Credential fixed.")
                     await page.locator('button[type="submit"]').first.click()
@@ -243,7 +243,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     # Channel settings moved into the model selector dropdown.
                     await page.get_by_test_id("model-selector-button").click()
                     await page.get_by_test_id("model-selector-settings").click()
-                    await page.get_by_role("heading", name="Channels & models / 渠道与模型").wait_for()
+                    await page.get_by_role("heading", name="Channels & models").wait_for()
                     await page.get_by_role("button", name="Delete Secondary Research").click()
                     async with page.expect_response(lambda response: response.request.method == "DELETE" and "name=Secondary%20Research" in response.url) as blocked:
                         await page.get_by_role("button", name="Confirm delete Secondary Research").click()

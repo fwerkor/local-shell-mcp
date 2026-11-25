@@ -11,7 +11,7 @@ export default function GlobalSettings() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (pathname !== '/control/settings') return;
+    if (pathname.replace(/\/+$/, '') !== '/control/settings') return;
     setTab(hash === '#models' ? 'models' : 'controller');
     navigate('/control/overview', { replace: true });
   }, [pathname, hash, navigate, setTab]);

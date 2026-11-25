@@ -61,6 +61,8 @@ describe('unified settings', () => {
   it.each([
     ['/control/settings', 'controller'],
     ['/control/settings#models', 'models'],
+    ['/control/settings/', 'controller'],
+    ['/control/settings/#models', 'models'],
   ])('redirects legacy URL %s to the unified dialog', async (path, tab) => {
     mount(path);
     expect(await screen.findByRole('dialog', { name: tab })).toBeInTheDocument();

@@ -57,10 +57,10 @@ def test_native_python_login_agents_and_sse_are_routed_without_node(monkeypatch)
 
 def test_native_control_pages_and_settings_source_are_retained():
     pages = WORKSPACE / "client" / "src" / "components" / "LSM"
-    for name in ("Control.tsx", "Overview.tsx", "Files.tsx", "Operations.tsx", "Desktop.tsx", "Settings.tsx"):
+    for name in ("Control.tsx", "Overview.tsx", "Files.tsx", "Operations.tsx", "Desktop.tsx"):
         assert (pages / name).is_file()
     navigation = (pages / "Control.tsx").read_text(encoding="utf-8")
-    settings = (pages / "Settings.tsx").read_text(encoding="utf-8")
+    settings = (pages.parent / "Nav" / "Settings" / "ControllerSettings.tsx").read_text(encoding="utf-8")
     assert "/control/" in navigation
     assert "section === 'settings'" in navigation
     for action in ("view", "save", "restart"):
