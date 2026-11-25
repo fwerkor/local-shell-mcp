@@ -191,9 +191,18 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
                 DynamicMCPManager(current.state_dir, max_timeout_s=current.max_timeout_s).serve_refresh(),
                 name="dynamic-mcp-discovery",
             )
+            model_refresh_task = None
+            if enabled:
+                from .webui.model_discovery import serve_model_refresh
+
+                model_refresh_task = asyncio.create_task(
+                    serve_model_refresh(generation_store.database), name="model-catalog-refresh")
             try:
                 yield
             finally:
+                if model_refresh_task is not None:
+                    model_refresh_task.cancel()
+                    await asyncio.gather(model_refresh_task, return_exceptions=True)
                 mcp_refresh_task.cancel()
                 await asyncio.gather(mcp_refresh_task, return_exceptions=True)
                 if enabled:

@@ -14,10 +14,11 @@ export const useGetEndpointsQuery = <TData = t.TEndpointsConfig>(
     [QueryKeys.endpoints],
     () => dataService.getAIEndpoints(),
     {
-      staleTime: Infinity,
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: false,
-      refetchOnMount: false,
+      staleTime: 60_000,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      refetchOnMount: true,
+      refetchInterval: 60_000,
       ...config,
       enabled: (config?.enabled ?? true) === true && queriesEnabled,
     },
@@ -29,14 +30,11 @@ export const useTokenConfigQuery = (
 ): QueryObserverResult<t.TTokenConfigMap> => {
   const queriesEnabled = useRecoilValue<boolean>(store.queriesEnabled);
   return useQuery<t.TTokenConfigMap>([QueryKeys.tokenConfig], () => dataService.getTokenConfig(), {
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    /** Refetch on mount only when stale — with `staleTime: Infinity` that's
-     *  exclusively after a user-key change invalidates `tokenConfig`, so a
-     *  settings change made while the gauge is unmounted is picked up on
-     *  return instead of serving the prior key's resolved config */
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     refetchOnMount: true,
+    refetchInterval: 60_000,
     ...config,
     enabled: (config?.enabled ?? true) === true && queriesEnabled,
   });
