@@ -40,7 +40,7 @@ def setup(tmp_path, monkeypatch):
 
 
 def blob(database, identity, owner="alice", *, payload=b"real file"):
-    path = attachments._safe_attachment_path(owner, identity + ".txt", database.root)
+    path = attachments._safe_attachment_path(identity + ".txt", database.root)
     path.write_bytes(payload)
     with database.connect() as db:
         db.execute("INSERT INTO attachments(id,owner,name,path,content_type,metadata) VALUES(?,?,?,?,?,?)",

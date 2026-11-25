@@ -740,14 +740,15 @@ class SQLiteStateStore:
 
     def read_bytes(self, key: str) -> bytes | None:
         with self.database.connect() as db:
-            row = db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
-            if row is None:
-                return None
-            parts = [bytes(row[0])]
-            parts.extend(bytes(chunk[0]) for chunk in db.execute(
-                "SELECT value FROM state_append_chunks WHERE key=? ORDER BY id", (key,)
-            ))
-            return b"".join(parts)
+            # Base value and append chunks must come from the same SQLite
+            # snapshot, even when another Controller replaces the key.
+            rows = db.execute(
+                "SELECT value,0 AS sequence FROM state WHERE key=? "
+                "UNION ALL SELECT value,id AS sequence FROM state_append_chunks "
+                "WHERE key=? ORDER BY sequence", (key, key),
+            )
+            parts = [bytes(row[0]) for row in rows]
+            return b"".join(parts) if parts else None
 
     def write_bytes(self, key: str, value: bytes) -> None:
         with self.database.connect() as db:
@@ -792,9 +793,12 @@ class SQLiteStateStore:
 
     def list_keys(self, prefix: str = "") -> list[str]:
         with self.database.connect() as db:
-            # Escape wildcard characters so prefix semantics match FileStateStore.
-            escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            rows = db.execute("SELECT key FROM state WHERE key LIKE ? ESCAPE '\\' ORDER BY key", (escaped + "%",))
+            # LIKE is ASCII-case-insensitive and interprets wildcard characters.
+            # State keys are literal, case-sensitive strings across all backends.
+            rows = db.execute(
+                "SELECT key FROM state WHERE key>=? AND instr(key,?)=1 ORDER BY key",
+                (prefix, prefix),
+            )
             return [row[0] for row in rows]
 
     @contextlib.contextmanager

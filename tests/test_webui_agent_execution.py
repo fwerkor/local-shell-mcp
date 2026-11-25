@@ -187,3 +187,33 @@ async def test_failed_completion_persistence_does_not_mark_tool_replayable():
         await execute_tool_batch([call("1")], execute, settled=cache, on_completed=complete)
     assert cache == {}
     assert await execute_tool_batch([], execute) == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_call_ids_rejected_before_any_side_effects():
+    executed = []
+
+    async def execute(item):
+        executed.append(item.call_id)
+
+    with pytest.raises(ValueError, match="Duplicate tool call ID"):
+        await execute_tool_batch([call("same"), call("same"), call("other")], execute)
+    assert executed == []
+
+
+@pytest.mark.asyncio
+async def test_replay_mismatch_rejected_before_unrelated_siblings_execute():
+    executed = []
+    cache = {}
+
+    async def execute(item):
+        executed.append(item.call_id)
+        return item.call_id
+
+    await execute_tool_batch([call("previous")], execute, settled=cache)
+    with pytest.raises(ValueError, match="Cannot change"):
+        await execute_tool_batch(
+            [call("new"), call("previous", arguments={"changed": True})],
+            execute, settled=cache,
+        )
+    assert executed == ["previous"]

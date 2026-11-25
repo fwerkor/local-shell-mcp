@@ -27,6 +27,7 @@ from .base import (
     display_screenshot_path,
     quantize_scroll_amount,
 )
+from .limits import key_parts
 
 _AX_OPERATION_TIMEOUT_S = 30.0
 
@@ -227,15 +228,7 @@ def _unicode_chunks(text: str, max_units: int = 20) -> list[str]:
 
 
 def _key_parts(keys: Any) -> list[str]:
-    if isinstance(keys, str):
-        parts = [part.strip() for part in keys.replace("+", " ").split() if part.strip()]
-    elif isinstance(keys, list):
-        parts = [str(part).strip() for part in keys if str(part).strip()]
-    else:
-        raise ValueError("key action requires keys as a string or list")
-    if not parts:
-        raise ValueError("key action requires at least one key")
-    return [part.upper() for part in parts]
+    return [part.upper() for part in key_parts(keys)]
 
 
 class MacOSGuiBackend:

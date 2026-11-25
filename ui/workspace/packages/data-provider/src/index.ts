@@ -44,7 +44,6 @@ export * from './types/runs';
 export * from './types/web';
 export * from './types/graph';
 export * from './types/insights';
-export * from './types/traces';
 export * from './types/subagents';
 export * from './types/background';
 export * from './types/queuedTurns';
@@ -72,8 +71,6 @@ export * from './svg';
 export * from './utils';
 export * from './actions';
 export { default as createPayload } from './createPayload';
-// /* react query hooks */
-// export * from './react-query/react-query-service';
 /* feedback */
 export * from './feedback';
 export * from './parameterSettings';
