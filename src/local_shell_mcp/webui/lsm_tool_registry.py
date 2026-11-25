@@ -14,7 +14,7 @@ from functools import lru_cache
 from typing import Any
 
 from ..audit import audit
-from .machine_permissions import agent_access_policy, authorize_machine_action, resolve_access
+from .machine_permissions import MachineReadOnlyError, agent_access_policy, authorize_machine_action, resolve_access
 from .providers import ModelToolCall
 
 # Controller management belongs to the `local` machine and requires its
@@ -57,6 +57,10 @@ _ADDITIONAL_SCOPES = {
     "mcp_manage": "shell:execute", "remote_manage": "remote:use",
 }
 _AUTHORIZATION_RECHECK_SECONDS = 0.5
+
+
+class ToolPermissionDenied(PermissionError):
+    """An operation was denied before native dispatch, with no side effects."""
 
 
 @lru_cache(maxsize=8)
@@ -190,9 +194,19 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
         params["required"] = [name for name in params.get("required", []) if name != "logical_session_id"]
         if not params["required"]:
             params.pop("required", None)
+        description = (tool.description or "")[:2048]
+        if tool.name == "browser_session":
+            writable = any(level == "write" and _can_authorize(
+                owner, conversation_id, machine, "write", scopes, expires,
+            ) for machine, level in policy.items())
+            if not writable:
+                params["properties"]["action"] = {"type": "string", "enum": ["list"]}
+                description = "List existing browser sessions on readable machines. Starting, closing, and cleanup require write access."
+            else:
+                description += " Only list is allowed on read-only machines; other actions require write access."
         definitions.append({"type": "function", "function": {
             "name": tool.name,
-            "description": (tool.description or "")[:2048],
+            "description": description,
             "parameters": params,
         }})
     return definitions
@@ -284,6 +298,8 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
                     requirements.extend(job_retry_machine_requirements(arguments.get("job_id")))
                 for machine, required in requirements:
                     if not _agent_allows(agent_policy, machine, required, default):
+                        if required != "read" and agent_policy.get(machine, default) == "read":
+                            raise MachineReadOnlyError(f"Machine {machine} is read-only for this Agent")
                         raise PermissionError(f"Agent has no {required} access to machine {machine}")
         if tool.name in _AGENT_CONTROL:
             # Session ownership is still checked; this bypasses machine ACLs only.
@@ -323,7 +339,12 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
         if run_id is not None:
             durable_tasks.owned(owner, conversation_id, tool.name, arguments)
 
-    check_authorization()
+    try:
+        check_authorization()
+    except MachineReadOnlyError as error:
+        # Only a denial before dispatch is recoverable. Live revocation still
+        # interrupts the native task and propagates as a runtime safety error.
+        raise ToolPermissionDenied("The target machine is read-only; this action requires write access.") from error
     # MCP uses None/omitted for the local controller. Passing the literal name
     # `local` would instead incorrectly route to a Worker called local.
     if run_id is not None and (tool.name in durable_tasks._STARTS or (
