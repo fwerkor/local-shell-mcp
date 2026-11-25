@@ -600,7 +600,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
                        instructions=instructions,
-                       parameters=(agent or {}).get("model_parameters") or {},
+                       parameters=(agent or {}).get("model_parameters") or generation.sampling,
                        native_file_tools=native_file_tools, write_tools=write_tools,
                        ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                        parent_agent=agent,

@@ -76,7 +76,7 @@ export function ModelSelectorChatProvider({ children }: { children: React.ReactN
         .catch((error) => {
           console.error('Failed to save conversation model selection', error);
           showToast({
-            message: 'Could not save the selected model. Refreshing may restore the previous model.',
+            message: 'Could not save conversation settings. Refreshing may restore the previous settings.',
             severity: NotificationSeverity.ERROR,
           });
         });

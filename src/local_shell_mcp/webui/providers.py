@@ -10,7 +10,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit
 
 
@@ -22,6 +22,7 @@ class ProviderConfig:
     token: str
     timeout_s: float = 180.0
     include_usage: bool = False
+    sampling: dict = field(default_factory=dict)
 
 
 def _require_https_or_loopback(value: str) -> str:
@@ -69,7 +70,8 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
         raise ValueError("Unsupported model provider")
     return ProviderConfig(kind, name, url, token,
                           include_usage=kind == 'openai' and (
-                              value.get('include_usage') is not False))
+                              value.get('include_usage') is not False),
+                          sampling=(value.get('model_sampling') or {}).get(name, {}))
 
 
 async def _data_frames(response) -> AsyncIterator[str]:

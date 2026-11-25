@@ -34,6 +34,13 @@ async def update_conversation(request: Request):
     conversation_id = _conversation_id(values)
     repo = _repo()
     changes = {key: val for key, val in values.items() if key != "conversationId"}
+    if "lsmSampling" in changes:
+        from .sampling import validate_sampling
+
+        try:
+            changes["lsmSampling"] = validate_sampling(changes["lsmSampling"])
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
     updated = repo.update_conversation(owner, conversation_id, changes)
     if updated is not None and "projectId" in changes:
         from .durable_tasks import mark_revoked

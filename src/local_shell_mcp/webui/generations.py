@@ -15,7 +15,7 @@ import logging
 import secrets
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .approval_runtime import ApprovalBatch, prepare_approval_batch
@@ -24,6 +24,7 @@ from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
 from .storage import _json, _now
+from .sampling import validate_sampling
 
 log = logging.getLogger(__name__)
 _TERMINAL = frozenset({"complete", "aborted", "error", "interrupted"})
@@ -42,6 +43,7 @@ class Generation:
     agent_id: str | None = None
     protocol_version: int = 2
     web_search_enabled: bool = True
+    sampling: dict = field(default_factory=dict)
 
 
 class GenerationConflict(Exception):
@@ -105,6 +107,7 @@ class GenerationStore:
             user_message_id=state["userMessageId"], status=row["status"], agent_id=row["agent_id"],
             protocol_version=job_generation_protocol(state),
             web_search_enabled=state.get("webSearchEnabled", True),
+            sampling=state.get("sampling", {}),
         )
 
     def latest(self, owner: str, conversation_id: str) -> Generation | None:
@@ -196,6 +199,7 @@ class GenerationStore:
             "webSearchEnabled": _web_search_requested(agent, payload),
             'manualCompaction': manual_compaction,
             "artifactsMode": artifact_mode(payload, agent),
+            "sampling": validate_sampling(payload.get("lsmSampling", {})) if not agent else {},
         }
         # Internal trigger delivery supplies its already-locked SQLite
         # transaction. The generation and a one-shot child result claim must
@@ -218,10 +222,11 @@ class GenerationStore:
                 ).fetchone():
                     raise KeyError("Project not found")
                 db.execute(
-                    "INSERT INTO conversations(id,owner,title,model,endpoint,project_id,created_at,updated_at) "
-                    "VALUES(?,?,?,?,?,?,?,?)",
+                    "INSERT INTO conversations(id,owner,title,model,endpoint,project_id,metadata,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?)",
                     (conversation_id, owner, prompt.strip()[:80], state["model"],
-                     payload.get("endpoint") or "agents", project_id, now, now),
+                     payload.get("endpoint") or "agents", project_id,
+                     _json({"lsmSampling": state["sampling"]} if "lsmSampling" in payload and not agent else {}), now, now),
                 )
             elif not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                                 (conversation_id, owner)).fetchone():
@@ -236,6 +241,15 @@ class GenerationStore:
                     (bool(state["model"]), state["model"], payload.get("endpoint"),
                      now, conversation_id, owner),
                 )
+            if not new_conversation and not agent:
+                if "lsmSampling" in payload:
+                    db.execute("UPDATE conversations SET metadata=json_set(metadata, '$.lsmSampling', json(?)) "
+                               "WHERE id=? AND owner=?", (_json(state["sampling"]), conversation_id, owner))
+                else:
+                    saved = db.execute("SELECT json_extract(metadata, '$.lsmSampling') FROM conversations "
+                                       "WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()[0]
+                    if saved is not None:
+                        state["sampling"] = validate_sampling(json.loads(saved))
             if manual_compaction and not db.execute(
                 'SELECT 1 FROM messages WHERE id=? AND conversation_id=?',
                 (user_message_id, conversation_id),
@@ -301,7 +315,7 @@ class GenerationStore:
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(created)))
         return Generation(run_id, conversation_id, stamp_ms, response_message_id,
                           user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id"),
-                          protocol_version, state["webSearchEnabled"]), True
+                          protocol_version, state["webSearchEnabled"], state["sampling"]), True
 
     @staticmethod
     def action_expired(pending: dict) -> bool:

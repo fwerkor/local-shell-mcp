@@ -1151,6 +1151,12 @@ export const tConversationSchema = z.object({
   userLabel: z.string().optional(),
   model: z.string().nullable().optional(),
   promptPrefix: z.string().nullable().optional(),
+  // Explicit LSM conversation overrides; absent values inherit channel/model defaults.
+  lsmSampling: z.object({
+    temperature: z.number().min(0).max(2).optional(),
+    top_p: z.number().min(0).max(1).optional(),
+    max_tokens: z.number().int().positive().max(2000000).optional(),
+  }).optional(),
   temperature: z.number().nullable().optional(),
   topP: z.number().optional(),
   topK: z.number().optional(),

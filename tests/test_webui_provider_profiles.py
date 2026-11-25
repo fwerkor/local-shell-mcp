@@ -507,3 +507,25 @@ async def test_force_delete_referenced_legacy_channel_does_not_fall_back_to_defa
         assert refusal.status_code == 409
         assert refusal.json()["can_force"] is False
         assert provider_config("custom").url == "https://legacy.invalid/v1/chat/completions"
+
+
+@pytest.mark.asyncio
+async def test_model_sampling_defaults_are_independent_and_validated(setup_profiles):
+    _, app = setup_profiles
+    body = {"provider": "openai", "base_url": "http://127.0.0.1:9000/v1",
+            "name": "Research", "models": ["a", "b"],
+            "model_sampling": {"a": {"temperature": 0, "top_p": 0.7, "max_tokens": 128}}}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        saved = await client.put("/api/lsm/providers", json=body)
+        assert saved.status_code == 200, saved.text
+        assert next(p for p in saved.json()["providers"] if p.get("name") == "Research")["model_sampling"] == body["model_sampling"]
+        assert provider_config("Research", "a").sampling == body["model_sampling"]["a"]
+        assert provider_config("Research", "b").sampling == {}
+        for invalid in ({"c": {}}, {"a": {"temperature": 3}}, {"a": {"max_tokens": True}}):
+            assert (await client.put("/api/lsm/providers", json={**body, "model_sampling": invalid})).status_code == 400
+        without = {k: v for k, v in body.items() if k != "model_sampling"}
+        assert (await client.put("/api/lsm/providers", json=without)).status_code == 200
+        assert provider_config("Research", "a").sampling == body["model_sampling"]["a"]
+        assert (await client.put("/api/lsm/providers", json={**body, "model_sampling": {}})).status_code == 200
+        assert provider_config("Research", "a").sampling == {}
