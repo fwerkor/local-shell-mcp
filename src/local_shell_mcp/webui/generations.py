@@ -24,7 +24,7 @@ from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
 from .storage import _json, _now
-from .sampling import validate_sampling
+from .sampling import validate_channel_sampling
 
 log = logging.getLogger(__name__)
 _TERMINAL = frozenset({"complete", "aborted", "error", "interrupted"})
@@ -199,7 +199,7 @@ class GenerationStore:
             "webSearchEnabled": _web_search_requested(agent, payload),
             'manualCompaction': manual_compaction,
             "artifactsMode": artifact_mode(payload, agent),
-            "sampling": validate_sampling(payload.get("lsmSampling", {})) if not agent else {},
+            "sampling": validate_channel_sampling(payload.get("lsmSampling", {}), selected_provider(payload, agent)) if not agent else {},
         }
         # Internal trigger delivery supplies its already-locked SQLite
         # transaction. The generation and a one-shot child result claim must
@@ -249,7 +249,7 @@ class GenerationStore:
                     saved = db.execute("SELECT json_extract(metadata, '$.lsmSampling') FROM conversations "
                                        "WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()[0]
                     if saved is not None:
-                        state["sampling"] = validate_sampling(json.loads(saved))
+                        state["sampling"] = validate_channel_sampling(json.loads(saved), state["provider"])
             if manual_compaction and not db.execute(
                 'SELECT 1 FROM messages WHERE id=? AND conversation_id=?',
                 (user_message_id, conversation_id),

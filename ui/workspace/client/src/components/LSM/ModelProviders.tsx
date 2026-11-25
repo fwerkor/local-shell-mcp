@@ -123,7 +123,7 @@ export default function ModelProviders() {
       }
       if (!models.length) throw new Error('At least one model identifier is required');
       const modelSampling = Object.fromEntries(models
-        .map((model) => [model, parseSampling(draft.sampling[model] ?? samplingDraft())] as const)
+        .map((model) => [model, parseSampling(draft.sampling[model] ?? samplingDraft(), draft.provider)] as const)
         .filter(([, value]) => Object.keys(value).length > 0));
       await request.put(url, {
         provider: draft.provider,
@@ -247,7 +247,7 @@ export default function ModelProviders() {
           <summary className="cursor-pointer text-sm font-medium text-text-primary">Model defaults / 模型默认参数</summary>
           {draftModels.map((model) => <div key={model} className="space-y-2">
             <p className="break-all text-sm text-text-secondary">{model}</p>
-            <SamplingFields prefix={model} value={draft.sampling[model] ?? samplingDraft()}
+            <SamplingFields provider={draft.provider} prefix={model} value={draft.sampling[model] ?? samplingDraft()}
               onChange={(value) => setDraft((previous) => ({ ...previous,
                 sampling: { ...previous.sampling, [model]: value } }))} />
           </div>)}

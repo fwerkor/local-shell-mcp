@@ -17,12 +17,12 @@ export function samplingDraft(value?: Sampling): SamplingDraft {
   };
 }
 
-export function parseSampling(draft: SamplingDraft): Sampling {
+export function parseSampling(draft: SamplingDraft, provider?: string): Sampling {
   const result: Sampling = {};
   for (const { key, min, max, step } of samplingFields) {
     if (!draft[key].trim()) continue;
     const value = Number(draft[key]);
-    if (!Number.isFinite(value) || value < min || value > max || (step === 1 && !Number.isInteger(value))) {
+    if (!Number.isFinite(value) || value < min || value > (key === 'temperature' && provider === 'anthropic' ? 1 : max) || (step === 1 && !Number.isInteger(value))) {
       throw new Error('Invalid sampling parameter');
     }
     result[key] = value;
@@ -30,10 +30,11 @@ export function parseSampling(draft: SamplingDraft): Sampling {
   return result;
 }
 
-export default function SamplingFields({ value, onChange, prefix = '' }: {
+export default function SamplingFields({ value, onChange, prefix = '', provider }: {
   value: SamplingDraft;
   onChange: (value: SamplingDraft) => void;
   prefix?: string;
+  provider?: string;
 }) {
   const localize = useLocalize();
   return (
@@ -45,7 +46,7 @@ export default function SamplingFields({ value, onChange, prefix = '' }: {
             className="w-full rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary"
             type="number"
             min={min}
-            max={max}
+            max={key === 'temperature' && provider === 'anthropic' ? 1 : max}
             step={step}
             placeholder={localize('com_ui_default')}
             aria-label={prefix ? prefix + ' ' + localize(label) : localize(label)}

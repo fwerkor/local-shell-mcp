@@ -10,18 +10,27 @@ _ALIASES = {
 }
 
 
-def validate_sampling(value: object) -> dict:
+def validate_sampling(value: object, *, provider: str | None = None) -> dict:
     if not isinstance(value, dict) or value.keys() - _ALIASES.keys():
         raise ValueError("Invalid sampling parameters")
     result = {}
     for key, item in value.items():
-        upper = {"temperature": 2, "top_p": 1, "max_tokens": 2_000_000}[key]
+        upper = {"temperature": 1 if provider == "anthropic" else 2, "top_p": 1, "max_tokens": 2_000_000}[key]
         if (type(item) not in (int, float) or not 0 <= item <= upper
                 or not math.isfinite(item)
                 or (key == "max_tokens" and (item < 1 or type(item) is not int))):
             raise ValueError(f"Invalid sampling parameter: {key}")
         result[key] = item
     return result
+
+
+def validate_channel_sampling(value: object, channel: str | None) -> dict:
+    result = validate_sampling(value)
+    if result.get('temperature', 0) <= 1 or not channel:
+        return result
+    from .provider_profiles import profile
+
+    return validate_sampling(result, provider=profile(channel)['provider'])
 
 
 def merge_sampling(defaults: dict, overrides: dict) -> dict:

@@ -11,8 +11,9 @@ import store from '~/store';
 import SamplingFields, { parseSampling, samplingDraft } from '~/components/Endpoints/SamplingFields';
 import { useLocalize } from '~/hooks';
 
-export default function ConversationSamplingDialog({ conversation, onClose, onSave }: {
+export default function ConversationSamplingDialog({ conversation, onClose, onSave, provider }: {
   conversation: TConversation;
+  provider?: string;
   onClose: () => void;
   onSave: (sampling: NonNullable<TConversation['lsmSampling']>) => void;
 }) {
@@ -28,10 +29,10 @@ export default function ConversationSamplingDialog({ conversation, onClose, onSa
         main={
           <form id={formId} onSubmit={(event) => {
             event.preventDefault();
-            onSave(parseSampling(draft));
+            onSave(parseSampling(draft, provider));
             onClose();
           }}>
-            <SamplingFields value={draft} onChange={setDraft} />
+            <SamplingFields provider={provider} value={draft} onChange={setDraft} />
           </form>
         }
         leftButtons={<Button variant="outline" type="button" onClick={() => setDraft(samplingDraft())}>
@@ -76,6 +77,7 @@ export function useConversationSampling(endpointsConfig: TEndpointsConfig) {
     dialog: enabled && snapshot && snapshot.model === model && snapshot.endpoint === endpoint && (
       <ConversationSamplingDialog
         conversation={snapshot}
+        provider={getEndpointField(endpointsConfig, endpoint, 'type') ?? endpoint}
         onClose={() => setSnapshot(null)}
         onSave={(lsmSampling) => {
           if (getConversation()?.conversationId !== snapshot.conversationId) return;

@@ -17,6 +17,13 @@ def test_invalid_sampling_rejected(value):
         validate_sampling(value)
 
 
+def test_anthropic_sampling_temperature_limit():
+    assert validate_sampling({'temperature': 1}, provider='anthropic') == {'temperature': 1}
+    with pytest.raises(ValueError, match='temperature'):
+        validate_sampling({'temperature': 1.5}, provider='anthropic')
+    assert validate_sampling({'temperature': 1.5}, provider='openai') == {'temperature': 1.5}
+
+
 def test_sampling_inheritance_and_legacy_agent_aliases():
     defaults = {"temperature": 0.7, "top_p": 0.9, "max_tokens": 256}
     assert validate_sampling({"temperature": 0, "top_p": 0, "max_tokens": 1}) == {

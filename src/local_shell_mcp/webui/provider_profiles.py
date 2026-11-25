@@ -163,7 +163,7 @@ def _validate(body: dict) -> dict:
     if model_sampling is not None:
         if not isinstance(model_sampling, dict) or model_sampling.keys() - set(models):
             raise ValueError("Sampling defaults must belong to configured models")
-        model_sampling = {model: validate_sampling(value) for model, value in model_sampling.items()}
+        model_sampling = {model: validate_sampling(value, provider=kind) for model, value in model_sampling.items()}
     include_usage = body.get('include_usage')
     if include_usage is not None and type(include_usage) is not bool:
         raise ValueError('include_usage must be a boolean')
