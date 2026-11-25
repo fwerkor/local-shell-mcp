@@ -108,8 +108,8 @@ async def startup_config(request: Request):
     except HTTPException:
         return JSONResponse(settings)
     from .build_info import about_build_info
-    from .memory import memory_enabled
-    has_memory = memory_enabled(_repo(), _owner(request))
+    from .memory import memory_config
+    has_memory = memory_config(_repo(), _owner(request)) is not None
     settings.update({
         **(await asyncio.to_thread(about_build_info)),
         "interface": {
@@ -140,10 +140,10 @@ async def startup_config(request: Request):
 
 
 async def endpoint_configs(request: Request):
-    from .memory import memory_enabled
+    from .memory import memory_tools_available
 
     owner = _owner(request)
-    return JSONResponse(_endpoint_info(memory_available=memory_enabled(_repo(), owner, tools=True)))
+    return JSONResponse(_endpoint_info(memory_available=memory_tools_available(_repo(), owner)))
 
 
 async def models(request: Request):

@@ -372,12 +372,12 @@ function BadgeRow({
             />
           </div>
         )}
+        {showTools && <Memory />}
         {showEphemeralBadges === true && (
           <>
             <WebSearch />
             <CodeInterpreter />
             <FileSearch />
-            <Memory />
             <Artifacts />
           </>
         )}

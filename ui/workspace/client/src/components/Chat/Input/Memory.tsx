@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Brain } from 'lucide-react';
 import { CheckboxButton } from '@librechat/client';
 import { useLocalize, useAuthContext } from '~/hooks';
@@ -9,29 +9,23 @@ import { badgeAccents } from './accents';
 function Memory() {
   const localize = useLocalize();
   const { user } = useAuthContext();
-  const context = useBadgeRowContext();
-  const { toggleState: memoryActive, debouncedChange, isPinned } = context?.memory ?? {};
-
+  const features = useBadgeRowContext()?.features;
   const { data: startupConfig } = useGetStartupConfig();
-  const canUseMemory = startupConfig?.interface?.memories === true;
 
-  const hasOptedOut = user?.personalization?.memories === false;
-
-  if (!canUseMemory || hasOptedOut) {
+  if (startupConfig?.interface?.memories !== true || !features) {
     return null;
   }
 
+  const optedOut = user?.personalization?.memories === false;
   return (
-    (memoryActive || isPinned) && (
-      <CheckboxButton
-        disabled={!context?.features.canEdit}
-        checked={memoryActive}
-        setValue={debouncedChange}
-        label={localize('com_ui_memory')}
-        isCheckedClassName={badgeAccents.purple}
-        icon={<Brain className="icon-md" aria-hidden="true" />}
-      />
-    )
+    <CheckboxButton
+      disabled={optedOut || !features.canEdit}
+      checked={!optedOut && (features.current?.memory ?? false)}
+      setValue={({ value }) => features.toggle('memory', value === true)}
+      label={localize('com_ui_memory')}
+      isCheckedClassName={badgeAccents.purple}
+      icon={<Brain className="icon-md" aria-hidden="true" />}
+    />
   );
 }
 

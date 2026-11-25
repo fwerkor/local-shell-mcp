@@ -19,7 +19,6 @@ import { useVerifyAgentToolAuth, useGetAgentFiles } from '~/data-provider';
 import { useLocalize, useHasAccess, useHasMemoryAccess } from '~/hooks';
 import { useFileMapContext, useAgentPanelContext } from '~/Providers';
 import { deriveSelectedItems } from './items/selectors';
-import { useAuthContext } from '~/hooks/AuthContext';
 import { buildCatalog } from './items/catalog';
 import { processAgentOption } from '~/utils';
 
@@ -66,20 +65,16 @@ export function useWebSearchUserProvided(): boolean {
 
 /**
  * Resolves whether the Memory capability should be offered in the builder.
- * Mirrors the legacy `AgentConfig` gate: the admin must enable the `memory`
- * capability, the user must hold the memory permission, and the user must not
- * have opted out of memories in personalization. Collapsed into one flag here
- * so both the selected list (`ToolsSection`) and the marketplace
- * (`ToolsMarketplaceDialog`) gate the catalog item identically.
+ * Deployment availability gates the catalog, not the user's temporary global
+ * opt-out. Agent tool configuration remains editable while memory use is off.
  */
 export function useShowMemory(): boolean {
   const { agentsConfig } = useAgentPanelContext();
   const hasMemoryAccess = useHasMemoryAccess();
-  const { user } = useAuthContext();
   return useMemo(() => {
     const memoryEnabled = agentsConfig?.capabilities?.includes(AgentCapabilities.memory) ?? false;
-    return hasMemoryAccess && memoryEnabled && user?.personalization?.memories !== false;
-  }, [agentsConfig, hasMemoryAccess, user]);
+    return hasMemoryAccess && memoryEnabled;
+  }, [agentsConfig, hasMemoryAccess]);
 }
 
 export interface AgentFileEntries {
