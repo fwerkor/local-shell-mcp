@@ -2,12 +2,14 @@
 """Validate the chat WebUI's lazy-loaded translation catalogs."""
 import json
 import re
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "ui/workspace/client/src"
 LOCALES = ROOT / "locales"
+REPO = Path(__file__).resolve().parents[1]
 TOKEN = re.compile(r"\{\{[^{}]+\}\}|</?\d+>|</?[a-zA-Z][^>]*>")
 
 
@@ -21,6 +23,33 @@ def read_catalog(path: Path) -> dict[str, str]:
         return result
 
     return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_pairs)
+
+
+def report_unreferenced(keys: set[str]) -> None:
+    """Report candidates, not proof of dead keys: some labels come from API data."""
+    result = subprocess.run(
+        ["git", "grep", "-I", "-h", "-E", "com_|chat_direction", "--",
+         ":!**/translation.json", ":!ui/workspace/PORTING_INVENTORY.json"],
+        cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", check=False,
+    )
+    if result.returncode not in (0, 1):
+        print("Skipping translation reference audit: Git search unavailable", file=sys.stderr)
+        return
+    tokens = set(re.findall(r"[A-Za-z0-9_]+", result.stdout))
+    plural = re.compile(r"_(?:zero|one|two|few|many|other|plural|\d+)$")
+    # Dynamic variable names, machine permission levels, API categories/errors.
+    dynamic = ("com_ui_special_var_", "com_lsm_agent_machine_",
+               "com_agents_category_", "com_ui_agent_category_", "com_error_")
+    candidates = sorted(
+        key for key in keys
+        if key not in tokens and plural.sub("", key) not in tokens
+        and not key.startswith(dynamic)
+    )
+    if candidates:
+        print(f"Translation audit: {len(candidates)} keys without direct references "
+              "(review dynamic/API consumers before removal)")
+        print("  " + ", ".join(candidates))
 
 
 def main() -> int:
@@ -52,6 +81,7 @@ def main() -> int:
         print("\n".join(errors), file=sys.stderr)
         return 1
     print(f"Validated {len(files)} WebUI locale catalogs × {len(english)} messages")
+    report_unreferenced(set(english))
     return 0
 
 
