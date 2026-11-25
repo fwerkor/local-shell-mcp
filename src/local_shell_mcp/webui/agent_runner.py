@@ -209,7 +209,7 @@ class AgentRunner:
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled and (agent or {}).get("mcp_servers") != []:
             mcp_configured = "mcp_servers" in (agent or {})
-            mcp_exposed = selected_tools is None and (not selected or mcp_configured)
+            mcp_exposed = mcp_configured or (selected_tools is None and not selected)
             tools += [tool for tool in nested_tools()
                       if unrestricted or machine_exposed or mcp_exposed
                       or tool["function"]["name"] in selected]

@@ -273,11 +273,12 @@ def test_external_mcp_available_without_machine_policy(machine_agent, mcp_config
         stream_tools=None, stream_text=None, on_text=None, profile=profile,
         agent=legacy, mcp_enabled=True,
     )
-    context = runner._context(legacy, profile=profile)
-    names = {item["function"]["name"] for item in context.tools}
-    assert ({"mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call"} <= names) is expected
-    assert "file_read" in names
-    assert "file_write" not in names  # No implicit migration of legacy tool grants.
+    for selected in (None, ("file_read",)):
+        context = runner._context(legacy, profile=profile, selected_tools=selected)
+        names = {item["function"]["name"] for item in context.tools}
+        assert ({"mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call"} <= names) is expected
+        assert "file_read" in names
+        assert "file_write" not in names  # No implicit migration of legacy tool grants.
 
 
 @pytest.mark.asyncio
