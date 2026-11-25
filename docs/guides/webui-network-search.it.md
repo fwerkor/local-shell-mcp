@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # Ricerca web e lettura dei documenti in WebUI
 
 La ricerca web è attiva per impostazione
@@ -53,3 +53,11 @@ possibile. I contenuti esterni non sono
 attendibili e non possono sovrascrivere le
 istruzioni dell'utente o le impostazioni
 dell'Agent.
+
+Le pagine HTML vuote o dipendenti da JavaScript vengono riprovate in un nuovo
+contesto Chromium headless, se l'extra browser e Chromium sono installati.
+Le pagine statiche e i PDF non avviano il browser. Il rendering usa lo stesso
+trasporto HTTP limitato agli IP pubblici, blocca richieste non di lettura
+e connessioni dirette del browser, con limite di 25 secondi e 128 richieste.
+Pagine con login, CAPTCHA o reindirizzamenti non supportati possono restare illeggibili.
+Accessi negati e risultati vuoti vengono segnalati e non salvati nella cache.

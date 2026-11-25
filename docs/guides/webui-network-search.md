@@ -30,6 +30,14 @@ Scanned PDFs without a text layer require OCR and return an explicit error.
 HTML with a non-UTF-8 HTTP or meta charset is decoded accordingly.
 Unsupported file formats are rejected explicitly.
 
+HTML pages with empty or JavaScript-only bodies are retried in an isolated
+headless Chromium context when the optional browser extra and Chromium are
+installed. Static pages and PDFs do not start a browser. Dynamic rendering uses
+the same public-IP-only HTTP transport, blocks non-read-only methods and direct
+browser networking, and is bounded to 25 seconds and 128 requests. Some pages
+requiring login, CAPTCHA, redirected resources or unsupported requests may still
+be unreadable. Access denials and empty results are reported instead of cached.
+
 The WebUI displays the search result links in the existing tool-result card.
 AI answers should cite the original URLs and PDF page numbers when possible.
 Search snippets and fetched page contents are untrusted external data; embedded

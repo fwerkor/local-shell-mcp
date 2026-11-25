@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # Pesquisa na web e leitura de documentos no WebUI
 
 A pesquisa na web fica ativada por padrão no
@@ -51,3 +51,11 @@ páginas do PDF quando possível. Conteúdo
 externo não é confiável e não pode substituir
 as instruções do usuário nem a configuração
 do Agent.
+
+Páginas HTML vazias ou dependentes de JavaScript são tentadas novamente em um novo
+contexto Chromium sem interface, se o extra browser e o Chromium estiverem instalados.
+Páginas estáticas e PDFs não iniciam o navegador. A renderização usa o mesmo
+transporte HTTP restrito a IPs públicos, bloqueia solicitações que não sejam de leitura
+e conexões diretas do navegador, com limite de 25 segundos e 128 solicitações.
+Login, CAPTCHA ou redirecionamentos não suportados podem impedir a leitura.
+Acessos negados e resultados vazios são informados e não entram no cache.

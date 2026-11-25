@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # Pencarian web dan pembacaan dokumen di WebUI
 
 Pencarian web aktif secara bawaan dalam
@@ -52,3 +52,11 @@ nomor halaman PDF bila memungkinkan. Konten
 eksternal tidak dapat dipercaya dan
 instruksinya tidak boleh mengganti perintah
 pengguna atau pengaturan Agent.
+
+Halaman HTML kosong atau bergantung pada JavaScript dicoba ulang dalam konteks
+Chromium headless baru jika ekstra browser opsional dan Chromium terpasang.
+Halaman statis dan PDF tidak membuka browser. Rendering memakai transport HTTP
+yang sama, terbatas pada IP publik, memblokir permintaan selain baca dan jaringan
+langsung browser, dengan batas 25 detik dan 128 permintaan.
+Halaman yang membutuhkan login, CAPTCHA, atau pengalihan yang tidak didukung mungkin gagal.
+Penolakan akses dan hasil kosong dilaporkan, bukan disimpan dalam cache.

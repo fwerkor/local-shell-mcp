@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # WebUI içinde web araması ve belge okuma
 
 WebUI sohbetinde web araması varsayılan
@@ -50,3 +50,11 @@ sayfa numaraları belirtilmelidir. Dışarıdan
 gelen içerikler güvenilir değildir ve
 kullanıcı talimatlarını ya da Agent
 ayarlarını değiştiremez.
+
+Boş veya JavaScript'e bağımlı HTML sayfaları, isteğe bağlı browser eki ve Chromium
+kuruluysa yeni bir başsız Chromium bağlamında yeniden denenir.
+Statik sayfalar ve PDF'ler tarayıcı başlatmaz. İşleme aynı genel IP ile sınırlı
+HTTP taşımasını kullanır, okuma dışı istekleri ve doğrudan tarayıcı ağını engeller;
+25 saniye ve 128 istekle sınırlıdır. Oturum açma, CAPTCHA veya desteklenmeyen
+yönlendirme ve istekler gerektiren sayfalar okunamayabilir.
+Erişim retleri ve boş sonuçlar bildirilir, önbelleğe alınmaz.
