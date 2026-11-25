@@ -96,8 +96,7 @@ def _redact(value: dict) -> dict:
             "model_context_overrides": value.get("model_context_overrides") or {},
             "model_sync_at": value.get("model_sync_at"),
             "model_sync_error": value.get("model_sync_error"),
-            "configured": configured(value),
-            "include_usage": value["provider"] == "openai" and value.get("include_usage") is not False}
+            "configured": configured(value)}
 
 
 def all_profiles() -> list[dict]:
@@ -177,15 +176,11 @@ def _validate(body: dict) -> dict:
         if not isinstance(model_sampling, dict) or model_sampling.keys() - set(models):
             raise ValueError("Sampling defaults must belong to configured models")
         model_sampling = {model: validate_sampling(value, provider=kind) for model, value in model_sampling.items()}
-    include_usage = body.get('include_usage')
-    if include_usage is not None and type(include_usage) is not bool:
-        raise ValueError('include_usage must be a boolean')
     return {**({"name": name} if name is not None else {}), "provider": kind, "base_url": base,
             "models": models, "api_key": key,
             "model_contexts": model_contexts,
             "auto_discover": auto_discover,
-            "model_sampling": model_sampling,
-            'include_usage': include_usage}
+            "model_sampling": model_sampling}
 
 
 def _access(request):
@@ -319,8 +314,6 @@ async def provider_profiles(request):
                 value["model_sampling"] = {model: sampling for model, sampling in
                                            (previous.get("model_sampling") or {}).items()
                                            if value["auto_discover"] or model in value["models"]}
-            if value["include_usage"] is None:
-                value["include_usage"] = previous.get("include_usage", value["provider"] == "openai")
             if value["auto_discover"]:
                 from .model_discovery import apply_auto_save, connection_identity
 
