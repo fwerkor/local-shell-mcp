@@ -33,8 +33,6 @@ import { isEphemeralAgent } from '~/common';
 import SkillsSection from './SkillsSection';
 import SkillsDialog from './SkillsDialog';
 import ToolRow from './ToolRow';
-import LsmAgentMachineAccess from './LsmAgentMachineAccess';
-import LsmExternalMcpServers from './LsmExternalMcpServers';
 
 interface Props {
   agentId: string;
@@ -248,10 +246,6 @@ export default function ToolsSection({ agentId }: Props) {
 
   return (
     <>
-      <div className="mb-5 space-y-5">
-        <LsmAgentMachineAccess />
-        <LsmExternalMcpServers />
-      </div>
       <SelectedSection
         title={localize('com_ui_tools_section_title')}
         addLabel={localize('com_ui_add_tools')}

@@ -169,6 +169,11 @@ function AgentSelect({
           formValues[name] = value;
           return;
         }
+        if (name === 'mcp_servers' && (value === null || Array.isArray(value))) {
+          formValues.mcp_servers = value as string[] | null;
+          return;
+        }
+
         if (name === 'machine_permissions' && typeof value === 'object' && value !== null) {
           formValues[name] = value;
           return;

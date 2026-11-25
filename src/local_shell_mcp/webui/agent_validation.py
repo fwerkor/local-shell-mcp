@@ -184,6 +184,10 @@ def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
         from .machine_permissions import validate_access_map
 
         result["machine_permissions"] = validate_access_map(obj["machine_permissions"])
+    if "mcp_servers" in obj:
+        from .misc_routes import _validate_feature_change
+
+        result["mcp_servers"] = _validate_feature_change({"mcpServers": obj["mcp_servers"]})["mcpServers"]
     nullable_strings = {"name", "description", "instructions", "model",
                         "entryAgentId", "resultAgentId"}
     strings = {"provider", "artifacts", "category", "code_environment_id", "code_workspace_id"}

@@ -48,3 +48,13 @@ test('new agents use the fully allowed machine default', async () => {
   expect(picker).toHaveValue('write');
   expect(screen.queryByText('com_lsm_agent_machine_legacy')).not.toBeInTheDocument();
 });
+
+test('local is present and first even if an older server omits it', async () => {
+  (request.get as jest.Mock).mockResolvedValue({ machines: [{ name: 'aia1', status: 'online' }] });
+  mount(false);
+  await screen.findByLabelText('aia1 machine access');
+  const pickers = screen.getAllByRole('combobox');
+  expect(pickers[0]).toHaveAccessibleName('local machine access');
+  fireEvent.change(pickers[0], { target: { value: 'none' } });
+  expect(screen.getByTestId('policy')).toHaveTextContent('{"local":"none"}');
+});

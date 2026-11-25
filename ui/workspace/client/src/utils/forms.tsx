@@ -51,6 +51,7 @@ export const getDefaultAgentFormValues = (
   // A newly created Agent inherits all chat-exposed machines by default.
   // Existing Agents without this field keep their legacy tool allowlist.
   machine_permissions: {},
+  mcp_servers: null,
   stateful_code_environment: statefulCodeEnvironment,
   avatar_file: null,
   avatar_preview: '',

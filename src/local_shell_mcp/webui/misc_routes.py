@@ -152,20 +152,6 @@ async def feature_defaults(request: Request):
     return JSONResponse(effective_features(owner, repo=repo))
 
 
-async def registered_mcp_servers(request: Request):
-    _owner(request)
-    from ..dynamic_mcp import DynamicMCPManager
-    from ..settings import get_settings
-
-    result = await DynamicMCPManager(get_settings().state_dir).manage(action="list")
-    # The composer needs only names, enabled state and counts. Do not expose
-    # commands, paths, URLs or connection configuration to this endpoint.
-    return JSONResponse({"servers": [
-        {"name": server["name"], "enabled": server["enabled"],
-         "tool_count": server["tool_count"]} for server in result["servers"]
-    ]})
-
-
 async def conversation_permissions(request: Request):
     from .machine_permissions import (
         _CONVERSATION,
@@ -265,7 +251,6 @@ def misc_routes() -> list[Route]:
         Route("/api/keys", user_key, methods=["GET"]),
         Route("/api/agents/tools/calls", tool_calls, methods=["GET"]),
         Route("/api/lsm/feature-defaults", feature_defaults, methods=["GET", "PUT"]),
-        Route("/api/lsm/mcp/servers", registered_mcp_servers, methods=["GET"]),
         Route("/api/lsm/preferences/{conversation_id}", conversation_permissions, methods=["GET", "PUT"]),
         Route("/api/files/config", files_config, methods=["GET"]),
         Route("/api/agents/tools/web_search/auth", web_search_auth, methods=["GET"]),

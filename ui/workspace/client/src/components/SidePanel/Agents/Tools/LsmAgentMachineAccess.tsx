@@ -30,10 +30,11 @@ export default function LsmAgentMachineAccess() {
   const { data, isLoading, isError } = useLsmMachines();
   const names = useMemo(
     () => [...new Set([
+      ...((data || !isLoading) ? ['local'] : []),
       ...(data?.machines ?? []).map((machine) => machine.name),
       ...Object.keys(selected ?? {}),
-    ])].sort(),
-    [data, selected],
+    ])].sort((a, b) => a === b ? 0 : a === 'local' ? -1 : b === 'local' ? 1 : a.localeCompare(b)),
+    [data, selected, isLoading],
   );
   const statuses = new Map((data?.machines ?? []).map((machine) => [machine.name, machine.status]));
 

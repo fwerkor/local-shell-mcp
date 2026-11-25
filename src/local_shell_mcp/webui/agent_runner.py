@@ -203,9 +203,9 @@ class AgentRunner:
         if self.web_search_enabled:
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
-        if self.mcp_enabled:
+        if self.mcp_enabled and (agent or {}).get("mcp_servers") != []:
             tools += [tool for tool in nested_tools()
-                      if unrestricted or machine_exposed or (selected_tools is None and not selected)
+                      if unrestricted or machine_exposed or (selected_tools is None and (not selected or bool((agent or {}).get("mcp_servers"))))
                       or tool["function"]["name"] in selected]
         from .storage import WorkspaceRepository
         settings = WorkspaceRepository(self.database)
@@ -624,9 +624,11 @@ class AgentRunner:
                 return await invoke_action(self.owner, current_id, call.name, call.arguments, self.database,
                                            oauth_token=oauth_token, expected_version=operation["action_version"])
             if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
-                return await discover(self.owner, self.authorization_conversation_id, set(self.scopes), call)
+                return await discover(self.owner, self.authorization_conversation_id, set(self.scopes), call,
+                                      agent_id=(state.context.agent or {}).get("id"))
             if call.name == "mcp_tool_call":
-                return await approved_call(self.owner, self.authorization_conversation_id, set(self.scopes), call)
+                return await approved_call(self.owner, self.authorization_conversation_id, set(self.scopes), call,
+                                           agent_id=(state.context.agent or {}).get("id"))
             return await call_tool(self.owner, self.generation.conversation_id, call,
                                    granted_scopes=set(self.scopes), grant_expires=self.grant_expires,
                                    run_id=self.generation.run_id,
