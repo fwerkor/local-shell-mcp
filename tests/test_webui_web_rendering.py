@@ -45,6 +45,7 @@ async def test_dynamic_fetch_replaces_title_only_legacy_cache(monkeypatch, fetch
 @pytest.mark.parametrize('mime,body', [
     ('text/html', b'<html><title>Page</title><p>OK</p></html>'),
     ('text/plain', b'hello'),
+    ('text/html', b'<html><title>OK</title><p>OK</p></html>'),
 ])
 async def test_short_readable_documents_do_not_render(monkeypatch, fetch_env, mime, body):
     async def download(url, **kwargs):
@@ -82,6 +83,7 @@ def test_html_quality_and_title_extraction():
     data = web._parse_document('text/html', b'<html><title>Actual title</title><svg><title>Icon</title></svg><p>Body</p></html>', url)
     assert data['title'] == 'Actual title' and data['text'] == 'Body'
     assert web._html_problem(data) is None
+    assert web._html_problem(web._parse_document('text/html', b'<title>OK</title><p>OK</p>', url)) is None
     assert web._html_problem({'title': 'App', 'text': 'Please enable JavaScript to continue.'})
     assert web._html_problem({'title': 'App', 'text': 'Loading...'})
     assert web._html_problem({'title': 'Just a moment...', 'text': 'Verify'})
@@ -112,7 +114,7 @@ async def test_render_routes_limit_and_validate_every_resource(monkeypatch):
         requests.append(request)
         if request.url.path == '/redirect':
             return httpx.Response(302, headers={'location': 'http://127.0.0.1/'})
-        return httpx.Response(200, headers={'content-type': 'text/javascript'}, content=b'123456')
+        return httpx.Response(200, headers=[('content-type', 'text/javascript'), ('set-cookie', 'a=1; Path=/'), ('set-cookie', 'b=2; Path=/')], content=b'123456')
 
     budget = web._RenderBudget()
     async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
@@ -127,6 +129,7 @@ async def test_render_routes_limit_and_validate_every_resource(monkeypatch):
         good = Route('https://example.org/script')
         await budget.handle(good, client)
         assert good.result['body'] == b'123456'
+        assert good.result['headers']['set-cookie'] == 'a=1; Path=/\nb=2; Path=/'
         assert 'authorization' not in requests[-1].headers
         exhausted = Route('https://example.org/other')
         await budget.handle(exhausted, client)
@@ -173,15 +176,16 @@ async def test_real_browser_renders_script_without_private_network(monkeypatch):
     async with listener:
         port = listener.sockets[0].getsockname()[1]
 
-        def response(request):
+        async def response(request):
             seen.append(str(request.url))
             if request.url.path == '/app.js':
                 return httpx.Response(200, headers={'content-type': 'text/javascript'}, text=(
-                    "fetch('/data').then(r=>r.text()).then(t=>document.querySelector('app-root').textContent=t);"
+                    "document.querySelector('app-root').textContent='Loading profile…';fetch('/data').then(r=>r.text()).then(t=>document.querySelector('app-root').textContent=t);"
                     f"fetch('http://127.0.0.1:{port}/secret').catch(()=>{{}});"
                     f"new WebSocket('ws://127.0.0.1:{port}/secret');"
                 ))
             if request.url.path == '/data':
+                await asyncio.sleep(1.2)
                 return httpx.Response(200, text='Readable dynamic profile')
             return httpx.Response(200, headers={'content-type': 'text/html'}, content=SHELL)
 

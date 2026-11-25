@@ -371,7 +371,7 @@ def _html_problem(document: dict) -> str | None:
         remainder = body[len(title):]
         if not remainder or remainder[0].isspace():
             body = remainder.strip()
-    if not body or body.casefold() == title or body.casefold() in {'loading', 'loading...', 'loading…', '加载中', '加载中…'}:
+    if not body or body.casefold() in {'loading', 'loading...', 'loading…', '加载中', '加载中…'}:
         return 'no extractable page body'
     if len(body) < 400 and _PLACEHOLDER.search(body):
         return 'page requires JavaScript'
@@ -426,6 +426,11 @@ class _RenderBudget:
                                 if k.lower() not in {'content-encoding', 'content-length',
                                                     'transfer-encoding', 'connection',
                                                     'alt-svc', 'upgrade'}}
+                    # Playwright splits newline-delimited Set-Cookie values into
+                    # separate headers; HTTPX's items() otherwise comma-folds them.
+                    cookies = response.headers.get_list('set-cookie')
+                    if cookies:
+                        outgoing['set-cookie'] = '\n'.join(cookies)
                     await route.fulfill(status=response.status_code, headers=outgoing, body=bytes(body))
         except (WebResearchError, httpx.HTTPError):
             await route.abort()
@@ -516,7 +521,9 @@ async def _render_html(url: str) -> tuple[str, dict]:
                                 now = time.monotonic()
                                 if current != previous:
                                     previous, stable_since = current, now
-                                if not problem and now - stable_since >= _RENDER_SETTLE:
+                                if pending:
+                                    stable_since = now
+                                if not problem and not pending and now - stable_since >= _RENDER_SETTLE:
                                     resolved = await asyncio.to_thread(_safe_url, page.url)
                                     return resolved, document
                                 await asyncio.sleep(0.4)
