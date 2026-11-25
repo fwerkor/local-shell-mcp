@@ -307,6 +307,21 @@ class WorkspaceRepository:
             db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) "
                        "DO UPDATE SET value=excluded.value", (owner, key, _json(value)))
 
+    def merge_setting(self, owner: str, key: str, changes: dict, *, max_bytes: int) -> dict:
+        """Merge a preference patch without losing concurrent updates to other keys."""
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT value FROM settings WHERE owner=? AND key=?",
+                             (owner, key)).fetchone()
+            current = json.loads(row[0]) if row else {}
+            merged = {**(current if isinstance(current, dict) else {}), **changes}
+            encoded = _json(merged)
+            if len(encoded.encode("utf-8")) > max_bytes:
+                raise ValueError("Preferences are too large")
+            db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) "
+                       "DO UPDATE SET value=excluded.value", (owner, key, encoded))
+            return merged
+
     def setting(self, owner: str, key: str, default: Any = None) -> Any:
         with self.database.connect() as db:
             row = db.execute("SELECT value FROM settings WHERE owner=? AND key=?", (owner, key)).fetchone()

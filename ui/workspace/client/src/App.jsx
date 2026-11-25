@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { RecoilRoot } from 'recoil';
 import { DndProvider } from 'react-dnd';
 import { RouterProvider } from 'react-router-dom';
@@ -11,9 +11,34 @@ import WakeLockManager from '~/components/System/WakeLockManager';
 import QueryDevtoolsGate from '~/components/QueryDevtoolsGate';
 import LanguageSync from '~/components/System/LanguageSync';
 import { getThemeFromEnv } from './utils/getThemeFromEnv';
+import { serverPreferences } from '~/store/serverPreferences';
 import { initializeFontSize } from '~/store/fontSize';
 import { LiveAnnouncer } from '~/a11y';
 import { router } from './routes';
+
+const readAppearance = () => {
+  const appearance = serverPreferences.get('theme', 'system');
+  return ['light', 'dark', 'system', 'high-contrast-light', 'high-contrast-dark'].includes(
+    appearance,
+  )
+    ? appearance
+    : 'system';
+};
+const subscribeAppearance = (notify) => serverPreferences.subscribe('theme', notify);
+const saveAppearance = (appearance) => serverPreferences.set('theme', appearance);
+
+function AccountThemeProvider({ children, envTheme }) {
+  const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, readAppearance);
+  return (
+    <ThemeProvider
+      appearance={appearance}
+      onAppearanceChange={saveAppearance}
+      {...(envTheme && { themeRGB: envTheme })}
+    >
+      {children}
+    </ThemeProvider>
+  );
+}
 
 const App = () => {
   const { setError } = useApiErrorBoundary();
@@ -40,7 +65,7 @@ const App = () => {
   });
 
   useEffect(() => {
-    initializeFontSize();
+    return initializeFontSize();
   }, []);
 
   // Load theme from environment variables if available
@@ -51,16 +76,7 @@ const App = () => {
       <RecoilRoot>
         <LanguageSync />
         <LiveAnnouncer>
-          <ThemeProvider
-            // Only pass initialTheme and themeRGB if environment theme exists
-            // This allows localStorage values to persist when no env theme is set
-            {...(envTheme && { initialTheme: 'system', themeRGB: envTheme })}
-          >
-            {/* The ThemeProvider will automatically:
-                1. Apply dark/light mode classes
-                2. Apply custom theme colors if envTheme is provided
-                3. Otherwise use stored theme preferences from localStorage
-                4. Fall back to default theme colors if nothing is stored */}
+          <AccountThemeProvider envTheme={envTheme}>
             <RadixToast.Provider>
               <ToastProvider>
                 <DndProvider backend={HTML5Backend}>
@@ -91,7 +107,7 @@ const App = () => {
                 </DndProvider>
               </ToastProvider>
             </RadixToast.Provider>
-          </ThemeProvider>
+          </AccountThemeProvider>
         </LiveAnnouncer>
       </RecoilRoot>
     </QueryClientProvider>

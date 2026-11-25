@@ -1,5 +1,6 @@
+import { serverPreferences } from './serverPreferences';
 import { applyFontSize } from '@librechat/client';
-import { createStorageAtomWithEffect, initializeFromStorage } from './jotai-utils';
+import { createStorageAtomWithEffect } from './jotai-utils';
 
 const DEFAULT_FONT_SIZE = 'text-base';
 
@@ -13,9 +14,11 @@ export const fontSizeAtom = createStorageAtomWithEffect<string>(
 );
 
 /**
- * Initialize font size on app load
- * This function applies the saved font size from localStorage to the DOM
+ * Initialize font size and follow the authenticated account
+ * Apply the server preference to the DOM, including after login and logout.
  */
-export const initializeFontSize = (): void => {
-  initializeFromStorage('fontSize', DEFAULT_FONT_SIZE, applyFontSize);
+export const initializeFontSize = () => {
+  const apply = () => applyFontSize(serverPreferences.get('fontSize', DEFAULT_FONT_SIZE));
+  apply();
+  return serverPreferences.subscribe('fontSize', apply);
 };

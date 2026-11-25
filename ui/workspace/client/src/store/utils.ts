@@ -1,4 +1,5 @@
 import { atom } from 'recoil';
+import { serverPreferences } from './serverPreferences';
 
 // Improved helper function to create atoms with localStorage
 export function atomWithLocalStorage<T>(
@@ -50,6 +51,29 @@ export function atomWithLocalStorage<T>(
         onSet((newValue: T) => {
           localStorage.setItem(key, JSON.stringify(newValue));
         });
+      },
+    ],
+  });
+}
+
+/** Server-owned account preference; no browser persistence or legacy-value import. */
+export function atomWithServerPreference<T>(
+  key: string,
+  defaultValue: T,
+  normalize: (value: T) => T = (value) => value,
+) {
+  const read = () => normalize(serverPreferences.get(key, defaultValue));
+  return atom<T>({
+    key,
+    default: defaultValue,
+    effects_UNSTABLE: [
+      ({ setSelf, onSet }) => {
+        setSelf(read());
+        const unsubscribe = serverPreferences.subscribe(key, () => setSelf(read()));
+        onSet((value, _old, isReset) =>
+          serverPreferences.set(key, normalize(isReset ? defaultValue : value)),
+        );
+        return unsubscribe;
       },
     ],
   });

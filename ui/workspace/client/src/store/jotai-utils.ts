@@ -1,29 +1,35 @@
 import { atom } from 'jotai';
+import { serverPreferences } from './serverPreferences';
 import { atomWithStorage } from 'jotai/utils';
 import type { SyncStorage } from 'jotai/vanilla/utils/atomWithStorage';
 
 /**
- * Create a simple atom with localStorage persistence
+ * Create a simple atom with server-owned preference persistence
  * Uses Jotai's atomWithStorage with getOnInit for proper SSR support
  *
- * @param key - localStorage key
+ * @param key - server preference key
  * @param defaultValue - default value if no saved value exists
- * @returns Jotai atom with localStorage persistence
+ * @returns Jotai atom with server preference persistence
  */
 export function createStorageAtom<T>(key: string, defaultValue: T) {
-  return atomWithStorage<T>(key, defaultValue, undefined, {
-    getOnInit: true,
-  });
+  const storage: SyncStorage<T> = {
+    getItem: (name, fallback) => serverPreferences.get(name, fallback),
+    setItem: (name, value) => serverPreferences.set(name, value),
+    removeItem: (name) => serverPreferences.set(name, defaultValue),
+    subscribe: (name, callback, fallback) =>
+      serverPreferences.subscribe(name, () => callback(serverPreferences.get(name, fallback))),
+  };
+  return atomWithStorage<T>(key, defaultValue, storage, { getOnInit: true });
 }
 
 /**
- * Create an atom with localStorage persistence and side effects
+ * Create an atom with server-owned preference persistence and side effects
  * Useful when you need to apply changes to the DOM or trigger other actions
  *
- * @param key - localStorage key
+ * @param key - server preference key
  * @param defaultValue - default value if no saved value exists
  * @param onWrite - callback function to run when the value changes
- * @returns Jotai atom with localStorage persistence and side effects
+ * @returns Jotai atom with server preference persistence and side effects
  */
 export function createStorageAtomWithEffect<T>(
   key: string,
@@ -103,49 +109,4 @@ export function createTabIsolatedAtom<T>(key: string, defaultValue: T) {
   return atomWithStorage<T>(key, defaultValue, createTabIsolatedStorage<T>(), {
     getOnInit: true,
   });
-}
-
-/**
- * Initialize a value from localStorage and optionally apply it
- * Useful for applying saved values on app startup (e.g., theme, fontSize)
- *
- * @param key - localStorage key
- * @param defaultValue - default value if no saved value exists
- * @param onInit - optional callback to run with the loaded value
- * @returns The loaded value (or default if none exists)
- */
-export function initializeFromStorage<T>(
-  key: string,
-  defaultValue: T,
-  onInit?: (value: T) => void,
-): T {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
-    return defaultValue;
-  }
-
-  try {
-    const savedValue = localStorage.getItem(key);
-    const value = savedValue ? (JSON.parse(savedValue) as T) : defaultValue;
-
-    if (onInit) {
-      onInit(value);
-    }
-
-    return value;
-  } catch (error) {
-    console.error(`Error initializing ${key} from localStorage, using default. Error:`, error);
-
-    // Reset corrupted value
-    try {
-      localStorage.setItem(key, JSON.stringify(defaultValue));
-    } catch (setError) {
-      console.error(`Error resetting corrupted ${key} in localStorage:`, setError);
-    }
-
-    if (onInit) {
-      onInit(defaultValue);
-    }
-
-    return defaultValue;
-  }
 }

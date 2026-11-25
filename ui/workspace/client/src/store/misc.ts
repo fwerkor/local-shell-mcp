@@ -1,9 +1,9 @@
 import { atom, selectorFamily } from 'recoil';
 import { TAttachment } from 'librechat-data-provider';
-import { atomWithLocalStorage } from './utils';
+import { atomWithServerPreference } from './utils';
 import { BadgeItem } from '~/common';
 
-const hideBannerHint = atomWithLocalStorage('hideBannerHint', [] as string[]);
+const hideBannerHint = atomWithServerPreference('hideBannerHint', [] as string[]);
 
 const messageAttachmentsMap = atom<Record<string, TAttachment[] | undefined>>({
   key: 'messageAttachmentsMap',
@@ -77,15 +77,15 @@ export type ShortcutOverride = {
   other: string | null;
 };
 
-const customShortcuts = atomWithLocalStorage<Record<string, ShortcutOverride>>(
+const customShortcuts = atomWithServerPreference<Record<string, ShortcutOverride>>(
   'customKeyboardShortcuts',
   {},
 );
 
 /** When false, no keyboard shortcut fires and the UI stops advertising them. */
-const shortcutsEnabled = atomWithLocalStorage<boolean>('keyboardShortcutsEnabled', true);
+const shortcutsEnabled = atomWithServerPreference<boolean>('keyboardShortcutsEnabled', true);
 
-const chatBadges = atomWithLocalStorage<Pick<BadgeItem, 'id'>[]>('chatBadges', [
+const chatBadges = atomWithServerPreference<Pick<BadgeItem, 'id'>[]>('chatBadges', [
   // When adding new badges, make sure to add them to useChatBadges.ts as well and add them as last item
   // DO NOT CHANGE THE ORDER OF THE BADGES ALREADY IN THE ARRAY
   { id: '1' },

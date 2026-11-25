@@ -98,6 +98,9 @@ export interface ThemeProviderProps {
   persistThemeDefinition?: boolean;
   themeName?: string;
   initialTheme?: string;
+  /** Controlled appearance: the host owns persistence. */
+  appearance?: string;
+  onAppearanceChange?: (appearance: string) => void;
 }
 
 /**
@@ -314,6 +317,8 @@ export function ThemeProvider({
   persistThemeDefinition = true,
   themeName: propThemeName,
   initialTheme,
+  appearance,
+  onAppearanceChange,
 }: ThemeProviderProps): JSX.Element {
   const initialThemeState = useRef<InitialThemeState | undefined>(undefined);
   if (!initialThemeState.current) {
@@ -340,9 +345,14 @@ export function ThemeProvider({
     }
   }
 
-  const initialAppearance =
-    initialTheme && isAppearanceMode(initialTheme) ? initialTheme : getInitialTheme();
-  const [theme, setThemeState] = useState<AppearanceMode>(initialAppearance);
+  const controlledAppearance = appearance !== undefined && isAppearanceMode(appearance);
+  const initialAppearance = controlledAppearance
+    ? appearance
+    : initialTheme && isAppearanceMode(initialTheme)
+      ? initialTheme
+      : getInitialTheme();
+  const [themeState, setThemeState] = useState<AppearanceMode>(initialAppearance);
+  const theme = controlledAppearance ? appearance : themeState;
   /**
    * Seeded from the mode string alone, never from a media query, so a server
    * render and the first client render agree. `system` therefore starts at the
@@ -417,7 +427,7 @@ export function ThemeProvider({
     }
     persistedInitialProps.current = true;
 
-    if (initialTheme && isAppearanceMode(initialTheme)) {
+    if (!controlledAppearance && initialTheme && isAppearanceMode(initialTheme)) {
       writeStorage(THEME_KEY, initialTheme);
     }
 
@@ -455,6 +465,7 @@ export function ThemeProvider({
         : undefined,
     );
   }, [
+    controlledAppearance,
     initialTheme,
     legacyThemeRGB,
     propThemeDefinition,
@@ -464,13 +475,20 @@ export function ThemeProvider({
     writeThemeStorage,
   ]);
 
-  const setTheme = useCallback((newTheme: string) => {
-    if (!isAppearanceMode(newTheme)) {
-      return;
-    }
-    setThemeState(newTheme);
-    writeStorage(THEME_KEY, newTheme);
-  }, []);
+  const setTheme = useCallback(
+    (newTheme: string) => {
+      if (!isAppearanceMode(newTheme)) {
+        return;
+      }
+      if (controlledAppearance) {
+        onAppearanceChange?.(newTheme);
+        return;
+      }
+      setThemeState(newTheme);
+      writeStorage(THEME_KEY, newTheme);
+    },
+    [controlledAppearance, onAppearanceChange],
+  );
 
   const setThemeDefinition = useCallback(
     (definition?: ThemeDefinition) => {
@@ -570,7 +588,12 @@ export function ThemeProvider({
     ) {
       setThemeName(propThemeName);
     }
-    if (initialTheme !== previous.initialTheme && initialTheme && isAppearanceMode(initialTheme)) {
+    if (
+      !controlledAppearance &&
+      initialTheme !== previous.initialTheme &&
+      initialTheme &&
+      isAppearanceMode(initialTheme)
+    ) {
       setTheme(initialTheme);
     }
 
@@ -581,6 +604,7 @@ export function ThemeProvider({
       themeRGB: propThemeRGB,
     };
   }, [
+    controlledAppearance,
     initialTheme,
     propThemeDefinition,
     propThemeName,
