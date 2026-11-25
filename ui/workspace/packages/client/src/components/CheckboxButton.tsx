@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { useEffect } from 'react';
 import { Checkbox, useStoreState, useCheckboxStore } from '@ariakit/react';
 import { composerControlClasses } from '~/utils/composer';
 import { cn } from '~/utils';
@@ -10,6 +9,7 @@ const CheckboxButton: React.ForwardRefExoticComponent<
     label: string;
     className?: string;
     checked?: boolean;
+    disabled?: boolean;
     defaultChecked?: boolean;
     isCheckedClassName?: string;
     setValue?: (values: {
@@ -24,6 +24,7 @@ const CheckboxButton: React.ForwardRefExoticComponent<
     label: string;
     className?: string;
     checked?: boolean;
+    disabled?: boolean;
     defaultChecked?: boolean;
     isCheckedClassName?: string;
     setValue?: (values: {
@@ -31,56 +32,48 @@ const CheckboxButton: React.ForwardRefExoticComponent<
       value: boolean | string;
     }) => void;
   }
->(({ icon, label, setValue, className, checked, defaultChecked, isCheckedClassName }, ref) => {
-  const checkbox = useCheckboxStore();
-  const isChecked = useStoreState(checkbox, (state) => state?.value);
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    if (typeof isChecked !== 'boolean') {
-      return;
-    }
-    setValue?.({ e, value: !isChecked });
-  };
+>(
+  (
+    { icon, label, setValue, className, checked, disabled, defaultChecked, isCheckedClassName },
+    ref,
+  ) => {
+    const checkbox = useCheckboxStore({ value: checked, defaultValue: defaultChecked });
+    const isChecked = useStoreState(checkbox, (state) => state?.value);
+    const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      e.stopPropagation();
+      if (typeof isChecked !== 'boolean') {
+        return;
+      }
+      setValue?.({ e, value: !isChecked });
+    };
 
-  // Sync with controlled checked prop
-  useEffect(() => {
-    if (checked !== undefined) {
-      checkbox.setValue(checked);
-    }
-  }, [checked, checkbox]);
+    return (
+      <Checkbox
+        ref={ref}
+        store={checkbox}
+        disabled={disabled}
+        onChange={onChange}
+        className={cn(
+          composerControlClasses(),
+          'w-theme-control max-w-fit p-theme-compact md:w-full md:px-theme-normal',
 
-  // Set initial value from defaultChecked
-  useEffect(() => {
-    if (defaultChecked !== undefined && checked === undefined) {
-      checkbox.setValue(defaultChecked);
-    }
-  }, [defaultChecked, checked, checkbox]);
+          // Checked state styling
+          isChecked && isCheckedClassName && isCheckedClassName,
 
-  return (
-    <Checkbox
-      ref={ref}
-      store={checkbox}
-      onChange={onChange}
-      className={cn(
-        composerControlClasses(),
-        'w-theme-control max-w-fit p-theme-compact md:w-full md:px-theme-normal',
+          // Additional custom classes
+          className,
+        )}
+        render={<button type="button" aria-label={label} />}
+      >
+        {/* Icon if provided */}
+        {icon && <span className="icon-md text-text-primary">{icon as React.JSX.Element}</span>}
 
-        // Checked state styling
-        isChecked && isCheckedClassName && isCheckedClassName,
-
-        // Additional custom classes
-        className,
-      )}
-      render={<button type="button" aria-label={label} />}
-    >
-      {/* Icon if provided */}
-      {icon && <span className="icon-md text-text-primary">{icon as React.JSX.Element}</span>}
-
-      {/* Show the label on larger screens */}
-      <span className="hidden truncate md:block">{label}</span>
-    </Checkbox>
-  );
-});
+        {/* Show the label on larger screens */}
+        <span className="hidden truncate md:block">{label}</span>
+      </Checkbox>
+    );
+  },
+);
 
 CheckboxButton.displayName = 'CheckboxButton';
 

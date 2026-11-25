@@ -27,6 +27,7 @@ function Memory() {
   return (
     (memoryActive || isPinned) && (
       <CheckboxButton
+        disabled={!context?.features.canEdit}
         checked={memoryActive}
         setValue={debouncedChange}
         label={localize('com_ui_memory')}

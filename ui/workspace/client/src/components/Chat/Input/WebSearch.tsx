@@ -26,6 +26,7 @@ function WebSearch() {
   return (
     (isPinned || webSearch) && (
       <CheckboxButton
+        disabled={!context?.features.canEdit}
         ref={badgeTriggerRef}
         checked={webSearch}
         setValue={debouncedChange}

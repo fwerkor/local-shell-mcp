@@ -210,6 +210,14 @@ def test_native_skill_aliases_never_bypass_hosted_activation(runner_state, monke
     assert 'skill' in shown
     assert 'file_read' in shown
     assert not shown.intersection({'skill_list', 'skill_load', 'skill_read'})
+    restricted = {tool['function']['name'] for tool in
+                  runner._context(None, profile=profile, selected_tools=[]).tools}
+    assert 'skill' in restricted
+    assert 'file_read' not in restricted
+    assert not restricted.intersection({'skill_list', 'skill_load', 'skill_read'})
+    disabled_agent = {'id': 'disabled', 'skills_enabled': False}
+    assert 'skill' not in {tool['function']['name'] for tool in
+                           runner._context(disabled_agent, profile=profile).tools}
     # These schemas can be present in an old checkpoint and must fail closed.
     WorkspaceRepository(db).save_setting('local', 'webui.skill.states', {'managed': False})
     hidden = {tool['function']['name'] for tool in runner._context(None, profile=profile).tools}
@@ -231,3 +239,15 @@ async def test_restored_native_skill_aliases_are_rejected(runner_state, monkeypa
         state = AgentLoopState(context, [{'role': 'user', 'content': 'Inspect skills'}])
         with pytest.raises(RuntimeSafetyError, match='hosted skill tool'):
             await runner._invoke(ModelToolCall('old-call', name, {'name': 'managed'}), state)
+
+def test_server_web_preference_controls_tool_exposure(runner_state):
+    db, _, job, profile, runner = runner_state
+    repo = WorkspaceRepository(db)
+    def names():
+        return {tool['function']['name'] for tool in runner._context(None, profile=profile).tools}
+
+    assert {'web_search', 'web_fetch'} <= names()
+    repo.save_setting('local', 'conversation.permissions.' + job.conversation_id, {'web': False})
+    assert not {'web_search', 'web_fetch'} & names()
+    repo.save_setting('local', 'conversation.permissions.' + job.conversation_id, {'web': True})
+    assert {'web_search', 'web_fetch'} <= names()

@@ -18,6 +18,8 @@ interface UseToolToggleOptions {
   localStorageKey: LocalStorageKeys;
   isAuthenticated?: boolean;
   setIsDialogOpen?: (open: boolean) => void;
+  /** Server-owned feature value; do not persist a second local toggle. */
+  controlled?: { value: boolean; onChange: (value: boolean) => void };
   /** Options for auth verification */
   authConfig?: {
     toolId: string;
@@ -33,6 +35,7 @@ export function useToolToggle({
   isAuthenticated: externalIsAuthenticated,
   setIsDialogOpen,
   authConfig,
+  controlled,
 }: UseToolToggleOptions) {
   const key = conversationId ?? Constants.NEW_CONVO;
   const [ephemeralAgent, setEphemeralAgent] = useRecoilState(ephemeralAgentByConvoId(key));
@@ -55,10 +58,10 @@ export function useToolToggle({
   const toolKey = useMemo(() => _toolKey, [_toolKey]);
   const storageKey = useMemo(() => `${localStorageKey}${key}`, [localStorageKey, key]);
 
-  // The actual current value comes from ephemeralAgent
+  // LSM features use server state; other tools use ephemeralAgent.
   const toolValue = useMemo(() => {
-    return ephemeralAgent?.[toolKey] ?? false;
-  }, [ephemeralAgent, toolKey]);
+    return controlled?.value ?? ephemeralAgent?.[toolKey] ?? false;
+  }, [controlled?.value, ephemeralAgent, toolKey]);
 
   const isToolEnabled = useMemo(() => {
     // For backward compatibility, treat truthy string values as enabled
@@ -70,12 +73,13 @@ export function useToolToggle({
 
   // Sync to localStorage with timestamps when ephemeralAgent changes
   useEffect(() => {
+    if (controlled) return;
     const value = ephemeralAgent?.[toolKey];
     if (value !== undefined) {
       localStorage.setItem(storageKey, JSON.stringify(value));
       setTimestamp(storageKey);
     }
-  }, [ephemeralAgent, toolKey, storageKey]);
+  }, [controlled, ephemeralAgent, toolKey, storageKey]);
 
   /** Admin-configured default: pin this tool when its key is listed in `defaultPinnedTools`.
    *  Only seeds the initial state — a user's stored pin preference always takes precedence. */
@@ -124,6 +128,10 @@ export function useToolToggle({
 
   const handleChange = useCallback(
     ({ e, value }: { e?: React.ChangeEvent<HTMLInputElement>; value: ToolValue }) => {
+      if (controlled) {
+        controlled.onChange(value === true);
+        return;
+      }
       if (isAuthenticated !== undefined && !isAuthenticated && setIsDialogOpen) {
         setIsDialogOpen(true);
         e?.preventDefault?.();
@@ -148,6 +156,7 @@ export function useToolToggle({
       }
     },
     [
+      controlled,
       setIsDialogOpen,
       isAuthenticated,
       setEphemeralAgent,
@@ -158,8 +167,8 @@ export function useToolToggle({
   );
 
   const debouncedChange = useMemo(
-    () => debounce(handleChange, 50, { leading: true }),
-    [handleChange],
+    () => (controlled ? handleChange : debounce(handleChange, 50, { leading: true })),
+    [controlled, handleChange],
   );
 
   return {

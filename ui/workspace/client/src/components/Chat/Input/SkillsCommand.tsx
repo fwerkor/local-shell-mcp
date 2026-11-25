@@ -12,7 +12,6 @@ import { useLocalize, useSkillActiveState } from '~/hooks';
 import { useSkillsInfiniteQuery } from '~/data-provider';
 import { showSkillsPopoverFamily } from './skillsState';
 import { useAgentsMapContext } from '~/Providers';
-import { ephemeralAgentByConvoId } from '~/store';
 import { isEphemeralAgent } from '~/common';
 import MentionItem from './MentionItem';
 import store from '~/store';
@@ -90,7 +89,6 @@ function SkillsCommandContent({
 }) {
   const localize = useLocalize();
   const setShowSkillsPopover = useSetAtom(showSkillsPopoverFamily(index));
-  const setEphemeralAgent = useSetRecoilState(ephemeralAgentByConvoId(conversationId));
   const setPendingManualSkills = useSetRecoilState(
     store.pendingManualSkillsByConvoId(conversationId),
   );
@@ -100,8 +98,7 @@ function SkillsCommandContent({
 
   /* Resolve the per-agent skill scope. Mirrors backend
      `resolveAgentScopedSkillIds`: ephemeral agents always see the full
-     catalog (picking any skill flips `ephemeralAgent.skills = true` and
-     activates for the turn); persisted agents gate on the builder's
+     catalog; persisted agents gate on the builder's
      `skills_enabled` master toggle and explicit catalog scope. Legacy agents
      without a scope retain empty allowlist = full catalog. Persisted agents fail closed during the
      `agentsMap` hydration window so the user cannot pick a skill the
@@ -199,13 +196,6 @@ function SkillsCommandContent({
       setOpen(false);
       setShowSkillsPopover(false);
 
-      setEphemeralAgent((prev) => {
-        if (prev?.skills) {
-          return prev;
-        }
-        return { ...(prev || {}), skills: true };
-      });
-
       /* Structured channel for manual skill invocations. The submit
          pipeline reads this and primes SKILL.md as a meta user message
          before the LLM turn — no textarea-level marker is needed, and
@@ -219,14 +209,7 @@ function SkillsCommandContent({
 
       textAreaRef.current?.focus();
     },
-    [
-      setSearchValue,
-      setOpen,
-      setShowSkillsPopover,
-      textAreaRef,
-      setEphemeralAgent,
-      setPendingManualSkills,
-    ],
+    [setSearchValue, setOpen, setShowSkillsPopover, textAreaRef, setPendingManualSkills],
   );
 
   useEffect(() => {

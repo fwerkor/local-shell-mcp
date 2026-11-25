@@ -200,15 +200,18 @@ class AgentRunner:
                  if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
                  and (unrestricted or machine_exposed or tool["function"]["name"] in selected
                       or tool["function"]["name"] in {"session_manage", "plan_manage"})]
-        if self.web_search_enabled:
+        from .misc_routes import effective_features
+        from .storage import WorkspaceRepository
+
+        settings = WorkspaceRepository(self.database)
+        features = effective_features(self.owner, self.authorization_conversation_id, repo=settings)
+        if self.web_search_enabled and features["web"]:
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
                       if unrestricted or machine_exposed or (selected_tools is None and not selected)
                       or tool["function"]["name"] in selected]
-        from .storage import WorkspaceRepository
-        settings = WorkspaceRepository(self.database)
         from .content_filters import validate_agent_instructions, validate_model_parameters
 
         filters = configured_filters(settings, self.owner)
@@ -216,18 +219,14 @@ class AgentRunner:
         parameters = (agent or {}).get('model_parameters') or self.initial_parameters
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
-        from .misc_routes import effective_features
         if ((unrestricted or 'memory' in selected)
-                and effective_features(self.owner, self.authorization_conversation_id,
-                                       repo=settings)['memory']
+                and features['memory']
                 and memory_enabled(settings, self.owner, tools=True)):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
         from .skill_runtime import SKILL_TOOL, active_skills
 
-        if ((unrestricted or 'skills' in selected or 'skill' in selected
-             or (agent or {}).get('skills_enabled') is True)
-                and active_skills(self.database, self.owner, agent)):
+        if active_skills(self.database, self.owner, agent):
             tools.append(SKILL_TOOL)
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
@@ -475,7 +474,10 @@ class AgentRunner:
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
-            if not memory_enabled(settings, self.owner, tools=True):
+            from .misc_routes import effective_features
+
+            if (not effective_features(self.owner, self.authorization_conversation_id, repo=settings)["memory"]
+                    or not memory_enabled(settings, self.owner, tools=True)):
                 raise RuntimeSafetyError('Memory tools are disabled')
             config = {**(memory_config(settings, self.owner) or {}),
                       'filters': configured_filters(settings, self.owner)}
@@ -485,7 +487,13 @@ class AgentRunner:
                 self.memory_artifacts[call.call_id] = artifact
             return result
         if call.name in {"web_search", "web_fetch"}:
+            from .misc_routes import effective_features
+            from .storage import WorkspaceRepository
             from .web_research import invoke_web_tool
+
+            if not effective_features(self.owner, self.authorization_conversation_id,
+                                      repo=WorkspaceRepository(self.database))["web"]:
+                raise RuntimeSafetyError("Web search is disabled for this conversation")
 
             return await invoke_web_tool(self.owner, call.name, call.arguments)
         if call.name == "check_background_task":
