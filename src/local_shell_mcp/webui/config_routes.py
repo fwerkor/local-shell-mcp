@@ -118,7 +118,7 @@ async def startup_config(request: Request):
             "presets": True,
             "multiConvo": True,
             "bookmarks": True,
-            "schedules": {"use": True, "maxPerUser": 25, "minIntervalMinutes": 5, "requireProject": False},
+            "schedules": {"use": True, "create": True, "maxPerUser": 25, "minIntervalMinutes": 5, "requireProject": False},
             "agents": {"use": True, "create": True, "share": False, "public": False},
             "prompts": {"use": False, "create": False, "share": False, "public": False},
             "mcpServers": {"use": True, "create": True, "share": False, "public": False},
