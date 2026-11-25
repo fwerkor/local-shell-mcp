@@ -192,8 +192,18 @@ async def test_browser_session_listing_is_read_only_but_start_is_not(bound_polic
     repo, cid = bound_policy
     repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "read"})
     scopes = {"shell:read", "browser:use"}
-    names = {t["function"]["name"] for t in registry.available_tools("local", cid, scopes=scopes)}
-    assert "browser_session" in names
+    definitions = {t["function"]["name"]: t["function"] for t in registry.available_tools("local", cid, scopes=scopes)}
+    assert definitions["browser_session"]["parameters"]["properties"]["action"]["enum"] == ["list"]
+    writable = registry.available_tools("local", cid, scopes=scopes | {"shell:write", "remote:use"})
+    action = next(t["function"]["parameters"]["properties"]["action"] for t in writable
+                  if t["function"]["name"] == "browser_session")
+    assert action.get("enum") != ["list"]
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid,
+                      {"local": "read", "worker1": "read", "worker2": "read"})
+    all_read = registry.available_tools("local", cid, scopes=scopes | {"shell:write", "remote:use"})
+    action = next(t["function"]["parameters"]["properties"]["action"] for t in all_read
+                  if t["function"]["name"] == "browser_session")
+    assert action["enum"] == ["list"]
     observed = []
     async def invoke(*args, **kwargs):
         observed.append(args)
@@ -201,7 +211,7 @@ async def test_browser_session_listing_is_read_only_but_start_is_not(bound_polic
     monkeypatch.setattr(registry, "_invoke_registered", invoke)
     await registry.call_tool("local", cid, ModelToolCall("list", "browser_session", {"action": "list"}),
                              granted_scopes=scopes)
-    with pytest.raises(PermissionError, match="read-only"):
+    with pytest.raises(registry.ToolPermissionDenied, match="read-only"):
         await registry.call_tool("local", cid, ModelToolCall("start", "browser_session", {"action": "start"}),
                                  granted_scopes=scopes)
     assert len(observed) == 1
@@ -302,3 +312,33 @@ def test_native_mcp_error_envelopes_control_audit_status():
     assert registry._result_succeeded(CallToolResult(content=content, structuredContent={"data": {"ok": False}}))
     assert not registry._result_succeeded((content, {"ok": False}))
     assert registry._result_succeeded((content, {"ok": True}))
+
+
+@pytest.mark.asyncio
+async def test_running_browser_dispatch_still_fails_on_live_write_revocation(bound_policy, monkeypatch):
+    import asyncio
+
+    from local_shell_mcp.webui.machine_permissions import MachineReadOnlyError
+
+    repo, cid = bound_policy
+    entered = asyncio.Event()
+    cleaned_up = asyncio.Event()
+
+    async def invoke(*args, **kwargs):
+        entered.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cleaned_up.set()
+
+    monkeypatch.setattr(registry, "_invoke_registered", invoke)
+    monkeypatch.setattr(registry, "_AUTHORIZATION_RECHECK_SECONDS", 0.01)
+    task = asyncio.create_task(registry.call_tool(
+        "local", cid, ModelToolCall("live", "browser_session", {"action": "start"}),
+        granted_scopes={"shell:read", "shell:write", "browser:use"},
+    ))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "read"})
+    with pytest.raises(MachineReadOnlyError, match="read-only"):
+        await asyncio.wait_for(task, timeout=2)
+    assert cleaned_up.is_set()

@@ -29,9 +29,9 @@ type DuringRunSendButtonProps = {
 /**
  * The send button while a run is generating: it takes over the send/stop slot
  * (and `submitButtonRef`, so Enter's synthetic click routes here) whenever the
- * composer holds text — submitting steers or queues per the effective action.
- * Hovering it reveals the full action list with its shortcuts: steer, queue
- * (⌘/Ctrl+Enter routes to the non-default action), interrupt & steer
+ * composer holds text — ordinary submits queue a follow-up.
+ * Hovering it reveals the full action list with its shortcuts: queue, steer
+ * (⌘/Ctrl+Enter explicitly steers), interrupt & steer
  * (⌘/Ctrl+Shift+Enter — requests an earlier safe point when a conversation
  * exists, otherwise stops and sends a new turn), and
  * interrupt & send (⌥/Alt+Enter — discards the answer and starts over).
@@ -40,13 +40,11 @@ type DuringRunSendButtonProps = {
 const DuringRunSendButton = React.memo(
   forwardRef((props: DuringRunSendButtonProps, ref: React.ForwardedRef<HTMLButtonElement>) => {
     const localize = useLocalize();
-    const steerInterruptsByDefault = useRecoilValue(store.steerInterruptsByDefault);
     const enterToSend = useRecoilValue(store.enterToSend);
     const { shortcutsEnabled, submitOverride, yieldedChords } = useComposerBindings();
     const { steering } = props;
     const data = useWatch({ control: props.control });
     const content = data?.text?.trim();
-    const primary = steering.effectiveAction;
     const modEnter = isMacPlatform ? '⌘⏎' : 'Ctrl ⏎';
     const altEnter = isMacPlatform ? '⌥⏎' : 'Alt ⏎';
     const modShiftEnter = isMacPlatform ? '⌘⇧⏎' : 'Ctrl ⇧ ⏎';
@@ -84,14 +82,6 @@ const DuringRunSendButton = React.memo(
       };
     }, [enterToSend, shortcutsEnabled, submitOverride, yieldedChords]);
 
-    /**
-     * With the preference on, plain Enter routes through `submitDuringRun`,
-     * which preempts. The hint has to follow it: leaving ⏎ on the ordinary
-     * Steer row would advertise a key that does something else, and that row
-     * deliberately stays non-preempting when CLICKED. No key reaches it in
-     * this mode, so it shows none.
-     */
-    const enterInterrupts = primary === 'steer' && steerInterruptsByDefault;
     /** The chord that submits the default action, if any still does. */
     let submitHint: string | undefined;
     if (verdicts.plainEnter === 'submit') {
@@ -100,13 +90,6 @@ const DuringRunSendButton = React.memo(
       submitHint = modEnter;
     }
     const alternateHint = verdicts.modEnter === 'other' ? modEnter : undefined;
-    let interruptSteerKbd: string | undefined;
-    if (enterInterrupts && submitHint != null) {
-      interruptSteerKbd = submitHint;
-    } else if (verdicts.modShiftEnter === 'preempt') {
-      interruptSteerKbd = modShiftEnter;
-    }
-
     const runAction = (action: (text: string) => boolean | void) => {
       const text = props.getText().trim();
       if (text.length === 0) {
@@ -117,25 +100,20 @@ const DuringRunSendButton = React.memo(
       }
     };
 
-    let steerKbd: string | undefined = alternateHint;
-    if (primary === 'steer') {
-      steerKbd = enterInterrupts ? undefined : submitHint;
-    }
-
     const steerRow: ActionRow = {
       key: 'steer',
       label: localize('com_ui_steer'),
-      kbd: steerKbd,
+      kbd: alternateHint,
       icon: <Zap className="h-4 w-4 text-status-warning" aria-hidden="true" />,
       // Gate on availability, not the default action — the row exists to
-      // override a queue-preferring default with an explicit steer.
+      // override the queue default with an explicit steer.
       disabled: !steering.canSteer,
       onClick: () => runAction((text) => steering.steerFromComposer(text)),
     };
     const queueRow: ActionRow = {
       key: 'queue',
       label: localize('com_ui_queue'),
-      kbd: primary === 'queue' ? submitHint : alternateHint,
+      kbd: submitHint,
       icon: <Clock className="h-4 w-4 text-status-info" aria-hidden="true" />,
       onClick: () => runAction((text) => steering.queueFromComposer(text)),
     };
@@ -145,7 +123,7 @@ const DuringRunSendButton = React.memo(
       label: localize(
         props.isNewConversation ? 'com_ui_steer_first_turn_stop' : 'com_ui_interrupt_steer',
       ),
-      kbd: interruptSteerKbd,
+      kbd: verdicts.modShiftEnter === 'preempt' ? modShiftEnter : undefined,
       icon: <ZapOff className="h-4 w-4 text-status-warning" aria-hidden="true" />,
       // Matches the standalone button's gate, and deliberately NOT
       // `!canSteer` like the steer row above: `canSteer` is also false before
@@ -162,25 +140,19 @@ const DuringRunSendButton = React.memo(
       disabled: !steering.canControlGeneration,
       onClick: () => runAction((text) => steering.interruptAndSend(text)),
     };
-    const rows = primary === 'steer' ? [steerRow, queueRow] : [queueRow, steerRow];
-    rows.push(interruptSteerRow, interruptRow);
-
-    const label =
-      primary === 'steer' ? localize('com_ui_steer_send') : localize('com_ui_queue_send');
-
     return (
       <SendActions
-        actions={rows}
+        actions={[queueRow, steerRow, interruptSteerRow, interruptRow]}
         label={localize('com_ui_during_run_actions')}
         anchor={
           <button
             ref={ref}
-            aria-label={label}
+            aria-label={localize('com_ui_queue_send')}
             id="during-run-send-button"
             disabled={!content || props.disabled === true}
             className={composerSubmitClasses()}
             data-testid="during-run-send-button"
-            data-during-run-action={primary}
+            data-during-run-action="queue"
             type="submit"
           >
             <span data-state="closed">

@@ -9,12 +9,7 @@ import type { SteeringControls, QueuedMessageContext } from '~/hooks/Chat/useSte
 import type { SteerReceiptState } from '~/components/Chat/Steering/Receipt';
 import type { PendingSteer } from '~/store/families';
 import type { MenuEntry } from './SteerMenu';
-import {
-  RowMenu,
-  EscalateNowButton,
-  useDefaultToggleEntry,
-  useInterruptToggleEntry,
-} from './SteerMenu';
+import { RowMenu, EscalateNowButton } from './SteerMenu';
 import { carriedSteerContext, cn, hydrateFileDeliveryMetadata, usesImagePreview } from '~/utils';
 import FilePreviewDialog from '~/components/Chat/Messages/Content/FilePreviewDialog';
 import { supportsGenerationProtocolV2, useArmSteerMutation } from '~/data-provider';
@@ -126,8 +121,6 @@ const InFlightSteer = memo(function InFlightSteer({
   const { showToast } = useToastContext();
   const cancelSteer = useSteerCancel(conversationId);
   const reclaimSteer = useSteerReclaim(conversationId);
-  const toggleEntry = useDefaultToggleEntry(steering);
-  const interruptToggle = useInterruptToggleEntry();
   const enableUserMsgMarkdown = useRecoilValue<boolean>(store.enableUserMsgMarkdown);
   const activeGenerationCreatedAt = useRecoilValue(
     store.activeGenerationCreatedAtByConvoId(conversationId),
@@ -450,7 +443,6 @@ const InFlightSteer = memo(function InFlightSteer({
       },
     },
   ];
-  const preferences: MenuEntry[] = [toggleEntry, interruptToggle];
 
   return (
     <div
@@ -503,7 +495,6 @@ const InFlightSteer = memo(function InFlightSteer({
             <RowMenu
               label={localize('com_ui_more_options')}
               entries={entries}
-              preferences={preferences}
               buttonRef={optionsButtonRef}
             />
           </div>
