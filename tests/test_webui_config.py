@@ -37,6 +37,7 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
         assert login_page_config.status_code == 200
         assert login_page_config.json()["appTitle"] == "local-shell-mcp"
         assert "interface" not in login_page_config.json()
+        assert "compactionEnabled" not in login_page_config.json()
         assert "lsmVersion" not in login_page_config.json()
         assert "very-private" not in login_page_config.text
         assert (await client.get("/api/endpoints")).status_code == 401
@@ -45,6 +46,16 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
         assert startup["lsmVersion"] == __version__
         assert startup["interface"]["agents"]["use"] is True
         assert startup["interface"]["contextUsage"] is True
+        assert startup["compactionEnabled"] is True
+        repo = routes._repo()
+        repo.save_setting("alice", "endpoints", {"summarization": {"enabled": False}})
+        assert (await client.get("/api/config", headers=alice)).json()["compactionEnabled"] is False
+        assert (await client.get("/api/config", headers={"x-test-owner": "bob"})).json()["compactionEnabled"] is True
+        repo.save_setting("alice", "endpoints", {"summarization": {"enabled": True}})
+        assert (await client.get("/api/config", headers=alice)).json()["compactionEnabled"] is True
+        repo.save_setting("alice", "endpoints", {"summarization": "invalid"})
+        assert (await client.get("/api/config", headers=alice)).json()["compactionEnabled"] is True
+        repo.save_setting("alice", "endpoints", {})
         assert startup["interface"]["schedules"] == {
             "use": True, "create": True, "maxPerUser": 25,
             "minIntervalMinutes": 5, "requireProject": False,

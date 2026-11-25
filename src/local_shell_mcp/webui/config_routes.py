@@ -134,6 +134,8 @@ async def startup_config(request: Request):
         "mcpServers": {},
         "titleGenerationTiming": "final",
     })
+    summarization = (_repo().setting(_owner(request), "endpoints", {}) or {}).get("summarization")
+    settings["compactionEnabled"] = not (isinstance(summarization, dict) and summarization.get("enabled") is False)
     return JSONResponse(settings)
 
 
