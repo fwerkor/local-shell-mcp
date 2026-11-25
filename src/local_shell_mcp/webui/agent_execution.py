@@ -50,14 +50,25 @@ async def execute_tool_batch(
 ) -> list[Any]:
     cache = settled if settled is not None else {}
 
-    async def run_one(position: int) -> Any:
-        call = calls[position]
-        key = replay_key(call, position)
+    # Validate the entire batch before starting any side effects. A malformed
+    # provider response may repeat a call ID, or alter a previously completed
+    # proposal while other calls in the same batch are still pending.
+    check_breaker()
+    keys = [replay_key(call, position) for position, call in enumerate(calls)]
+    if len(set(keys)) != len(keys):
+        raise ValueError("Duplicate tool call ID in a single batch")
+    for key, call in zip(keys, calls, strict=True):
         cached = cache.get(key)
         if cached is not None:
             proposal = cached["proposal"]
             if proposal["name"] != call.name or not _same_args(proposal["args"], call.arguments):
                 raise ValueError("Cannot change an already completed tool call during approval replay")
+
+    async def run_one(position: int) -> Any:
+        call = calls[position]
+        key = keys[position]
+        cached = cache.get(key)
+        if cached is not None:
             return copy.deepcopy(cached["output"])
         output = await execute(call)
         result = {"proposal": copy.deepcopy({"name": call.name, "args": call.arguments}),
@@ -78,7 +89,6 @@ async def execute_tool_batch(
             raise failure
         return results
 
-    check_breaker()
     interrupting = [i for i, call in enumerate(calls) if call.name in interrupting_names]
     if not interrupting:
         return await settle(list(range(len(calls))), prefer_non_interrupt=True)

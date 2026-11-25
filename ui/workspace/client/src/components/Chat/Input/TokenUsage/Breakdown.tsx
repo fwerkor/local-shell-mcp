@@ -1,6 +1,6 @@
 import { Fragment, useId, useMemo, useState } from 'react';
 import { useAtom } from 'jotai';
-import { ChevronDown, ExternalLink, Info, TriangleAlert } from 'lucide-react';
+import { ChevronDown, Info, TriangleAlert } from 'lucide-react';
 import {
   Button,
   HoverCard,
@@ -105,7 +105,6 @@ interface BreakdownProps {
   showCost: boolean;
   compactionAvailable?: boolean;
   currency?: CurrencyConfig;
-  langfuseSessionUrl?: string;
 }
 
 export default function Breakdown({
@@ -113,7 +112,6 @@ export default function Breakdown({
   showCost,
   compactionAvailable = false,
   currency,
-  langfuseSessionUrl,
 }: BreakdownProps) {
   const localize = useLocalize();
   const [expanded, setExpanded] = useAtom(contextBreakdownExpandedAtom);
@@ -651,17 +649,6 @@ export default function Breakdown({
               </>
             )}
 
-            {langfuseSessionUrl && (
-              <>
-                <div className="border-t border-border-light" role="separator" />
-                <Button asChild variant="link" className="h-auto w-full justify-between gap-2 p-0">
-                  <a href={langfuseSessionUrl} target="_blank" rel="noopener noreferrer">
-                    <span>{localize('com_ui_langfuse_view_session')}</span>
-                    <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
-                  </a>
-                </Button>
-              </>
-            )}
           </div>
         </CollapsibleContent>
       </Collapsible>

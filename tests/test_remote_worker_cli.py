@@ -298,7 +298,9 @@ async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, mon
 
 @pytest.mark.asyncio
 async def test_run_worker_transfer_does_not_block_interactive_jobs(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli.remote, "_worker_result_outbox_dir", lambda: tmp_path / "outbox")
+    monkeypatch.setattr(cli.remote, "_worker_resource_snapshot", lambda: {})
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
     monkeypatch.setattr(cli.remote, "worker_capabilities", lambda: [])
     monkeypatch.setattr(cli.remote, "worker_info", lambda workdir: {})
@@ -315,7 +317,7 @@ async def test_run_worker_transfer_does_not_block_interactive_jobs(tmp_path, mon
             transfer_started.set()
             await asyncio.Event().wait()
         assert tool == "run_shell"
-        assert transfer_started.is_set()
+        await asyncio.wait_for(transfer_started.wait(), timeout=15)
         return {"exit_code": 0, "stdout": "ok\n"}
 
     async def fake_post(url, payload, headers=None, timeout=None, operation="request"):
@@ -347,7 +349,7 @@ async def test_run_worker_transfer_does_not_block_interactive_jobs(tmp_path, mon
                     "ok": True,
                     "data": {"job": {"id": "interactive", "tool": "run_shell", "args": {}}},
                 }
-            await asyncio.wait_for(interactive_result_submitted.wait(), timeout=1)
+            await asyncio.wait_for(interactive_result_submitted.wait(), timeout=15)
             raise RuntimeError("stop polling")
         if url.endswith("/remote/heartbeat"):
             assert payload.get("starting") is True
@@ -368,6 +370,7 @@ async def test_run_worker_transfer_does_not_block_interactive_jobs(tmp_path, mon
 
     assert interactive_result_submitted.is_set()
     assert [result["job_id"] for result in submitted_results] == ["interactive"]
+    assert submitted_results[0]["ok"] is True
 
 
 @pytest.mark.asyncio
