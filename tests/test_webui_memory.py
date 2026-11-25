@@ -123,6 +123,26 @@ def test_memory_format_definitions_and_tool_artifacts(db):
 
 
 @pytest.mark.asyncio
+async def test_global_opt_out_does_not_hide_memory_management(appdb):
+    from local_shell_mcp.webui.config_routes import config_routes
+    from local_shell_mcp.webui.misc_routes import misc_routes
+
+    _, repo = appdb
+    app = Starlette(routes=[*memory_routes.memory_routes(), *config_routes(), *misc_routes()])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as cli:
+        await cli.post('/api/memories', json={'key': 'style', 'value': 'Use concise answers.'})
+        assert (await cli.patch('/api/memories/preferences', json={'memories': False})).status_code == 200
+        assert not memory_enabled(repo, 'local', tools=True)
+        permissions = (await cli.get('/api/roles/USER')).json()['permissions']['MEMORIES']
+        assert permissions['READ'] and permissions['UPDATE'] and permissions['OPT_OUT']
+        assert (await cli.get('/api/config')).json()['interface']['memories'] is True
+        assert 'memory' in (await cli.get('/api/endpoints')).json()['agents']['capabilities']
+        stored = (await cli.get('/api/memories')).json()['memories']
+        assert stored[0]['key'] == 'style'
+        assert (await cli.delete('/api/memories/id/' + stored[0]['_id'])).status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_memory_http_crud_preference_and_partitions(appdb):
     database, repo = appdb
     app = Starlette(routes=memory_routes.memory_routes())

@@ -72,17 +72,20 @@ def memory_config(repo: Any, owner: str) -> dict | None:
     return config if isinstance(config, dict) else {}
 
 
-def memory_enabled(repo: Any, owner: str, *, tools: bool = False) -> bool:
-    config = memory_config(repo, owner)
-    if config is None or repo.setting(owner, 'user.memories', True) is False:
+def memory_tools_available(repo: Any, owner: str) -> bool:
+    if memory_config(repo, owner) is None:
         return False
-    if not tools:
-        return True
     endpoints = repo.setting(owner, 'endpoints', {}) or {}
     agents = endpoints.get('agents') if isinstance(endpoints, dict) else {}
     if isinstance(agents, dict) and isinstance(agents.get('capabilities'), list):
         return 'memory' in agents['capabilities']
     return True
+
+
+def memory_enabled(repo: Any, owner: str, *, tools: bool = False) -> bool:
+    if repo.setting(owner, 'user.memories', True) is False:
+        return False
+    return memory_tools_available(repo, owner) if tools else memory_config(repo, owner) is not None
 
 
 def tool_definitions(valid_keys: list[str] | None = None) -> list[dict]:
