@@ -1,13 +1,17 @@
 """Approval preferences and conservative tool classification."""
-import pytest
 import httpx
+import pytest
 from starlette.applications import Starlette
 
 from local_shell_mcp.settings import get_settings
-from local_shell_mcp.webui.approval_settings import (
-    GLOBAL_KEY, CHAT_PREFIX, call_decision, effective_mode, validate_mode,
-)
 from local_shell_mcp.webui.agents import AgentRepository
+from local_shell_mcp.webui.approval_settings import (
+    CHAT_PREFIX,
+    GLOBAL_KEY,
+    call_decision,
+    effective_mode,
+    validate_mode,
+)
 from local_shell_mcp.webui.misc_routes import misc_routes
 from local_shell_mcp.webui.routes import _repo
 
@@ -95,6 +99,7 @@ async def test_preferences_api_and_agent_persistence(tmp_path, monkeypatch):
             assert (await client.put("/api/lsm/approval", json={"mode": "dangerous"})).status_code == 200
             assert (await client.get(url)).json() == {"mode": "inherit", "effective": "all"}
             assert (await client.put(url, json={"mode": "automatic"})).json() == {"mode": "automatic", "effective": "automatic"}
+            assert effective_mode(repo, "local", generation.conversation_id, agent, parent_mode="all") == "all"
             assert (await client.put(url, json={"mode": "inherit"})).json() == {"mode": "inherit", "effective": "all"}
             assert (await client.put(url, json={"mode": "bad"})).status_code == 400
             assert (await client.put("/api/lsm/approval", json={"mode": "inherit"})).status_code == 400

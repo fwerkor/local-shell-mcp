@@ -583,7 +583,8 @@ class AgentRunner:
             return await invoke_subagent(
                 call, self.configs[(state.context.agent or {}).get("id") or "default"],
                 execute_child=lambda invocation: self._child(
-                    invocation, profile=state.context.profile, parameters=state.context.parameters),
+                    invocation, profile=state.context.profile, parameters=state.context.parameters,
+                    parent_approval_mode=self._approval_mode(state.context.agent)),
                 start_background=lambda invocation, thread: host.start(
                     invocation, thread_id=thread, mcp_enabled=self.mcp_enabled,
                     web_search_enabled=self.web_search_enabled,
@@ -661,7 +662,7 @@ class AgentRunner:
             # Keep their type for recovery without copying secrets to the model.
             return "Tool failed (" + type(error).__name__ + ")"
 
-    async def _child(self, invocation, *, profile=None, parameters=None):
+    async def _child(self, invocation, *, profile=None, parameters=None, parent_approval_mode=None):
         async def quiet(text):
             pass
 
@@ -678,7 +679,7 @@ class AgentRunner:
                             partial_text=self.partial_text,
                             authorization_conversation_id=self.authorization_conversation_id,
                             background_deny=self.background_deny,
-                            parent_approval_mode=self._approval_mode(),
+                            parent_approval_mode=parent_approval_mode or self._approval_mode(),
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
                             subagent_depth=invocation.remaining_depth,
                             wakeup_lease=self.wakeup_lease,

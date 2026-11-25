@@ -18,9 +18,7 @@ def validate_mode(value, *, inherit=False):
 
 def effective_mode(repo, owner, conversation_id, agent=None, *, parent_mode=None):
     chat = repo.setting(owner, CHAT_PREFIX + conversation_id, "inherit")
-    if chat in MODES:
-        return chat
-    mode = (agent or {}).get("approval_mode", "inherit")
+    mode = chat if chat in MODES else (agent or {}).get("approval_mode", "inherit")
     if mode not in MODES:
         mode = repo.setting(owner, GLOBAL_KEY, "automatic")
     mode = mode if mode in MODES else "automatic"
