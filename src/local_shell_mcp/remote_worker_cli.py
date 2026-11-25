@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import remote
+from .remote_worker_bootstrap import needs_worker_reaper, supervise_worker
 from .remote_worker_installer import install_or_update_runtime
 from .remote_worker_service import (
     cancel_worker_lock_reexec,
@@ -293,7 +294,10 @@ def run_worker_cli(argv: list[str] | None = None) -> None:
     try:
         argv = sys.argv[1:] if argv is None else list(argv)
         try:
-            _run_command(_parser().parse_args(argv))
+            args = _parser().parse_args(argv)
+            if args.command in {"run", "connect"} and needs_worker_reaper():
+                raise SystemExit(supervise_worker([*_worker_run_exec_argv()[:-1], *argv]))
+            _run_command(args)
         except KeyboardInterrupt:
             print("\nStatus: disconnected by user.", file=sys.stderr, flush=True)
             raise SystemExit(130) from None
