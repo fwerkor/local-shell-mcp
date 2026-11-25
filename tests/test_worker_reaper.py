@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import os
 import shutil
 import signal
@@ -7,6 +9,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -52,6 +55,92 @@ def test_bootstrap_dispatches_reaper(monkeypatch):
     monkeypatch.setattr(bootstrap, "supervise_worker", lambda argv: calls.append(argv) or 42)
     assert bootstrap.main() == 42
     assert calls == [[sys.executable, str(Path(bootstrap.__file__).resolve())]]
+
+
+@pytest.mark.parametrize(
+    ("pid", "lock_fd", "status", "expected"),
+    [(1, None, 42 << 8, 42), (20, "9", signal.SIGTERM, 143)],
+)
+def test_supervisor_reaps_and_forwards_signals(monkeypatch, pid, lock_fd, status, expected):
+    monkeypatch.setattr(os, "getpid", lambda: pid)
+    monkeypatch.delenv(bootstrap._LOCK_FD_ENV, raising=False)
+    if lock_fd:
+        monkeypatch.setenv(bootstrap._LOCK_FD_ENV, lock_fd)
+    prctl_calls = []
+    monkeypatch.setattr(
+        ctypes, "CDLL",
+        lambda *args, **kwargs: SimpleNamespace(prctl=lambda *args: prctl_calls.append(args) or 0),
+    )
+
+    signals = (signal.SIGCHLD, signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT)
+    original_handlers = dict.fromkeys(signals, signal.SIG_IGN)
+    handlers = original_handlers.copy()
+
+    def install_handler(sig, handler):
+        previous = handlers[sig]
+        handlers[sig] = handler
+        return previous
+
+    monkeypatch.setattr(signal, "signal", install_handler)
+    child = SimpleNamespace(pid=21, returncode=None)
+    closed = []
+    forwarded = []
+
+    def spawn(argv, *, env, pass_fds):
+        assert argv == ["worker"]
+        assert env[bootstrap._REAPER_PID_ENV] == str(pid)
+        assert pass_fds == ((int(lock_fd),) if lock_fd else ())
+        assert handlers[signal.SIGCHLD] == signal.SIG_DFL
+        handlers[signal.SIGTERM](signal.SIGTERM, None)
+        return child
+
+    def kill(target, sig):
+        forwarded.append((target, sig))
+        if sig == signal.SIGHUP:
+            raise ProcessLookupError
+
+    def waitpid(target, options):
+        assert (target, options) == (-1, 0)
+        if len(forwarded) == 1:
+            handlers[signal.SIGHUP](signal.SIGHUP, None)
+            return 22, 17 << 8
+        return child.pid, status
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    monkeypatch.setattr(os, "close", closed.append)
+    monkeypatch.setattr(os, "kill", kill)
+    monkeypatch.setattr(os, "waitpid", waitpid)
+    assert bootstrap.supervise_worker(["worker"]) == expected
+    assert child.returncode == os.waitstatus_to_exitcode(status)
+    assert prctl_calls == ([] if pid == 1 else [(36, 1, 0, 0, 0)])
+    assert closed == ([int(lock_fd)] if lock_fd else [])
+    assert bootstrap._LOCK_FD_ENV not in os.environ
+    assert forwarded == [(21, signal.SIGTERM), (21, signal.SIGHUP)]
+    assert handlers == original_handlers
+
+
+def test_supervisor_reports_subreaper_setup_error(monkeypatch):
+    monkeypatch.setattr(os, "getpid", lambda: 20)
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: SimpleNamespace(prctl=lambda *args: -1))
+    monkeypatch.setattr(ctypes, "get_errno", lambda: errno.EPERM)
+    with pytest.raises(OSError) as exc:
+        bootstrap.supervise_worker(["worker"])
+    assert exc.value.errno == errno.EPERM
+
+
+def test_supervisor_restores_signal_handlers_on_spawn_failure(monkeypatch):
+    monkeypatch.setattr(os, "getpid", lambda: 1)
+    previous = {sig: signal.getsignal(sig) for sig in (
+        signal.SIGCHLD, signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT,
+    )}
+
+    def spawn(*args, **kwargs):
+        raise FileNotFoundError("worker")
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    with pytest.raises(FileNotFoundError, match="worker"):
+        bootstrap.supervise_worker(["worker"])
+    assert {sig: signal.getsignal(sig) for sig in previous} == previous
 
 
 def _reaper_command(worker_script: str) -> list[str]:
