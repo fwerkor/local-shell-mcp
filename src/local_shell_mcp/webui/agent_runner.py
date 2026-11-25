@@ -54,10 +54,14 @@ from .semantic_index import (
 from .steering import SteeringStore, merged_text
 from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
 
+# The hosted Agent has an owner/Agent-aware Skill tool. Native MCP aliases
+# bypass per-user activation and must remain exclusive to external MCP clients.
+_HOSTED_SKILL_ALIASES = frozenset({'skill_list', 'skill_load', 'skill_read'})
+
 
 class AgentRunner:
     def __init__(self, owner, generation, database, store, *, scopes, grant_expires,
-                 stream_tools, stream_text, on_text, agent=None, profile=None,
+                 stream_tools, stream_text, on_text, on_thought=None, agent=None, profile=None,
                  parameters=None, ask_user_enabled=False, mcp_enabled=False,
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
@@ -66,11 +70,13 @@ class AgentRunner:
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
                  on_injected=None, wakeup_lease=None, event_delivery_lease=None,
-                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, web_search_enabled=True):
+                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, webui_cookie=None, web_search_enabled=True):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
+        self.webui_cookie = webui_cookie
         self.web_search_enabled = web_search_enabled
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
+        self.on_thought = on_thought
         self.root_agent, self.initial_profile = agent, profile
         self.graph_definition = graph_definition if graph_definition is not None else agent
         self.graph_node = graph_node
@@ -110,6 +116,17 @@ class AgentRunner:
         self._summary_failures = 0
 
     def _check_grant(self):
+        if self.webui_cookie is not None:
+            from ..settings import get_settings
+            from .auth import WebAuthStore
+
+            session = WebAuthStore(get_settings().state_dir).session(self.webui_cookie)
+            if (session is None or session.owner != self.owner
+                    or not set(self.scopes).issubset(set(session.scopes.split()))):
+                raise RuntimeSafetyError("WebUI session expired or was signed out")
+            # The JWT that began this run may have expired an hour ago; only
+            # the live, revocable browser session controls its ongoing lease.
+            self.grant_expires = session.grant_until
         if self.actor_lease is not None:
             self.actor_lease.assert_current()
         if self.grant_expires is not None and self.grant_expires <= time.time():
@@ -128,20 +145,36 @@ class AgentRunner:
                                self.event_delivery_lease)
 
     def _memory_context(self, agent: dict | None) -> str:
+        from .misc_routes import effective_features
         from .storage import WorkspaceRepository
 
         settings = WorkspaceRepository(self.database)
+        if not effective_features(self.owner, self.authorization_conversation_id, repo=settings)["memory"]:
+            return ''
         if not memory_enabled(settings, self.owner):
             return ''
         # The original primary Agent reads shared personal memories even when
         # it has no inline memory tool. Only an Agent explicitly registering
         # the memory capability receives keys and a mutation-tool prompt.
-        has_tools = ('memory' in ((agent or {}).get('tools') or [])
+        has_tools = ((agent is None or 'memory' in ((agent or {}).get('tools') or []))
                      and memory_enabled(settings, self.owner, tools=True))
         formatted = MemoryRepository(self.database).formatted(
             self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
         if formatted.get('readFailed'):
-            return ''
+            # Never lose the mutation consent rule when Memory reads fail.
+            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
+        explicit_memory_tool = bool(agent and 'memory' in ((agent or {}).get('tools') or []))
+        endpoints = settings.setting(self.owner, 'endpoints', {})
+        explicit_memory_config = (
+            isinstance(settings.setting(self.owner, 'webui.memory.config'), dict)
+            or isinstance((endpoints or {}).get('memory'), dict)
+        )
+        if (not explicit_memory_tool and not explicit_memory_config
+                and not (formatted.get('withKeys') or formatted.get('withoutKeys'))):
+            # An empty default-enabled store needs no memory-list preamble,
+            # but the mutation consent rule must remain visible to the model
+            # whenever its Memory tools are offered.
+            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
         return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
 
@@ -155,16 +188,25 @@ class AgentRunner:
         admit_agent_graph(self.owner, self.graph_definition, self.repository)
         selected = set(selected_tools if selected_tools is not None else (agent or {}).get("tools") or [])
         unrestricted = agent is None and selected_tools is None
+        # Legacy agents retain their per-tool allowlist. Agents configured in
+        # the new builder expose all audited native tools allowed by both ACLs.
+        machine_policy = (agent or {}).get("machine_permissions")
+        machine_configured = isinstance(machine_policy, dict)
         native = available_tools(self.owner, self.authorization_conversation_id,
-                                 scopes=set(self.scopes), expires=self.grant_expires)
-        tools = [tool for tool in native if unrestricted or tool["function"]["name"] in selected
-                 or tool["function"]["name"] in {"session_manage", "plan_manage"}]
+                                 scopes=set(self.scopes), expires=self.grant_expires,
+                                 agent_permissions=machine_policy if machine_configured else None)
+        machine_exposed = selected_tools is None and machine_configured
+        tools = [tool for tool in native
+                 if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
+                 and (unrestricted or machine_exposed or tool["function"]["name"] in selected
+                      or tool["function"]["name"] in {"session_manage", "plan_manage"})]
         if self.web_search_enabled:
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled:
             tools += [tool for tool in nested_tools()
-                      if unrestricted or tool["function"]["name"] in selected]
+                      if unrestricted or machine_exposed or (selected_tools is None and not selected)
+                      or tool["function"]["name"] in selected]
         from .storage import WorkspaceRepository
         settings = WorkspaceRepository(self.database)
         from .content_filters import validate_agent_instructions, validate_model_parameters
@@ -174,9 +216,19 @@ class AgentRunner:
         parameters = (agent or {}).get('model_parameters') or self.initial_parameters
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
-        if 'memory' in selected and memory_enabled(settings, self.owner, tools=True):
+        from .misc_routes import effective_features
+        if ((unrestricted or 'memory' in selected)
+                and effective_features(self.owner, self.authorization_conversation_id,
+                                       repo=settings)['memory']
+                and memory_enabled(settings, self.owner, tools=True)):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
+        from .skill_runtime import SKILL_TOOL, active_skills
+
+        if ((unrestricted or 'skills' in selected or 'skill' in selected
+             or (agent or {}).get('skills_enabled') is True)
+                and active_skills(self.database, self.owner, agent)):
+            tools.append(SKILL_TOOL)
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
@@ -409,8 +461,17 @@ class AgentRunner:
         from .nested_mcp import approved_call, discover
 
         self._check_grant()
+        # A restored checkpoint may still contain a pre-upgrade native schema.
+        # Reject these aliases at dispatch as well as filtering them from prompts.
+        if call.name in _HOSTED_SKILL_ALIASES:
+            raise RuntimeSafetyError("Use the hosted skill tool for enabled Skills")
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name == 'skill':
+            from .skill_runtime import load
+
+            return load(self.database, self.owner, state.context.agent,
+                        call.arguments.get('name'), path=call.arguments.get('path'))
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
@@ -480,11 +541,14 @@ class AgentRunner:
                 if self.background_deny:
                     raise RuntimeSafetyError("Background execution is disabled in this child context")
 
+                origin_agent_id = (state.context.agent or {}).get("id")
+
                 async def detached_dispatch(c, scopes, expires, authorization):
                     return await invoke_native(self.owner, self.generation.conversation_id, c,
                                                granted_scopes=set(scopes), grant_expires=expires,
                                                run_id=self.generation.run_id,
-                                               authorization_conversation_id=authorization)
+                                               authorization_conversation_id=authorization,
+                                               agent_id=origin_agent_id)
 
                 return await start_tool_task(self.database, self.owner,
                                              self.generation.conversation_id,
@@ -566,7 +630,8 @@ class AgentRunner:
             return await call_tool(self.owner, self.generation.conversation_id, call,
                                    granted_scopes=set(self.scopes), grant_expires=self.grant_expires,
                                    run_id=self.generation.run_id,
-                                   authorization_conversation_id=self.authorization_conversation_id)
+                                   authorization_conversation_id=self.authorization_conversation_id,
+                                   agent_id=(state.context.agent or {}).get("id"))
         except PermissionError as error:
             raise RuntimeSafetyError(str(error)) from error
         except Exception as error:
@@ -973,11 +1038,62 @@ class AgentRunner:
             })
         return summary
 
+    def _context_limit(self, state: AgentLoopState, settings: dict | None = None) -> int | None:
+        """Resolve the explicit agent limit first, then this channel's model limit."""
+        if settings is None:
+            from .storage import WorkspaceRepository
+            settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+        params = state.context.parameters or {}
+        agents = settings.get('agents') or {}
+        raw = (params.get('max_context_tokens') or params.get('maxContextTokens')
+               or agents.get('maxContextTokens'))
+        if type(raw) in (int, float) and 0 < raw <= 2_000_000:
+            return int(raw)
+        from .provider_profiles import profile
+
+        channel = (state.context.agent or {}).get('provider')
+        if not channel:
+            with self.database.connect() as db:
+                row = db.execute('SELECT state FROM runs WHERE id=?', (self.generation.run_id,)).fetchone()
+            channel = (json.loads(row['state']).get('provider') if row else None)
+        if not isinstance(channel, str) or not channel:
+            return None
+        try:
+            stored = profile(channel)
+        except ValueError:
+            return None
+        limit = (stored.get('model_contexts') or {}).get(state.context.profile.model)
+        return limit if type(limit) is int and 0 < limit <= 2_000_000 else None
+
     async def _observe_model_usage(self, usage: ModelUsage, state: AgentLoopState) -> None:
         """Update cumulative raw/provider ratio only on genuine usage frames."""
         if self.namespace or usage.provider != state.context.profile.provider:
             return
-        from .context_budget import calculate_budget
+        if usage.input_tokens <= 0:
+            return
+        from .context_budget import calculate_budget, provider_usage_snapshot
+
+        # Persist actual provider counts on every confirmed primary call, even
+        # when the model has no configured context limit. The previous path
+        # only saved a calibrated estimate and skipped unknown limits entirely.
+        try:
+            from .storage import WorkspaceRepository
+            settings = WorkspaceRepository(self.database).setting(self.owner, 'endpoints', {}) or {}
+            options = settings.get('summarization') or {}
+            ratio = options.get('reserveRatio', 0.05) if isinstance(options, dict) else 0.05
+            calibration = self.store.token_calibration(self.owner, self.generation.run_id,
+                state.context.profile.provider, state.context.profile.model)
+            snapshot = provider_usage_snapshot(
+                input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
+                provider=usage.provider, model=state.context.profile.model,
+                messages=state.provider_projection or state.messages, tools=state.context.tools,
+                max_context_tokens=self._context_limit(state, settings),
+                reserve_ratio=ratio, calibration_ratio=calibration.ratio,
+                run_id=self.generation.run_id,
+                agent_id=(state.context.agent or {}).get('id'))
+            self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
+        except Exception as exc:
+            logging.getLogger(__name__).warning('Provider context usage unavailable (%s)', type(exc).__name__)
 
         profile = state.context.profile
         try:
@@ -1052,10 +1168,8 @@ class AgentRunner:
         if self.namespace:
             return
         settings = repository.setting(self.owner, 'endpoints', {}) or {}
-        agent_settings = settings.get('agents') or {}
-        params = state.context.parameters or {}
-        max_raw = params.get('max_context_tokens') or params.get('maxContextTokens') or agent_settings.get('maxContextTokens')
-        if not isinstance(max_raw, (int, float)) or isinstance(max_raw, bool) or not 0 < max_raw <= 2000000:
+        max_raw = self._context_limit(state, settings)
+        if max_raw is None:
             return
         calibration = self.store.token_calibration(
             self.owner, self.generation.run_id,
@@ -1188,10 +1302,54 @@ class AgentRunner:
             return await run_multi_agent_graph(self, history, topology, recursion_limit=recursion_limit)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
-        if not self.namespace or (self.graph_node and self.namespace.startswith('/graph:')):
-            memory_text = self._memory_context(self.root_agent)
+        if (not self.namespace or
+                (self.graph_node and self.namespace.startswith('/graph:')) or
+                '/subagent:' in self.namespace):
+            from .skill_runtime import catalog
+
+            skills_text = catalog(self.database, self.owner, self.root_agent)
+            # Personal memory remains scoped to the main agent; delegated Agents
+            # must independently receive their own selected Skill catalog.
+            memory_text = self._memory_context(self.root_agent) if (
+                not self.namespace or self.graph_node) else ''
+            supplementary = []
             if memory_text:
-                history = [{'role': 'system', 'content': memory_text}, *history]
+                supplementary.append({'role': 'system', 'content': memory_text})
+            if skills_text:
+                supplementary.append({'role': 'system', 'content': skills_text})
+            if not self.namespace:
+                # The selection is stored on the exact user message in SQLite,
+                # rather than carrying a transient HTTP field across retries.
+                with self.database.connect() as db:
+                    record = db.execute(
+                        'SELECT m.metadata FROM messages m JOIN conversations c '
+                        'ON c.id=m.conversation_id WHERE m.id=? AND c.owner=? '
+                        'AND m.conversation_id=? AND m.role=\'user\'',
+                        (self.generation.user_message_id, self.owner,
+                         self.generation.conversation_id)).fetchone()
+                if record is not None:
+                    selected_ids = json.loads(record['metadata']).get('manualSkills') or []
+                    if selected_ids:
+                        from .skill_runtime import manual_context
+
+                        selected_text = manual_context(self.database, self.owner,
+                                                       self.root_agent, selected_ids)
+                        if selected_text:
+                            supplementary.append({'role': 'system', 'content': selected_text})
+            if supplementary:
+                # Preserve the built-in artifact/Agent system message as the
+                # single leading prompt, appending Memory/Skill context to it.
+                # Empty memories must never inject a second system message.
+                index = 0
+                while index < len(history) and history[index].get('role') == 'system':
+                    index += 1
+                if index:
+                    last = dict(history[index - 1])
+                    last['content'] = str(last['content']) + '\n\n' + '\n\n'.join(
+                        item['content'] for item in supplementary)
+                    history = [*history[:index - 1], last, *history[index:]]
+                else:
+                    history = [*supplementary, *history]
         state = AgentLoopState(context, history)
         if restored:
             self.active_config = restored["config"]
@@ -1383,7 +1541,8 @@ class AgentRunner:
 
         result = await run_agent_loop(
             state, stream_tools=stream_tools_with_media, stream_text=stream_text_with_media,
-            dispatch=self._dispatch, on_text=emit, save_state=self._save,
+            dispatch=self._dispatch, on_text=emit, on_thought=self.on_thought,
+            save_state=self._save,
             before_model=self._before_model, on_model_usage=self._observe_model_usage,
             project_messages=self._project_model_messages,
             preflight_calls=self._preflight_model_calls,

@@ -76,7 +76,7 @@ async def test_dynamic_mcp_search_scoring_and_disabled_paths(
     assert [item["name"] for item in result["tools"]] == ["alpha:find", "alpha:other"]
     assert result["unrefreshed_servers"] == ["empty"]
     assert (await manager.search("", server="off"))["count"] == 0
-    with pytest.raises(ValueError, match="unknown"):
+    with pytest.raises(ValueError, match="MCP server is not available"):
         await manager.search("", server="missing")
 
 @pytest.mark.asyncio

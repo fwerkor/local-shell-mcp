@@ -38,9 +38,6 @@ const FAVORITE_ROW_DRAG_TYPE = 'favorite-item';
  *  to a row would otherwise never meet the section's written hint, leaving the
  *  only non-pointer way to reorder undiscoverable. */
 const REORDER_SHORTCUTS = 'Alt+ArrowUp Alt+ArrowDown';
-/** The whole section accepts both kinds: a drop anywhere on it pins a chat that
- *  is not pinned yet, whichever row it happened to land on. */
-const PINNED_ROW_ACCEPTS = [CONVERSATION_DRAG_TYPE, FAVORITE_ROW_DRAG_TYPE];
 /** What a row answers a release with, so the drag can tell a reorder inside
  *  this list from a drop that filed the chat somewhere else. */
 const PINNED_ROW_DROP_RESULT = { pinnedRowReorder: true } as const;
@@ -92,7 +89,7 @@ interface DraggablePinnedRowProps {
   children: React.ReactNode;
 }
 
-/** Hover-reorder wrapper for the unified pinned list, following the favorites
+/** Hover-reorder wrapper for a pinned group, following the favorites
  *  pattern: rows shift as the drag passes them and the order commits on drop.
  *  Touch pointers are excluded, matching every other drag source here, so the
  *  Alt+Arrow shortcut below is the only way to reorder without a mouse. */
@@ -224,7 +221,7 @@ interface FavoriteRowProps {
   keyShortcuts?: string;
 }
 
-/** One favorite rendered for the unified list; skeleton while its agent is
+/** One pinned favorite; skeleton while its agent is
  *  still resolving, nothing if the agent or spec is gone (cleanup handles the
  *  latter asynchronously). */
 const FavoriteRow = ({
@@ -292,9 +289,9 @@ interface PinnedSectionProps {
   conversations: TConversation[];
   toggleNav: () => void;
   isSmallScreen?: boolean;
-  /** True when this list is the whole pinned list: no bookmark filter, and the
-   *  pinned query has finished draining. Only then can keys the section cannot
-   *  resolve be treated as gone rather than merely unseen. */
+  /** True when the conversation membership is complete: no bookmark filter,
+   *  and the pinned query has finished draining. Only then can keys the
+   *  section cannot resolve be treated as gone rather than merely unseen. */
   membershipComplete?: boolean;
   /** When the pinned query last delivered, compared against the stored order's
    *  own fetch time to tell membership that reconciled with it from membership
@@ -302,11 +299,10 @@ interface PinnedSectionProps {
   membershipUpdatedAt?: number;
 }
 
-/** Pinned chats and pinned agents/models/specs (favorites) render as ONE
- *  reorderable list, kept in two groups — favorites first, then chats — because
- *  a row only reorders against its own kind. The order persists per user, and
- *  the section opens with the same collapse motion as the Projects section
- *  above it. */
+/** Pinned favorites and conversations have separate sidebar sections and
+ *  independent collapse states. Their ordering still shares the persisted
+ *  pinned-order key format for backward compatibility, while drag and keyboard
+ *  reorder remain scoped to the row kind. */
 const PinnedSection = ({
   conversations,
   toggleNav,
@@ -315,7 +311,15 @@ const PinnedSection = ({
   membershipUpdatedAt = 0,
 }: PinnedSectionProps) => {
   const localize = useLocalize();
-  const [isExpanded, setIsExpanded] = useLocalStorage('pinnedSectionExpanded', true);
+  const [areFavoritesExpanded, setFavoritesExpanded] = useLocalStorage(
+    'pinnedFavoritesSectionExpanded',
+    true,
+  );
+  // Preserve the previous collapse preference for the pinned conversations section.
+  const [areConversationsExpanded, setConversationsExpanded] = useLocalStorage(
+    'pinnedSectionExpanded',
+    true,
+  );
   const { data: activeJobsData } = useActiveJobs();
   const favoritesData = useFavoritesData();
   /* Gated on success, not on the fetch having been attempted: a failed GET
@@ -335,13 +339,13 @@ const PinnedSection = ({
   const updatePinnedOrder = useUpdatePinnedOrderMutation();
   const pinMutation = usePinConversationMutation();
   const { showToast } = useToastContext();
-  const sectionRef = useRef<HTMLDivElement | null>(null);
+  const favoriteSectionRef = useRef<HTMLDivElement | null>(null);
   const activeJobIds = useMemo(
     () => new Set(activeJobsData?.activeJobIds ?? []),
     [activeJobsData?.activeJobIds],
   );
 
-  /* Dropping an unpinned conversation anywhere on the section pins it. Row
+  /* Dropping an unpinned conversation on the pinned chats section pins it. Row
    * drops reorder instead (their targets carry no drop handler, so a drop that
    * misses them bubbles here), and already-pinned rows are refused so an
    * aborted reorder never re-pins anything. */
@@ -350,7 +354,7 @@ const PinnedSection = ({
     unknown,
     { isPinOver: boolean; canPin: boolean }
   >({
-    accept: PINNED_ROW_ACCEPTS,
+    accept: CONVERSATION_DRAG_TYPE,
     canDrop: (item, monitor) =>
       monitor.getItemType() === CONVERSATION_DRAG_TYPE && item.pinned !== true,
     /* The header and the padding around the rows are part of this list too, so
@@ -653,11 +657,9 @@ const PinnedSection = ({
     }
   }, [orderLoaded]);
 
-  /* `FavoriteItem` reports the removal only once its row is already gone, so
-   * there is no position left to search around: focus goes to the first
-   * surviving row, matching what the favorites list did before this merge. */
+  /* On favorite removal, keep focus within the favorites section. */
   const handleRemoveFocus = useCallback(() => {
-    focusFirstRow(sectionRef.current);
+    focusFirstRow(favoriteSectionRef.current);
   }, []);
 
   const handleSelectEndpoint = useCallback<SelectEndpointHandler>(
@@ -685,141 +687,184 @@ const PinnedSection = ({
     [conversations],
   );
 
-  /** The section root is both the pin drop target and the scope focus falls
-   *  back into when a row is removed. */
-  const setSectionRef = useCallback(
+  /** Only the conversation section accepts drops of chats to pin. */
+  const setConversationSectionRef = useCallback(
     (node: HTMLDivElement | null) => {
-      sectionRef.current = node;
       pinDropRef(node);
     },
     [pinDropRef],
   );
 
-  /* The section renders while either half is present or still resolving, and
-   * drops out only once both are definitively empty. A live conversation drag
-   * keeps it mounted as a drop target even when empty. */
+  /* Render each group only with rows, while loading, or as a live drop target. */
   if (naturalEntries.length === 0 && !favoritesData.isLoading && !draggingConversation) {
     return null;
   }
 
-  return (
-    <div
-      ref={setSectionRef}
-      className="flex flex-col px-3 text-sm"
-      role="region"
-      /** The focus handoff after an unpin must act only on rows in this list:
-       *  `ConversationsSection` is also a labelled region and an ancestor of
-       *  the project rows, which render the same `Convo` and survive unpinning. */
-      data-pinned-section=""
-      aria-label={localize('com_ui_pinned')}
-    >
-      <div
-        className={cn(
-          'flex h-8 w-full items-center pr-2',
-          isPinOver && canPin && 'rounded-lg bg-surface-active-alt',
-        )}
-      >
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className={cn(buttonVariants({ variant: 'section-header' }), 'group min-w-0 flex-1')}
-          type="button"
-          aria-expanded={isExpanded}
-        >
-          <span className="select-none truncate">{localize('com_ui_pinned')}</span>
-          <ChevronDown
-            className={cn(
-              'h-3 w-3 shrink-0 transition-transform duration-200',
-              isExpanded ? '' : '-rotate-90',
-            )}
-            aria-hidden="true"
-          />
-        </button>
-      </div>
+  const favoriteEntries = displayEntries.filter((entry) => entry.kind === 'favorite');
+  const conversationEntries = displayEntries.filter((entry) => entry.kind === 'convo');
 
-      <Collapse open={isExpanded}>
-        {/* No scroll pane of its own: the sidebar scrolls as one surface. */}
-        <div className="pt-0.5">
-          {displayEntries.length === 0 && draggingConversation && (
-            <div
-              className={cn(
-                'flex h-9 items-center justify-center rounded-lg border border-dashed text-xs text-text-secondary',
-                isPinOver && canPin
-                  ? 'border-border-medium bg-surface-active-alt text-text-primary'
-                  : 'border-border-light',
-              )}
-              aria-hidden="true"
+  return (
+    <>
+      {(favoriteEntries.length > 0 || favoritesData.isLoading) && (
+        <div
+          ref={favoriteSectionRef}
+          className="flex flex-col px-3 text-sm"
+          role="region"
+          data-pinned-section="favorites"
+          aria-label={localize('com_ui_pinned_favorites')}
+        >
+          <div className="flex h-8 w-full items-center pr-2">
+            <button
+              onClick={() => setFavoritesExpanded(!areFavoritesExpanded)}
+              className={cn(buttonVariants({ variant: 'section-header' }), 'group min-w-0 flex-1')}
+              type="button"
+              aria-expanded={areFavoritesExpanded}
             >
-              {localize('com_ui_drop_to_pin')}
-            </div>
-          )}
-          <p className="sr-only">{localize('com_ui_pinned_reorder_hint')}</p>
-          <p className="sr-only" role="status" aria-live="polite">
-            {announcement}
-          </p>
-          <ul className="m-0 list-none p-0">
-            {favoritesData.isLoading && favoritesData.favorites.length === 0 && (
-              <li className="list-none">
-                <FavoriteRowSkeleton />
-              </li>
-            )}
-            {displayEntries.map((entry) => {
-              if (entry.kind === 'convo') {
-                const convo = conversationByKey.get(entry.conversationId);
-                if (!convo) {
-                  return null;
-                }
-                return (
-                  <li key={entry.key} className="list-none">
-                    <DraggablePinnedRow
-                      entry={entry}
-                      conversation={convo}
-                      indexOfKey={indexOfKey}
-                      moveEntry={moveEntry}
-                      moveEntryBy={moveEntryBy}
-                      onDrop={commitOrder}
-                      canDrag={orderLoaded && !renamingKeys.has(entry.key)}
-                    >
-                      <Convo
-                        conversation={convo}
-                        retainView={noop}
-                        toggleNav={toggleNav}
-                        isGenerating={activeJobIds.has(convo.conversationId ?? '')}
-                        keyShortcuts={orderLoaded ? REORDER_SHORTCUTS : undefined}
-                        onRenamingChange={(renaming) => setRowRenaming(entry.key, renaming)}
-                      />
-                    </DraggablePinnedRow>
+              <span className="select-none truncate">{localize('com_ui_pinned_favorites')}</span>
+              <ChevronDown
+                className={cn(
+                  'h-3 w-3 shrink-0 transition-transform duration-200',
+                  areFavoritesExpanded ? '' : '-rotate-90',
+                )}
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+          <Collapse open={areFavoritesExpanded}>
+            <div className="pt-0.5">
+              <p className="sr-only">{localize('com_ui_pinned_reorder_hint')}</p>
+              <p className="sr-only" role="status" aria-live="polite">
+                {announcement}
+              </p>
+              <ul className="m-0 list-none p-0">
+                {favoritesData.isLoading && favoritesData.favorites.length === 0 && (
+                  <li className="list-none">
+                    <FavoriteRowSkeleton />
                   </li>
-                );
-              }
-              return (
-                <li key={entry.key} className="list-none">
-                  <DraggablePinnedRow
-                    entry={entry}
-                    indexOfKey={indexOfKey}
-                    moveEntry={moveEntry}
-                    moveEntryBy={moveEntryBy}
-                    onDrop={commitOrder}
-                    canDrag={orderLoaded}
-                  >
-                    <FavoriteRow
-                      favorite={entry.favorite}
-                      agentsMap={favoritesData.agentsMap}
-                      specsMap={favoritesData.specsMap}
-                      endpointsConfig={favoritesData.endpointsConfig}
-                      isAgentsLoading={favoritesData.isAgentsLoading}
-                      onSelectEndpoint={handleSelectEndpoint}
-                      onSelectSpec={handleSelectSpec}
-                      onRemoveFocus={handleRemoveFocus}
-                      keyShortcuts={orderLoaded ? REORDER_SHORTCUTS : undefined}
-                    />
-                  </DraggablePinnedRow>
-                </li>
-              );
-            })}
-          </ul>
+                )}
+                {favoriteEntries.map((entry) => {
+                  if (entry.kind !== 'favorite') {
+                    return null;
+                  }
+                  return (
+                    <li key={entry.key} className="list-none">
+                      <DraggablePinnedRow
+                        entry={entry}
+                        indexOfKey={indexOfKey}
+                        moveEntry={moveEntry}
+                        moveEntryBy={moveEntryBy}
+                        onDrop={commitOrder}
+                        canDrag={orderLoaded}
+                      >
+                        <FavoriteRow
+                          favorite={entry.favorite}
+                          agentsMap={favoritesData.agentsMap}
+                          specsMap={favoritesData.specsMap}
+                          endpointsConfig={favoritesData.endpointsConfig}
+                          isAgentsLoading={favoritesData.isAgentsLoading}
+                          onSelectEndpoint={handleSelectEndpoint}
+                          onSelectSpec={handleSelectSpec}
+                          onRemoveFocus={handleRemoveFocus}
+                          keyShortcuts={orderLoaded ? REORDER_SHORTCUTS : undefined}
+                        />
+                      </DraggablePinnedRow>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </Collapse>
         </div>
-      </Collapse>
-    </div>
+      )}
+      {(conversationEntries.length > 0 || draggingConversation) && (
+        <div
+          ref={setConversationSectionRef}
+          className="flex flex-col px-3 text-sm"
+          role="region"
+          data-pinned-section="conversations"
+          aria-label={localize('com_ui_pinned_conversations')}
+        >
+          <div
+            className={cn(
+              'flex h-8 w-full items-center pr-2',
+              isPinOver && canPin && 'rounded-lg bg-surface-active-alt',
+            )}
+          >
+            <button
+              onClick={() => setConversationsExpanded(!areConversationsExpanded)}
+              className={cn(buttonVariants({ variant: 'section-header' }), 'group min-w-0 flex-1')}
+              type="button"
+              aria-expanded={areConversationsExpanded}
+            >
+              <span className="select-none truncate">
+                {localize('com_ui_pinned_conversations')}
+              </span>
+              <ChevronDown
+                className={cn(
+                  'h-3 w-3 shrink-0 transition-transform duration-200',
+                  areConversationsExpanded ? '' : '-rotate-90',
+                )}
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+          <Collapse open={areConversationsExpanded}>
+            <div className="pt-0.5">
+              {conversationEntries.length === 0 && draggingConversation && (
+                <div
+                  className={cn(
+                    'flex h-9 items-center justify-center rounded-lg border border-dashed text-xs text-text-secondary',
+                    isPinOver && canPin
+                      ? 'border-border-medium bg-surface-active-alt text-text-primary'
+                      : 'border-border-light',
+                  )}
+                  aria-hidden="true"
+                >
+                  {localize('com_ui_drop_to_pin')}
+                </div>
+              )}
+              <p className="sr-only">{localize('com_ui_pinned_reorder_hint')}</p>
+              <p className="sr-only" role="status" aria-live="polite">
+                {announcement}
+              </p>
+              <ul className="m-0 list-none p-0">
+                {conversationEntries.map((entry) => {
+                  if (entry.kind !== 'convo') {
+                    return null;
+                  }
+                  const convo = conversationByKey.get(entry.conversationId);
+                  if (!convo) {
+                    return null;
+                  }
+                  return (
+                    <li key={entry.key} className="list-none">
+                      <DraggablePinnedRow
+                        entry={entry}
+                        conversation={convo}
+                        indexOfKey={indexOfKey}
+                        moveEntry={moveEntry}
+                        moveEntryBy={moveEntryBy}
+                        onDrop={commitOrder}
+                        canDrag={orderLoaded && !renamingKeys.has(entry.key)}
+                      >
+                        <Convo
+                          conversation={convo}
+                          retainView={noop}
+                          toggleNav={toggleNav}
+                          isGenerating={activeJobIds.has(convo.conversationId ?? '')}
+                          keyShortcuts={orderLoaded ? REORDER_SHORTCUTS : undefined}
+                          onRenamingChange={(renaming) => setRowRenaming(entry.key, renaming)}
+                        />
+                      </DraggablePinnedRow>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </Collapse>
+        </div>
+      )}
+    </>
   );
 };
 

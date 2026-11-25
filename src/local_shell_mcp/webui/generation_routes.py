@@ -23,6 +23,7 @@ from .artifact_prompts import agent_instructions, artifact_mode
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
+from .misc_routes import effective_features
 from .providers import (
     ProviderConfig,
     provider_config,
@@ -38,6 +39,22 @@ _TASK_GUARD = asyncio.Lock()
 # Preserve durable running checkpoints only for cooperative Controller shutdown.
 # Explicit abort/disconnect cancellation keeps its existing terminal semantics.
 _SHUTDOWN_TASKS: set[asyncio.Task] = set()
+
+
+def _safe_model_error(error: Exception) -> str:
+    """Explain provider failures without exposing request URLs, keys or headers."""
+    import httpx
+
+    name = type(error).__name__
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"Model provider returned HTTP {error.response.status_code} ({name})"
+    if isinstance(error, httpx.RemoteProtocolError):
+        return f"Model stream disconnected before completion ({name})"
+    if isinstance(error, (httpx.ReadError, httpx.ReadTimeout)):
+        return f"Model stream failed while reading the upstream response ({name})"
+    if isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+        return f"Unable to connect to model provider ({name})"
+    return f"Model generation failed ({name})"
 
 
 def _prune_stale_task_handles() -> None:
@@ -65,6 +82,27 @@ def _generation_store() -> GenerationStore:
     return GenerationStore(_database())
 
 
+def _webui_grant_cookie(request: Request) -> str | None:
+    """Bind the short-lived first-party bearer to its live, revocable browser session.
+
+    Ordinary OAuth clients never get a longer grant; possession of a bearer
+    alone (or of an unrelated cookie) cannot extend execution authorization.
+    """
+    from ..auth import principal_scopes
+    from .auth import COOKIE, _store
+
+    principal = getattr(request.state, "principal", None)
+    claims = getattr(principal, "claims", {})
+    if not isinstance(claims, dict) or claims.get("client_id") != "lsm-webui":
+        return None
+    cookie = request.cookies.get(COOKIE, "")
+    session = _store().session(cookie)
+    if (session is None or session.owner != principal.subject
+            or not principal_scopes(principal).issubset(set(session.scopes.split()))):
+        return None
+    return cookie
+
+
 def _request_grant(request: Request) -> tuple[set[str], int | None]:
     from ..auth import principal_scopes
     from ..settings import get_settings
@@ -76,7 +114,23 @@ def _request_grant(request: Request) -> tuple[set[str], int | None]:
     principal = getattr(request.state, "principal", None)
     if principal is None or not hasattr(principal, "claims"):
         return set(), None
-    return principal_scopes(principal), principal.claims.get("exp")
+    scopes = principal_scopes(principal)
+    if principal.claims.get("client_id") == "lsm-webui":
+        cookie = _webui_grant_cookie(request)
+        if cookie is None:
+            # A revoked browser cookie must not fall back to the still-valid
+            # short bearer and silently authorize a new generation.
+            raise HTTPException(401, detail="WebUI login expired or was revoked")
+        request.state._lsm_webui_grant_cookie = cookie
+        # Give detached children a finite initial grant. Foreground runners
+        # re-read this session at every boundary and adopt its renewed expiry.
+        from .auth import _store
+
+        session = _store().session(cookie)
+        if session is None:
+            raise HTTPException(401, detail="WebUI login expired or was revoked")
+        return scopes, session.grant_until
+    return scopes, principal.claims.get("exp")
 
 
 def _generation_body(job: Generation, *, status: str = "stream", resumed: bool = False,
@@ -195,6 +249,7 @@ async def _run_model(
     resume_history: list[dict] | None = None, partial_text: str = "",
     approved_batch=None, resume_namespace: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+    webui_cookie: str | None = None,
     wakeup_lease: tuple[str, str] | None = None,
     event_delivery_lease: tuple[str, str] | None = None,
     actor_lease=None,
@@ -208,6 +263,7 @@ async def _run_model(
     step_id = "step_" + generation.run_id
     step_index = 0
     needs_post_tool_step = False
+    current_content_type: str | None = None
     now_ms = int(time.time() * 1000)
     memory_task: asyncio.Task | None = None
     def check_wakeup_lease():
@@ -250,6 +306,14 @@ async def _run_model(
         if recovered_step is not None:
             step_id, step_index, created = recovered_step
             now_ms = created if isinstance(created, int) else now_ms
+            snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
+            parts = snapshot['aggregatedContent']
+            if step_index < len(parts):
+                part = parts[step_index]
+                if part.get('type') == 'think' and part.get('think'):
+                    current_content_type = 'think'
+                elif part.get('type') == 'text' and part.get('text'):
+                    current_content_type = 'text'
         else:
             if resume_history is not None:
                 snapshot, _ = repo.resume_snapshot(owner, generation.run_id)
@@ -269,13 +333,16 @@ async def _run_model(
             }, actor_lease=actor_lease)
 
         async def append_text(chunk):
-            nonlocal needs_post_tool_step
+            nonlocal needs_post_tool_step, current_content_type
             check_wakeup_lease()
             if not chunk:
                 return
             if needs_post_tool_step:
                 needs_post_tool_step = False
                 await _open_followup_step('after_tool')
+            elif current_content_type == 'think':
+                await _open_followup_step('after_reasoning')
+            current_content_type = 'text'
             text_parts.append(chunk)
             repo.append(owner, generation.run_id, {
                 "event": "on_message_delta", "data": {
@@ -285,10 +352,27 @@ async def _run_model(
                 },
             }, actor_lease=actor_lease)
 
-        async def _open_followup_step(reason):
-            nonlocal step_id, step_index, now_ms, needs_post_tool_step
+        async def append_thought(chunk):
+            nonlocal needs_post_tool_step, current_content_type
+            check_wakeup_lease()
+            if not chunk:
+                return
+            if needs_post_tool_step:
+                await _open_followup_step('after_tool', content_type='think')
+            elif current_content_type == 'text':
+                await _open_followup_step('after_text', content_type='think')
+            current_content_type = 'think'
+            repo.append(owner, generation.run_id, {
+                'event': 'on_reasoning_delta', 'data': {
+                    'id': step_id, 'delta': {'content': {'type': 'think', 'think': chunk}},
+                },
+            }, actor_lease=actor_lease)
+
+        async def _open_followup_step(reason, *, content_type='text'):
+            nonlocal step_id, step_index, now_ms, needs_post_tool_step, current_content_type
             check_wakeup_lease()
             needs_post_tool_step = False
+            current_content_type = None
             # Upstream reserves an absolute content slot per message_creation.
             # Once a STEER part occupies the next slot, subsequent provider
             # text must use a *new* runStep index or useStepHandler appends it
@@ -312,7 +396,7 @@ async def _run_model(
                     "created_at": now_ms, "status": "in_progress",
                     "stepDetails": {"type": "message_creation", "message_creation": {
                         "message_id": generation.response_message_id,
-                        "content_type": "text", "phase": "final_answer",
+                        "content_type": content_type, "phase": "final_answer",
                     }},
                 },
             }, actor_lease=actor_lease)
@@ -329,8 +413,10 @@ async def _run_model(
 
         runner = AgentRunner(owner, generation, _database(), repo,
                              scopes=granted_scopes, grant_expires=grant_expires,
+                             webui_cookie=webui_cookie,
                              stream_tools=stream_model_with_tools, stream_text=stream_model,
-                             on_text=append_text, agent=parent_agent, profile=profile,
+                             on_text=append_text, on_thought=append_thought,
+                             agent=parent_agent, profile=profile,
                              parameters=params, ask_user_enabled=ask_user_enabled,
                              mcp_enabled=mcp_enabled, resume_history=resume_history,
                              resume_namespace=resume_namespace, partial_text=partial_text,
@@ -386,7 +472,13 @@ async def _run_model(
             # new model-history boundary is committed with that checkpoint.
             history_start = post_compaction_start
         elif history_start > 0:
-            source_user = next((message for message in reversed(history[:history_start])
+            # The saved resume history may already start with a synthetic
+            # Memory/Skill system prompt.  The persisted boundary predates that
+            # insertion, so slicing the resumed prompt can miss the request and
+            # incorrectly persist a second copy of the user message.
+            submitted = repo.history(owner, generation.conversation_id,
+                                     message_id=generation.user_message_id)
+            source_user = next((message for message in reversed(submitted)
                                 if message.get('role') == 'user'), None)
             if source_user is not None:
                 # The runner can prepend a memory system message after this
@@ -420,12 +512,13 @@ async def _run_model(
                 check_wakeup_lease()
             except Exception:
                 return
-        # Do not put provider tokens, request metadata or secrets in response.
-        error_report = _generation_error_report(exc, generation, profile)
-        log.warning("Model generation failed for %s: %s", generation.run_id,
-                    error_report.replace('\n', '; '))
+        # Preserve the precise failure class and safe stack locations for
+        # expandable UI diagnostics, never upstream headers or secret values.
+        from .error_diagnostics import generation_failure
+
+        log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=error_report,
+                    error=generation_failure(exc, generation.run_id),
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
                                                              "".join(text_parts)), actor_lease=actor_lease)
     finally:
@@ -455,6 +548,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       resume_history: list[dict] | None = None, partial_text: str = "",
                       approved_batch=None, resume_namespace: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
+                      webui_cookie: str | None = None,
                       wakeup_lease: tuple[str, str] | None = None,
                       event_delivery_lease: tuple[str, str] | None = None,
                       recovery_steers: bool = False,
@@ -513,6 +607,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        resume_history=resume_history, partial_text=partial_text,
                        approved_batch=approved_batch, resume_namespace=resume_namespace,
                        granted_scopes=granted_scopes, grant_expires=grant_expires,
+                       webui_cookie=webui_cookie,
                        wakeup_lease=wakeup_lease, event_delivery_lease=event_delivery_lease,
                        actor_lease=actor_lease, recovery_steers=recovery_steers),
             name="webui-generation-" + generation.run_id,
@@ -551,8 +646,7 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
     from .action_oauth import access_token
     from .actions import ActionRepository
     from .checkpoints import SQLiteCheckpointSaver
-    from .machine_permissions import require_machine_scope, resolve_access
-    from .routes import _repo
+    from .machine_permissions import resolve_access
 
     database = _database()
     with database.connect() as conn:
@@ -612,12 +706,9 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
             ).fetchone()
         if not persisted:
             return False
-    # Revalidate current LSM machine grants before even contacting an IdP
-    # refresh endpoint or rotating an expired browser authorization state.
+    # Machine exposure is a UI preference, not a requirement to expand the
+    # browser's OAuth grant. Native tool calls enforce their scopes separately.
     policy = resolve_access(owner, generation.conversation_id)
-    for machine, level in policy.items():
-        if level in {"read", "write"}:
-            require_machine_scope(scopes, machine, level, expires=expiry)
     repo = ActionRepository(database)
     if not await access_token(repo, owner, aid):
         from .action_oauth import begin_flow
@@ -629,12 +720,12 @@ async def _resume_ready_oauth(owner: str, generation: Generation,
                        reissue={"tool_name": payload["tool_name"]})
         return False
     profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
-    flags = _repo().setting(owner, "conversation.permissions." + generation.conversation_id, {}) or {}
+    flags = effective_features(owner, generation.conversation_id)
     started = await _start_task(owner, generation, profile, agent,
                       native_file_tools=any(level in {"read", "write"} for level in policy.values()),
                       write_tools=any(level == "write" for level in policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
-                      mcp_enabled=isinstance(flags, dict) and flags.get("mcp") is True,
+                      mcp_enabled=isinstance(flags, dict) and flags.get("mcp", True) is True,
                       resume_namespace=pending.get("namespace", ""), granted_scopes=frozenset(scopes),
                       grant_expires=expiry, oauth_claim=(aid, cid, rev,
                           len(calls) == 1 or payload.get("checkpoint_completed") is True))
@@ -717,10 +808,9 @@ async def start_generation(request: Request):
             validate_model_parameters({'model_parameters': params}, filters)
     except ContentFilterBlocked as blocked:
         return JSONResponse(blocked.response(), status_code=400)
-    # Permission inheritance is resolved against SQLite at the start and
-    # rechecked before every tool. The initial OAuth grant cannot be elevated
-    # by modifying defaults while a generation is in progress.
-    from .machine_permissions import require_machine_scope, resolve_access
+    # Exposure preferences are resolved at startup and rechecked for each
+    # native operation. They do not require a new OAuth scope grant.
+    from .machine_permissions import resolve_access
 
     existing_cid = payload.get("conversationId")
     try:
@@ -735,13 +825,6 @@ async def start_generation(request: Request):
         raise HTTPException(404, detail=str(exc)) from exc
     requested_tools = any(level in {"read", "write"} for level in policy.values())
     scopes, grant_expires = _request_grant(request)
-    if requested_tools:
-        try:
-            for machine, level in policy.items():
-                if level in {"read", "write"}:
-                    require_machine_scope(scopes, machine, level, expires=grant_expires)
-        except PermissionError as exc:
-            raise HTTPException(403, detail=str(exc)) from exc
     try:
         profile = provider_config(kind, model)
         result, fresh = _generation_store().begin(owner, payload, agent, protocol_version=protocol)
@@ -756,15 +839,14 @@ async def start_generation(request: Request):
     protocol = min(protocol, result.protocol_version)
     if fresh:
         ask_user_enabled = ask_user_requested(agent, payload)
-        from .routes import _repo
 
-        flags = _repo().setting(owner, "conversation.permissions." + result.conversation_id, {})
-        mcp_enabled = isinstance(flags, dict) and flags.get("mcp") is True
+        mcp_enabled = effective_features(owner, result.conversation_id)["mcp"]
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                           artifacts_mode=artifact_mode(payload, agent),
-                          granted_scopes=frozenset(scopes), grant_expires=grant_expires)
+                          granted_scopes=frozenset(scopes), grant_expires=grant_expires,
+                          webui_cookie=getattr(request.state, "_lsm_webui_grant_cookie", None))
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh, protocol_version=protocol), status_code=202,
                         headers=_generator_headers(protocol))
@@ -928,17 +1010,13 @@ async def steer_generation(request: Request):
             return JSONResponse({"code": "FORBIDDEN", "generationProtocolVersion": protocol},
                                 status_code=403, headers=_generator_headers(protocol))
         if current is not None:
-            # Model-bound instructions cannot bypass revoked machine scopes
-            # merely because the originating generation still exists.
-            from .machine_permissions import require_machine_scope, resolve_access
+            # Steering does not need authorization for every exposed machine.
+            # Native tool dispatch checks actual use against current scopes.
+            from .machine_permissions import resolve_access
 
-            scopes, expiry = _request_grant(request)
             try:
-                policy = resolve_access(owner, cid)
-                for machine, level in policy.items():
-                    if level in {"read", "write"}:
-                        require_machine_scope(scopes, machine, level, expires=expiry)
-            except (PermissionError, KeyError):
+                resolve_access(owner, cid)
+            except KeyError:
                 return JSONResponse({"code": "FORBIDDEN", "generationProtocolVersion": protocol},
                                     status_code=403, headers=_generator_headers(protocol))
     try:
@@ -1007,8 +1085,7 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     """
     from .checkpoints import SQLiteCheckpointSaver
     from .generation_actor_lease import active_run_ids
-    from .machine_permissions import require_machine_scope, resolve_access
-    from .routes import _repo
+    from .machine_permissions import resolve_access
 
     # Detached subagent child generations are owned by their task host.
     # Foreground reconnect may observe SSE, but never claim their actor lease.
@@ -1038,9 +1115,6 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
     try:
         scopes, expiry = _request_grant(request)
         machine_policy = resolve_access(owner, cid)
-        for machine, level in machine_policy.items():
-            if level in {"read", "write"}:
-                require_machine_scope(scopes, machine, level, expires=expiry)
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
     with _database().connect() as db:
@@ -1061,11 +1135,12 @@ async def _reattach_running_actor(request: Request, owner: str, generation: Gene
         native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
         write_tools=any(level == "write" for level in machine_policy.values()),
         ask_user_enabled=bool(state.get("askUserEnabled")),
-        mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+        mcp_enabled=bool(effective_features(owner, cid)["mcp"]),
         resume_history=_generation_store().history(owner, cid, message_id=generation.user_message_id),
         partial_text=(checkpoint_text if checkpoint_text is not None
                       else _generation_store().accumulated_text(owner, generation.run_id)),
         granted_scopes=frozenset(scopes), grant_expires=expiry,
+        webui_cookie=getattr(request.state, "_lsm_webui_grant_cookie", None),
         recovery_steers=True,
         checkpoint_text=checkpoint_text,
     )
@@ -1110,13 +1185,10 @@ async def resume_generation(request: Request):
     try:
         # Confirm the user is still entitled to use the Agent before taking
         # the one-shot SQLite continuation claim.
-        from .machine_permissions import require_machine_scope, resolve_access
+        from .machine_permissions import resolve_access
 
         scopes, expiry = _request_grant(request)
         machine_policy = resolve_access(owner, cid)
-        for machine, level in machine_policy.items():
-            if level in {"read", "write"}:
-                require_machine_scope(scopes, machine, level, expires=expiry)
         claim = store.resume_claim(owner, generation.run_id)
         pending = store.pending_action(owner, generation.run_id)
         if claim is not None and claim.get("actionId") == action_id:
@@ -1208,17 +1280,17 @@ async def resume_generation(request: Request):
         detail = str(exc)
         conflict = detail in {"Conflicting human action retry", "Stale human action"}
         raise HTTPException(409 if conflict else 400, detail=detail) from exc
-    from .routes import _repo
 
     await _start_task(owner, resumed, profile, agent,
                       native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
                       artifacts_mode=state.get("artifactsMode"),
-                      mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
+                      mcp_enabled=bool(effective_features(owner, cid)["mcp"]),
                       resume_history=history, partial_text=previous_text,
                       approved_batch=approved_batch, resume_namespace=resume_namespace,
                       granted_scopes=frozenset(scopes), grant_expires=expiry,
+                      webui_cookie=getattr(request.state, "_lsm_webui_grant_cookie", None),
                       recovery_steers=True)
     return JSONResponse(_generation_body(resumed, status="resuming", resumed=True, protocol_version=protocol),
                         headers=_generator_headers(protocol))

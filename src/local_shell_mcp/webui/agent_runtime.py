@@ -8,6 +8,8 @@ LSM rather than maintaining separate provider or machine execution systems.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -42,6 +44,39 @@ class AgentSuspended(Exception):
     """A durable human interrupt has been saved; leave the generation parked."""
 
 
+_MODEL_RETRY_DELAYS = (0.4, 0.4 * 3)
+
+# A model that keeps re-issuing the same call and receiving the same result is
+# making no progress. Stop the run instead of streaming one durable event per
+# iteration; an unbounded loop otherwise writes without limit to SQLite.
+_MAX_REPEATED_TOOL_BATCHES = 2
+
+
+def _tool_batch_signature(calls: list[ModelToolCall], results: list[dict]) -> str:
+    """Fingerprint one tool round-trip: requested calls plus delivered results."""
+    payload = json.dumps(
+        {
+            "calls": [[call.name, call.arguments] for call in calls],
+            "results": results,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _retryable_model_error(error: Exception) -> bool:
+    """Only retry transient transport failures and explicitly temporary HTTP statuses."""
+    import httpx
+
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code in {408, 429, 500, 502, 503, 504}
+    return isinstance(error, (
+        httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError,
+        httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.PoolTimeout,
+    ))
+
+
 @dataclass
 class AgentContext:
     profile: ProviderConfig
@@ -65,6 +100,8 @@ class AgentLoopState:
     completed: bool = False
     graph_commands: list[dict] = field(default_factory=list)
     provider_projection: list[dict] | None = None
+    repeated_tool_batches: int = 0
+    last_tool_batch: str | None = None
 
 
 @dataclass
@@ -82,6 +119,7 @@ async def run_agent_loop(
     stream_text: Callable[..., AsyncIterator[str]],
     dispatch: Callable[[list[ModelToolCall], AgentLoopState], Awaitable[ToolBatchOutput]],
     on_text: Callable[[str], Awaitable[None]],
+    on_thought: Callable[[str], Awaitable[None]] | None = None,
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
     before_model: Callable[[AgentLoopState], Awaitable[None]] | None = None,
     on_model_usage: Callable[[ModelUsage, AgentLoopState], Awaitable[None]] | None = None,
@@ -105,6 +143,18 @@ async def run_agent_loop(
                 if save_state is not None:
                     await save_state(state, state.pending_calls)
             output = await dispatch(state.pending_calls, state)
+            signature = _tool_batch_signature(state.pending_calls, output.messages)
+            if signature == state.last_tool_batch:
+                state.repeated_tool_batches += 1
+            else:
+                state.last_tool_batch = signature
+                state.repeated_tool_batches = 0
+            if state.repeated_tool_batches >= _MAX_REPEATED_TOOL_BATCHES:
+                raise RuntimeSafetyError(
+                    "The model repeated an identical tool call and received an "
+                    "identical result without making progress; the run was "
+                    "stopped to prevent an unbounded loop.",
+                )
             if output.replace_messages is not None:
                 state.messages = output.replace_messages
             state.messages.extend(output.messages)
@@ -157,14 +207,11 @@ async def run_agent_loop(
         projected = project_messages(state) if project_messages else state.messages
         state.provider_projection = projected
         preempted = False
-        # A provider can close an HTTP connection before producing the first
-        # SSE event (e.g. while pre-filling a large post-tool context). No
-        # model state is committed at that point, so two bounded retries are
-        # safe. Once any event is observed, leave the failure to the normal
-        # durable error path instead of replaying possibly visible output.
-        for attempt in range(3):
+        # Retry only an *empty* model attempt. Text and complete tool proposals
+        # are observable, so replaying them could duplicate output or actions.
+        # A new model attempt keeps the graph turn and completed tool results.
+        for attempt in range(len(_MODEL_RETRY_DELAYS) + 1):
             received_event = False
-            retry = False
             source = stream_tools(context.profile, projected, tools=context.tools,
                                   **sampling) if context.tools else \
                 stream_text(context.profile, projected, **sampling)
@@ -182,6 +229,8 @@ async def run_agent_loop(
                                 reasoning[-1]['thinking'] += item.text
                             else:
                                 reasoning.append({'type': 'thinking', 'thinking': item.text})
+                            if item.text and on_thought is not None:
+                                await on_thought(item.text)
                         elif item.kind == 'signature':
                             if reasoning and reasoning[-1].get('type') == 'thinking':
                                 reasoning[-1]['signature'] = item.signature
@@ -196,25 +245,33 @@ async def run_agent_loop(
                         (on_stream_chunk is not None and await on_stream_chunk())):
                         preempted = True
                         break
-            except Exception as exc:
-                if received_event or attempt == 2 or not _retryable_provider_disconnect(exc):
+            except Exception as error:
+                if (attempt == len(_MODEL_RETRY_DELAYS) or received_event
+                        or not _retryable_model_error(error)):
                     raise
+                # Honor revocation and user interrupts even during backoff.
+                if ((should_preempt is not None and should_preempt()) or
+                    (on_stream_chunk is not None and await on_stream_chunk())):
+                    preempted = True
+                    break
                 log.warning("Model transport %s before first event; retry %d/2 (model=%s)",
-                            type(exc).__name__, attempt + 1, context.profile.model)
-                retry = True
+                            type(error).__name__, attempt + 1, context.profile.model)
+                await asyncio.sleep(_MODEL_RETRY_DELAYS[attempt])
+                continue
             finally:
                 close = getattr(source, "aclose", None)
                 if close is not None:
                     await close()
-            if not retry:
-                break
-            await asyncio.sleep(0.4 * (3 ** attempt))
+            break
         # A steer can arrive between final SSE chunk and tool dispatch.
         if not preempted and ((should_preempt is not None and should_preempt()) or
                               (on_stream_chunk is not None and await on_stream_chunk())):
             preempted = True
         if preempted:
-            state.messages.append({"role": "assistant", "content": "".join(text_parts) or None})
+            interrupted = {"role": "assistant", "content": "".join(text_parts) or None}
+            if reasoning:
+                interrupted["reasoning"] = reasoning
+            state.messages.append(interrupted)
             state.pending_calls = []
             state.completed = False
             if on_boundary is not None:

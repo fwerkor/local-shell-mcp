@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useMemo, useCallback } from
 import debounce from 'lodash/debounce';
 import {
   EModelEndpoint,
+  getEndpointField,
   PermissionBits,
   isAgentsEndpoint,
   isAssistantsEndpoint,
@@ -14,11 +15,13 @@ import {
   useKeyDialog,
   useEndpoints,
   useLocalize,
+  useApplyModelSpecEffects,
 } from '~/hooks';
 import { useAgentsMapContext, useAssistantsMapContext, useLiveAnnouncer } from '~/Providers';
 import { useGetEndpointsQuery, useListAgentsQuery } from '~/data-provider';
 import { useModelSelectorChatContext } from './ModelSelectorChatContext';
 import useSelectMention from '~/hooks/Input/useSelectMention';
+import { getModelSpecIconURL } from '~/utils';
 import { filterItems } from './utils';
 
 type ModelSelectorContextType = {
@@ -63,8 +66,11 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
   const agentsMap = useAgentsMapContext();
   const assistantsMap = useAssistantsMapContext();
   const { data: endpointsConfig } = useGetEndpointsQuery();
-  const { endpoint, model, spec, agent_id, assistant_id, getConversation, newConversation } =
-    useModelSelectorChatContext();
+  const {
+    endpoint, model, spec, agent_id, assistant_id, getConversation, newConversation,
+    selectExistingConversation,
+  } = useModelSelectorChatContext();
+  const applyModelSpecEffects = useApplyModelSpecEffects();
   const localize = useLocalize();
   const { announcePolite } = useLiveAnnouncer();
   const modelSpecs = useMemo(() => {
@@ -203,7 +209,27 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
   const handleSelectSpec = useCallback(
     (spec: t.TModelSpec) => {
       let model = spec.preset.model ?? null;
-      onSelectSpec?.(spec);
+      const previous = getConversation();
+      const selection = {
+        ...spec.preset,
+        endpoint: spec.preset.endpoint,
+        model: spec.preset.model ?? '',
+        agent_id: spec.preset.agent_id ?? null,
+        assistant_id: spec.preset.assistant_id ?? null,
+        spec: spec.name,
+        iconURL: getModelSpecIconURL(spec),
+        modelLabel: null,
+      } as unknown as Partial<t.TConversation>;
+      if (selectExistingConversation(selection)) {
+        applyModelSpecEffects({
+          startupConfig,
+          convoId: previous?.conversationId ?? null,
+          specName: spec.name,
+          prevSpecName: previous?.spec,
+        });
+      } else {
+        onSelectSpec?.(spec);
+      }
       /** Specs arrive with `preset.endpoint` materialized at config load. */
       const endpoint = spec.preset.endpoint ?? null;
       if (isAgentsEndpoint(endpoint)) {
@@ -217,14 +243,32 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
         modelSpec: spec.name,
       });
     },
-    [onSelectSpec],
+    [onSelectSpec, getConversation, selectExistingConversation, applyModelSpecEffects, startupConfig, endpointsConfig],
   );
 
   const handleSelectEndpoint = useCallback(
     (endpoint: Endpoint) => {
       if (!endpoint.hasModels) {
         if (endpoint.value) {
-          onSelectEndpoint?.(endpoint.value);
+          const previous = getConversation();
+          const selection = {
+            endpoint: endpoint.value,
+            model: '',
+            spec: null,
+            agent_id: null,
+            assistant_id: null,
+            iconURL: null,
+            modelLabel: null,
+          } as unknown as Partial<t.TConversation>;
+          if (selectExistingConversation(selection)) {
+            applyModelSpecEffects({
+              startupConfig,
+              convoId: previous?.conversationId ?? null,
+              prevSpecName: previous?.spec,
+            });
+          } else {
+            onSelectEndpoint?.(endpoint.value);
+          }
         }
         setSelectedValues({
           endpoint: endpoint.value,
@@ -233,12 +277,33 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
         });
       }
     },
-    [onSelectEndpoint],
+    [onSelectEndpoint, getConversation, selectExistingConversation, applyModelSpecEffects, startupConfig, endpointsConfig],
   );
 
   const handleSelectModel = useCallback(
     (endpoint: Endpoint, model: string) => {
-      if (isAgentsEndpoint(endpoint.value)) {
+      const previous = getConversation();
+      const selection = {
+        endpoint: endpoint.value,
+        endpointType: getEndpointField(endpointsConfig, endpoint.value, 'type') ?? endpoint.value,
+        model: isAgentsEndpoint(endpoint.value)
+          ? (agentsMap?.[model]?.model ?? '')
+          : isAssistantsEndpoint(endpoint.value)
+            ? (assistantsMap?.[endpoint.value]?.[model]?.model ?? '')
+            : model,
+        agent_id: isAgentsEndpoint(endpoint.value) ? model : null,
+        assistant_id: isAssistantsEndpoint(endpoint.value) ? model : null,
+        spec: null,
+        iconURL: null,
+        modelLabel: null,
+      } as unknown as Partial<t.TConversation>;
+      if (selectExistingConversation(selection)) {
+        applyModelSpecEffects({
+          startupConfig,
+          convoId: previous?.conversationId ?? null,
+          prevSpecName: previous?.spec,
+        });
+      } else if (isAgentsEndpoint(endpoint.value)) {
         onSelectEndpoint?.(endpoint.value, {
           agent_id: model,
           model: agentsMap?.[model]?.model ?? '',
@@ -261,7 +326,7 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
       const announcement = localize('com_ui_model_selected', { 0: modelDisplayName });
       announcePolite({ message: announcement, isStatus: true });
     },
-    [agentsMap, announcePolite, assistantsMap, getModelDisplayName, localize, onSelectEndpoint],
+    [agentsMap, announcePolite, assistantsMap, getConversation, getModelDisplayName, localize, onSelectEndpoint, selectExistingConversation, applyModelSpecEffects, startupConfig, endpointsConfig],
   );
 
   const value = useMemo(

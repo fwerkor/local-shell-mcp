@@ -133,7 +133,8 @@ CREATE TABLE IF NOT EXISTS web_login_tickets (
     owner TEXT NOT NULL,
     scopes TEXT NOT NULL,
     grant_until INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
+    expires_at INTEGER NOT NULL,
+    renewable INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS web_sessions (
     hash TEXT PRIMARY KEY,
@@ -141,10 +142,85 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     scopes TEXT NOT NULL,
     grant_until INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    renewable INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_web_sessions_expiry ON web_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_web_tickets_expiry ON web_login_tickets(expires_at);
+CREATE TABLE IF NOT EXISTS webui_tags (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,tag)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_tags_owner ON webui_tags(owner,position);
+CREATE TABLE IF NOT EXISTS webui_skills (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    name TEXT NOT NULL,
+    record TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,name)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_skills_owner ON webui_skills(owner,updated_at DESC);
+CREATE TABLE IF NOT EXISTS webui_skill_folders (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    skill_id TEXT NOT NULL REFERENCES webui_skills(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(skill_id,path)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_skill_folders_skill ON webui_skill_folders(skill_id,path);
+CREATE TABLE IF NOT EXISTS webui_skill_files (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    skill_id TEXT NOT NULL REFERENCES webui_skills(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    data BLOB NOT NULL,
+    mime TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(skill_id,path)
+);
+CREATE TABLE IF NOT EXISTS webui_schedules (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    config TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 0,
+    next_run INTEGER,
+    run_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_run TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(owner,request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_schedules_due ON webui_schedules(enabled,next_run);
+CREATE TABLE IF NOT EXISTS webui_schedule_runs (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    schedule_id TEXT NOT NULL REFERENCES webui_schedules(id) ON DELETE CASCADE,
+    due_at INTEGER NOT NULL,
+    conversation_id TEXT,
+    run_id TEXT,
+    status TEXT NOT NULL DEFAULT 'claimed',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(schedule_id,due_at)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_schedule_runs_schedule ON webui_schedule_runs(schedule_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS webui_memories (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
@@ -432,6 +508,7 @@ CREATE TABLE IF NOT EXISTS agent_durable_tasks (
     authorization_conversation_id TEXT,
     run_id TEXT,
     call_id TEXT NOT NULL,
+    agent_id TEXT,
     tool TEXT NOT NULL,
     kind TEXT NOT NULL,
     machine TEXT NOT NULL,
@@ -553,15 +630,27 @@ class SQLiteDatabase:
                 self.fts_enabled = False
             else:
                 self.fts_enabled = True
+            # Explicitly distinguish renewable first-party WebUI logins from
+            # bounded OAuth handoffs. Upgraded sessions remain nonrenewable
+            # until the user authenticates again; never elevate old grants.
+            db.execute("BEGIN IMMEDIATE")
+            for name in ("web_login_tickets", "web_sessions"):
+                existing = {row["name"] for row in db.execute(f"PRAGMA table_info({name})")}
+                if "renewable" not in existing:
+                    db.execute(f"ALTER TABLE {name} ADD COLUMN renewable INTEGER NOT NULL DEFAULT 0")
+            db.commit()
             # PR #353 created this table before delegated child conversations
             # needed a separate inherited permission scope. Migrate the real
             # existing Controller DB in-place; serialize concurrent cold starts.
             db.execute("BEGIN IMMEDIATE")
-            if "authorization_conversation_id" not in {
+            durable_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(agent_durable_tasks)")
-            }:
+            }
+            if "authorization_conversation_id" not in durable_columns:
                 db.execute("ALTER TABLE agent_durable_tasks "
                            "ADD COLUMN authorization_conversation_id TEXT")
+            if "agent_id" not in durable_columns:
+                db.execute("ALTER TABLE agent_durable_tasks ADD COLUMN agent_id TEXT")
             # Upgrade pre-retry completion queue rows without losing accepted
             # turns or violating the existing native durable Job migrations.
             existing_wakeup = {

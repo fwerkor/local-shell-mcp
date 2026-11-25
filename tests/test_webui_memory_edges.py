@@ -40,17 +40,17 @@ def _enable(repo, config=None):
                                            'agents': {'capabilities': ['memory']}})
 
 
-def test_memory_is_explicit_opt_in_and_deployment_is_readable(state):
+def test_memory_is_enabled_by_default_and_deployment_is_readable(state):
     _, repo = state
-    assert not memory_enabled(repo, 'local')
-    assert memory_config(repo, 'local') is None
+    assert memory_enabled(repo, 'local')
+    assert memory_config(repo, 'local') == {}
     _enable(repo)
     assert memory_enabled(repo, 'local')
     assert memory_enabled(repo, 'local', tools=True)
     repo.save_setting('local', 'user.memories', False)
     assert not memory_enabled(repo, 'local')
     repo.save_setting('local', 'user.memories', True)
-    repo.save_setting('local', 'endpoints', {'memory': {'tokenLimit': 12}, 'agents': {}})
+    repo.save_setting('local', 'endpoints', {'memory': {'tokenLimit': 12}, 'agents': {'capabilities': []}})
     assert memory_enabled(repo, 'local')
     assert not memory_enabled(repo, 'local', tools=True)
     repo.save_setting('local', 'webui.memory.config', {'disabled': True})
@@ -130,7 +130,10 @@ async def test_memory_http_route_guards_and_error_statuses(state):
     db, repo = state
     app = Starlette(routes=memory_routes())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        assert (await client.get('/api/memories')).status_code == 200
+        repo.save_setting('local', 'webui.memory.config', {'disabled': True})
         assert (await client.get('/api/memories')).status_code == 403
+        repo.save_setting('local', 'webui.memory.config', {'tokenLimit': 20, 'charLimit': 20})
         _enable(repo, {'tokenLimit': 20, 'charLimit': 20})
         bad = [
             ({'key': '', 'value': 'yes'}, 400),
@@ -156,9 +159,11 @@ async def test_memory_http_route_guards_and_error_statuses(state):
             'key': 'second', 'value': 'Hey.'})).status_code == 409
         assert (await client.patch('/api/memories/id/' + first['_id'], json={
             'key': 'second', 'value': 'Hey.'})).status_code == 409
+        repo.save_setting('local', 'webui.memory.config', {'tokenLimit': 1, 'charLimit': 20})
         _enable(repo, {'tokenLimit': 1, 'charLimit': 20})
         assert (await client.patch('/api/memories/style', json={
             'value': 'Several words here'})).status_code == 400
+        repo.save_setting('local', 'webui.memory.config', {'tokenLimit': 20, 'charLimit': 20})
         _enable(repo, {'tokenLimit': 20, 'charLimit': 20})
         assert (await client.delete('/api/memories/style')).status_code == 200
         assert (await client.delete('/api/memories/second')).status_code == 200

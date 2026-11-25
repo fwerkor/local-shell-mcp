@@ -525,7 +525,7 @@ type SchemaShape<T> = T extends z.ZodObject<infer U> ? U : never;
 
 // Helper type to determine the default value or undefined based on whether the field has a default
 type DefaultValue<T> =
-  T extends z.ZodDefault<z.ZodTypeAny> ? z.infer<T> : undefined;
+  T extends z.ZodDefault<z.ZodTypeAny> | z.ZodPrefault<z.ZodTypeAny> ? z.infer<T> : undefined;
 
 // Extract default values or undefined from the schema shape
 type ExtractDefaults<T> = {
@@ -536,12 +536,12 @@ export type SchemaDefaults<T> = ExtractDefaults<SchemaShape<T>>;
 
 export type TConfigDefaults = SchemaDefaults<typeof configSchema>;
 
-export function getSchemaDefaults<Schema extends z.AnyZodObject>(
+export function getSchemaDefaults<Schema extends z.ZodObject>(
   schema: Schema,
 ): ExtractDefaults<SchemaShape<Schema>> {
   const shape = schema.shape;
   const entries = Object.entries(shape).map(([key, value]) => {
-    if (value instanceof z.ZodDefault) {
+    if (value instanceof z.ZodDefault || value instanceof z.ZodPrefault) {
       // Zod 4 stores a value rather than the Zod 3 defaultValue() factory.
       // Parsing undefined applies the schema's default across both versions.
       return [key, value.parse(undefined)];
@@ -599,7 +599,7 @@ export const azureBaseSchema = z.object({
   dropParams: z.array(z.string()).optional(),
   version: z.string().optional(),
   baseURL: z.string().optional(),
-  additionalHeaders: z.record(z.string()).optional(),
+  additionalHeaders: z.record(z.string(), z.string()).optional(),
 });
 
 export type TAzureBaseSchema = z.infer<typeof azureBaseSchema>;
@@ -694,7 +694,7 @@ export const baseEndpointSchema = z.object({
    * providers through an AI gateway / reverse proxy that consumes metadata
    * headers (provider-native request shaping is preserved).
    */
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
   titlePrompt: z.string().optional(),
   titleModel: z.string().optional(),
   titleConvo: z.boolean().optional(),
@@ -822,7 +822,7 @@ export const assistantEndpointSchema = baseEndpointSchema.merge(
         userIdQuery: z.boolean().optional(),
       })
       .optional(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
   }),
 );
 
@@ -1047,7 +1047,7 @@ export const toolApprovalHookConfigSchema = z.object({
   /** Optional regex matched against the tool name; omit to run for every tool. */
   matcher: z.string().optional(),
   /** Static options forwarded to the module's builder; the hook's own per-call config. */
-  options: z.record(z.unknown()).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type TToolApprovalHookConfig = z.infer<typeof toolApprovalHookConfigSchema>;
@@ -1379,7 +1379,7 @@ export const agentsEndpointSchema = baseEndpointSchema
       /** Per-tool overrides of `maxToolCallArgBytes`, keyed by model-facing tool name; `0`
        * disables the guard for that tool only. Merged over LibreChat's shipped default of
        * `{ create_file: 131072 }`. */
-      maxToolCallArgBytesByTool: z.record(z.number()).optional(),
+      maxToolCallArgBytesByTool: z.record(z.string(), z.number()).optional(),
       /** Characters of retained tool output the save path may tokenize exactly for the
        * context gauge when a turn stops at the tool-call limit (see
        * `retainedToolTokens`). Tokenizing costs ~60 ms/MB and runs once per stopped
@@ -1669,7 +1669,7 @@ export const agentsEndpointSchema = baseEndpointSchema
       checkpointer: checkpointerSchema,
     }),
   )
-  .default({
+  .prefault({
     disableBuilder: false,
     capabilities: defaultAgentCapabilities,
     maxCitations: 30,
@@ -1703,7 +1703,7 @@ export const paramDefinitionSchema = z.object({
       path: ['positiveMin'],
     })
     .optional(),
-  enumMappings: z.record(z.union([z.number(), z.boolean(), z.string()])).optional(),
+  enumMappings: z.record(z.string(), z.union([z.number(), z.boolean(), z.string()])).optional(),
   component: z.nativeEnum(ComponentTypes).optional(),
   optionType: z.nativeEnum(OptionTypes).optional(),
   columnSpan: z.number().int().nonnegative().optional(),
@@ -1760,7 +1760,7 @@ export const endpointSchema = baseEndpointSchema.merge(
      * OpenAI-compatible endpoints.
      */
     provider: z.literal(EModelEndpoint.anthropic).optional(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     addParams: addParamsSchema.optional(),
     dropParams: z.array(z.string()).optional(),
     customParams: z
@@ -1781,6 +1781,7 @@ export const endpointSchema = baseEndpointSchema.merge(
     /** Static per-model token config: context window and per-million-token rates */
     tokenConfig: z
       .record(
+        z.string(),
         z.object({
           prompt: z.number(),
           completion: z.number(),
@@ -2117,7 +2118,7 @@ const termsOfServiceSchema = z.object({
 export type TTermsOfService = z.infer<typeof termsOfServiceSchema>;
 
 // Schema for localized string (either simple string or language-keyed object)
-const localizedStringSchema = z.union([z.string(), z.record(z.string())]);
+const localizedStringSchema = z.union([z.string(), z.record(z.string(), z.string())]);
 export type LocalizedString = z.infer<typeof localizedStringSchema>;
 
 export const mcpRefreshDefaults = {
@@ -2395,7 +2396,7 @@ export const interfaceSchema = z
       ])
       .optional(),
   })
-  .default({
+  .prefault({
     modelSelect: true,
     codeHighlightThrottleMs: 300,
     agentSelectorLimit: DEFAULT_AGENT_SELECTOR_LIMIT,
@@ -2728,7 +2729,7 @@ export const webSearchSchema = z.object({
       formats: z.array(z.string()).optional(),
       includeTags: z.array(z.string()).optional(),
       excludeTags: z.array(z.string()).optional(),
-      headers: z.record(z.string()).optional(),
+      headers: z.record(z.string(), z.string()).optional(),
       waitFor: z.number().optional(),
       timeout: z.number().int().nonnegative().optional(),
       maxAge: z.number().optional(),
@@ -2749,7 +2750,7 @@ export const webSearchSchema = z.object({
       changeTrackingOptions: z
         .object({
           modes: z.array(z.string()).optional(),
-          schema: z.record(z.unknown()).optional(),
+          schema: z.record(z.string(), z.unknown()).optional(),
           prompt: z.string().optional(),
           tag: z.string().nullable().optional(),
         })
@@ -2861,7 +2862,7 @@ export const memorySchema = z.object({
         provider: z.string(),
         model: z.string(),
         instructions: z.string().optional(),
-        model_parameters: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+        model_parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
       }),
     ])
     .optional(),
@@ -2901,7 +2902,7 @@ export const summarizationConfigSchema = z.object({
   enabled: z.boolean().optional(),
   provider: z.string().optional(),
   model: z.string().optional(),
-  parameters: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   trigger: summarizationTriggerSchema.optional(),
   prompt: z.string().optional(),
   updatePrompt: z.string().optional(),
@@ -3105,7 +3106,7 @@ export const langfuseConfigSchema = z.object({
    * schema does not yet express — and note the fanout collector forwards only
    * `Authorization` upstream regardless.
    */
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
   /** Trace user identity and allowlisted user/request metadata. */
   trace: langfuseTraceConfigSchema.optional(),
 });
@@ -3197,7 +3198,7 @@ export const configSchema = z.object({
             .default(30_000),
           authorizationFenceRetryBatchSize: z.number().int().positive().max(10_000).default(100),
         })
-        .default({}),
+        .prefault({}),
     })
     .optional(),
   interface: interfaceSchema,

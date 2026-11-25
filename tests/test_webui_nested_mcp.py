@@ -39,6 +39,10 @@ class MockRegistry:
     ("reject", "External MCP was rejected by the user."),
 ])
 async def test_mcp_discovery_and_tool_call_requires_human_approval(tmp_path, monkeypatch, decision, expected):
+    monkeypatch.setattr(
+        "local_shell_mcp.webui.machine_permissions._registered_defaults",
+        lambda: {"local": "none"},
+    )
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
@@ -52,8 +56,8 @@ async def test_mcp_discovery_and_tool_call_requires_human_approval(tmp_path, mon
 
     async def model(profile, history, *, tools, **kwargs):
         assert {tool["function"]["name"] for tool in tools} == {
-            "session_manage", "plan_manage", "web_search", "web_fetch",
-            "mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call",
+            "session_manage", "plan_manage", "web_search", "web_fetch", "mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call",
+            "set_memory", "delete_memory",
         }
         count = sum(1 for item in history if item.get("role") == "tool")
         if count == 0:
@@ -131,7 +135,7 @@ async def test_mcp_discovery_and_tool_call_requires_human_approval(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_nested_mcp_disabled_by_default_and_management_tool_absent(tmp_path, monkeypatch):
+async def test_nested_mcp_can_be_explicitly_disabled_and_management_tool_absent(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
@@ -140,6 +144,8 @@ async def test_nested_mcp_disabled_by_default_and_management_tool_absent(tmp_pat
 
     repo = _repo()
     cid = repo.create_conversation("local", {"title": "No MCP"})["conversationId"]
+    # New conversations have MCP enabled by default; an explicit off must win.
+    repo.save_setting("local", "conversation.permissions." + cid, {"mcp": False})
     registry = MockRegistry()
     monkeypatch.setattr(core_tools, "DynamicMCPManager", lambda *args, **kwargs: registry)
     _registry_for_state.cache_clear()

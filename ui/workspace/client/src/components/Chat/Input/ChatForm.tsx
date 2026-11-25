@@ -68,6 +68,7 @@ import CollapseChat from './CollapseChat';
 import QuoteButton from './QuoteButton';
 import TokenUsage from './TokenUsage';
 import LsmChatPermissions from './LsmChatPermissions';
+import LsmChatFeatures from './LsmChatFeatures';
 import StopButton from './StopButton';
 import SendButton from './SendButton';
 import EditBadges from './EditBadges';
@@ -890,7 +891,13 @@ const ChatForm = memo(function ChatForm({
                   <PendingToolApprovalButton conversationId={conversationId} />
                 )}
                 <div className="grow" />
-                {index === 0 && <LsmChatPermissions conversationId={conversationId} />}
+                {index === 0 && <LsmChatFeatures conversationId={conversationId} />}
+                {index === 0 && (
+                  <LsmChatPermissions
+                    conversationId={conversationId}
+                    projectId={project?._id}
+                  />
+                )}
                 <TokenUsage index={index} conversation={conversation} isSubmitting={isSubmitting} />
                 {SpeechToText && (
                   <AudioRecorder

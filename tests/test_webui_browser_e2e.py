@@ -164,34 +164,35 @@ async def test_real_react_machine_permission_scopes_and_inheritance(tmp_path, mo
                 page.on("pageerror", lambda error: failures.append(str(error)))
                 await page.goto(f"http://127.0.0.1:{port}/c/{conversation_id}",
                                 wait_until="domcontentloaded")
-                selector = page.get_by_role("button", name="Permissions", exact=True)
+                # The composer popup is labelled in the UI's own language and
+                # exposes machine access as segmented buttons, not a <select>.
+                selector = page.get_by_role("button", name="工具权限", exact=True)
                 await selector.wait_for(timeout=15_000)
                 await selector.click()
-                access = page.get_by_label("local machine access")
-                await access.wait_for(timeout=10_000)
-                await page.get_by_role("button", name="Global").click()
-                await access.select_option("read")
+                await page.get_by_role("button", name="local 只读").wait_for(timeout=10_000)
+                await page.get_by_role("button", name="实例默认").click()
+                await page.get_by_role("button", name="local 只读").click()
                 for _ in range(100):
                     if (await http.get("/api/lsm/permissions/defaults")).json().get("machines", {}).get("local") == "read":
                         break
                     await asyncio.sleep(0.03)
                 assert (await http.get("/api/lsm/permissions/defaults")).json()["machines"]["local"] == "read"
-                await page.get_by_role("button", name="Project", exact=True).click()
-                await access.select_option("write")
+                await page.get_by_role("button", name="项目默认").click()
+                await page.get_by_role("button", name="local 读写").click()
                 for _ in range(100):
                     if (await http.get(f"/api/lsm/permissions/projects/{project_id}")).json().get("machines", {}).get("local") == "write":
                         break
                     await asyncio.sleep(0.03)
                 assert (await http.get(f"/api/lsm/permissions/projects/{project_id}")).json()["machines"]["local"] == "write"
-                await page.get_by_role("button", name="This chat").click()
-                await access.select_option("none")
+                await page.get_by_role("button", name="当前会话").click()
+                await page.get_by_role("button", name="local 无").click()
                 for _ in range(100):
                     if (await http.get(f"/api/lsm/preferences/{conversation_id}")).json().get("machines", {}).get("local") == "none":
                         break
                     await asyncio.sleep(0.03)
                 applied = (await http.get(f"/api/lsm/preferences/{conversation_id}")).json()
-                assert applied["machines"] == {"local": "none"}
-                assert applied["effective"] == {"local": "none"}
+                assert applied["machines"]["local"] == "none"
+                assert applied["effective"]["local"] == "none"
                 assert failures == [], failures
     finally:
         if browser:

@@ -18,7 +18,12 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
 @pytest.fixture
-def runtime(tmp_path):
+def runtime(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
+    monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
+    get_settings.cache_clear()
     db = SQLiteDatabase(tmp_path / '.local-shell-mcp')
     store = GenerationStore(db)
     profile = ProviderConfig('openai', 'test', 'http://127.0.0.1:10000/v1/chat/completions', '')
@@ -35,12 +40,15 @@ def runtime(tmp_path):
     runner = AgentRunner('a', job, db, store, scopes=set(), grant_expires=None,
                          stream_tools=empty_stream, stream_text=empty_stream,
                          on_text=emit, profile=profile)
-    return db, store, setting, profile, runner
+    yield db, store, setting, profile, runner
+    get_settings.cache_clear()
 
 
 def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, monkeypatch):
     db, _, repo, profile, runner = runtime
-    assert runner._memory_context(None) == ''
+    # With default Memory tools, even an empty store must retain consent.
+    assert 'Only use the `set_memory`' in runner._memory_context(None)
+    assert runner._memory_context({'id': 'plain', 'tools': []}) == ''
     repo.save_setting('a', 'endpoints', {'memory': {'tokenLimit': 100},
                                        'agents': {'capabilities': ['memory']}})
     assert 'Persistent memory is available' in runner._memory_context(None)
@@ -56,7 +64,9 @@ def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, mon
     repo.save_setting('a', 'user.memories', True)
     repo.save_setting('a', 'endpoints', {'memory': {'tokenLimit': 100}, 'agents': {}})
     assert 'Persistent memory is available' in runner._memory_context({'id': 'a', 'tools': ['memory']})
-    assert 'Only use the `set_memory`' not in runner._memory_context({'id': 'a', 'tools': ['memory']})
+    # Default-enabled memory tools remain available even if an Agent's other
+    # endpoint settings do not spell out its capabilities.
+    assert 'Only use the `set_memory`' in runner._memory_context({'id': 'a', 'tools': ['memory']})
 
 
 @pytest.mark.asyncio
@@ -65,8 +75,10 @@ async def test_memory_tool_requires_enabled_runtime_capability(runtime):
     tool = tool_definitions()[0]
     state = AgentLoopState(AgentContext(profile, [tool]), [{'role': 'user', 'content': 'Remember.'}])
     call = ModelToolCall('call-1', 'set_memory', {'key': 'style', 'value': 'I prefer concise responses.'})
+    repo.save_setting('a', 'user.memories', False)
     with pytest.raises(RuntimeSafetyError, match='disabled'):
         await runner._invoke(call, state)
+    repo.save_setting('a', 'user.memories', True)
     repo.save_setting('a', 'endpoints', {'memory': {}, 'agents': {'capabilities': ['memory']}})
     assert 'Memory set' in await runner._invoke(call, state)
     repo.save_setting('a', 'user.memories', False)

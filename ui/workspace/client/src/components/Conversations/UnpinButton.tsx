@@ -20,9 +20,8 @@ interface UnpinButtonProps {
 
 /**
  * The unpin badge a pinned row carries, shared by both kinds of row in the
- * Pinned section: conversations and agents/models/specs. They sit in one list
- * and are reordered against each other, so a badge that differed in colour,
- * size or in when it appears read as two different controls.
+ * sidebar: conversations and agents/models/specs. The groups are independent
+ * but share an unpin affordance, so their rows behave consistently.
  *
  * Hidden until the row is hovered or holds focus, and inert while hidden so an
  * invisible badge cannot swallow a click meant for the row. The reveal is asked

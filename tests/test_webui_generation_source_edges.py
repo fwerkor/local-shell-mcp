@@ -93,8 +93,10 @@ async def test_source_generation_start_translates_provider_and_database_exceptio
         monkeypatch.setattr(machine_permissions, 'resolve_access', lambda *args, **kw: {'local': 'write', 'outside': 'read'})
         monkeypatch.setattr(routes, '_request_grant', lambda _: (set(), None))
         response = await client.post('/api/agents/chat', json={'text': 'hello'})
-        assert response.status_code == 403
-        assert not store.active('local') if hasattr(store, 'active') else True
+        # Exposure of default machines must not require new shell OAuth grants
+        # just to start a text-only generation.
+        assert response.status_code == 202
+        assert started[-1][1]['granted_scopes'] == frozenset()
         monkeypatch.setattr(routes, '_request_grant', lambda _: ({'shell:read', 'shell:write', 'remote:use'}, None))
         response = await client.post('/api/agents/chat', json={'text': 'hello'})
         assert response.status_code == 202

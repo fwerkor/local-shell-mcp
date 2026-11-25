@@ -241,10 +241,26 @@ export function generateDynamicSchema(settings: SettingsConfiguration) {
 }
 
 const ZodTypeToSettingType: Record<string, string | undefined> = {
-  ZodString: 'string',
-  ZodNumber: 'number',
-  ZodBoolean: 'boolean',
+  string: 'string',
+  number: 'number',
+  boolean: 'boolean',
 };
+
+/** Zod 4 exposes the primitive type through `def.type`; optional/nullable/default
+ *  wrappers keep their own `def.type`, so unwrap them before classifying. */
+const PRIMITIVE_WRAPPERS = new Set(['optional', 'nullable', 'default', 'prefault', 'nonoptional']);
+
+function primitiveZodType(schema: z.ZodTypeAny): string | undefined {
+  let current: z.ZodTypeAny | undefined = schema;
+  for (let depth = 0; current != null && depth < 10; depth += 1) {
+    const definition = current.def as { type: string; innerType?: z.ZodTypeAny };
+    if (!PRIMITIVE_WRAPPERS.has(definition.type)) {
+      return definition.type;
+    }
+    current = definition.innerType;
+  }
+  return undefined;
+}
 
 const minColumns = 1;
 const maxColumns = 4;
@@ -503,8 +519,8 @@ export function validateSettingDefinitions(settings: SettingsConfiguration): voi
           path: ['optionType'],
         });
       } else {
-        const zodType = conversationSchema._def.typeName;
-        const settingTypeEquivalent = ZodTypeToSettingType[zodType] || null;
+        const zodType = primitiveZodType(conversationSchema);
+        const settingTypeEquivalent = (zodType && ZodTypeToSettingType[zodType]) || null;
         if (settingTypeEquivalent !== setting.type) {
           errors.push({
             code: ZodIssueCode.custom,

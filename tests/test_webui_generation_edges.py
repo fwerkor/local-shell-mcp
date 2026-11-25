@@ -148,7 +148,8 @@ async def test_generation_model_failure_is_durable_and_redacted(configured_gener
         assert (await client.get("/api/agents/chat/active", headers=alice)).json()["activeJobIds"] == []
         terminal = await client.get(f"/api/agents/chat/stream/{cid}", headers=alice)
         assert terminal.status_code == 200
-        assert "Model generation failed" in terminal.text
+        assert "lsm_generation_error" in terminal.text
+        assert "LSM could not finish this generation (RuntimeError)" in terminal.text
     await generation_routes.shutdown_generations()
 
 

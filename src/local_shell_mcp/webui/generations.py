@@ -172,6 +172,13 @@ class GenerationStore:
             prompt = ''
         if not manual_compaction and (not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
             raise ValueError("A non-empty text message is required (max 128 KiB)")
+        manual_skill_ids = payload.get('manualSkills')
+        if manual_skill_ids is not None:
+            from .skill_runtime import resolve_manual_skills
+
+            resolve_manual_skills(self.database, owner, agent, manual_skill_ids)
+        else:
+            manual_skill_ids = []
         user_message_id = str(payload.get('parentMessageId') if manual_compaction else (payload.get('messageId') or uuid.uuid4()))
         response_message_id = str(uuid.uuid4())
         run_id = "run_" + secrets.token_hex(16)
@@ -219,6 +226,16 @@ class GenerationStore:
             elif not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                                 (conversation_id, owner)).fetchone():
                 raise KeyError("Conversation not found")
+            elif state["model"] or payload.get("endpoint"):
+                # A later turn can switch model without recreating the chat. Keep
+                # the conversation's saved selection in sync with the actual
+                # request, including when the frontend did not send /convos/update.
+                db.execute(
+                    "UPDATE conversations SET model=CASE WHEN ? THEN ? ELSE model END, "
+                    "endpoint=COALESCE(?,endpoint),updated_at=? WHERE id=? AND owner=?",
+                    (bool(state["model"]), state["model"], payload.get("endpoint"),
+                     now, conversation_id, owner),
+                )
             if manual_compaction and not db.execute(
                 'SELECT 1 FROM messages WHERE id=? AND conversation_id=?',
                 (user_message_id, conversation_id),
@@ -247,6 +264,7 @@ class GenerationStore:
                 "sender": "User", "isCreatedByUser": True,
                 "endpoint": str(payload.get("endpoint") or "agents"),
                 "files": files,
+                **({"manualSkills": manual_skill_ids} if manual_skill_ids else {}),
             }
             if not manual_compaction:
                 db.execute(
@@ -274,6 +292,7 @@ class GenerationStore:
                     "sender": "User",
                     "files": files,
                     "isCreatedByUser": True,
+                    **({"manualSkills": manual_skill_ids} if manual_skill_ids else {}),
                 },
             }
             if manual_compaction:
@@ -955,6 +974,20 @@ class GenerationStore:
                     else:
                         content_parts.append({"type": "text", "text": content["text"],
                                               "phase": "final_answer"})
+            elif event == 'on_reasoning_delta':
+                part = (data.get('delta') or {}).get('content') or {}
+                if part.get('type') == 'think' and isinstance(part.get('think'), str) and part['think']:
+                    slot = text_slot_by_step.get(data.get('id'))
+                    if slot is not None and slot < len(content_parts):
+                        existing = content_parts[slot]
+                        if existing.get('type') == 'text' and not existing.get('text'):
+                            content_parts[slot] = {'type': 'think', 'think': part['think']}
+                        elif existing.get('type') == 'think':
+                            existing['think'] += part['think']
+                    elif content_parts and content_parts[-1].get('type') == 'think':
+                        content_parts[-1]['think'] += part['think']
+                    else:
+                        content_parts.append({'type': 'think', 'think': part['think']})
             elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
                 content_parts.append(data["part"])
             elif event == 'on_content_rewind':
@@ -1678,6 +1711,13 @@ class GenerationStore:
                             content[-1]["text"] += delta["text"]
                         else:
                             content.append({"type": "text", "text": delta["text"], "phase": "final_answer"})
+                elif kind == 'on_reasoning_delta':
+                    delta = (data.get('delta') or {}).get('content') or {}
+                    if delta.get('type') == 'think' and isinstance(delta.get('think'), str) and delta['think']:
+                        if content and content[-1].get('type') == 'think':
+                            content[-1]['think'] += delta['think']
+                        else:
+                            content.append({'type': 'think', 'think': delta['think']})
                 elif kind == "on_steer_applied" and isinstance(data.get("part"), dict):
                     content.append(data["part"])
                 elif kind == 'on_content_rewind':

@@ -1263,86 +1263,55 @@ export function deleteSkillFile(
   return request.delete(endpoints.skillFile(skillId, relativePath));
 }
 
-/* -------------------------------------------------------------------------- */
-/* Skill Tree (nodes) — phase 2 backend                                       */
-/* -------------------------------------------------------------------------- */
-/* These were introduced by the original UI PR and are shipped as stubs in    */
-/* phase 1 so the tree UI compiles. Each resolves with empty/no-op data until */
-/* the backend persists a folder hierarchy. The call surface matches what the */
-/* tree hooks expect so wiring real endpoints later is a one-line swap.       */
+/* Skill Tree — persisted folders and editable files in LSM SQLite. */
 
-export const getSkillTree = (_skillId: string): Promise<t.TSkillTreeResponse> => {
-  return Promise.resolve({ nodes: [] });
-};
+export const getSkillTree = (skillId: string): Promise<t.TSkillTreeResponse> =>
+  request.get(endpoints.skillTree({ skillId }));
 
 export const createSkillNode = (
   skillId: string,
   data: FormData | t.TCreateSkillNodeRequest,
-): Promise<t.TSkillNode> => {
-  const name = data instanceof FormData ? (data.get('name') as string) || 'untitled' : data.name;
-  const type = data instanceof FormData ? 'file' : data.type;
-  const now = new Date().toISOString();
-  return Promise.resolve({
-    _id: `pending-${now}`,
-    skillId,
-    parentId: null,
-    type,
-    name,
-    order: 0,
-    author: '',
-    createdAt: now,
-    updatedAt: now,
-  });
-};
+): Promise<t.TSkillNode> =>
+  data instanceof FormData
+    ? request.postMultiPart(endpoints.skillTree({ skillId }), data)
+    : request.post(endpoints.skillTree({ skillId }), data);
 
 export const updateSkillNode = (variables: {
   skillId: string;
   nodeId: string;
   data: t.TUpdateSkillNodeRequest;
-}): Promise<t.TSkillNode> => {
-  const now = new Date().toISOString();
-  return Promise.resolve({
-    _id: variables.nodeId,
-    skillId: variables.skillId,
-    parentId: variables.data.parentId ?? null,
-    type: 'file',
-    name: variables.data.name ?? '',
-    order: variables.data.order ?? 0,
-    author: '',
-    createdAt: now,
-    updatedAt: now,
-  });
-};
+}): Promise<t.TSkillNode> =>
+  request.patch(
+    endpoints.skillTree({ skillId: variables.skillId, path: variables.nodeId }),
+    variables.data,
+  );
 
-export const deleteSkillNode = (_variables: { skillId: string; nodeId: string }): Promise<void> => {
-  return Promise.resolve();
-};
+export const deleteSkillNode = (variables: { skillId: string; nodeId: string }): Promise<void> =>
+  request.delete(endpoints.skillTree({ skillId: variables.skillId, path: variables.nodeId }));
 
-export const getSkillNodeContent = (_variables: {
+export const getSkillNodeContent = (variables: {
   skillId: string;
   nodeId: string;
-}): Promise<{ content: string; mimeType: string }> => {
-  return Promise.resolve({ content: '', mimeType: 'text/plain' });
-};
+}): Promise<{ content: string; mimeType: string }> =>
+  request.get(
+    endpoints.skillTree({
+      skillId: variables.skillId,
+      path: `${encodeURIComponent(variables.nodeId)}/content`,
+    }),
+  );
 
 export const updateSkillNodeContent = (variables: {
   skillId: string;
   nodeId: string;
   content: string;
-}): Promise<t.TSkillNode> => {
-  const now = new Date().toISOString();
-  return Promise.resolve({
-    _id: variables.nodeId,
-    skillId: variables.skillId,
-    parentId: null,
-    type: 'file',
-    name: '',
-    order: 0,
-    author: '',
-    createdAt: now,
-    updatedAt: now,
-  });
-};
+}): Promise<t.TSkillNode> =>
+  request.put(
+    endpoints.skillTree({
+      skillId: variables.skillId,
+      path: `${encodeURIComponent(variables.nodeId)}/content`,
+    }),
+    { content: variables.content },
+  );
 
 export function getGitHubSkillSyncStatus(): Promise<sk.TGitHubSkillSyncStatusResponse> {
   return request.get(endpoints.adminSkillsSyncStatus());

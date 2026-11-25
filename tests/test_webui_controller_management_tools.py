@@ -43,7 +43,8 @@ def test_administration_requires_local_write_and_matching_oauth_scopes(policy):
     agent_control = {"session_manage", "plan_manage"}
     assert agent_control <= exposed("local", cid, set())
     repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"worker1": "write"})
-    assert not controller & exposed("local", cid, scopes)
+    # Unspecified local inherits the instance-wide default of read/write.
+    assert controller <= exposed("local", cid, scopes)
     assert agent_control <= exposed("local", cid, scopes)
     repo.save_setting("local", "agent.machine_policy.conversation." + cid,
                       {"local": "read", "worker1": "write"})

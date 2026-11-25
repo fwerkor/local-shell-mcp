@@ -65,7 +65,11 @@ def memory_config(repo: Any, owner: str) -> dict | None:
     if not isinstance(config, dict):
         endpoints = repo.setting(owner, 'endpoints', {})
         config = endpoints.get('memory') if isinstance(endpoints, dict) else None
-    return config if isinstance(config, dict) and config.get('disabled') is not True else None
+    # The Controller ships a working memory store without deployment setup.
+    # An explicit opt-out wins; no separate model is needed for manual memory.
+    if isinstance(config, dict) and config.get('disabled') is True:
+        return None
+    return config if isinstance(config, dict) else {}
 
 
 def memory_enabled(repo: Any, owner: str, *, tools: bool = False) -> bool:
@@ -76,8 +80,9 @@ def memory_enabled(repo: Any, owner: str, *, tools: bool = False) -> bool:
         return True
     endpoints = repo.setting(owner, 'endpoints', {}) or {}
     agents = endpoints.get('agents') if isinstance(endpoints, dict) else {}
-    caps = agents.get('capabilities') if isinstance(agents, dict) else []
-    return isinstance(caps, list) and 'memory' in caps
+    if isinstance(agents, dict) and isinstance(agents.get('capabilities'), list):
+        return 'memory' in agents['capabilities']
+    return True
 
 
 def tool_definitions(valid_keys: list[str] | None = None) -> list[dict]:
