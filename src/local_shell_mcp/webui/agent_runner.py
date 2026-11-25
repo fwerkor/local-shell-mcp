@@ -190,11 +190,15 @@ class AgentRunner:
         unrestricted = agent is None and selected_tools is None
         # Legacy agents retain their per-tool allowlist. Agents configured in
         # the new builder expose all audited native tools allowed by both ACLs.
-        machine_policy = (agent or {}).get("machine_permissions")
-        machine_configured = isinstance(machine_policy, dict)
+        from .machine_permissions import agent_access_policy
+
+        policy = agent_access_policy(agent or {})
+        machine_configured = policy is not None
+        machine_policy, machine_default = policy if policy is not None else (None, "write")
         native = available_tools(self.owner, self.authorization_conversation_id,
                                  scopes=set(self.scopes), expires=self.grant_expires,
-                                 agent_permissions=machine_policy if machine_configured else None)
+                                 agent_permissions=machine_policy,
+                                 agent_default_permission=machine_default)
         machine_exposed = selected_tools is None and machine_configured
         tools = [tool for tool in native
                  if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
@@ -204,8 +208,10 @@ class AgentRunner:
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
         if self.mcp_enabled and (agent or {}).get("mcp_servers") != []:
+            mcp_configured = "mcp_servers" in (agent or {})
+            mcp_exposed = selected_tools is None and (not selected or mcp_configured)
             tools += [tool for tool in nested_tools()
-                      if unrestricted or machine_exposed or (selected_tools is None and (not selected or bool((agent or {}).get("mcp_servers"))))
+                      if unrestricted or machine_exposed or mcp_exposed
                       or tool["function"]["name"] in selected]
         from .storage import WorkspaceRepository
         settings = WorkspaceRepository(self.database)

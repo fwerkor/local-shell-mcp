@@ -45,7 +45,7 @@ export default function LsmExternalMcpServers() {
           {localize('com_lsm_external_mcp_help')}
         </p>
       </div>
-      {selected != null && (
+      {selected !== null && (
         <button type="button" className="text-xs text-text-secondary underline"
           onClick={() => setValue('mcp_servers', null, { shouldDirty: true, shouldValidate: true })}>
           {localize('com_lsm_external_mcp_inherit')}

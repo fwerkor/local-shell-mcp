@@ -184,6 +184,11 @@ def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
         from .machine_permissions import validate_access_map
 
         result["machine_permissions"] = validate_access_map(obj["machine_permissions"])
+    if "machine_default_permission" in obj:
+        from .machine_permissions import agent_access_policy
+
+        _, default = agent_access_policy(obj)
+        result["machine_default_permission"] = default
     if "mcp_servers" in obj:
         from .misc_routes import _validate_feature_change
 

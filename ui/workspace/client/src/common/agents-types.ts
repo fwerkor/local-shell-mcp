@@ -41,6 +41,7 @@ export type AgentForm = {
   model_parameters: AgentModelParameters;
   tools?: string[];
   machine_permissions?: Record<string, 'none' | 'read' | 'write'>;
+  machine_default_permission?: 'none' | 'read' | 'write';
   mcp_servers?: string[] | null;
   /** Per-tool configuration options (deferred loading, allowed callers, etc.) */
   tool_options?: AgentToolOptions;

@@ -117,9 +117,8 @@ function AgentSelect({
       // A pre-machine-ACL Agent must retain its legacy tool allowlist until
       // the user explicitly opts into machine permissions. The new-Agent
       // default ({}) would otherwise silently broaden access on every edit.
-      if (!Object.prototype.hasOwnProperty.call(fullAgent, 'machine_permissions')) {
-        formValues.machine_permissions = undefined;
-      }
+      formValues.machine_permissions = fullAgent.machine_permissions;
+      formValues.machine_default_permission = fullAgent.machine_default_permission;
 
       Object.entries(fullAgent).forEach(([name, value]) => {
         if (name === 'model_parameters') {
@@ -174,9 +173,8 @@ function AgentSelect({
           return;
         }
 
-        if (name === 'machine_permissions' && typeof value === 'object' && value !== null) {
-          formValues[name] = value;
-          return;
+        if (name === 'machine_default_permission' || name === 'machine_permissions') {
+          return; // Loaded explicitly above, including absent legacy values.
         }
 
         if (!keys.has(name)) {

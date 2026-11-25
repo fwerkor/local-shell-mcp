@@ -9,7 +9,7 @@ jest.mock('~/hooks', () => ({ useLocalize: () => (key: string) => key }));
 
 function Form({ legacy }: { legacy: boolean }) {
   const methods = useForm({
-    defaultValues: { machine_permissions: legacy ? undefined : {}, tools: ['run_shell'] },
+    defaultValues: { machine_permissions: legacy ? undefined : {}, machine_default_permission: legacy ? undefined : 'none', tools: ['run_shell'] },
   });
   return (
     <FormProvider {...methods}>
@@ -38,14 +38,22 @@ test('legacy tool grants are visible and cannot silently become machine grants',
   expect(await screen.findByText('com_lsm_agent_machine_legacy')).toBeInTheDocument();
   expect(screen.getByLabelText('local machine access')).toBeDisabled();
   fireEvent.click(screen.getByText('com_lsm_agent_machine_revoke'));
-  await waitFor(() => expect(screen.getByTestId('policy')).toHaveTextContent('{"local":"none"}'));
+  await waitFor(() => expect(screen.getByTestId('policy')).toHaveTextContent('{}'));
   expect(screen.getByLabelText('local machine access')).not.toBeDisabled();
 });
 
-test('new agents use the fully allowed machine default', async () => {
+test('new agents deny by default and inherit without losing explicit overrides', async () => {
   mount(false);
   const picker = await screen.findByLabelText('local machine access');
+  expect(picker).toHaveValue('inherit');
+  const defaultPicker = screen.getByLabelText('com_lsm_agent_machine_default');
+  expect(defaultPicker).toHaveValue('none');
+  fireEvent.change(picker, { target: { value: 'write' } });
+  fireEvent.change(defaultPicker, { target: { value: 'read' } });
   expect(picker).toHaveValue('write');
+  expect(screen.getByTestId('policy')).toHaveTextContent('{"local":"write"}');
+  fireEvent.change(picker, { target: { value: 'inherit' } });
+  expect(screen.getByTestId('policy')).toHaveTextContent('{}');
   expect(screen.queryByText('com_lsm_agent_machine_legacy')).not.toBeInTheDocument();
 });
 
@@ -53,7 +61,7 @@ test('local is present and first even if an older server omits it', async () => 
   (request.get as jest.Mock).mockResolvedValue({ machines: [{ name: 'aia1', status: 'online' }] });
   mount(false);
   await screen.findByLabelText('aia1 machine access');
-  const pickers = screen.getAllByRole('combobox');
+  const pickers = screen.getAllByRole('combobox').filter((picker) => picker !== screen.getByLabelText('com_lsm_agent_machine_default'));
   expect(pickers[0]).toHaveAccessibleName('local machine access');
   fireEvent.change(pickers[0], { target: { value: 'none' } });
   expect(screen.getByTestId('policy')).toHaveTextContent('{"local":"none"}');

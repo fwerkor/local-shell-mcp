@@ -253,14 +253,18 @@ async def test_detached_native_execution_keeps_agent_identity(machine_agent, mon
     assert "run_in_background" not in recorded["arguments"]
 
 
-def test_external_mcp_available_without_machine_policy(machine_agent):
+@pytest.mark.parametrize(("mcp_config", "expected"), [
+    ({}, False), ({"mcp_servers": []}, False),
+    ({"mcp_servers": ["external-one"]}, True), ({"mcp_servers": None}, True),
+])
+def test_external_mcp_available_without_machine_policy(machine_agent, mcp_config, expected):
     from local_shell_mcp.webui.agent_runner import AgentRunner
     from local_shell_mcp.webui.generations import GenerationStore
     from local_shell_mcp.webui.providers import ProviderConfig
 
     repo, _, agents, _ = machine_agent
     legacy = agents.create("local", {"name": "External only", "provider": "openAI",
-                                      "model": "test", "tools": []})
+                                      "model": "test", "tools": ["file_read"], **mcp_config})
     store = GenerationStore(repo.database)
     generation, _ = store.begin("local", {"text": "External MCP"}, legacy)
     profile = ProviderConfig("openai", "test", "https://test.invalid", "")
@@ -271,7 +275,8 @@ def test_external_mcp_available_without_machine_policy(machine_agent):
     )
     context = runner._context(legacy, profile=profile)
     names = {item["function"]["name"] for item in context.tools}
-    assert {"mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call"} <= names
+    assert ({"mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call"} <= names) is expected
+    assert "file_read" in names
     assert "file_write" not in names  # No implicit migration of legacy tool grants.
 
 
@@ -295,3 +300,70 @@ async def test_subagent_machine_policy_is_not_replaced_by_empty_legacy_list(mach
         grant_expires=None,
     )
     assert observed == [None]
+
+@pytest.mark.asyncio
+async def test_agent_default_machine_permission_inheritance(machine_agent, monkeypatch):
+    _, cid, agents, agent = machine_agent
+    from local_shell_mcp.webui.machine_permissions import agent_access_policy
+
+    updated = agents.update("local", agent["id"], {
+        "machine_permissions": {"local": "write"},
+        "machine_default_permission": "none",
+    })
+    assert agent_access_policy(updated) == ({"local": "write"}, "none")
+    for invalid in ("inherit", "*", None, []):
+        with pytest.raises(ValueError):
+            agents.update("local", agent["id"], {"machine_default_permission": invalid})
+    monkeypatch.setattr(
+        "local_shell_mcp.webui.machine_permissions._registered_defaults",
+        lambda: {"local": "write", "worker1": "write", "new-worker": "write"},
+    )
+    async def invoke(*args, **kwargs):
+        return '{"ok":true}'
+    monkeypatch.setattr(registry, "_invoke_registered", invoke)
+
+    async def call(name, machine, **kwargs):
+        return await registry.call_tool(
+            "local", cid, ModelToolCall("default-test", name, {"machine": machine, **kwargs}),
+            granted_scopes=SCOPES, agent_id=agent["id"],
+        )
+
+    with pytest.raises(PermissionError, match="Agent has no read"):
+        await call("file_read", "new-worker", path="file.txt")
+    assert await call("file_read", "local", path="file.txt") == '{"ok":true}'
+    agents.update("local", agent["id"], {"machine_default_permission": "read"})
+    assert await call("file_read", "new-worker", path="file.txt") == '{"ok":true}'
+    with pytest.raises(PermissionError, match="Agent has no write"):
+        await call("file_write", "new-worker", path="file.txt", content="x")
+    agents.update("local", agent["id"], {"machine_default_permission": "write"})
+    with pytest.raises(PermissionError, match="read-only"):
+        await call("file_write", "worker1", path="file.txt", content="x")
+    with pytest.raises(PermissionError, match="not granted"):
+        await call("file_read", "unknown", path="file.txt")
+    assert await call("file_write", "new-worker", path="file.txt", content="x") == '{"ok":true}'
+
+
+def test_default_machine_permission_filters_tools_and_revokes_jobs(machine_agent):
+    from local_shell_mcp.webui import durable_tasks as durable
+
+    repo, cid, agents, agent = machine_agent
+    with repo.database.connect() as db:
+        db.execute("INSERT INTO runs(id,conversation_id,status,state,created_at,updated_at) "
+                   "VALUES('default-run',?,'running','{}',1,1)", (cid,))
+    agents.update("local", agent["id"], {
+        "machine_permissions": {}, "machine_default_permission": "write",
+    })
+    intent = durable.reserve("local", cid, "default-run", "default-lease", "job_start",
+                            {"command": "echo ok"}, SCOPES, None, agent_id=agent["id"])
+    assert durable.mark_revoked("local") == 0
+    agents.update("local", agent["id"], {"machine_default_permission": "none"})
+    assert durable.mark_revoked("local") == 1
+    with pytest.raises(PermissionError, match="revoked"):
+        durable.check_intent(intent)
+    for default, readable, writable in [("none", False, False), ("read", True, False), ("write", True, True)]:
+        tools = registry.available_tools("local", cid, scopes=SCOPES, agent_permissions={},
+                                         agent_default_permission=default)
+        names = {tool["function"]["name"] for tool in tools}
+        assert ("file_read" in names) is readable
+        assert ("file_write" in names) is writable
+        assert {"session_manage", "plan_manage"} <= names

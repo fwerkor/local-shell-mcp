@@ -14,7 +14,7 @@ from functools import lru_cache
 from typing import Any
 
 from ..audit import audit
-from .machine_permissions import authorize_machine_action, resolve_access
+from .machine_permissions import agent_access_policy, authorize_machine_action, resolve_access
 from .providers import ModelToolCall
 
 # Controller management belongs to the `local` machine and requires its
@@ -127,16 +127,17 @@ def _targets(tool: Any, arguments: dict[str, Any]) -> list[str]:
     return ["local"]
 
 
-def _agent_allows(policy: dict[str, str], machine: str, operation: str) -> bool:
-    # Agent maps contain only exceptions to the default fully exposed policy.
+def _agent_allows(policy: dict[str, str], machine: str, operation: str, default: str = "write") -> bool:
+    # Agent maps contain explicit exceptions to the Agent default.
     # The chat's machine policy and existing principal scopes remain ceilings.
-    level = policy.get(machine, "write")
+    level = policy.get(machine, default)
     return level == "write" if operation != "read" else level in {"read", "write"}
 
 
 def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
                     expires: int | None = None,
-                    agent_permissions: dict[str, str] | None = None) -> list[dict]:
+                    agent_permissions: dict[str, str] | None = None,
+                    agent_default_permission: str = "write") -> list[dict]:
     """Advertise registered tool schemas filtered by effective machine policy."""
     policy = resolve_access(owner, conversation_id)
     if agent_permissions is not None:
@@ -145,7 +146,7 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
 
         agent_policy = validate_access_map(agent_permissions)
         rank = {"none": 0, "read": 1, "write": 2}
-        policy = {name: min(level, agent_policy.get(name, "write"), key=rank.get)
+        policy = {name: min(level, agent_policy.get(name, agent_default_permission), key=rank.get)
                   for name, level in policy.items()}
     definitions: list[dict] = []
     for tool in _registry()._tool_manager.list_tools():
@@ -267,10 +268,9 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
             agent = AgentRepository(_repo().database).get(owner, agent_id)
             if agent is None:
                 raise PermissionError("Agent no longer exists")
-            if "machine_permissions" in agent:
-                from .machine_permissions import validate_access_map
-
-                agent_policy = validate_access_map(agent["machine_permissions"])
+            policy = agent_access_policy(agent)
+            if policy is not None:
+                agent_policy, default = policy
                 if tool.name == "remote_transfer":
                     requirements = [
                         (arguments.get("source_machine") or "local", "read"),
@@ -283,7 +283,7 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
 
                     requirements.extend(job_retry_machine_requirements(arguments.get("job_id")))
                 for machine, required in requirements:
-                    if not _agent_allows(agent_policy, machine, required):
+                    if not _agent_allows(agent_policy, machine, required, default):
                         raise PermissionError(f"Agent has no {required} access to machine {machine}")
         if tool.name in _AGENT_CONTROL:
             # Session ownership is still checked; this bypasses machine ACLs only.

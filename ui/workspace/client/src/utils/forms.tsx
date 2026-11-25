@@ -48,9 +48,10 @@ export const getDefaultAgentFormValues = (
   statefulCodeEnvironment: StatefulCodeEnvironment = 'user',
 ) => ({
   ...defaultAgentFormValues,
-  // A newly created Agent inherits all chat-exposed machines by default.
-  // Existing Agents without this field keep their legacy tool allowlist.
+  // New Builder Agents deny access unless explicitly granted.
+  // Existing Agents retain their stored machine or legacy tool policy.
   machine_permissions: {},
+  machine_default_permission: 'none' as const,
   mcp_servers: null,
   stateful_code_environment: statefulCodeEnvironment,
   avatar_file: null,

@@ -7,9 +7,9 @@ import LsmExternalMcpServers from './LsmExternalMcpServers';
 jest.mock('librechat-data-provider', () => ({ request: { get: jest.fn() } }));
 jest.mock('~/hooks', () => ({ useLocalize: () => (key: string) => key }));
 
-function Form() {
-  const methods = useForm<{ mcp_servers: string[] | null }>({
-    defaultValues: { mcp_servers: null },
+function Form({ legacy = false }: { legacy?: boolean }) {
+  const methods = useForm<{ mcp_servers?: string[] | null }>({
+    defaultValues: { mcp_servers: legacy ? undefined : null },
   });
   const value = useWatch({ control: methods.control, name: 'mcp_servers' });
   return (
@@ -44,4 +44,15 @@ test('server toggles persist an agent allowlist and never enable globally disabl
   fireEvent.click(screen.getByText('com_lsm_external_mcp_inherit'));
   expect(screen.getByTestId('policy')).toHaveTextContent('null');
   expect(other).toBeChecked();
+});
+
+test('legacy agents can explicitly allow all servers without selecting a subset first', async () => {
+  (request.get as jest.Mock).mockResolvedValue({
+    servers: [{ name: 'snowluma', enabled: true, transport: 'stdio', tool_count: 10 }],
+  });
+  const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={query}><Form legacy /></QueryClientProvider>);
+  await screen.findByRole('checkbox', { name: 'snowluma' });
+  fireEvent.click(screen.getByText('com_lsm_external_mcp_inherit'));
+  expect(screen.getByTestId('policy')).toHaveTextContent('null');
 });

@@ -1017,6 +1017,7 @@ export type Agent = {
   tools?: string[];
   /** Per-machine Agent ceiling; the chat's effective ACL still applies. */
   machine_permissions?: Record<string, 'none' | 'read' | 'write'>;
+  machine_default_permission?: 'none' | 'read' | 'write';
   mcp_servers?: string[] | null;
   tool_kwargs?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -1110,6 +1111,7 @@ export type AgentCreateParams = {
   | 'support_contact'
   | 'tool_options'
   | 'machine_permissions'
+  | 'machine_default_permission'
   | 'mcp_servers'
   | 'skills'
   | 'skills_enabled'
@@ -1148,6 +1150,7 @@ export type AgentUpdateParams = {
   | 'support_contact'
   | 'tool_options'
   | 'machine_permissions'
+  | 'machine_default_permission'
   | 'mcp_servers'
   | 'skills'
   | 'skills_enabled'
