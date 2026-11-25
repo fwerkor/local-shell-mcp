@@ -11,7 +11,7 @@ import time
 import pytest
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
-from local_shell_mcp.webui import agent_runner as agent_runtime
+from local_shell_mcp.webui import approval_settings
 from local_shell_mcp.webui.agent_runner import AgentRunner
 from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState, RuntimeSafetyError
 from local_shell_mcp.webui.generations import GenerationStore
@@ -96,8 +96,8 @@ async def test_policy_deny_produces_tool_output_without_execution(runner_state, 
     from local_shell_mcp.webui import routes
 
     monkeypatch.setattr(routes, '_repo', lambda: WorkspaceRepository(db))
-    monkeypatch.setattr(agent_runtime, 'approval_policy_decision',
-                        lambda _policy, name: {'decision': 'deny', 'reason': 'Blocked by operator'})
+    monkeypatch.setattr(approval_settings, 'call_decision',
+                        lambda _mode, _policy, name, _arguments: {'decision': 'deny', 'reason': 'Blocked by operator'})
 
     async def forbidden(*args, **kwargs):
         raise AssertionError('A denied tool must not execute')
