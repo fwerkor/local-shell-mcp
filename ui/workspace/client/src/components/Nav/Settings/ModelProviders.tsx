@@ -13,13 +13,12 @@ type Profile = {
   models: string[];
   model_contexts?: Record<string, number>;
   model_sampling?: Record<string, Sampling>;
-  include_usage?: boolean;
   configured: boolean;
   source: Source;
 };
 type Profiles = { providers: Profile[] };
 type Draft = { name: string; provider: Kind; base: string; models: string;
-  contexts: Record<string, string>; sampling: Record<string, SamplingDraft>; includeUsage: boolean; apiKey: string };
+  contexts: Record<string, string>; sampling: Record<string, SamplingDraft>; apiKey: string };
 type Editor = { original: Profile | null };
 const input = 'w-full rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary';
 const button = 'rounded-lg border border-border-medium px-3 py-2 text-sm text-text-primary hover:bg-surface-secondary disabled:opacity-40';
@@ -32,7 +31,7 @@ const protocolLabel = (provider: Kind) => kinds.find((kind) => kind.value === pr
 const channelLabel = (profile: Profile) => profile.name ?? protocolLabel(profile.provider) + ' (legacy)';
 const channelId = (profile: Profile) => profile.name ?? 'legacy:' + profile.provider;
 const newDraft = (): Draft => ({ name: '', provider: 'openai', base: kinds[0].defaultUrl,
-  models: '', contexts: {}, sampling: {}, includeUsage: true, apiKey: '' });
+  models: '', contexts: {}, sampling: {}, apiKey: '' });
 const errorMessage = (reason: unknown) => {
   const error = reason as { response?: { data?: { detail?: string; message?: string } | string }; message?: string };
   const data = error?.response?.data;
@@ -92,7 +91,6 @@ export default function ModelProviders() {
       models: profile.models.join('\n'),
       contexts: Object.fromEntries(Object.entries(profile.model_contexts ?? {}).map(([key, value]) => [key, String(value)])),
       sampling: Object.fromEntries(Object.entries(profile.model_sampling ?? {}).map(([model, value]) => [model, samplingDraft(value)])),
-      includeUsage: profile.include_usage !== false,
       apiKey: '',
     });
     setConfirmDelete(null);
@@ -130,7 +128,6 @@ export default function ModelProviders() {
         models,
         model_contexts: modelContexts,
         model_sampling: modelSampling,
-        ...(draft.provider === 'openai' ? { include_usage: draft.includeUsage } : {}),
         ...(original?.name || !original ? { name } : {}),
         ...(original?.name && name !== original.name ? { previous_name: original.name } : {}),
         ...(draft.apiKey ? { api_key: draft.apiKey } : {}),
@@ -251,10 +248,6 @@ export default function ModelProviders() {
                 sampling: { ...previous.sampling, [model]: value } }))} />
           </div>)}
         </details>}
-        {draft.provider === 'openai' && <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
-          <input type="checkbox" checked={draft.includeUsage} onChange={(event) => setDraft({ ...draft, includeUsage: event.target.checked })} />
-          Request exact token usage from the model API (auto-fallback when unsupported)
-        </label>}
       </div>
       <p className="text-xs text-text-secondary">{editor.original?.name ? 'Renaming a channel in use is restricted to protect Agent and conversation references. ' : ''}Keys are stored on the server and never returned here; an empty key preserves an existing one.</p>
       <div className="flex flex-wrap gap-2">

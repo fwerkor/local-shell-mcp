@@ -91,8 +91,7 @@ def _redact(value: dict) -> dict:
             "base_url": urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", "")),
             "models": value["models"], "model_contexts": value.get("model_contexts", {}),
             "model_sampling": value.get("model_sampling") or {},
-            "configured": configured(value),
-            "include_usage": value["provider"] == "openai" and value.get("include_usage") is not False}
+            "configured": configured(value)}
 
 
 def all_profiles() -> list[dict]:
@@ -164,14 +163,10 @@ def _validate(body: dict) -> dict:
         if not isinstance(model_sampling, dict) or model_sampling.keys() - set(models):
             raise ValueError("Sampling defaults must belong to configured models")
         model_sampling = {model: validate_sampling(value, provider=kind) for model, value in model_sampling.items()}
-    include_usage = body.get('include_usage')
-    if include_usage is not None and type(include_usage) is not bool:
-        raise ValueError('include_usage must be a boolean')
     return {**({"name": name} if name is not None else {}), "provider": kind, "base_url": base,
             "models": models, "api_key": (key.strip() or None) if key else None,
             "model_contexts": model_contexts,
-            "model_sampling": model_sampling,
-            'include_usage': include_usage}
+            "model_sampling": model_sampling}
 
 
 def _access(request):
@@ -295,8 +290,6 @@ async def provider_profiles(request):
                 value["model_sampling"] = {model: sampling for model, sampling in
                                            (previous.get("model_sampling") or {}).items()
                                            if model in value["models"]}
-            if value["include_usage"] is None:
-                value["include_usage"] = previous.get("include_usage", value["provider"] == "openai")
             db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) "
                        "DO UPDATE SET value=excluded.value", (_OWNER, key, json.dumps(value)))
             if renaming:

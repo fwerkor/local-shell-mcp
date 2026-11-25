@@ -143,7 +143,7 @@ async def test_openai_stream_reports_usage_after_final_text_not_in_text(model_ev
         {'choices': [{'delta': {'content': 'Hello.'}}]},
         {'choices': [], 'usage': {'prompt_tokens': 104, 'completion_tokens': 5}},
     ]
-    profile = ProviderConfig('openai', 'gpt', 'https://test.invalid/stream', 'secret', include_usage=True)
+    profile = ProviderConfig('openai', 'gpt', 'https://test.invalid/stream', 'secret')
     result = [item async for item in stream_model(profile, [{'role': 'user', 'content': 'Hello'}])]
     assert result == ['Hello.', ModelUsage('openai', 104, 5)]
     assert json.loads(requests[0].content)['stream_options'] == {'include_usage': True}
@@ -157,7 +157,7 @@ async def test_openai_tools_usage_after_calls(model_events):
             'function': {'name': 'demo', 'arguments': '{}'}}]}}]},
         {'choices': [], 'usage': {'prompt_tokens': 155, 'completion_tokens': 11}},
     ]
-    profile = ProviderConfig('openai', 'gpt', 'https://test.invalid/stream', 'secret', include_usage=True)
+    profile = ProviderConfig('openai', 'gpt', 'https://test.invalid/stream', 'secret')
     result = [item async for item in stream_model_with_tools(profile, [], tools=[{'type': 'function',
         'function': {'name': 'demo', 'parameters': {'type': 'object', 'properties': {}}}}])]
     assert result == [ModelToolCall('c1', 'demo', {}), ModelUsage('openai', 155, 11)]
@@ -361,7 +361,7 @@ async def test_openai_compatible_usage_option_retries_only_when_unsupported(monk
                               headers={'content-type': 'text/event-stream'})
 
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(server), **kw))
-    config = ProviderConfig('openai', 'compatible', 'https://test.invalid/stream', 'key', include_usage=True)
+    config = ProviderConfig('openai', 'compatible', 'https://test.invalid/stream', 'key')
     if with_tools:
         result = [item async for item in stream_model_with_tools(config, [], tools=[{
             'type': 'function', 'function': {'name': 'demo', 'parameters': {'type': 'object'}}}])]
@@ -383,7 +383,7 @@ async def test_usage_option_does_not_retry_unrelated_model_error(monkeypatch):
         return httpx.Response(400, json={'error': {'message': 'Model not found'}})
 
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(server), **kw))
-    config = ProviderConfig('openai', 'bad', 'https://test.invalid/stream', 'key', include_usage=True)
+    config = ProviderConfig('openai', 'bad', 'https://test.invalid/stream', 'key')
     with pytest.raises(httpx.HTTPStatusError):
         _ = [item async for item in stream_model(config, [])]
     assert len(requests) == 1
