@@ -10,6 +10,19 @@ const flush = async () => {
 };
 
 describe('server preferences', () => {
+  it('supports anonymous appearance without writing it to an account', async () => {
+    const patch = jest.fn();
+    const prefs = new ServerPreferences(async () => ({ theme: 'light' }), patch, jest.fn());
+    const listener = jest.fn();
+    prefs.subscribe('theme', listener);
+    prefs.set('theme', 'dark');
+    expect(prefs.get('theme', 'system')).toBe('dark');
+    expect(listener).toHaveBeenLastCalledWith('dark');
+    await prefs.load('alice');
+    expect(prefs.get('theme', 'system')).toBe('light');
+    expect(patch).not.toHaveBeenCalled();
+  });
+
   it('ignores legacy browser preferences and hydrates from the account', async () => {
     localStorage.setItem('autoExpandTools', 'true');
     const prefs = new ServerPreferences(async () => ({}), jest.fn(), jest.fn());

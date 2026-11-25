@@ -83,8 +83,15 @@ export class ServerPreferences {
 
   set(key: string, value: unknown) {
     const owner = this.owner;
-    if (!owner) return;
     const stored = value === undefined ? null : value;
+    if (!owner) {
+      // Login appearance is ephemeral; account hydration replaces it.
+      if (key === 'theme' && !Object.is(this.values[key], stored)) {
+        this.values[key] = stored;
+        this.publish(key);
+      }
+      return;
+    }
     if (this.has(key) && Object.is(this.values[key], stored)) return;
     const revision = (this.revisions.get(key) ?? 0) + 1;
     this.revisions.set(key, revision);
