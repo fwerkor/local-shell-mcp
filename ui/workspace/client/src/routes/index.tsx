@@ -11,10 +11,13 @@ import LsmControl from '~/components/LSM/Control';
 import Search from './Search';
 import { OAuthError, OAuthSuccess } from '~/components/OAuth';
 import Root from './Root';
+import ServerPreferencesGate from '~/components/System/ServerPreferencesGate';
 
 const AuthLayout = () => (
   <AuthContextProvider>
-    <Outlet />
+    <ServerPreferencesGate>
+      <Outlet />
+    </ServerPreferencesGate>
     <ApiErrorWatcher />
   </AuthContextProvider>
 );

@@ -153,13 +153,18 @@ def test_invalid_cron_step_rejected_not_interpreted_as_default(state):
 @pytest.mark.asyncio
 async def test_config_edit_preserves_next_run_advanced_concurrently(state, monkeypatch):
     app, repo, agent = state
+    # Use an actual daily occurrence, not an arbitrary wall-clock minute.
+    # A late claim should advance from the scheduled 09:00 occurrence.
+    from datetime import UTC, datetime
+
+    due = int(datetime(2026, 11, 25, 9, 0, tzinfo=UTC).timestamp() * 1000)
+    now = due + 30_000
+    monkeypatch.setattr(schedule_routes.time, "time", lambda: now / 1000)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                  base_url='http://test') as c:
         created = await c.post('/api/schedules', json=_config(agent))
         assert created.status_code == 201
         sid = created.json()['id']
-        now = int(time.time() * 1000)
-        due = now - 60_000
         with repo.database.connect() as db:
             db.execute('UPDATE webui_schedules SET next_run=? WHERE id=?', (due, sid))
         actual_validate = schedule_routes._validate
@@ -177,7 +182,7 @@ async def test_config_edit_preserves_next_run_advanced_concurrently(state, monke
         with repo.database.connect() as db:
             actual_next = db.execute('SELECT next_run FROM webui_schedules WHERE id=?',
                                      (sid,)).fetchone()['next_run']
-        assert actual_next > now
+        assert actual_next == due + 24 * 60 * 60_000
         assert changed.json()['nextRunAt'] == schedule_routes._iso(actual_next)
         schedule_routes._settle(repo.database, claimed[0][0], 'success')
         assert schedule_routes._claim_due(repo.database) == []

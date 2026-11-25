@@ -1,3 +1,4 @@
+import { serverPreferences } from '~/store/serverPreferences';
 import { useEffect, useRef } from 'react';
 import { useRecoilState, useSetRecoilState } from 'recoil';
 import { useGetCustomConfigSpeechQuery } from 'librechat-data-provider/react-query';
@@ -44,16 +45,13 @@ export default function useSpeechSettingsInit(isAuthenticated: boolean) {
 
     if (!isFetched) return;
 
-    if (
-      isError &&
-      (localStorage.getItem('engineSTT') === null || localStorage.getItem('engineTTS') === null)
-    ) {
+    if (isError && (!serverPreferences.has('engineSTT') || !serverPreferences.has('engineTTS'))) {
       setSpeechSettingsInitialized(false);
       return;
     }
 
-    const hasSavedEngineSTT = localStorage.getItem('engineSTT') !== null;
-    const hasSavedEngineTTS = localStorage.getItem('engineTTS') !== null;
+    const hasSavedEngineSTT = serverPreferences.has('engineSTT');
+    const hasSavedEngineTTS = serverPreferences.has('engineTTS');
 
     if (data && data.message !== 'not_found') {
       logger.log('Initializing speech settings from config:', data);
@@ -61,7 +59,12 @@ export default function useSpeechSettingsInit(isAuthenticated: boolean) {
       Object.entries(data).forEach(([key, value]) => {
         if (key === 'sttExternal' || key === 'ttsExternal') return;
 
-        if (localStorage.getItem(key) !== null) return;
+        if (
+          ['voice', 'cloudBrowserVoices', 'decibelValue'].includes(key)
+            ? localStorage.getItem(key) !== null
+            : serverPreferences.has(key)
+        )
+          return;
 
         const setter = setters[key as keyof typeof setters];
         if (setter) {

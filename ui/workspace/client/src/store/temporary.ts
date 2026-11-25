@@ -1,7 +1,7 @@
-import { atomWithLocalStorage } from '~/store/utils';
+import { atomWithLocalStorage, atomWithServerPreference } from '~/store/utils';
 
 const isTemporary = atomWithLocalStorage('isTemporary', false);
-const defaultTemporaryChat = atomWithLocalStorage('defaultTemporaryChat', false);
+const defaultTemporaryChat = atomWithServerPreference('defaultTemporaryChat', false);
 
 export default {
   isTemporary,

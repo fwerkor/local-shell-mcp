@@ -1,3 +1,4 @@
+import { serverPreferences } from '~/store/serverPreferences';
 import { useCallback, useEffect, useMemo } from 'react';
 import copy from 'copy-to-clipboard';
 import { useToastContext } from '@librechat/client';
@@ -442,17 +443,7 @@ export function resolveShortcutBindings(
 }
 
 function readOverridesFromStorage(): Record<string, ShortcutOverride> {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-  try {
-    const raw = window.localStorage.getItem(CUSTOM_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return typeof parsed === 'object' && parsed !== null ? parsed : {};
-  } catch {
-    return {};
-  }
+  return serverPreferences.get(CUSTOM_STORAGE_KEY, {});
 }
 
 export function effectiveBinding(

@@ -169,13 +169,27 @@ async def token_configs(request: Request):
 
 async def preferences(request: Request):
     owner = _owner(request)
+    # The client binds queued updates to the account that initiated them. An
+    # authentication refresh must never replay a stale update under another owner.
+    expected_owner = request.query_params.get("owner")
+    if expected_owner is not None:
+        from .auth import public_owner_id
+
+        if expected_owner != public_owner_id(owner):
+            raise HTTPException(409, detail="Preference account changed")
     repository = _repo()
     if request.method == "GET":
         return JSONResponse(repository.setting(owner, "user.preferences", {}))
     body = await _body(request)
     if len(str(body).encode("utf-8")) > 128 * 1024:
         raise HTTPException(413, detail="Preferences are too large")
-    repository.save_setting(owner, "user.preferences", body)
+    if request.method == "PATCH":
+        try:
+            body = repository.merge_setting(owner, "user.preferences", body, max_bytes=128 * 1024)
+        except ValueError as exc:
+            raise HTTPException(413, detail=str(exc)) from exc
+    else:
+        repository.save_setting(owner, "user.preferences", body)
     return JSONResponse(body)
 
 

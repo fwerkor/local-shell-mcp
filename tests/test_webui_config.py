@@ -61,6 +61,25 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
                                  json={"lang": "zh-CN", "theme": "dark"})).status_code == 200
         assert (await client.get("/api/user/preferences", headers=alice)).json()["theme"] == "dark"
         assert (await client.get("/api/user/preferences", headers={"x-test-owner": "bob"})).json() == {}
+        assert (await client.patch("/api/user/preferences", headers=alice,
+                                   json={"autoExpandTools": False})).json() == {
+            "lang": "zh-CN", "theme": "dark", "autoExpandTools": False,
+        }
+        assert (await client.patch("/api/user/preferences", headers=alice,
+                                   json={"theme": "light"})).json()["autoExpandTools"] is False
+        assert (await client.patch("/api/user/preferences", json={"theme": "dark"})).status_code == 401
+        assert (await client.get("/api/user/preferences", headers={"x-test-owner": "bob"})).json() == {}
+        assert (await client.patch("/api/user/preferences", headers=alice,
+                                   json={"large": "x" * (128 * 1024)})).status_code == 413
+        assert (await client.get("/api/user/preferences", headers=alice)).json()["theme"] == "light"
+        from local_shell_mcp.webui.auth import public_owner_id
+
+        assert (await client.patch("/api/user/preferences", headers=alice,
+                                   params={"owner": public_owner_id("bob")},
+                                   json={"theme": "dark"})).status_code == 409
+        assert (await client.get("/api/user/preferences", headers=alice,
+                                 params={"owner": public_owner_id("alice")})).status_code == 200
+        assert (await client.get("/api/user/preferences", headers=alice)).json()["theme"] == "light"
         create = await client.post("/api/presets", headers=alice, json={"title": "Research"})
         assert create.status_code == 200
         preset = create.json()

@@ -1,3 +1,4 @@
+import { serverPreferences } from '~/store/serverPreferences';
 import { LocalStorageKeys } from 'librechat-data-provider';
 
 export const CHAT_TITLE_IN_TAB_KEY = 'chatTitleInTab';
@@ -14,21 +15,15 @@ const getAppTitle = (): string => {
   }
 };
 
-/** Reads the setting straight from localStorage so non-React callers stay in sync with the atom. */
-export const isChatTitleInTabEnabled = (): boolean => {
-  try {
-    const saved = localStorage.getItem(CHAT_TITLE_IN_TAB_KEY);
-    return saved === null ? true : (JSON.parse(saved) as boolean);
-  } catch {
-    return true;
-  }
-};
+/** Read the same in-memory account preference as the Recoil atom. */
+export const isChatTitleInTabEnabled = (): boolean =>
+  serverPreferences.get(CHAT_TITLE_IN_TAB_KEY, true);
 
 /**
  * Sets the tab title to the conversation title, or to the app title when the
  * conversation title is empty or the user opted out.
  * Pass `enabled` when the atom's value is already known, since Recoil writes to
- * localStorage after the change handler runs.
+ * the preference cache after the change handler runs.
  */
 export const setDocumentTitle = (title?: string | null, enabled?: boolean): void => {
   const showChatTitle = enabled ?? isChatTitleInTabEnabled();

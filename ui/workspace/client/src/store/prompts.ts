@@ -1,5 +1,5 @@
 import { atom } from 'recoil';
-import { atomWithLocalStorage } from '~/store/utils';
+import { atomWithServerPreference } from '~/store/utils';
 import { PromptsEditorMode } from '~/common';
 
 // Static atoms without localStorage
@@ -16,10 +16,10 @@ const staticAtoms = {
 
 // Atoms with localStorage
 const localStorageAtoms = {
-  autoSendPrompts: atomWithLocalStorage('autoSendPrompts', true),
-  alwaysMakeProd: atomWithLocalStorage('alwaysMakeProd', true),
+  autoSendPrompts: atomWithServerPreference('autoSendPrompts', true),
+  alwaysMakeProd: atomWithServerPreference('alwaysMakeProd', true),
   // Editor mode
-  promptsEditorMode: atomWithLocalStorage<PromptsEditorMode>(
+  promptsEditorMode: atomWithServerPreference<PromptsEditorMode>(
     'promptsEditorMode',
     PromptsEditorMode.SIMPLE,
   ),
