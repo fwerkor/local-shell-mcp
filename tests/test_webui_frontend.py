@@ -35,11 +35,27 @@ async def test_react_assets_and_routes(tmp_path, monkeypatch):
         assert (await client.get("/")).status_code == 200
         assert (await client.get("/c/new")).status_code == 200
         assert "LSM WebUI" in (await client.get("/control/files")).text
+        for uri in ("/skills", "/skills/new", "/skills/deployment:code-humanizer",
+                    "/skills/deployment%3Acode-humanizer?file=references%2Fexample.md",
+                    "/skills/example-id/edit"):
+            response = await client.get(uri)
+            assert response.status_code == 200 and "LSM WebUI" in response.text
+            assert response.headers["Cache-Control"] == "no-store"
         assert "console.log" in (await client.get("/assets/app.js")).text
         assert (await client.get("/assets/secret.map")).status_code == 404
         assert (await client.get("/api/not-found")).status_code == 404
         assert (await client.get("/.env")).status_code == 404
         assert (await client.get("/foo")).status_code == 404
+
+
+def test_skill_pages_are_registered_in_react_router():
+    import re
+
+    router = Path(__file__).parents[1] / "ui/workspace/client/src/routes/index.tsx"
+    source = router.read_text(encoding="utf-8")
+    assert "import('~/components/Skills/layouts/SkillsView')" in source
+    for route in ("skills", "skills/new", "skills/:skillId", "skills/:skillId/edit"):
+        assert re.search(r"path: '" + re.escape(route) + r"',\s*lazy: loadSkillsView", source), route
 
 
 def test_only_safe_get_paths_are_public():
@@ -91,6 +107,7 @@ async def test_oauth_result_pages_render_publicly_without_login(tmp_path, monkey
             assert (await client.get("/oauth/authorize")).status_code == 404
             assert (await client.get("/oauth/success/private")).status_code == 404
             assert (await client.get("/c/new")).status_code == 303
+            assert (await client.get("/skills/deployment:code-humanizer")).status_code == 303
     finally:
         get_settings.cache_clear()
 

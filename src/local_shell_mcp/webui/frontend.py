@@ -22,7 +22,7 @@ from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Match, Route
 
 _STATIC_PREFIXES = ("monaco/", "assets/", "fonts/", "images/", "locales/", "favicon", "robots.txt", "manifest", "sw.js", "sw-heal.js", "registerSW.js", "workbox-")
-_SPA_PREFIXES = ("c", "login", "register", "search", "agents", "settings", "control", "projects", "chat", "d", "presets", "prompts", "schedules", "memories")
+_SPA_PREFIXES = ("c", "login", "register", "search", "agents", "settings", "control", "projects", "skills", "chat", "d", "presets", "prompts", "schedules", "memories")
 _ACTION_OAUTH_SPA_PATHS = frozenset({"/oauth/success", "/oauth/error"})
 _CACHE_LOCK = threading.Lock()
 _MAX_FILE_BYTES = 60 * 1024 * 1024

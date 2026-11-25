@@ -29,6 +29,11 @@ const loadProjectWorkspace = () =>
     Component: m.ProjectWorkspace,
   }));
 
+const loadSkillsView = () =>
+  import('~/components/Skills/layouts/SkillsView').then((m) => ({
+    Component: m.default,
+  }));
+
 const baseEl = document.querySelector('base');
 const baseHref = baseEl?.getAttribute('href') || '/';
 
@@ -81,6 +86,22 @@ export const router = createBrowserRouter(
             {
               path: 'projects/:projectId',
               lazy: loadProjectWorkspace,
+            },
+            {
+              path: 'skills',
+              lazy: loadSkillsView,
+            },
+            {
+              path: 'skills/new',
+              lazy: loadSkillsView,
+            },
+            {
+              path: 'skills/:skillId',
+              lazy: loadSkillsView,
+            },
+            {
+              path: 'skills/:skillId/edit',
+              lazy: loadSkillsView,
             },
             {
               path: 'agents',
