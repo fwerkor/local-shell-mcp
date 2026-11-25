@@ -37,6 +37,16 @@ def validate_access_map(value: Any) -> dict[str, str]:
     return result
 
 
+def agent_access_policy(agent: dict) -> tuple[dict[str, str], str] | None:
+    """Resolve an Agent's ACL, preserving legacy per-tool and implicit-write policies."""
+    if "machine_permissions" not in agent and "machine_default_permission" not in agent:
+        return None
+    default = agent.get("machine_default_permission", "write")
+    if not isinstance(default, str) or default not in _LEVELS:
+        raise ValueError("Default machine access must be none, read or write")
+    return validate_access_map(agent.get("machine_permissions", {})), default
+
+
 def _stored(repo: Any, owner: str, key: str) -> dict[str, str]:
     value = repo.setting(owner, key, {})
     # Never treat an old all-machine boolean permission as a privilege grant.

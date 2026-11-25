@@ -27,6 +27,7 @@ import FontSizeSelector from '../SettingsTabs/Chat/FontSizeSelector';
 import ChatTitleInTab from '../SettingsTabs/General/ChatTitleInTab';
 import AdvancedPrompts from '../SettingsTabs/Chat/AdvancedPrompts';
 import DuringRunAction from '../SettingsTabs/Chat/DuringRunAction';
+import ApprovalModeSetting from '~/components/Chat/approval/ApprovalModeSetting';
 import StatefulWorkspaceDefault from './StatefulWorkspaceDefault';
 import { ForkSettings } from '../SettingsTabs/Chat/ForkSettings';
 import ChatDirection from '../SettingsTabs/Chat/ChatDirection';
@@ -184,6 +185,14 @@ export const registry: SettingEntry[] = [
     }),
   },
   // Chat · Sending
+  {
+    id: 'toolApprovalMode',
+    tab: CHAT,
+    section: 'sending',
+    labelKey: 'com_ui_tool_approval_mode',
+    keywords: ['approval', 'permission', 'agent', 'tool', '危险', '审批'],
+    Component: ApprovalModeSetting,
+  },
   {
     id: 'enterToSend',
     tab: CHAT,

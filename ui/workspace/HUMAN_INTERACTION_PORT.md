@@ -217,3 +217,25 @@ a full two-Controller takeover between checkpoint creation and subsequent
 writes, stale tool-step refusal, and a successful fresh lease writing the same
 owned checkpoint. Original local and graph-only savers without an active HTTP
 actor keep their existing separate owner-bound semantics.
+
+## LSM tool approval preferences
+
+The global default is Automatic. Settings → Chat → Tool approval mode sets
+the server-side default; Agent Builder and the current conversation's tool
+permissions popover can override it or inherit. Conversation overrides take
+priority over Agent settings and the global default. Foreground and detached
+delegation retain the parent's approval floor unless the user explicitly sets
+a conversation override. Detached children deny calls requiring review instead
+of blocking on an unavailable human interface.
+
+- Automatic: no additional review (legacy explicitly configured approval rules
+  and all authorization checks still apply).
+- Review risky operations: conservative tool allowlist for known reads and
+  internal orchestration; writes, arbitrary commands/scripts and unknown
+  tools require approval. Only literal argument-free `ls` and `pwd` are
+  exempted for run_shell. This is a convenience policy, not a shell sandbox.
+- Review all tools: review every proposed call except Ask User itself, which
+  already pauses for human input. Legacy explicit Ask User rules still apply.
+
+The preference API persists owner-scoped values in SQLite. The approval
+mechanism does not grant machine access, enable tools, or bypass OAuth.

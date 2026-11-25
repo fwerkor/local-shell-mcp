@@ -33,10 +33,20 @@ def _check_mcp_access(owner: str, conversation_id: str, scopes: set[str], *, exe
         raise PermissionError("shell:execute is required to invoke an external tool")
 
 
-def _allowed(owner: str, conversation_id: str, arguments: dict) -> frozenset[str] | None:
+def _allowed(owner: str, conversation_id: str, arguments: dict, agent_id: str | None = None) -> frozenset[str] | None:
     from .misc_routes import effective_features
 
     selected = effective_features(owner, conversation_id)["mcpServers"]
+    if agent_id:
+        from .agents import AgentRepository
+        from .routes import _repo
+
+        agent = AgentRepository(_repo().database).get(owner, agent_id)
+        if agent is None:
+            raise PermissionError("Agent no longer exists")
+        ceiling = agent.get("mcp_servers")
+        if ceiling is not None:
+            selected = ceiling if selected is None else set(selected).intersection(ceiling)
     if selected is None:
         return None
     allowed = frozenset(selected)
@@ -46,30 +56,30 @@ def _allowed(owner: str, conversation_id: str, arguments: dict) -> frozenset[str
     server = arguments.get("server")
     target = name.split(":", 1)[0] if isinstance(name, str) else server
     if target is not None and target not in allowed:
-        raise PermissionError(f"MCP server is disabled for this chat: {target}")
+        raise PermissionError(f"MCP server is disabled for this chat or agent: {target}")
     return allowed
 
 
 async def _invoke_selected(owner: str, conversation_id: str, scopes: set[str],
-                           name: str, arguments: dict) -> str:
-    token = _AGENT_ALLOWED_SERVERS.set(_allowed(owner, conversation_id, arguments))
+                           name: str, arguments: dict, *, agent_id: str | None = None) -> str:
+    token = _AGENT_ALLOWED_SERVERS.set(_allowed(owner, conversation_id, arguments, agent_id))
     try:
         return await _invoke_registered(owner, conversation_id, name, arguments, scopes=scopes)
     finally:
         _AGENT_ALLOWED_SERVERS.reset(token)
 
 
-async def discover(owner: str, conversation_id: str, scopes: set[str], call: ModelToolCall) -> str:
+async def discover(owner: str, conversation_id: str, scopes: set[str], call: ModelToolCall, *, agent_id: str | None = None) -> str:
     """Use the registered LSM discovery implementations without tool execution."""
     _check_mcp_access(owner, conversation_id, scopes)
     if call.name not in {"mcp_tool_search", "mcp_tool_inspect"}:
         raise PermissionError("MCP execution requires explicit approval")
     if not isinstance(call.arguments, dict):
         raise ValueError("MCP discovery arguments must be an object")
-    return await _invoke_selected(owner, conversation_id, scopes, call.name, call.arguments)
+    return await _invoke_selected(owner, conversation_id, scopes, call.name, call.arguments, agent_id=agent_id)
 
 
-async def approved_call(owner: str, conversation_id: str, scopes: set[str], call: ModelToolCall) -> str:
+async def approved_call(owner: str, conversation_id: str, scopes: set[str], call: ModelToolCall, *, agent_id: str | None = None) -> str:
     _check_mcp_access(owner, conversation_id, scopes, execution=True)
     if call.name != "mcp_tool_call" or not isinstance(call.arguments, dict):
         raise ValueError("The approved tool does not match the pending action")
@@ -80,4 +90,4 @@ async def approved_call(owner: str, conversation_id: str, scopes: set[str], call
         raise ValueError("Invalid qualified external MCP tool name or arguments")
     # This function is only reached after the immutable SQLite action ID and
     # the user's explicit approve decision have been validated by resume.
-    return await _invoke_selected(owner, conversation_id, scopes, "mcp_tool_call", arguments)
+    return await _invoke_selected(owner, conversation_id, scopes, "mcp_tool_call", arguments, agent_id=agent_id)

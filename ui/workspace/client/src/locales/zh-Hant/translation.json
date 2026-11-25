@@ -1,4 +1,10 @@
 {
+  "com_ui_tool_approval_mode": "工具審批模式",
+  "com_ui_tool_approval_auto": "自動執行",
+  "com_ui_tool_approval_dangerous": "危險操作審批",
+  "com_ui_tool_approval_all": "全部審批",
+  "com_ui_tool_approval_inherit": "繼承預設設定",
+  "com_ui_tool_approval_description": "機器權限仍然有效。危險操作包括寫入、任意命令和未知工具。",
   "com_error_details_diagnostic": "完整錯誤資訊",
   "chat_direction_left_to_right": "由左至右",
   "chat_direction_right_to_left": "由右至左",

@@ -214,6 +214,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             graph_max_handoffs=root.get("maxHandoffs"),
             authorization_conversation_id=parent.authorization_conversation_id,
             background_deny=parent.background_deny,
+            parent_approval_mode=parent._approval_mode(),
             task_control_host=parent.task_control_host, task_control_id=parent.task_control_id,
             subagent_depth=parent.subagent_depth, on_injected=parent.on_injected,
             wakeup_lease=parent.wakeup_lease,

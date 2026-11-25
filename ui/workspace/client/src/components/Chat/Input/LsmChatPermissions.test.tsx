@@ -24,6 +24,9 @@ beforeEach(() => {
   put.mockReset();
   put.mockImplementation((_url: string, payload: unknown) => Promise.resolve(payload));
   get.mockImplementation((url: string) => {
+    if (url === '/api/lsm/approval/chat-1') {
+      return Promise.resolve({ mode: 'inherit', effective: 'automatic' });
+    }
     if (url === '/api/lsm/permissions/machines') {
       return Promise.resolve({ machines: [
         { name: 'local', status: 'online' }, { name: 'worker1', status: 'offline' },

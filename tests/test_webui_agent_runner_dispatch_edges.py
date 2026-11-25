@@ -5,7 +5,7 @@ import pytest
 from test_webui_agent_runner_boundaries import runner
 from test_webui_agent_runner_boundaries import runner_parts as runner_parts
 
-from local_shell_mcp.webui import agent_runner
+from local_shell_mcp.webui import agent_runner, approval_settings
 from local_shell_mcp.webui.agent_runtime import AgentLoopState, AgentSuspended, RuntimeSafetyError
 from local_shell_mcp.webui.providers import ModelToolCall
 
@@ -61,7 +61,7 @@ async def test_tool_batch_rejects_not_enabled_and_can_skip_namespace_only_step(r
 async def test_policy_deny_background_approval_or_human_pause_follow_original_fence(runner_parts,monkeypatch,
                                                                                      decision,detached):
     obj, state = ready(runner_parts,detached=detached)
-    monkeypatch.setattr(agent_runner,'approval_policy_decision',lambda *args:
+    monkeypatch.setattr(approval_settings,'call_decision',lambda *args:
                         {'decision':decision,'reason':'policy denied'})
     seen=[]
 
@@ -86,7 +86,7 @@ async def test_policy_deny_background_approval_or_human_pause_follow_original_fe
 async def test_ask_user_background_denial_parallel_constraint_or_pause(runner_parts,monkeypatch,
                                                                         detached,multiple):
     obj,state=ready(runner_parts,detached=detached,ask=True)
-    monkeypatch.setattr(agent_runner,'approval_policy_decision',lambda *args:None)
+    monkeypatch.setattr(approval_settings,'call_decision',lambda *args:None)
 
     async def fake_execute(calls, invoke, **kwargs):
         return [r['output'] for r in kwargs['settled'].values()]

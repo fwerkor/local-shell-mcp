@@ -88,6 +88,7 @@ async def test_text_only_provider_path_when_no_native_tools(runner_parts, monkey
 
     obj = runner(runner_parts, unexpected_tools, text=text_model)
     obj.web_search_enabled = False  # Web tools default on; opt out for text-only path.
+    obj.child_configs = []  # Explicit no-subagent scope for the no-tools transport test.
     messages = await obj.run(runner_parts[1].history('local', runner_parts[2].conversation_id))
     assert messages[-1]['content'] == 'Native-tools-disabled text still streams.'
     assert len(streams) == 1
@@ -122,11 +123,13 @@ async def test_enabled_registry_and_nested_mcp_error_guards(runner_parts, monkey
 
     calls = []
 
-    async def lookup(*args):
+    async def lookup(*args, agent_id=None):
+        assert agent_id is None
         calls.append('search')
         return 'searched'
 
-    async def execute(*args):
+    async def execute(*args, agent_id=None):
+        assert agent_id is None
         calls.append('call')
         return 'called'
 
