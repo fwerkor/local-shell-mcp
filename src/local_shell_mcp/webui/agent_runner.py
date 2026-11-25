@@ -52,8 +52,13 @@ from .semantic_index import (
     snapshot_compaction_semantic_index,
 )
 from .steering import SteeringStore, merged_text
-from .subagents import (MAX_SUBAGENT_DEPTH, build_subagent_configs, chat_subagent_config,
-                        invoke_subagent, subagent_tools)
+from .subagents import (
+    MAX_SUBAGENT_DEPTH,
+    build_subagent_configs,
+    chat_subagent_config,
+    invoke_subagent,
+    subagent_tools,
+)
 
 # The hosted Agent has an owner/Agent-aware Skill tool. Native MCP aliases
 # bypass per-user activation and must remain exclusive to external MCP clients.
