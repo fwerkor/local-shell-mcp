@@ -24,6 +24,7 @@ import UnpinButton from './UnpinButton';
 import RenameForm from './RenameForm';
 import ConvoLink from './ConvoLink';
 import store from '~/store';
+import { useConversationUnread } from './unread';
 
 interface ConversationProps {
   conversation: TConversation;
@@ -50,6 +51,7 @@ function Conversation({
   onRenamingChange,
   keyShortcuts,
 }: ConversationProps) {
+  const { marker: unreadMarker, setUnread } = useConversationUnread(conversation.conversationId);
   const params = useParams();
   const localize = useLocalize();
   const { showToast } = useToastContext();
@@ -257,6 +259,9 @@ function Conversation({
       return;
     }
 
+    if (currentConvoId === conversationId && !isPopoverActive && conversationId && unreadMarker) {
+      void setUnread(conversationId, false, unreadMarker).catch(() => {});
+    }
     if (currentConvoId === conversationId || isPopoverActive) {
       return;
     }
@@ -307,7 +312,7 @@ function Conversation({
   let actionWidthClassName = isSmallScreen
     ? 'group-focus-within:w-9 group-hover:w-9'
     : 'group-focus-within:w-7 group-hover:w-7';
-  if (isGenerating) {
+  if (isGenerating && !isPopoverActive) {
     actionVisibilityClassName = 'pointer-events-none w-5 scale-x-100 opacity-100';
     actionWidthClassName = '';
   } else if (isPopoverActive || isActiveConvo || isSmallScreen) {
@@ -322,7 +327,7 @@ function Conversation({
   }
 
   let actionContent: React.ReactNode = null;
-  if (isGenerating) {
+  if (isGenerating && !isPopoverActive) {
     actionContent = generatingSpinner;
   } else if (!renaming) {
     actionContent = <ConvoActions {...convoOptionsProps} hasInteracted={hasInteracted} />;
@@ -383,6 +388,13 @@ function Conversation({
       )}
       {isSharedBadgeVisible && (
         <Link2 className="icon-sm mr-1 shrink-0 text-text-secondary" aria-hidden="true" />
+      )}
+      {unreadMarker && !isGenerating && !renaming && (
+        <span
+          role="img"
+          aria-label={localize('com_ui_convo_unread')}
+          className="mr-2 size-2 shrink-0 rounded-full bg-blue-500"
+        />
       )}
       {conversation.pinned === true && (
         <UnpinButton

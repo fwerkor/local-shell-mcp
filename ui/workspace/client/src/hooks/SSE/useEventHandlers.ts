@@ -62,6 +62,7 @@ import { useApplyAgentTemplate } from '~/hooks/Agents';
 import { useAuthContext } from '~/hooks/AuthContext';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
 import { useLiveAnnouncer } from '~/Providers';
+import { notifyConversationCompletion } from '~/components/Conversations/unread';
 import store from '~/store';
 
 type TSyncData = {
@@ -1220,6 +1221,9 @@ export default function useEventHandlers({
       } finally {
         setShowStopButton(false);
         setIsSubmitting(false);
+        if (serverConversation?.conversationId && typeof data.unreadMarker === 'string') {
+          notifyConversationCompletion(serverConversation.conversationId, data.unreadMarker);
+        }
       }
     },
     [

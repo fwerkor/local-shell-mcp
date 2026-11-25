@@ -1776,9 +1776,15 @@ class GenerationStore:
                 run_state.pop("approvedToolBatch", None)
             db.execute("UPDATE runs SET status=?,state=?,updated_at=? WHERE id=?",
                        (status, _json(run_state), now, run_id))
-            db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, generation.conversation_id))
+            unread = db.execute(
+                "UPDATE conversations SET updated_at=?,unread_marker="
+                "CASE WHEN unread_marker LIKE 'manual:%' THEN ? ELSE ? END "
+                "WHERE id=? RETURNING unread_marker",
+                (now, "manual:" + run_id, "run:" + run_id, generation.conversation_id),
+            ).fetchone()["unread_marker"]
             final = {
                 "final": True,
+                "unreadMarker": unread,
                 "generationProtocolVersion": generation.protocol_version,
                 "conversation": {"conversationId": generation.conversation_id},
                 "responseMessage": response_message,

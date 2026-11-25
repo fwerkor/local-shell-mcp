@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import Conversation from './Convo';
+import { UnreadProvider } from './unread';
 
 jest.mock('react-dnd', () => ({ useDrag: () => [{}, () => undefined] }));
 jest.mock('recoil', () => ({ useRecoilValue: () => [] }));
@@ -66,17 +67,21 @@ jest.mock('./RenameForm', () => ({
 }));
 jest.mock('./UnpinButton', () => ({ __esModule: true, default: () => null }));
 
-function renderConversation() {
+function renderConversation(unread = false) {
   return render(
-    <Conversation
-      conversation={
-        { conversationId: 'chat-1', title: 'Example' } as React.ComponentProps<
-          typeof Conversation
-        >['conversation']
-      }
-      retainView={jest.fn()}
-      toggleNav={jest.fn()}
-    />,
+    <UnreadProvider
+      value={{ snapshot: { unread: unread ? { 'chat-1': 'manual:1' } : {} }, setUnread: jest.fn() }}
+    >
+      <Conversation
+        conversation={
+          { conversationId: 'chat-1', title: 'Example' } as React.ComponentProps<
+            typeof Conversation
+          >['conversation']
+        }
+        retainView={jest.fn()}
+        toggleNav={jest.fn()}
+      />
+    </UnreadProvider>,
   );
 }
 
@@ -92,6 +97,10 @@ function rightClick(x: number, y: number): MouseEvent {
 }
 
 describe('conversation row context menu', () => {
+  it('renders a small blue unread indicator for an unread conversation', () => {
+    renderConversation(true);
+    expect(screen.getByRole('img', { name: 'com_ui_convo_unread' })).toHaveClass('bg-blue-500');
+  });
   it('intercepts the browser menu and opens the existing actions at the mouse position', () => {
     renderConversation();
     expect(screen.getByTestId('convo-options')).toHaveAttribute('data-interacted', 'false');
