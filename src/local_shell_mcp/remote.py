@@ -125,6 +125,7 @@ REMOTE_WORKER_INTERACTIVE_LANE = "interactive"
 REMOTE_WORKER_TRANSFER_LANE = "transfer"
 REMOTE_WORKER_INTERACTIVE_CONCURRENCY = 4
 REMOTE_QUEUE_TIMEOUT_S = 30.0
+REMOTE_COMPATIBLE_UPGRADE_RETRY_S = 120.0
 REMOTE_RESULT_GRACE_S = 120.0
 REMOTE_WORKER_RESULT_OUTBOX_MAX_ITEMS = 1_024
 REMOTE_WORKER_RESULT_OUTBOX_MAX_BYTES = 256 * 1024 * 1024
@@ -590,6 +591,7 @@ class RemoteWorker:
     transfer_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     reset_generation: int = 0
     registration_key: str = ""
+    compatible_upgrade_retry_at: float = 0.0
 
 
 def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) -> None:
@@ -1246,6 +1248,21 @@ class RemoteManager:
                 "version": __version__,
                 "protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
             }
+            # A version-only mismatch must not strand a compatible worker if
+            # installing the new runtime fails. Offer a new attempt periodically
+            # while letting its other polls serve work between attempts.
+            with self._state_lock:
+                if protocol_version >= REMOTE_WORKER_POLL_PROTOCOL_VERSION:
+                    if worker_version == __version__:
+                        worker.compatible_upgrade_retry_at = 0.0
+                    elif upgrade["required"]:
+                        now = time.monotonic()
+                        if now < worker.compatible_upgrade_retry_at:
+                            upgrade["required"] = False
+                        else:
+                            worker.compatible_upgrade_retry_at = (
+                                now + REMOTE_COMPATIBLE_UPGRADE_RETRY_S
+                            )
             if upgrade["required"] and protocol_version == 2:
                 from .remote_worker_routes import worker_bundle_manifest
 

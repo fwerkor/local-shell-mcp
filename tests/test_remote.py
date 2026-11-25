@@ -487,6 +487,38 @@ async def test_upgrade_hold_preserves_compatible_worker_jobs(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_compatible_worker_upgrade_failure_does_not_starve_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.delenv("LOCAL_SHELL_MCP_REMOTE_WORKER_UPGRADE_HOLD", raising=False)
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    payload = {
+        "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+        "worker_version": "old-compatible",
+    }
+
+    first = await manager.poll(worker.token, payload)
+    assert first["upgrade"]["required"] is True
+    assert first["job"] is None
+
+    worker.queue.put_nowait({"id": "after-failed-upgrade", "tool": "list_files", "args": {}})
+    next_poll = await manager.poll(worker.token, payload)
+    assert next_poll["upgrade"]["required"] is False
+    assert next_poll["job"]["id"] == "after-failed-upgrade"
+
+    incompatible = await manager.poll(worker.token, {**payload, "protocol_version": 1})
+    assert incompatible["upgrade"]["required"] is True
+
+    worker.compatible_upgrade_retry_at = 0.0
+    retry = await manager.poll(worker.token, payload)
+    assert retry["upgrade"]["required"] is True
+
+
+@pytest.mark.asyncio
 async def test_invalid_worker_poll_protocol_uses_legacy_queue(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
