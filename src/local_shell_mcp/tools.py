@@ -127,9 +127,9 @@ from .shell_ops import (
     start_shell,
 )
 from .skill_ops import (
-    list_installed_skills,
-    load_installed_skill,
-    read_installed_skill_file,
+    list_skills,
+    load_skill,
+    read_skill,
 )
 from .state_store import get_state_store
 from .tmux_helper import persistent_shell_backend_info
@@ -3677,17 +3677,17 @@ def _register_environment_tools(
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_list() -> ToolResult:
         """List installed agent skills without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call."""
-        return await _tool_call(asyncio.to_thread, list_installed_skills, settings)
+        return await _tool_call(asyncio.to_thread, list_skills, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_load(name: str) -> ToolResult:
         """Load one installed agent skill by the exact name returned from skill_list. Returns SKILL.md instructions plus related file paths."""
-        return await _tool_call(asyncio.to_thread, load_installed_skill, name, settings)
+        return await _tool_call(asyncio.to_thread, load_skill, name, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_read(name: str, path: str) -> ToolResult:
         """Read one related text file from an installed Skill."""
-        return await _tool_call(asyncio.to_thread, read_installed_skill_file, name, path, settings)
+        return await _tool_call(asyncio.to_thread, read_skill, name, path, settings)
 
 
 def _register_command_tools(mcp: FastMCP, settings: Any) -> None:

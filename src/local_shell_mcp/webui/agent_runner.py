@@ -54,10 +54,6 @@ from .semantic_index import (
 from .steering import SteeringStore, merged_text
 from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
 
-# The hosted Agent has an owner/Agent-aware Skill tool. Native MCP aliases
-# bypass per-user activation and must remain exclusive to external MCP clients.
-_HOSTED_SKILL_ALIASES = frozenset({'skill_list', 'skill_load', 'skill_read'})
-
 
 class AgentRunner:
     def __init__(self, owner, generation, database, store, *, scopes, grant_expires,
@@ -188,6 +184,11 @@ class AgentRunner:
         admit_agent_graph(self.owner, self.graph_definition, self.repository)
         selected = set(selected_tools if selected_tools is not None else (agent or {}).get("tools") or [])
         unrestricted = agent is None and selected_tools is None
+        # Migrate the old Skill capability selection to the registered names.
+        if {"skill", "skills"} & selected or (
+            selected_tools is None and (agent or {}).get("skills_enabled") is True
+        ):
+            selected.update({"skill_list", "skill_load", "skill_read"})
         # Legacy agents retain their per-tool allowlist. Agents configured in
         # the new builder expose all audited native tools allowed by both ACLs.
         machine_policy = (agent or {}).get("machine_permissions")
@@ -197,9 +198,8 @@ class AgentRunner:
                                  agent_permissions=machine_policy if machine_configured else None)
         machine_exposed = selected_tools is None and machine_configured
         tools = [tool for tool in native
-                 if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
-                 and (unrestricted or machine_exposed or tool["function"]["name"] in selected
-                      or tool["function"]["name"] in {"session_manage", "plan_manage"})]
+                 if (unrestricted or machine_exposed or tool["function"]["name"] in selected
+                     or tool["function"]["name"] in {"session_manage", "plan_manage"})]
         from .misc_routes import effective_features
         from .storage import WorkspaceRepository
 
@@ -224,10 +224,6 @@ class AgentRunner:
                 and memory_enabled(settings, self.owner, tools=True)):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
-        from .skill_runtime import SKILL_TOOL, active_skills
-
-        if active_skills(self.database, self.owner, agent):
-            tools.append(SKILL_TOOL)
         if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
@@ -460,17 +456,8 @@ class AgentRunner:
         from .nested_mcp import approved_call, discover
 
         self._check_grant()
-        # A restored checkpoint may still contain a pre-upgrade native schema.
-        # Reject these aliases at dispatch as well as filtering them from prompts.
-        if call.name in _HOSTED_SKILL_ALIASES:
-            raise RuntimeSafetyError("Use the hosted skill tool for enabled Skills")
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
-        if call.name == 'skill':
-            from .skill_runtime import load
-
-            return load(self.database, self.owner, state.context.agent,
-                        call.arguments.get('name'), path=call.arguments.get('path'))
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
@@ -603,6 +590,9 @@ class AgentRunner:
                                          source_agent_id=current["id"])
             return build_handoff_command(edge, current["id"], current.get("name") or current["id"],
                                          call.name, call.arguments, call.call_id, state.messages)
+        from ..skill_ops import managed_skill_context
+
+        token = managed_skill_context.set((self.database, self.owner, state.context.agent))
         try:
             from .action_spec import is_action_tool
             if is_action_tool(call.name):
@@ -646,6 +636,8 @@ class AgentRunner:
             # Native/provider exceptions may contain credentials or headers.
             # Keep their type for recovery without copying secrets to the model.
             return "Tool failed (" + type(error).__name__ + ")"
+        finally:
+            managed_skill_context.reset(token)
 
     async def _child(self, invocation):
         async def quiet(text):

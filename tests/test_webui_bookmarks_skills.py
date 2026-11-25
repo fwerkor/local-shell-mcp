@@ -11,7 +11,8 @@ from starlette.applications import Starlette
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui import skill_routes, skill_tree_routes, tag_routes
-from local_shell_mcp.webui.skill_runtime import catalog, load
+from local_shell_mcp.webui.skill_runtime import catalog
+from local_shell_mcp.webui.skill_runtime import load_managed as load
 from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
@@ -189,7 +190,7 @@ def test_skill_activation_scope_and_deployment_source(app, monkeypatch):
                         lambda name: {'content': 'Server instructions'})
     catalog = skill_runtime.catalog(repo.database, 'alice', None)
     assert 'server-skill' in catalog and 'owner-skill' in catalog
-    assert skill_runtime.load(repo.database, 'alice', None, 'server-skill') == 'Server instructions'
+    assert 'Server instructions' in skill_runtime.manual_context(repo.database, 'alice', None, ['deployment:server-skill'])
     assert skill_runtime.active_skills(repo.database, 'alice', {'skills_scope': 'none'}) == []
     selected = skill_runtime.active_skills(repo.database, 'alice', {
         'skills_enabled': True, 'skills_scope': 'selected', 'skills': ['owner-skill'],
@@ -199,9 +200,9 @@ def test_skill_activation_scope_and_deployment_source(app, monkeypatch):
     repo.save_setting('alice', 'webui.skill.states', {'owner-skill': False})
     assert 'owner-skill' not in skill_runtime.catalog(repo.database, 'alice', None)
     with pytest.raises(ValueError, match='Invalid Skill'):
-        skill_runtime.load(repo.database, 'alice', None, '')
+        skill_runtime.load_managed(repo.database, 'alice', None, '')
     with pytest.raises(ValueError, match='not enabled'):
-        skill_runtime.load(repo.database, 'alice', None, 'owner-skill')
+        skill_runtime.load_managed(repo.database, 'alice', None, 'owner-skill')
     repo.save_setting('alice', 'webui.skill.states', 'bad')
     assert 'owner-skill' in skill_runtime.catalog(repo.database, 'alice', None)
     with repo.database.connect() as db:

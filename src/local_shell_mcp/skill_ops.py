@@ -1,6 +1,7 @@
 """Fixed operations for discovering and loading installed agent skills."""
 
 import os
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -196,3 +197,36 @@ def read_installed_skill_file(
         "source_path": str(source.path),
         **payload,
     }
+
+
+# Only the hosted Agent supplies an owner context; external MCP retains the
+# filesystem registry and never sees a different user's SQLite records.
+managed_skill_context: ContextVar = ContextVar("managed_skill_context", default=None)
+
+
+def list_skills(settings: Settings | None = None) -> dict[str, Any]:
+    result = list_installed_skills(settings)
+    context = managed_skill_context.get()
+    if context is not None:
+        from .webui.skill_runtime import managed_records
+
+        result["skills"].extend(managed_records(*context))
+    return result
+
+
+def load_skill(name: str, settings: Settings | None = None) -> dict[str, Any]:
+    context = managed_skill_context.get()
+    if context is not None and name.startswith("managed/"):
+        from .webui.skill_runtime import managed_result
+
+        return managed_result(*context, name)
+    return load_installed_skill(name, settings)
+
+
+def read_skill(name: str, path: str, settings: Settings | None = None) -> dict[str, Any]:
+    context = managed_skill_context.get()
+    if context is not None and name.startswith("managed/"):
+        from .webui.skill_runtime import managed_result
+
+        return managed_result(*context, name, path=path)
+    return read_installed_skill_file(name, path, settings)
