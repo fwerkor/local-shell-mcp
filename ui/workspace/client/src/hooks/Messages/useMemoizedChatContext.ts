@@ -61,7 +61,6 @@ export default function useMemoizedChatContext(
       regenerate: chatCtx.regenerate,
       conversation: stableConversation,
       handleContinue: chatCtx.handleContinue,
-      feedbackEnabled: chatCtx.feedbackEnabled,
       get isSubmitting() {
         return liveRef.current.isSubmitting;
       },
@@ -78,7 +77,6 @@ export default function useMemoizedChatContext(
       chatCtx.regenerate,
       stableConversation,
       chatCtx.handleContinue,
-      chatCtx.feedbackEnabled,
     ],
   );
 

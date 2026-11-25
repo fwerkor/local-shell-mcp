@@ -11,7 +11,7 @@ import {
   TooltipAnchor,
   RegenerateIcon,
 } from '@librechat/client';
-import type { TConversation, TMessage, TFeedback } from 'librechat-data-provider';
+import type { TConversation, TMessage } from 'librechat-data-provider';
 import { useMessagesIsSubmitting, useOptionalMessagesOperations } from '~/Providers';
 import { useGenerationsByLatest, useLocalize } from '~/hooks';
 import { hasEditablePart } from './Content/editableParts';
@@ -19,7 +19,6 @@ import { revealedQueuedTurnFamily } from '~/store/steer';
 import { Fork } from '~/components/Conversations';
 import { hoverButtonClasses } from './styles';
 import MessageAudio from './MessageAudio';
-import Feedback from './Feedback';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -39,7 +38,6 @@ type THoverButtons = {
   getLatestMessageId?: () => string | undefined;
   isLast: boolean;
   index: number;
-  handleFeedback?: ({ feedback }: { feedback: TFeedback | undefined }) => void;
 };
 
 type HoverButtonProps = {
@@ -138,7 +136,6 @@ const HoverButtons = ({
   latestMessageId,
   getLatestMessageId,
   isLast,
-  handleFeedback,
 }: THoverButtons) => {
   const localize = useLocalize();
   /** Subscribed here rather than passed down: a send toggles the rerun controls on
@@ -291,11 +288,6 @@ const HoverButtons = ({
           getLatestMessageId={getLatestMessageId ?? (() => latestMessageId)}
           isLast={isLast}
         />
-      )}
-
-      {/* Feedback Buttons */}
-      {!error && !isActiveStreamingMessage && !isCreatedByUser && handleFeedback != null && (
-        <Feedback handleFeedback={handleFeedback} feedback={message.feedback} isLast={isLast} />
       )}
 
       {/* Regenerate Button */}

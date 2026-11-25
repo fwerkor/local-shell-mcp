@@ -6,7 +6,6 @@ import type { FunctionTool } from './types/tools';
 import type { TFile } from './types/files';
 import { CODE_ENVIRONMENT_MODES, CODE_WORKSPACE_ID_PATTERN } from './code/workspace';
 import { userSubmittedMessageFieldPathSchema } from './filters';
-import { TFeedback, feedbackSchema } from './feedback';
 import { CODE_APPROVAL_MODES } from './code/approval';
 import { Tools } from './types/tools';
 
@@ -933,7 +932,6 @@ export const tMessageSchema = z.object({
   thread_id: z.string().optional(),
   /* frontend components */
   iconURL: z.string().nullable().optional(),
-  feedback: feedbackSchema.optional(),
   /** metadata */
   metadata: z.record(z.string(), z.unknown()).optional(),
   /** Output tokens for assistant messages, calibrated prompt-side estimate for user messages */
@@ -1079,7 +1077,6 @@ export type TMessage = z.input<typeof tMessageSchema> & {
   clientTimestamp?: string;
   /** Client-only durable branch anchor while this message is an optimistic response. */
   clientQueueParentMessageId?: string;
-  feedback?: TFeedback;
 };
 
 export const coerceNumber = z.union([z.number(), z.string()]).transform((val) => {

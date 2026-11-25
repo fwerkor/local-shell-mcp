@@ -899,7 +899,6 @@ export function areMessageFieldsEqual(
     prevMsg.model === nextMsg.model &&
     prevMsg.endpoint === nextMsg.endpoint &&
     prevMsg.iconURL === nextMsg.iconURL &&
-    prevMsg.feedback?.rating === nextMsg.feedback?.rating &&
     areMessageFilesEqual(prevMsg.files, nextMsg.files) &&
     (prevMsg.attachments?.length ?? 0) === (nextMsg.attachments?.length ?? 0) &&
     (prevMsg.manualSkills?.length ?? 0) === (nextMsg.manualSkills?.length ?? 0) &&

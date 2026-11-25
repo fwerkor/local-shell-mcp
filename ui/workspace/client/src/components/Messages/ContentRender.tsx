@@ -108,7 +108,6 @@ const ContentRender = memo(function ContentRender({
     conversation,
     messageLabel,
     handleContinue,
-    handleFeedback,
     copyToClipboard,
     getCanCopy,
     regenerateMessage,
@@ -218,7 +217,6 @@ const ContentRender = memo(function ContentRender({
             handleContinue={handleContinue}
             latestMessageId={latestMessageId}
             getLatestMessageId={getLatestMessageId}
-            handleFeedback={handleFeedback}
             isLast={isLast}
           />
         </SubRow>

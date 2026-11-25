@@ -71,8 +71,6 @@ export * from './svg';
 export * from './utils';
 export * from './actions';
 export { default as createPayload } from './createPayload';
-/* feedback */
-export * from './feedback';
 export * from './parameterSettings';
 export * from './agentToolOptions';
 export * from './backgroundResults';
