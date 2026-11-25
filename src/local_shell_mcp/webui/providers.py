@@ -50,6 +50,8 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
     value = profile(provider)
     kind = value["provider"]
     token, base = value.get("api_key", ""), value["base_url"]
+    if not model and not value["models"]:
+        raise ValueError("No available models in this channel")
     name = model or value["models"][0]
     if kind == "openai":
         if not token and urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"}:

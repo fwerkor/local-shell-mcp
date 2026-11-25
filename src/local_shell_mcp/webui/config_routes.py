@@ -230,10 +230,13 @@ async def delete_preset(request: Request):
 
 
 def config_routes() -> list[Route]:
+    from .model_discovery import discover_models, refresh_model_channel
     from .provider_profiles import provider_profiles
 
     return [
         Route("/api/lsm/providers", provider_profiles, methods=["GET", "PUT", "DELETE"]),
+        Route("/api/lsm/providers/discover", discover_models, methods=["POST"]),
+        Route("/api/lsm/providers/refresh", refresh_model_channel, methods=["POST"]),
         Route("/api/config", startup_config, methods=["GET"]),
         Route("/api/endpoints", endpoint_configs, methods=["GET"]),
         Route("/api/endpoints/token-config", token_configs, methods=["GET"]),
