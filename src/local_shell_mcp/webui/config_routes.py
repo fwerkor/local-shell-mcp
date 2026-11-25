@@ -52,7 +52,7 @@ def _endpoint_info(*, memory_available: bool = False) -> dict:
         # The native LibreChat endpointSchema uses OpenAI-compatible transport
         # for a custom name unless provider='anthropic'. LSM additionally has
         # an explicit Google native channel, never a generic custom client.
-        endpoint_type = ("openAI" if value["provider"] == "openai" else value["provider"])
+        endpoint_type = ("openAI" if value["provider"] in {"openai", "openai-responses"} else value["provider"])
         result[name] = {
             "order": index, "type": endpoint_type, "name": name,
             "modelDisplayLabel": "Model", "userProvide": False,

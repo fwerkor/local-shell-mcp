@@ -26,6 +26,7 @@ _DEFAULTS = {
     "anthropic": ("https://api.anthropic.com/v1", "claude-sonnet-4-6"),
     "google": ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
 }
+_PROTOCOLS = frozenset(_DEFAULTS) | {"openai-responses"}
 # Built-in provider aliases resolve case-insensitively via profile(). Use the
 # same aliases when checking references before resetting saved credentials.
 _LEGACY_ALIASES = {
@@ -81,7 +82,7 @@ def profile(channel: str) -> dict:
 
 def configured(value: dict) -> bool:
     return bool(value["models"] and (value.get("api_key") or (
-        value["provider"] == "openai" and urlsplit(value["base_url"]).hostname in {"127.0.0.1", "localhost", "::1"})))
+        value["provider"] in {"openai", "openai-responses"} and urlsplit(value["base_url"]).hostname in {"127.0.0.1", "localhost", "::1"})))
 
 
 def _redact(value: dict) -> dict:
@@ -126,7 +127,7 @@ def validate_connection(body: dict) -> tuple[str, str, str | None]:
     from .providers import _require_https_or_loopback
 
     kind = body.get("provider")
-    if not isinstance(kind, str) or kind not in _DEFAULTS:
+    if not isinstance(kind, str) or kind not in _PROTOCOLS:
         raise ValueError("Unsupported model provider")
     base = body.get("base_url")
     if not isinstance(base, str) or not base.strip() or len(base) > 2048:
@@ -151,6 +152,8 @@ def validate_connection(body: dict) -> tuple[str, str, str | None]:
 def _validate(body: dict) -> dict:
     kind, base, key = validate_connection(body)
     name = body.get("name")
+    if kind == "openai-responses" and name is None:
+        raise ValueError("Responses channels require a channel name")
     if name is not None and (not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or (name.lower() in _RESERVED or name.lower().endswith("assistants"))):
         raise ValueError("Invalid or reserved channel name")
     auto_discover = body.get("auto_discover", False)

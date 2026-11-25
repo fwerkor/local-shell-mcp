@@ -142,3 +142,21 @@ it('refreshes saved automatic channels immediately without editing', async () =>
   expect(post).toHaveBeenCalledWith(path + '/refresh', { channel: 'DeepSeek' });
   expect(put).not.toHaveBeenCalled();
 });
+
+
+it('uses the existing channel form for the fourth, Responses protocol', async () => {
+  await addChannel();
+  const protocol = screen.getByLabelText('Model provider');
+  fireEvent.change(protocol, { target: { value: 'openai-responses' } });
+  expect(screen.getByLabelText('Model API base URL')).toHaveValue('https://api.openai.com/v1');
+  expect(toggle()).toBeChecked();
+  await screen.findByText('Discovered 2 models');
+  expect(post).toHaveBeenCalledWith(path + '/discover', {
+    provider: 'openai-responses', base_url: 'https://api.openai.com/v1', api_key: 'key',
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    provider: 'openai-responses', auto_discover: true,
+  }));
+});
