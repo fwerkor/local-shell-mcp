@@ -21,7 +21,6 @@ class ProviderConfig:
     url: str
     token: str
     timeout_s: float = 180.0
-    include_usage: bool = False
     sampling: dict = field(default_factory=dict)
 
 
@@ -69,8 +68,6 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
     else:
         raise ValueError("Unsupported model provider")
     return ProviderConfig(kind, name, url, token,
-                          include_usage=kind == 'openai' and (
-                              value.get('include_usage') is not False),
                           sampling=(value.get('model_sampling') or {}).get(name, {}))
 
 
@@ -246,8 +243,7 @@ async def stream_model(
         body["messages"] = openai_wire_messages(project_artifact_messages(messages, config.provider))
         if max_tokens is not None:
             body["max_completion_tokens"] = max_tokens
-        if config.include_usage:
-            body['stream_options'] = {'include_usage': True}
+        body['stream_options'] = {'include_usage': True}
         if temperature is not None:
             body["temperature"] = temperature
         if top_p is not None:
@@ -403,8 +399,7 @@ async def stream_model_with_tools(
     }
     if max_tokens is not None:
         body["max_completion_tokens"] = max_tokens
-    if config.include_usage:
-        body['stream_options'] = {'include_usage': True}
+    body['stream_options'] = {'include_usage': True}
     if temperature is not None:
         body["temperature"] = temperature
     if top_p is not None:
