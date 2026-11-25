@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
 import ModelProviders from './ModelProviders';
@@ -20,9 +20,16 @@ const post = jest.mocked(request.post);
 const put = jest.mocked(request.put);
 const path = '/api/lsm/providers';
 const catalog = { models: ['flash', 'pro'], model_contexts: { flash: 1048576 } };
+const toggle = () => screen.getByRole('switch', { name: 'Automatically discover model information' });
+const existing = {
+  name: 'DeepSeek', provider: 'openai', base_url: 'https://api.deepseek.com',
+  models: ['old', 'flash'], model_contexts: { flash: 65536 },
+  model_context_overrides: { flash: 65536 }, discovered_model_contexts: { flash: 1048576 },
+  auto_discover: true, configured: true, source: 'named',
+};
 
 function mount() {
-  render(<QueryClientProvider client={new QueryClient()}><ModelProviders /></QueryClientProvider>);
+  return render(<QueryClientProvider client={new QueryClient()}><ModelProviders /></QueryClientProvider>);
 }
 
 async function addChannel() {
@@ -40,41 +47,98 @@ beforeEach(() => {
   post.mockResolvedValue(catalog);
 });
 
-it('discovers the catalog on save with no model input and saves reported windows', async () => {
+it('defaults to automatic mode and previews metadata; saves only explicit context overrides', async () => {
   await addChannel();
-  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
-  await screen.findByText('Channel saved.');
+  expect(toggle()).toBeChecked();
+  expect(screen.queryByLabelText('Model identifiers')).not.toBeInTheDocument();
+  await screen.findByText('Discovered 2 models');
   expect(post).toHaveBeenCalledWith(path + '/discover', {
     provider: 'openai', base_url: 'https://api.deepseek.com', api_key: 'key',
   });
-  expect(put).toHaveBeenCalledWith(path, expect.objectContaining(catalog));
+  expect(screen.getByLabelText('Context window for flash')).toHaveAttribute('placeholder', '1048576');
+  fireEvent.change(screen.getByLabelText('Context window for pro'), { target: { value: '8192' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    auto_discover: true, models: ['flash', 'pro'], model_contexts: { pro: 8192 },
+  }));
 });
 
-it('opens manual fallback when discovery fails and does not save an empty catalog', async () => {
-  post.mockRejectedValueOnce(new Error('List unavailable'));
+it('saves automatic mode before preview finishes using the authoritative server discovery', async () => {
   await addChannel();
   fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
-  await screen.findByText('List unavailable');
-  expect(screen.getByText('Edit models and context windows manually').closest('details')).toHaveAttribute('open');
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    auto_discover: true, models: [], model_contexts: {},
+  }));
+});
+
+it('does not turn off the toggle on preview failure; manual fallback is explicit', async () => {
+  post.mockRejectedValueOnce(new Error('List unavailable'));
+  await addChannel();
+  await screen.findByText(/List unavailable/);
+  expect(toggle()).toBeChecked();
   expect(put).not.toHaveBeenCalled();
+  fireEvent.click(toggle());
+  expect(toggle()).not.toBeChecked();
   fireEvent.change(screen.getByLabelText('Model identifiers'), { target: { value: 'manual' } });
   fireEvent.change(screen.getByLabelText('Context window for manual'), { target: { value: '8192' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
   await screen.findByText('Channel saved.');
   expect(post).toHaveBeenCalledTimes(1);
-  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({ models: ['manual'], model_contexts: { manual: 8192 } }));
+  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    auto_discover: false, models: ['manual'], model_contexts: { manual: 8192 },
+  }));
 });
 
-it('refreshes an existing channel without losing manual aliases or context overrides', async () => {
-  get.mockResolvedValue({ providers: [{ name: 'DeepSeek', provider: 'openai', base_url: 'https://api.deepseek.com', models: ['alias', 'flash'], model_contexts: { flash: 65536 }, configured: true, source: 'named' }] });
+it('replaces removed models and preserves explicit overrides in auto mode', async () => {
+  get.mockResolvedValue({ providers: [existing] });
   mount();
   fireEvent.click(await screen.findByRole('button', { name: 'Edit DeepSeek' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Fetch models' }));
-  await screen.findByText('Fetched 2 models. Save to apply.');
-  expect(put).not.toHaveBeenCalled();
+  await screen.findByText('Discovered 2 models');
+  expect(screen.queryByLabelText('Context window for old')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Context window for flash')).toHaveValue(65536);
   expect(post).toHaveBeenCalledWith(path + '/discover', {
     provider: 'openai', base_url: 'https://api.deepseek.com', existing_channel: 'DeepSeek',
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
-  await waitFor(() => expect(put).toHaveBeenCalledWith(path, expect.objectContaining({ models: ['alias', 'flash', 'pro'], model_contexts: { flash: 65536 } })));
+  await waitFor(() => expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    auto_discover: true, models: ['flash', 'pro'], model_contexts: { flash: 65536 },
+  })));
+});
+
+it('freezes current effective metadata when disabling auto mode', async () => {
+  get.mockResolvedValue({ providers: [existing] });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit DeepSeek' }));
+  await screen.findByText('Discovered 2 models');
+  fireEvent.click(toggle());
+  expect(screen.getByLabelText('Model identifiers')).toHaveValue('flash\npro');
+  expect(screen.getByLabelText('Context window for flash')).toHaveValue(65536);
+  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    auto_discover: false, models: ['flash', 'pro'], model_contexts: { flash: 65536 },
+  }));
+});
+
+it('ignores late discovery replies after switching to manual mode', async () => {
+  let resolve: (value: typeof catalog) => void = () => {};
+  post.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  await addChannel();
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  fireEvent.click(toggle());
+  fireEvent.change(screen.getByLabelText('Model identifiers'), { target: { value: 'manual' } });
+  await act(async () => { resolve(catalog); });
+  expect(screen.getByLabelText('Model identifiers')).toHaveValue('manual');
+});
+
+it('refreshes saved automatic channels immediately without editing', async () => {
+  get.mockResolvedValue({ providers: [existing] });
+  post.mockResolvedValueOnce({ providers: [existing] });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh DeepSeek' }));
+  await screen.findByText('Model information refreshed.');
+  expect(post).toHaveBeenCalledWith(path + '/refresh', { channel: 'DeepSeek' });
+  expect(put).not.toHaveBeenCalled();
 });

@@ -1,4 +1,4 @@
-"""Admin-only model metadata discovery; never changes saved channels."""
+"""Admin-only model discovery and controller-owned saved catalog refresh."""
 from __future__ import annotations
 
 import asyncio
@@ -83,7 +83,7 @@ def _parse_page(kind: str, data: dict, models: dict[str, int | None]) -> dict:
     return {}
 
 
-async def _fetch_models(kind: str, base: str, token: str) -> dict:
+async def _fetch_models(kind: str, base: str, token: str, *, allow_empty: bool = False) -> dict:
     headers = {'accept': 'application/json'}
     if token:
         if kind == 'google':
@@ -120,7 +120,7 @@ async def _fetch_models(kind: str, base: str, token: str) -> dict:
             seen.add(cursor)
         else:
             raise ValueError('Provider model list has too many pages')
-    if not models:
+    if not models and not allow_empty:
         raise ValueError('Provider returned no supported models; enter model identifiers manually')
     return {'models': list(models), 'model_contexts': {m: n for m, n in models.items() if n is not None}}
 
@@ -151,7 +151,7 @@ _SYNC_ERROR = 'Unable to refresh model information. Last successful data is reta
 
 
 def connection_identity(value: dict) -> tuple:
-    return (value.get('provider'), value.get('base_url'), value.get('api_key') or '')
+    return (value.get('provider'), (value.get('base_url') or '').rstrip('/'), value.get('api_key') or '')
 
 
 def _apply_catalog(value: dict, catalog: dict, overrides: dict) -> None:
@@ -180,11 +180,12 @@ async def prepare_auto_save(value: dict, previous: dict) -> tuple[tuple, dict | 
         raise HTTPException(400, detail='Enter an API key to use automatic discovery at a changed endpoint')
     token = value['api_key'] if value['api_key'] is not None else identity[2]
     try:
-        return identity, await _fetch_models(value['provider'], value['base_url'], token)
+        return identity, await _fetch_models(value['provider'], value['base_url'], token,
+                                             allow_empty=previous.get('auto_discover') is True and same_endpoint)
     except (httpx.HTTPError, TimeoutError, ValueError, UnicodeError):
         # A newly configured connection must have a verified catalog. An
         # existing connection may still be saved during a temporary outage.
-        if same_endpoint and token == identity[2] and previous.get('models'):
+        if same_endpoint and token == identity[2] and (previous.get('models') or previous.get('auto_discover') is True):
             return identity, None
         raise HTTPException(502, detail='Unable to discover models. Check the connection or turn off automatic discovery.') from None
 
@@ -212,7 +213,7 @@ async def _refresh_snapshot(database, key: str, raw: str) -> bool:
         return False
     try:
         kind, base, token = validate_connection(value)
-        catalog = await _fetch_models(kind, base, token or '')
+        catalog = await _fetch_models(kind, base, token or '', allow_empty=True)
     except (httpx.HTTPError, TimeoutError, ValueError, UnicodeError):
         value['model_sync_error'] = _SYNC_ERROR
     else:
