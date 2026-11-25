@@ -212,6 +212,10 @@ def test_native_skill_tools_follow_normal_registry(runner_state, monkeypatch):
     restricted = {tool['function']['name'] for tool in
                   runner._context(None, profile=profile, selected_tools=[]).tools}
     assert not {'skill_list', 'skill_load', 'skill_read', 'file_read'} & restricted
+    delegated = {tool['function']['name'] for tool in runner._context(
+        {'id': 'legacy', 'skills_enabled': True, 'tools': ['file_read']}, profile=profile,
+        selected_tools=('file_read',)).tools}
+    assert {'skill_list', 'skill_load', 'skill_read', 'file_read'} <= delegated
     # A disabled managed record does not remove the native tool definitions.
     WorkspaceRepository(db).save_setting('local', 'webui.skill.states', {'managed': False})
     hidden = {tool['function']['name'] for tool in runner._context(None, profile=profile).tools}
@@ -245,3 +249,34 @@ def test_server_web_preference_controls_tool_exposure(runner_state):
     assert not {'web_search', 'web_fetch'} & names()
     repo.save_setting('local', 'conversation.permissions.' + job.conversation_id, {'web': True})
     assert {'web_search', 'web_fetch'} <= names()
+
+
+@pytest.mark.asyncio
+async def test_background_skill_dispatch_preserves_hosted_context(runner_state, monkeypatch):
+    from local_shell_mcp.skill_ops import managed_skill_context
+    from local_shell_mcp.webui import background_tools, lsm_tool_registry
+
+    database, _, _, profile, runner = runner_state
+    agent = {'id': 'saved', 'skills_enabled': True, 'skills_scope': 'none'}
+    runner._injected_background_names['saved'] = frozenset({'skill_load'})
+    tools = [{'function': {'name': 'skill_load', 'parameters': {'properties': {
+        'run_in_background': {'type': 'boolean'},
+    }}}}]
+    state = AgentLoopState(AgentContext(profile, tools, agent=agent), [])
+    observed = []
+
+    async def native(owner, conversation, call, **kwargs):
+        observed.append(managed_skill_context.get())
+        assert 'run_in_background' not in call.arguments
+        return 'loaded'
+
+    async def start(*args, scopes, grant_expires, dispatch, **kwargs):
+        assert managed_skill_context.get() is None
+        return await dispatch(args[5], scopes, grant_expires, args[3])
+
+    monkeypatch.setattr(lsm_tool_registry, 'call_tool', native)
+    monkeypatch.setattr(background_tools, 'start_tool_task', start)
+    call = ModelToolCall('bg', 'skill_load', {'name': 'x', 'run_in_background': True})
+    assert await runner._invoke(call, state) == 'loaded'
+    assert observed == [(database, 'local', agent)]
+    assert managed_skill_context.get() is None

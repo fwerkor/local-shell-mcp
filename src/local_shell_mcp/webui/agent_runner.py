@@ -186,7 +186,7 @@ class AgentRunner:
         unrestricted = agent is None and selected_tools is None
         # Migrate the old Skill capability selection to the registered names.
         if {"skill", "skills"} & selected or (
-            selected_tools is None and (agent or {}).get("skills_enabled") is True
+            (agent or {}).get("skills_enabled") is True
         ):
             selected.update({"skill_list", "skill_load", "skill_read"})
         # Legacy agents retain their per-tool allowlist. Agents configured in
@@ -542,14 +542,21 @@ class AgentRunner:
                 if self.background_deny:
                     raise RuntimeSafetyError("Background execution is disabled in this child context")
 
-                origin_agent_id = (state.context.agent or {}).get("id")
+                origin_agent = copy.deepcopy(state.context.agent)
+                origin_agent_id = (origin_agent or {}).get("id")
 
                 async def detached_dispatch(c, scopes, expires, authorization):
-                    return await invoke_native(self.owner, self.generation.conversation_id, c,
-                                               granted_scopes=set(scopes), grant_expires=expires,
-                                               run_id=self.generation.run_id,
-                                               authorization_conversation_id=authorization,
-                                               agent_id=origin_agent_id)
+                    from ..skill_ops import managed_skill_context
+
+                    token = managed_skill_context.set((self.database, self.owner, origin_agent))
+                    try:
+                        return await invoke_native(self.owner, self.generation.conversation_id, c,
+                                                   granted_scopes=set(scopes), grant_expires=expires,
+                                                   run_id=self.generation.run_id,
+                                                   authorization_conversation_id=authorization,
+                                                   agent_id=origin_agent_id)
+                    finally:
+                        managed_skill_context.reset(token)
 
                 return await start_tool_task(self.database, self.owner,
                                              self.generation.conversation_id,

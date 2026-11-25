@@ -154,12 +154,14 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
   if (canUseWebSearch && webSearchEnabled) {
     dropdownItems.push({
       onClick: handleWebSearchToggle,
+      ariaChecked: webSearch?.toggleState === true,
       disabled: !features?.canEdit,
       hideOnClick: false,
       render: (props) => (
         <div {...props}>
           <div className="flex items-center gap-2">
             <Globe className="icon-md" aria-hidden="true" />
+            {webSearch?.toggleState === true && <Check className="icon-sm" aria-hidden="true" />}
             <span>{localize('com_ui_web_search')}</span>
           </div>
           <div className="flex items-center gap-1">
@@ -189,12 +191,14 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
   if (showMemory) {
     dropdownItems.push({
       onClick: handleMemoryToggle,
+      ariaChecked: memory?.toggleState === true,
       disabled: !features?.canEdit,
       hideOnClick: false,
       render: (props) => (
         <div {...props} data-testid="tools-menu-memory">
           <div className="flex items-center gap-2">
             <Brain className="icon-md" aria-hidden="true" />
+            {memory?.toggleState === true && <Check className="icon-sm" aria-hidden="true" />}
             <span>{localize('com_ui_memory')}</span>
           </div>
           <button
