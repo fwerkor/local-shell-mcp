@@ -573,3 +573,134 @@ async def test_optional_sse_transport_initializes_session(tmp_path, monkeypatch)
     async with DynamicMCPManager(tmp_path)._session(server) as session:
         assert isinstance(session, Session)
     assert calls == [(server.url, server.headers), "initialized"]
+
+
+@pytest.mark.asyncio
+async def test_discovery_notifications_periodic_refresh_and_lifecycle(tmp_path, monkeypatch):
+    import asyncio
+
+    from mcp.types import (
+        ServerCapabilities,
+        ServerNotification,
+        ToolListChangedNotification,
+        ToolsCapability,
+    )
+
+    manager = DynamicMCPManager(tmp_path / ".state")
+    monkeypatch.setattr(dynamic_mcp, "_REGISTRY_CHECK_INTERVAL_S", 0.02)
+    monkeypatch.setattr(dynamic_mcp, "_REFRESH_INTERVAL_S", 0.2)
+    await manager.manage(action="register", name="watch", command=sys.executable, refresh=False)
+    names = ["initial"]
+    handlers = []
+    closed = []
+    fail = False
+
+    class Session:
+        def get_server_capabilities(self):
+            return ServerCapabilities(tools=ToolsCapability(listChanged=True))
+
+        async def list_tools(self, cursor=None):
+            if fail:
+                raise RuntimeError("offline")
+            return SimpleNamespace(
+                tools=[Tool(name=name, inputSchema={}) for name in names], nextCursor=None
+            )
+
+    @asynccontextmanager
+    async def connect(config, *, message_handler=None):
+        handlers.append(message_handler)
+        try:
+            yield Session()
+        finally:
+            closed.append(config.updated_at)
+
+    monkeypatch.setattr(manager, "_session", connect)
+
+    async def wait_for_tools(expected):
+        async with asyncio.timeout(3):
+            while (await manager.search())["tools"] != expected:
+                await asyncio.sleep(0.005)
+
+    def tools(name):
+        return [{"name": f"watch:{name}", "server": "watch", "tool": name,
+                 "title": None, "description": None}]
+
+    task = asyncio.create_task(manager.serve_refresh())
+    try:
+        await wait_for_tools(tools("initial"))
+        names[:] = ["notified"]
+        await handlers[-1](ServerNotification(ToolListChangedNotification()))
+        await wait_for_tools(tools("notified"))
+        assert len(handlers) == 1
+        names[:] = ["polled"]
+        await wait_for_tools(tools("polled"))
+        fail = True
+        await handlers[-1](ServerNotification(ToolListChangedNotification()))
+        async with asyncio.timeout(3):
+            while not closed:
+                await asyncio.sleep(0.005)
+        assert (await manager.search())["tools"] == tools("polled")
+        names[:] = ["recovered"]
+        fail = False
+        await wait_for_tools(tools("recovered"))
+        assert len(handlers) >= 2
+
+        names[:] = ["updated"]
+        await manager.manage(action="env_set", name="watch", key="EXAMPLE", value="value")
+        await wait_for_tools(tools("updated"))
+        await manager.manage(action="disable", name="watch")
+        async with asyncio.timeout(3):
+            while len(closed) != len(handlers):
+                await asyncio.sleep(0.005)
+        assert (await manager.search())["tools"] == []
+        before = len(handlers)
+        await asyncio.sleep(0.05)
+        assert len(handlers) == before
+        await manager.manage(action="enable", name="watch")
+        async with asyncio.timeout(3):
+            while len(handlers) == before:
+                await asyncio.sleep(0.005)
+        await manager.manage(action="remove", name="watch")
+        await wait_for_tools([])
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert len(closed) == len(handlers)
+
+
+@pytest.mark.asyncio
+async def test_discovery_fallback_reopens_stdio_session(tmp_path, monkeypatch):
+    import asyncio
+
+    manager = DynamicMCPManager(tmp_path / ".state")
+    monkeypatch.setattr(dynamic_mcp, "_REFRESH_INTERVAL_S", 0.05)
+    script = _server_script(tmp_path)
+    await manager.manage(
+        action="register", name="demo", command=sys.executable, args=[str(script)], refresh=False
+    )
+    task = asyncio.create_task(manager.serve_refresh())
+    try:
+        async with asyncio.timeout(15):
+            while not (await manager.search("echo"))["tools"]:
+                await asyncio.sleep(0.02)
+            script.write_text(script.read_text().replace("def echo(", "def changed("))
+            while not (await manager.search("changed"))["tools"]:
+                await asyncio.sleep(0.02)
+        assert (await manager.search("echo"))["tools"] == []
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_discovery_does_not_overwrite_newer_refresh_or_recreated_server(tmp_path):
+    manager = DynamicMCPManager(tmp_path / ".state")
+    await manager.manage(action="register", name="demo", command=sys.executable, refresh=False)
+    original = manager._load()["demo"]
+    assert (await manager._store_tools(original, [{"name": "new"}]))["refreshed"]
+    assert not (await manager._store_tools(original, [{"name": "old"}]))["refreshed"]
+    assert (await manager.search())["tools"][0]["tool"] == "new"
+    await manager.manage(action="remove", name="demo")
+    await manager.manage(action="register", name="demo", command=sys.executable, refresh=False)
+    with pytest.raises(RuntimeError, match="configuration changed"):
+        await manager._store_tools(original, [{"name": "old"}])
