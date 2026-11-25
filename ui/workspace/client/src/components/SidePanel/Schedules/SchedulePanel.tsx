@@ -1,13 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { Plus } from 'lucide-react';
 import { Button, TooltipAnchor } from '@librechat/client';
-import { PermissionTypes, Permissions } from 'librechat-data-provider';
 import { PanelContent, PanelFooter } from '~/components/ui';
 import { useChatProjectNames } from './useScheduleProjects';
 import ScheduleCardSkeleton from './ScheduleCardSkeleton';
 import ScheduleEmptyState from './ScheduleEmptyState';
 import { useSchedulesQuery } from '~/data-provider';
-import { useLocalize, useHasAccess } from '~/hooks';
+import { useLocalize } from '~/hooks';
 import ScheduleDialog from './ScheduleDialog';
 import ScheduleCard from './ScheduleCard';
 import useRunSync from './useRunSync';
@@ -19,11 +18,6 @@ export default function SchedulePanel() {
    *  chat a run just produced is read out of the same poll. */
   useRunSync(data?.schedules, dataUpdatedAt);
   const [createOpen, setCreateOpen] = useState(false);
-
-  const hasCreateAccess = useHasAccess({
-    permissionType: PermissionTypes.SCHEDULES,
-    permission: Permissions.CREATE,
-  });
 
   const schedules = data?.schedules ?? [];
   /** ONE lookup for the whole list. Resolving a name inside each card would re-walk
@@ -39,7 +33,7 @@ export default function SchedulePanel() {
   if (isError) {
     panelContent = <ScheduleEmptyState isError onRetry={() => refetch()} />;
   } else if (schedules.length === 0) {
-    panelContent = <ScheduleEmptyState canCreate={hasCreateAccess && !atLimit} />;
+    panelContent = <ScheduleEmptyState canCreate={!atLimit && !isLoading && data != null} />;
   } else {
     panelContent = (
       <div className="space-y-2" role="list" aria-label={localize('com_ui_schedules')}>
@@ -72,7 +66,7 @@ export default function SchedulePanel() {
           <span className="text-sm font-medium text-text-primary">
             {localize('com_ui_schedules')}
           </span>
-          {hasCreateAccess && (
+          {data != null && (
             <TooltipAnchor
               description={localize('com_ui_schedule_new')}
               side="bottom"
