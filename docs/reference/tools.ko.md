@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # Tools reference
 
 이 페이지는 실제 MCP tool schema에서 구성됩니다. Public tool surface를 변경한 뒤 `python scripts/generate-tools-reference.py`를 실행해 English reference를 갱신하십시오.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-하나의 durable Logical Session을 관리합니다. start는 새 task를 만들고 session_id를 반환합니다. resume은 사용자가 명시적으로 제공했거나 이 conversation에 이미 있는 session_id만 계속. start 이외의 모든 action에는 session_id가 필요합니다. Action: start, resume, get, report, finish, cancel, delete. report는 summary/findings/next/blockers/objective/label을 받고, delete에는 terminal Session이 필요합니다. 24시간 활동이 없는 Active Sessions는 접근, 목록 조회 또는 새 Session 시작 시 stale 상태가 됩니다. 단, tool call이 진행 중이면 제외합니다. stale Sessions는 재개할 수 있고 오래된 순서로 기록에서 삭제할 수 있습니다.
+하나의 durable Logical Session을 관리합니다. start는 새 task를 만들고 session_id를 반환합니다. resume은 사용자가 명시적으로 제공했거나 이 conversation에 이미 있는 session_id만 계속. start 이외의 모든 action에는 session_id가 필요합니다. Action: start, resume, get, report, finish, cancel, delete. report는 summary/findings/next/blockers/objective/label을 받고, delete에는 terminal Session이 필요합니다. 24시간 활동이 없는 Active Sessions는 접근, 목록 조회 또는 새 Session 시작 시 stale 상태가 됩니다. 단, tool call이 진행 중이면 제외합니다. stale Sessions는 재개할 수 있고 오래된 순서로 기록에서 삭제할 수 있습니다. verbose=true를 사용하면 최근 활동 전체가 포함됩니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -112,6 +112,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Local 또는 remote machine에서 non-interactive shell command 하나를 실행합니다. 빠르게 끝나야 하는 build, test, package-manager, Git, inspection command에 사용하며 long-running, interactive, streaming process에는 `shell_start` 또는 `job_start`를 사용합니다. Optional purpose/explanation fields로 실행 이유를 설명할 수 있습니다.
+Local 또는 remote machine에서 non-interactive shell command 하나를 실행합니다. 빠르게 끝나야 하는 build, test, package-manager, Git, inspection command에 사용하며 long-running, interactive, streaming process에는 `shell_start` 또는 `job_start`를 사용합니다. Optional purpose/explanation fields로 실행 이유를 설명할 수 있습니다. timed_out, truncated, persisted가 생략되면 false이고 stderr가 생략되면 비어 있습니다. 성공한 exit_code=0은 data.ok=true를 의미합니다.
 
 `persist_on_timeout=true`(기본값 false)를 설정하면 시간 초과 후에도 동일한 작업이 계속 실행되며 `job_id`를 반환합니다. `job_tail`로 확인할 수 있습니다. stdout/stderr는 통합됩니다.
 
@@ -161,6 +162,7 @@ Local 또는 remote machine에서 non-interactive shell command 하나를 실행
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_python`
 
-Local 또는 remote machine에서 short Python script를 작성하고 실행합니다.
+Local 또는 remote machine에서 short Python script를 작성하고 실행합니다. timed_out, truncated, persisted가 생략되면 false이고 stderr가 생략되면 비어 있습니다. 성공한 exit_code=0은 data.ok=true를 의미합니다.
 
 `persist_on_timeout=true`(기본값 false)를 설정하면 시간 초과 후에도 동일한 작업이 계속 실행되며 `job_id`를 반환합니다. `job_tail`로 확인할 수 있습니다. stdout/stderr는 통합됩니다.
 
@@ -182,6 +184,7 @@ Local 또는 remote machine에서 short Python script를 작성하고 실행합�
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_tail`
 
-Tracked local/remote job의 recent output을 읽습니다.
+추적 작업의 최근 출력과 상태를 읽습니다. 전체 메타데이터는 verbose=true 또는 job_get으로 가져옵니다. log_truncated가 없으면 false입니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ controller와 remote machine 사이에서 file/directory를 복사하는 tracked
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-`<server>:<tool>`이라는 dynamic MCP tool의 full cached schema를 반환합니다. Cache가 stale하면 `mcp_manage`로 server를 refresh합니다.
+`<server>:<tool>`이라는 동적 MCP 도구의 캐시된 전체 스키마를 반환합니다. Controller가 캐시를 자동 갱신하며 mcp_manage로 강제 갱신할 수 있습니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -784,7 +789,7 @@ OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_manage`
 
-action=invite, list, reset, revoke, rename으로 remote workers를 관리합니다. invite는 name/workdir/ttl_s/max_uses, revoke는 machine, rename은 machine과 new_name이 필요합니다. max_uses 기본값은 1입니다. reset에는 machine이 필요하며 worker 연결을 끊지 않고 대기 중이거나 안전하게 취소 가능한 실행 중 제어 요청을 지웁니다. 이미 시작된 보호 대상 작업은 유지됩니다.
+action=invite, list, reset, revoke, rename으로 remote workers를 관리합니다. invite는 name/workdir/ttl_s/max_uses, revoke는 machine, rename은 machine과 new_name이 필요합니다. max_uses 기본값은 1입니다. reset에는 machine이 필요하며 worker 연결을 끊지 않고 대기 중이거나 안전하게 취소 가능한 실행 중 제어 요청을 지웁니다. 이미 시작된 보호 대상 작업은 유지됩니다. list에서 verbose=true를 지정하면 진단 원격 측정 데이터도 포함됩니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -795,6 +800,7 @@ action=invite, list, reset, revoke, rename으로 remote workers를 관리합니�
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

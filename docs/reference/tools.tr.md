@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # Tools referansı
 
 Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface değiştiğinde English reference güncellemek için `python scripts/generate-tools-reference.py` çalıştırın.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Tek bir kalıcı Logical Sessionı yönetir. start yeni bir görev oluşturur ve session_id değerini döndürür. resume yalnızca kullanıcının açıkça verdiği veya bu konuşmada zaten bulunan session_id değerini sürdürür. start dışındaki tüm actionlar session_id gerektirir. Actionlar: start, resume, get, report, finish, cancel, delete. report summary/findings/next/blockers/objective/label kabul eder; delete terminal bir Session gerektirir. 24 saat hareketsiz kalan Active Sessions, erişim, listeleme veya başlatma sırasında stale olur; sürmekte olan tool call varsa olmaz. stale Sessions yeniden sürdürülebilir ve geçmişten en eskiden başlayarak silinebilir.
+Tek bir kalıcı Logical Sessionı yönetir. start yeni bir görev oluşturur ve session_id değerini döndürür. resume yalnızca kullanıcının açıkça verdiği veya bu konuşmada zaten bulunan session_id değerini sürdürür. start dışındaki tüm actionlar session_id gerektirir. Actionlar: start, resume, get, report, finish, cancel, delete. report summary/findings/next/blockers/objective/label kabul eder; delete terminal bir Session gerektirir. 24 saat hareketsiz kalan Active Sessions, erişim, listeleme veya başlatma sırasında stale olur; sürmekte olan tool call varsa olmaz. stale Sessions yeniden sürdürülebilir ve geçmişten en eskiden başlayarak silinebilir. Son etkinliklerin tamamını dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -112,6 +112,7 @@ Tek bir kalıcı Logical Sessionı yönetir. start yeni bir görev oluşturur ve
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Local veya remote machine üzerinde bir non-interactive shell command çalıştırır. Hızlı bitmesi gereken build, test, package-manager, Git ve inspection commands için kullanın. Long-running, interactive veya streaming process için `shell_start` ya da `job_start` kullanın. Optional purpose/explanation fields command’in neden çalıştırıldığını belirtebilir.
+Local veya remote machine üzerinde bir non-interactive shell command çalıştırır. Hızlı bitmesi gereken build, test, package-manager, Git ve inspection commands için kullanın. Long-running, interactive veya streaming process için `shell_start` ya da `job_start` kullanın. Optional purpose/explanation fields command’in neden çalıştırıldığını belirtebilir. timed_out, truncated veya persisted yoksa false, stderr yoksa boş kabul edilir. Başarılı exit_code=0, data.ok=true anlamına gelir.
 
 `persist_on_timeout=true` (varsayılan false) ile aynı iş zaman aşımından sonra da çalışır ve `job_id` döndürür. `job_tail` ile izleyin; stdout ve stderr birleştirilir.
 
@@ -161,6 +162,7 @@ Local veya remote machine üzerinde bir non-interactive shell command çalışt�
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_python`
 
-Local veya remote machine üzerinde short Python script yazar ve çalıştırır.
+Local veya remote machine üzerinde short Python script yazar ve çalıştırır. timed_out, truncated veya persisted yoksa false, stderr yoksa boş kabul edilir. Başarılı exit_code=0, data.ok=true anlamına gelir.
 
 `persist_on_timeout=true` (varsayılan false) ile aynı iş zaman aşımından sonra da çalışır ve `job_id` döndürür. `job_tail` ile izleyin; stdout ve stderr birleştirilir.
 
@@ -182,6 +184,7 @@ Local veya remote machine üzerinde short Python script yazar ve çalıştırır
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_tail`
 
-Tracked local/remote job recent output okur.
+İzlenen bir işin son çıktısını ve durumunu okur. Tam meta veriler için verbose=true veya job_get kullanın; log_truncated yoksa false kabul edilir.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ Controller ile remote machine’ler arasında file veya directory kopyalayan tra
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-`<server>:<tool>` adlı dynamic MCP tool için full cached schema döndürür. Cache stale ise `mcp_manage` ile server refresh edin.
+`<server>:<tool>` adlı dinamik MCP aracının önbellekteki tam şemasını döndürür. Controller önbelleği otomatik yeniler; mcp_manage yenilemeyi zorlayabilir.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -784,7 +789,7 @@ OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:sh
 
 ### `remote_manage`
 
-action=invite, list, reset, revoke veya rename ile remote workers yönetir. invite name/workdir/ttl_s/max_uses kabul eder; revoke machine gerektirir; rename machine ve new_name gerektirir. max_uses varsayılan olarak 1'dir. reset için machine gerekir; worker bağlantısını kesmeden sıradaki veya güvenle iptal edilebilir etkin kontrol isteklerini temizler, başlamış korumalı işlemler korunur.
+action=invite, list, reset, revoke veya rename ile remote workers yönetir. invite name/workdir/ttl_s/max_uses kabul eder; revoke machine gerektirir; rename machine ve new_name gerektirir. max_uses varsayılan olarak 1'dir. reset için machine gerekir; worker bağlantısını kesmeden sıradaki veya güvenle iptal edilebilir etkin kontrol isteklerini temizler, başlamış korumalı işlemler korunur. list için verbose=true tanılama telemetrisini içerir.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -795,6 +800,7 @@ action=invite, list, reset, revoke veya rename ile remote workers yönetir. invi
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

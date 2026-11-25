@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # Referencia de herramientas
 
 Esta página se construye a partir de los schemas reales de las tools MCP. Ejecute `python scripts/generate-tools-reference.py` después de cambiar la superficie pública de tools para actualizar la referencia English.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Gestiona una única Logical Session persistente. start crea una tarea nueva y devuelve su session_id. resume continúa únicamente el session_id explícito proporcionado por el usuario o ya presente en esta conversación. Todas las acciones salvo start requieren session_id. Acciones: start, resume, get, report, finish, cancel, delete. report acepta summary/findings/next/blockers/objective/label; delete requiere una Session terminal. Tras 24 horas de inactividad, las Sessions activas pasan a stale al acceder, listar o iniciar, salvo que haya una llamada a una herramienta en curso. Las Sessions stale pueden reanudarse o eliminarse del historial comenzando por las más antiguas.
+Gestiona una única Logical Session persistente. start crea una tarea nueva y devuelve su session_id. resume continúa únicamente el session_id explícito proporcionado por el usuario o ya presente en esta conversación. Todas las acciones salvo start requieren session_id. Acciones: start, resume, get, report, finish, cancel, delete. report acepta summary/findings/next/blockers/objective/label; delete requiere una Session terminal. Tras 24 horas de inactividad, las Sessions activas pasan a stale al acceder, listar o iniciar, salvo que haya una llamada a una herramienta en curso. Las Sessions stale pueden reanudarse o eliminarse del historial comenzando por las más antiguas. Use verbose=true para incluir toda la actividad reciente.
 
 | Parámetro | Tipo | Requerido/default | Descripción |
 |---|---|---|---|
@@ -112,6 +112,7 @@ Gestiona una única Logical Session persistente. start crea una tarea nueva y de
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Ejecuta un comando shell no interactivo localmente o en una máquina remota. Úselo para build, test, package-manager, Git e inspección que deban terminar pronto. Para procesos largos, interactivos o streaming, use `shell_start` o `job_start`. Los campos opcionales purpose/explanation permiten indicar por qué se ejecuta el comando.
+Ejecuta un comando shell no interactivo localmente o en una máquina remota. Úselo para build, test, package-manager, Git e inspección que deban terminar pronto. Para procesos largos, interactivos o streaming, use `shell_start` o `job_start`. Los campos opcionales purpose/explanation permiten indicar por qué se ejecuta el comando. Si faltan timed_out, truncated o persisted, valen false; si falta stderr, está vacío. Una salida correcta con exit_code=0 implica data.ok=true.
 
 Con `persist_on_timeout=true` (false por defecto), el mismo trabajo sigue ejecutándose al vencer el plazo y devuelve `job_id`. Consulte `job_tail`; stdout y stderr se combinan.
 
@@ -161,6 +162,7 @@ Con `persist_on_timeout=true` (false por defecto), el mismo trabajo sigue ejecut
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session para esta llamada de herramienta. Mientras trabajes en la tarea, pasa el session_id devuelto por session_manage. Usa null solo cuando no haya una Logical Session activa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ Cuando se proporciona `machine`, la llamada también requiere `remote:use` y se 
 
 ### `run_python`
 
-Escribe y ejecuta un script Python corto localmente o en una máquina remota.
+Escribe y ejecuta un script Python corto localmente o en una máquina remota. Si faltan timed_out, truncated o persisted, valen false; si falta stderr, está vacío. Una salida correcta con exit_code=0 implica data.ok=true.
 
 Con `persist_on_timeout=true` (false por defecto), el mismo trabajo sigue ejecutándose al vencer el plazo y devuelve `job_id`. Consulte `job_tail`; stdout y stderr se combinan.
 
@@ -182,6 +184,7 @@ Con `persist_on_timeout=true` (false por defecto), el mismo trabajo sigue ejecut
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session para esta llamada de herramienta. Mientras trabajes en la tarea, pasa el session_id devuelto por session_manage. Usa null solo cuando no haya una Logical Session activa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ Cuando se proporciona `machine`, la llamada también requiere `remote:use` y se 
 
 ### `job_tail`
 
-Lee output reciente de un job local o remoto trackeado.
+Lee la salida reciente y el estado de una tarea supervisada. Use verbose=true o job_get para obtener todos los metadatos; si falta log_truncated, vale false.
 
 | Parámetro | Tipo | Requerido/default | Descripción |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session para esta llamada de herramienta. Mientras trabajes en la tarea, pasa el session_id devuelto por session_manage. Usa null solo cuando no haya una Logical Session activa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ Inicia un job trackeado que copia un archivo o directorio entre el controller y 
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session para esta llamada de herramienta. Mientras trabajes en la tarea, pasa el session_id devuelto por session_manage. Usa null solo cuando no haya una Logical Session activa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-Devuelve el schema completo cacheado de una tool MCP dinámica llamada `<server>:<tool>`. Refresque el server con `mcp_manage` si su cache está stale.
+Devuelve el esquema completo en caché de la herramienta MCP dinámica `<server>:<tool>`. El Controller actualiza la caché automáticamente; mcp_manage permite forzar la actualización.
 
 | Parámetro | Tipo | Requerido/default | Descripción |
 |---|---|---|---|
@@ -785,7 +790,7 @@ Cuando se proporciona `machine`, la llamada requiere adicionalmente `remote:use`
 
 ### `remote_manage`
 
-Gestiona remote workers con action=invite, list, reset, revoke o rename. invite acepta name/workdir/ttl_s/max_uses; revoke requiere machine; rename requiere machine y new_name. max_uses tiene el valor predeterminado 1. reset requiere machine y elimina solicitudes de control pendientes o activas que pueden cancelarse con seguridad, sin desconectar al worker; se conservan las operaciones protegidas iniciadas.
+Gestiona remote workers con action=invite, list, reset, revoke o rename. invite acepta name/workdir/ttl_s/max_uses; revoke requiere machine; rename requiere machine y new_name. max_uses tiene el valor predeterminado 1. reset requiere machine y elimina solicitudes de control pendientes o activas que pueden cancelarse con seguridad, sin desconectar al worker; se conservan las operaciones protegidas iniciadas. En list, verbose=true incluye telemetría de diagnóstico.
 
 | Parámetro | Tipo | Requerido/default | Descripción |
 |---|---|---|---|
@@ -796,6 +801,7 @@ Gestiona remote workers con action=invite, list, reset, revoke o rename. invite 
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session para esta llamada de herramienta. Mientras trabajes en la tarea, pasa el session_id devuelto por session_manage. Usa null solo cuando no haya una Logical Session activa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

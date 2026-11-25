@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # 工具参考
 
 本页由实际 MCP tool schema 生成。公开工具接口变更后，运行 `python scripts/generate-tools-reference.py` 更新 English 参考页。
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-管理单一持久 Logical Session。start 创建新任务并返回其 session_id。resume 只会继续用户明确提供、或本对话中已经存在的 session_id。除 start 外的所有 action 都必须提供 session_id。Action：start、resume、get、report、finish、cancel、delete。report 接受 summary/findings/next/blockers/objective/label；delete 需要 terminal Session。闲置 24 小时的 Active Sessions 会在访问、列出或开始时变为 stale，但有工具调用正在执行时除外。stale Sessions 仍可恢复，清理历史记录时会按最旧优先的顺序删除。
+管理单一持久 Logical Session。start 创建新任务并返回其 session_id。resume 只会继续用户明确提供、或本对话中已经存在的 session_id。除 start 外的所有 action 都必须提供 session_id。Action：start、resume、get、report、finish、cancel、delete。report 接受 summary/findings/next/blockers/objective/label；delete 需要 terminal Session。闲置 24 小时的 Active Sessions 会在访问、列出或开始时变为 stale，但有工具调用正在执行时除外。stale Sessions 仍可恢复，清理历史记录时会按最旧优先的顺序删除。 使用 verbose=true 返回完整近期活动。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -112,6 +112,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-在本地或 remote machine 运行一次非交互 shell command。适用于应快速完成的 build、test、package-manager、Git 与 inspection command；长时间、交互式或 streaming process 应使用 `shell_start` 或 `job_start`。可选 purpose/explanation 字段可说明执行原因。
+在本地或 remote machine 运行一次非交互 shell command。适用于应快速完成的 build、test、package-manager、Git 与 inspection command；长时间、交互式或 streaming process 应使用 `shell_start` 或 `job_start`。可选 purpose/explanation 字段可说明执行原因。 缺省的 timed_out、truncated、persisted 表示 false；缺省的 stderr 表示空。exit_code=0 且成功时意味着 data.ok=true。
 
 启用 `persist_on_timeout=true`（默认 false）后，同一次执行在超时后继续作为任务运行并返回 `job_id`；可用 `job_tail` 查询。任务日志合并 stdout/stderr。
 
@@ -161,6 +162,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_python`
 
-在本地或 remote machine 写入并运行短 Python script。
+在本地或 remote machine 写入并运行短 Python script。 缺省的 timed_out、truncated、persisted 表示 false；缺省的 stderr 表示空。exit_code=0 且成功时意味着 data.ok=true。
 
 启用 `persist_on_timeout=true`（默认 false）后，同一次执行在超时后继续作为任务运行并返回 `job_id`；可用 `job_tail` 查询。任务日志合并 stdout/stderr。
 
@@ -182,6 +184,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_tail`
 
-读取被跟踪的 local/remote job 的最近输出。
+读取跟踪任务的近期输出和状态。使用 verbose=true 或 job_get 获取完整元数据；缺省的 log_truncated 表示 false。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-返回名为 `<server>:<tool>` 的 dynamic MCP tool 的完整 cached schema；如果 cache stale，先用 `mcp_manage` refresh server。
+返回名为 `<server>:<tool>` 的动态 MCP 工具的完整缓存 schema。Controller 自动刷新缓存，也可通过 mcp_manage 强制刷新。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -784,7 +789,7 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_manage`
 
-使用 action=invite、list、reset、revoke 或 rename 管理 remote workers。invite 接受 name/workdir/ttl_s/max_uses；revoke 需要 machine；rename 需要 machine 与 new_name。max_uses 默认 1。reset 需要 machine，会在不断开 worker 连接的情况下清除队列中及可安全取消的执行中控制请求；已开始的受保护操作会保留。
+使用 action=invite、list、reset、revoke 或 rename 管理 remote workers。invite 接受 name/workdir/ttl_s/max_uses；revoke 需要 machine；rename 需要 machine 与 new_name。max_uses 默认 1。reset 需要 machine，会在不断开 worker 连接的情况下清除队列中及可安全取消的执行中控制请求；已开始的受保护操作会保留。 list 操作使用 verbose=true 时包含诊断遥测数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -795,6 +800,7 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

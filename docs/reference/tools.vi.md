@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Quản lý một Logical Session bền vững. start tạo task mới và trả về session_id của nó. resume chỉ tiếp tục session_id được người dùng cung cấp rõ ràng hoặc đã có trong conversation này. Mọi action ngoài start đều yêu cầu session_id. Action: start, resume, get, report, finish, cancel, delete. report nhận summary/findings/next/blockers/objective/label; delete yêu cầu Session ở trạng thái terminal. Sau 24 giờ không hoạt động, Sessions đang hoạt động sẽ chuyển thành stale khi truy cập, liệt kê hoặc bắt đầu, trừ khi có lời gọi tool đang thực hiện. Sessions stale có thể tiếp tục hoặc được xóa khỏi lịch sử từ cũ nhất trước.
+Quản lý một Logical Session bền vững. start tạo task mới và trả về session_id của nó. resume chỉ tiếp tục session_id được người dùng cung cấp rõ ràng hoặc đã có trong conversation này. Mọi action ngoài start đều yêu cầu session_id. Action: start, resume, get, report, finish, cancel, delete. report nhận summary/findings/next/blockers/objective/label; delete yêu cầu Session ở trạng thái terminal. Sau 24 giờ không hoạt động, Sessions đang hoạt động sẽ chuyển thành stale khi truy cập, liệt kê hoặc bắt đầu, trừ khi có lời gọi tool đang thực hiện. Sessions stale có thể tiếp tục hoặc được xóa khỏi lịch sử từ cũ nhất trước. Dùng verbose=true để bao gồm toàn bộ hoạt động gần đây.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -112,6 +112,7 @@ Quản lý một Logical Session bền vững. start tạo task mới và trả 
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Chạy một non-interactive shell command local hoặc trên remote machine. Dùng cho build, test, package-manager, Git và inspection commands cần hoàn thành nhanh. Với process long-running, interactive hoặc streaming, dùng `shell_start` hoặc `job_start`. Optional purpose/explanation fields cho phép nêu lý do chạy command.
+Chạy một non-interactive shell command local hoặc trên remote machine. Dùng cho build, test, package-manager, Git và inspection commands cần hoàn thành nhanh. Với process long-running, interactive hoặc streaming, dùng `shell_start` hoặc `job_start`. Optional purpose/explanation fields cho phép nêu lý do chạy command. Nếu thiếu timed_out, truncated hoặc persisted thì giá trị là false; thiếu stderr nghĩa là rỗng. exit_code=0 khi thành công có nghĩa là data.ok=true.
 
 Với `persist_on_timeout=true` (mặc định false), cùng một tác vụ tiếp tục chạy sau khi hết thời gian và trả về `job_id`. Dùng `job_tail` để xem; stdout và stderr được gộp.
 
@@ -161,6 +162,7 @@ Với `persist_on_timeout=true` (mặc định false), cùng một tác vụ ti�
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `run_python`
 
-Viết và chạy short Python script local hoặc trên remote machine.
+Viết và chạy short Python script local hoặc trên remote machine. Nếu thiếu timed_out, truncated hoặc persisted thì giá trị là false; thiếu stderr nghĩa là rỗng. exit_code=0 khi thành công có nghĩa là data.ok=true.
 
 Với `persist_on_timeout=true` (mặc định false), cùng một tác vụ tiếp tục chạy sau khi hết thời gian và trả về `job_id`. Dùng `job_tail` để xem; stdout và stderr được gộp.
 
@@ -182,6 +184,7 @@ Với `persist_on_timeout=true` (mặc định false), cùng một tác vụ ti�
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `job_tail`
 
-Đọc recent output của tracked local/remote job.
+Đọc đầu ra gần đây và trạng thái của tác vụ được theo dõi. Dùng verbose=true hoặc job_get để lấy siêu dữ liệu đầy đủ; thiếu log_truncated nghĩa là false.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ Khởi chạy tracked job để copy file hoặc directory giữa controller và
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-Trả về full cached schema của dynamic MCP tool tên `<server>:<tool>`. Refresh server bằng `mcp_manage` nếu cache stale.
+Trả về schema đầy đủ đã lưu đệm của công cụ MCP động `<server>:<tool>`. Controller tự động làm mới bộ đệm; mcp_manage có thể buộc làm mới.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -784,7 +789,7 @@ Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy q
 
 ### `remote_manage`
 
-Quản lý remote workers bằng action=invite, list, reset, revoke hoặc rename. invite nhận name/workdir/ttl_s/max_uses; revoke cần machine; rename cần machine và new_name. max_uses có giá trị mặc định là 1. reset cần machine và xóa các yêu cầu điều khiển đang chờ hoặc đang chạy có thể hủy an toàn mà không ngắt kết nối worker; các thao tác được bảo vệ đã bắt đầu vẫn được giữ nguyên.
+Quản lý remote workers bằng action=invite, list, reset, revoke hoặc rename. invite nhận name/workdir/ttl_s/max_uses; revoke cần machine; rename cần machine và new_name. max_uses có giá trị mặc định là 1. reset cần machine và xóa các yêu cầu điều khiển đang chờ hoặc đang chạy có thể hủy an toàn mà không ngắt kết nối worker; các thao tác được bảo vệ đã bắt đầu vẫn được giữ nguyên. Với list, verbose=true bao gồm dữ liệu đo từ xa phục vụ chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -795,6 +800,7 @@ Quản lý remote workers bằng action=invite, list, reset, revoke hoặc renam
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

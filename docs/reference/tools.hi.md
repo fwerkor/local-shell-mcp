@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # Tools reference
 
 यह page वास्तविक MCP tool schemas से बनती है। Public tool surface बदलने के बाद English reference update करने के लिए `python scripts/generate-tools-reference.py` चलाएँ।
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-एक durable Logical Session को प्रबंधित करें। start नई task बनाता है और उसका session_id लौटाता है। resume केवल उसी explicit session_id को जारी रखता है जो user ने दिया हो या इस conversation में पहले से मौजूद हो। start के अलावा हर action में session_id आवश्यक है। Actions: start, resume, get, report, finish, cancel, delete. report summary/findings/next/blockers/objective/label स्वीकार करता है; delete के लिए terminal Session आवश्यक है। 24 घंटे निष्क्रिय रहने वाले Active Sessions, access/list/start के समय stale होते हैं, यदि कोई tool call चल रही हो तो यह बदलाव नहीं होता। stale Sessions दोबारा शुरू किए जा सकते हैं और history से सबसे पुराने पहले हटाए जा सकते हैं।
+एक durable Logical Session को प्रबंधित करें। start नई task बनाता है और उसका session_id लौटाता है। resume केवल उसी explicit session_id को जारी रखता है जो user ने दिया हो या इस conversation में पहले से मौजूद हो। start के अलावा हर action में session_id आवश्यक है। Actions: start, resume, get, report, finish, cancel, delete. report summary/findings/next/blockers/objective/label स्वीकार करता है; delete के लिए terminal Session आवश्यक है। 24 घंटे निष्क्रिय रहने वाले Active Sessions, access/list/start के समय stale होते हैं, यदि कोई tool call चल रही हो तो यह बदलाव नहीं होता। stale Sessions दोबारा शुरू किए जा सकते हैं और history से सबसे पुराने पहले हटाए जा सकते हैं। हाल की सभी गतिविधियाँ शामिल करने के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -112,6 +112,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Local या remote machine पर एक non-interactive shell command चलाती है। शीघ्र समाप्त होने वाले build, test, package-manager, Git और inspection commands के लिए उपयोग करें। Long-running, interactive या streaming process के लिए `shell_start` या `job_start` उपयोग करें। Optional purpose/explanation fields execution का कारण बता सकते हैं।
+Local या remote machine पर एक non-interactive shell command चलाती है। शीघ्र समाप्त होने वाले build, test, package-manager, Git और inspection commands के लिए उपयोग करें। Long-running, interactive या streaming process के लिए `shell_start` या `job_start` उपयोग करें। Optional purpose/explanation fields execution का कारण बता सकते हैं। timed_out, truncated या persisted अनुपस्थित होने का अर्थ false है; stderr अनुपस्थित होने का अर्थ खाली है। सफल exit_code=0 का अर्थ data.ok=true है।
 
 `persist_on_timeout=true` (डिफ़ॉल्ट false) होने पर वही कार्य समय-सीमा के बाद भी चलता रहता है और `job_id` लौटाता है। `job_tail` से स्थिति देखें; stdout और stderr संयुक्त हैं।
 
@@ -161,6 +162,7 @@ Local या remote machine पर एक non-interactive shell command चल�
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_python`
 
-Local या remote machine पर short Python script लिखकर चलाती है।
+Local या remote machine पर short Python script लिखकर चलाती है। timed_out, truncated या persisted अनुपस्थित होने का अर्थ false है; stderr अनुपस्थित होने का अर्थ खाली है। सफल exit_code=0 का अर्थ data.ok=true है।
 
 `persist_on_timeout=true` (डिफ़ॉल्ट false) होने पर वही कार्य समय-सीमा के बाद भी चलता रहता है और `job_id` लौटाता है। `job_tail` से स्थिति देखें; stdout और stderr संयुक्त हैं।
 
@@ -182,6 +184,7 @@ Local या remote machine पर short Python script लिखकर चला
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_tail`
 
-Tracked local/remote job का recent output पढ़ती है।
+ट्रैक किए गए जॉब का हालिया आउटपुट और स्थिति पढ़ता है। पूर्ण मेटाडेटा के लिए verbose=true या job_get का उपयोग करें; log_truncated अनुपस्थित होने का अर्थ false है।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ Controller और remote machines के बीच file या directory copy �
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-`<server>:<tool>` नामक dynamic MCP tool का full cached schema लौटाती है। Cache stale हो तो `mcp_manage` से server refresh करें।
+डायनामिक MCP टूल `<server>:<tool>` का पूरा कैश किया गया स्कीमा लौटाता है। Controller कैश को स्वचालित रूप से रीफ़्रेश करता है; mcp_manage से रीफ़्रेश किया जा सकता है।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -785,7 +790,7 @@ OAuth क्षेत्र: `shell:read, shell:write, shell:execute, browser:us
 
 ### `remote_manage`
 
-action=invite, list, reset, revoke या rename से remote workers manage करती है। invite name/workdir/ttl_s/max_uses स्वीकार करता है; revoke को machine; rename को machine और new_name चाहिए। max_uses का डिफ़ॉल्ट मान 1 है। reset के लिए machine आवश्यक है; यह worker को डिस्कनेक्ट किए बिना queued और सुरक्षित रूप से रद्द किए जा सकने वाले सक्रिय control requests हटाता है, जबकि शुरू हो चुके protected operations सुरक्षित रहते हैं।
+action=invite, list, reset, revoke या rename से remote workers manage करती है। invite name/workdir/ttl_s/max_uses स्वीकार करता है; revoke को machine; rename को machine और new_name चाहिए। max_uses का डिफ़ॉल्ट मान 1 है। reset के लिए machine आवश्यक है; यह worker को डिस्कनेक्ट किए बिना queued और सुरक्षित रूप से रद्द किए जा सकने वाले सक्रिय control requests हटाता है, जबकि शुरू हो चुके protected operations सुरक्षित रहते हैं। list में verbose=true डायग्नोस्टिक टेलीमेट्री शामिल करता है।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -796,6 +801,7 @@ action=invite, list, reset, revoke या rename से remote workers manage �
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
