@@ -53,10 +53,10 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
     if not model and not value["models"]:
         raise ValueError("No available models in this channel")
     name = model or value["models"][0]
-    if kind == "openai":
+    if kind in {"openai", "openai-responses"}:
         if not token and urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("An OpenAI-compatible model API key is required")
-        url = _require_https_or_loopback(base.rstrip("/") + "/chat/completions")
+        url = _require_https_or_loopback(base.rstrip("/") + ("/responses" if kind == "openai-responses" else "/chat/completions"))
     elif kind == "anthropic":
         if not token:
             raise ValueError("ANTHROPIC_API_KEY is required")
@@ -231,6 +231,15 @@ async def stream_model(
     emit_finish_reason: bool = False,
 ) -> AsyncIterator[str | ModelUsage | ModelFinish | ModelThought]:
     """Stream user-visible answer text without buffering the provider response."""
+    if config.provider == "openai-responses":
+        from .provider_responses import stream_responses
+
+        async for event in stream_responses(config, messages, tools=[], max_tokens=max_tokens,
+                                            temperature=temperature, top_p=top_p,
+                                            emit_finish_reason=emit_finish_reason):
+            yield event
+        return
+
     import httpx
 
     from .mcp_projection import openai_wire_messages, project_artifact_messages
@@ -346,6 +355,7 @@ class ModelThought:
     text: str = ""
     signature: str = ""
     data: str = ""
+    provider_data: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -375,6 +385,13 @@ async def stream_model_with_tools(
     Unsupported providers do not receive tool declarations. Their ordinary
     text-stream behavior is preserved until their native tool protocols exist.
     """
+    if config.provider == "openai-responses":
+        from .provider_responses import stream_responses
+
+        async for event in stream_responses(config, messages, tools=tools, max_tokens=max_tokens,
+                                            temperature=temperature, top_p=top_p):
+            yield event
+        return
     if tools and config.provider in {"anthropic", "google"}:
         from .provider_tool_protocols import stream_native_tools
 

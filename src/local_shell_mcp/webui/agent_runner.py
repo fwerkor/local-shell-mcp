@@ -44,7 +44,14 @@ from .memory import (
     tool_definitions,
 )
 from .memory_protection import configured_filters
-from .providers import ModelFinish, ModelToolCall, ModelUsage, provider_config, selected_provider
+from .providers import (
+    ModelFinish,
+    ModelThought,
+    ModelToolCall,
+    ModelUsage,
+    provider_config,
+    selected_provider,
+)
 from .semantic_index import (
     render_compaction_semantic_index,
     snapshot_compaction_semantic_index,
@@ -1035,7 +1042,7 @@ class AgentRunner:
         async for value in response:
             if isinstance(value, str):
                 chunks.append(value)
-            elif isinstance(value, ModelUsage):
+            elif isinstance(value, (ModelUsage, ModelThought)):
                 # A summarizer's provider metadata must never be inserted into
                 # user-visible checkpoint text or mistaken for a tool call.
                 continue
@@ -1047,7 +1054,7 @@ class AgentRunner:
         if not summary:
             raise ValueError('Summarization produced empty output')
         if finish_reason in {'length', 'max_tokens', 'max_tokens_reached', 'max_output_tokens',
-                             'max_output_tokens_reached'}:
+                             'max_output_tokens_reached', 'incomplete'}:
             raise ValueError('Summary response was truncated by the provider output limit')
         # Some OpenAI-compatible endpoints omit finish_reason entirely. For
         # them, refuse near-limit output instead of committing a partial

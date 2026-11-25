@@ -29,7 +29,7 @@ _MAX_MODELS = 128
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
-def _chat_compatible(model: str, item: dict) -> bool:
+def _chat_compatible(model: str, item: dict, kind: str = "openai") -> bool:
     # Some OpenAI-compatible catalogs (e.g. OpenRouter) include explicit
     # output modalities or supported endpoints. Prefer those to ID heuristics.
     architecture = item.get('architecture')
@@ -38,7 +38,8 @@ def _chat_compatible(model: str, item: dict) -> bool:
         return False
     endpoints = item.get('supported_endpoints')
     if isinstance(endpoints, list) and endpoints:
-        return any(isinstance(e, str) and e.rstrip('/').endswith('chat/completions') for e in endpoints)
+        suffix = 'responses' if kind == 'openai-responses' else 'chat/completions'
+        return any(isinstance(e, str) and e.rstrip('/').endswith(suffix) for e in endpoints)
     # Local inference servers can describe non-generative models by task
     # rather than publishing supported_endpoints.
     non_chat = {
@@ -84,7 +85,7 @@ def _parse_page(kind: str, data: dict, models: dict[str, int | None]) -> dict:
                 continue
         if not model.strip() or model != model.strip() or len(model) > 200 or any(ord(c) < 32 for c in model):
             continue
-        if kind == 'openai' and not _chat_compatible(model, item):
+        if kind in {'openai', 'openai-responses'} and not _chat_compatible(model, item, kind):
             continue
         fields = ('inputTokenLimit',) if kind == 'google' else (
             'context_window', 'context_length', 'max_model_len', 'max_context_tokens', 'max_input_tokens')

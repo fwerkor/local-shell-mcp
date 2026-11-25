@@ -236,6 +236,8 @@ async def run_agent_loop(
                                 reasoning[-1]['signature'] = item.signature
                         elif item.kind == 'redacted_thinking':
                             reasoning.append({'type': 'redacted_thinking', 'data': item.data})
+                        elif item.kind == 'responses_item' and item.provider_data:
+                            reasoning.append({'type': 'responses_item', **item.provider_data})
                     elif item:
                         text_parts.append(item)
                         await on_text(item)

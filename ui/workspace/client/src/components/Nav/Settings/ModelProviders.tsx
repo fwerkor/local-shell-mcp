@@ -4,7 +4,7 @@ import { apiBaseUrl, request, QueryKeys } from 'librechat-data-provider';
 import SamplingFields, { samplingDraft, parseSampling } from '~/components/Endpoints/SamplingFields';
 import type { Sampling, SamplingDraft } from '~/components/Endpoints/SamplingFields';
 
-type Kind = 'openai' | 'anthropic' | 'google';
+type Kind = 'openai' | 'openai-responses' | 'anthropic' | 'google';
 type Source = 'default' | 'environment' | 'saved' | 'named';
 type Profile = {
   name?: string;
@@ -30,7 +30,8 @@ type Editor = { original: Profile | null };
 const input = 'w-full rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary';
 const button = 'rounded-lg border border-border-medium px-3 py-2 text-sm text-text-primary hover:bg-surface-secondary disabled:opacity-40';
 const kinds: { value: Kind; label: string; defaultUrl: string }[] = [
-  { value: 'openai', label: 'OpenAI-compatible', defaultUrl: 'https://api.openai.com/v1' },
+  { value: 'openai', label: 'OpenAI Chat Completions', defaultUrl: 'https://api.openai.com/v1' },
+  { value: 'openai-responses', label: 'OpenAI Responses', defaultUrl: 'https://api.openai.com/v1' },
   { value: 'anthropic', label: 'Anthropic native', defaultUrl: 'https://api.anthropic.com/v1' },
   { value: 'google', label: 'Google Gemini native', defaultUrl: 'https://generativelanguage.googleapis.com/v1beta' },
 ];
