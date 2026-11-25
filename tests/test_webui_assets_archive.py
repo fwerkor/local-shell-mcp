@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import json
 import importlib.util
 import io
+import json
 import tarfile
 from pathlib import Path
 
