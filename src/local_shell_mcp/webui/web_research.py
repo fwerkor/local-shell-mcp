@@ -391,7 +391,7 @@ class _RenderBudget:
         request = route.request
         # No uploads, authenticated browsing, or unnecessary media downloads.
         if (request.method not in {'GET', 'HEAD'}
-                or request.resource_type in {'image', 'media', 'font'}):
+                or request.resource_type in {'image', 'media', 'font', 'eventsource'}):
             await route.abort()
             return
         if self.requests >= _MAX_RENDER_REQUESTS:
@@ -402,11 +402,14 @@ class _RenderBudget:
         try:
             async with self.slots:
                 safe = await asyncio.to_thread(_safe_url, request.url)
-                # Only forward ordinary browser headers from this fresh context.
+                # Forward public content negotiation and common application headers
+                # from this fresh context; never forward credentials or hop-by-hop fields.
                 headers = {k: v for k, v in request.headers.items()
                            if k.lower() in {'accept', 'accept-language', 'user-agent',
                                             'referer', 'origin', 'cookie', 'sec-fetch-site',
-                                            'sec-fetch-mode', 'sec-fetch-dest'}}
+                                            'sec-fetch-mode', 'sec-fetch-dest', 'content-type',
+                                            'x-requested-with', 'hx-request', 'hx-boosted',
+                                            'x-inertia', 'x-inertia-version'}}
                 async with client.stream(request.method, safe, headers=headers) as response:
                     # Never follow redirects in HTTPX: Chromium owns navigation/CORS.
                     # Unintercepted redirect hops fail closed at the deny-only proxy.
@@ -415,6 +418,11 @@ class _RenderBudget:
                         if not location:
                             raise WebResearchError('Redirect has no Location')
                         await asyncio.to_thread(_safe_url, urljoin(safe, location))
+                    # The renderer buffers bounded documents, not live streams.
+                    # SSE opened through fetch() may not have resource type eventsource.
+                    if response.headers.get('content-type', '').split(';', 1)[0].strip().lower() == 'text/event-stream':
+                        await route.abort()
+                        return
                     body = bytearray()
                     async for chunk in response.aiter_bytes():
                         self.bytes += len(chunk)

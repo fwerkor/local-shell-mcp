@@ -93,7 +93,8 @@ def test_html_quality_and_title_extraction():
 class Route:
     def __init__(self, url, method='GET', resource_type='script'):
         self.request = SimpleNamespace(url=url, method=method, resource_type=resource_type,
-                                       headers={'accept': '*/*', 'authorization': 'secret'})
+                                       headers={'accept': '*/*', 'authorization': 'secret',
+                                                'x-requested-with': 'XMLHttpRequest', 'x-api-key': 'secret'})
         self.result = None
 
     async def abort(self):
@@ -119,7 +120,8 @@ async def test_render_routes_limit_and_validate_every_resource(monkeypatch):
     budget = web._RenderBudget()
     async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
         for route in (Route('http://127.0.0.1/'), Route('https://example.org/', 'POST'),
-                      Route('https://example.org/', resource_type='image')):
+                      Route('https://example.org/', resource_type='image'),
+                      Route('https://example.org/', resource_type='eventsource')):
             await budget.handle(route, client)
             assert route.result == 'blocked'
         assert not requests
@@ -131,6 +133,8 @@ async def test_render_routes_limit_and_validate_every_resource(monkeypatch):
         assert good.result['body'] == b'123456'
         assert good.result['headers']['set-cookie'] == 'a=1; Path=/\nb=2; Path=/'
         assert 'authorization' not in requests[-1].headers
+        assert 'x-api-key' not in requests[-1].headers
+        assert requests[-1].headers['x-requested-with'] == 'XMLHttpRequest'
         exhausted = Route('https://example.org/other')
         await budget.handle(exhausted, client)
         assert exhausted.result == 'blocked' and budget.exhausted
@@ -231,3 +235,24 @@ async def test_dynamic_render_deadline(monkeypatch):
     monkeypatch.setattr(web.asyncio, 'start_server', slow_proxy)
     with pytest.raises(web.WebResearchError, match='timed out'):
         await web._render_html('https://example.org/')
+
+
+@pytest.mark.asyncio
+async def test_render_skips_event_stream_without_consuming_it(monkeypatch):
+    monkeypatch.setattr(web, '_public_address', lambda host: True)
+
+    class PersistentStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            pytest.fail('persistent event stream must not be buffered')
+            yield b'event: update'
+
+    def response(request):
+        return httpx.Response(200, headers={'content-type': 'text/event-stream; charset=utf-8'},
+                              stream=PersistentStream())
+
+    budget = web._RenderBudget()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+        route = Route('https://example.org/events', resource_type='fetch')
+        await budget.handle(route, client)
+        assert route.result == 'blocked'
+        assert not budget.exhausted and budget.bytes == 0
