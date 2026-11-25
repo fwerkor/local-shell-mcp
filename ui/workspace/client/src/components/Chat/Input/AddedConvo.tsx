@@ -56,7 +56,7 @@ export default function AddedConvo({
       <button
         className="text-token-text-secondary flex-shrink-0"
         type="button"
-        aria-label="Close added conversation"
+        aria-label={localize('com_lsm_ui_close_added_conversation')}
         onClick={() => setAddedConvo(null)}
       >
         <svg

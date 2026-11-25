@@ -113,7 +113,7 @@ export default function Overview() {
                 <span className="capitalize text-text-secondary">{key.replaceAll('_', ' ')}</span><span className="font-medium">{asText(value)}</span>
               </div>)}
           </div>
-          {Object.keys(snapshot.system ?? {}).length === 0 && <p className="text-sm text-text-secondary">System details unavailable</p>}
+          {Object.keys(snapshot.system ?? {}).length === 0 && <p className="text-sm text-text-secondary">{localize('com_lsm_ui_system_details_unavailable')}</p>}
         </section>
       </div>
     </>}

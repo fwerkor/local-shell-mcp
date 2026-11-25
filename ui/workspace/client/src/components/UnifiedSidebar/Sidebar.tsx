@@ -3,6 +3,7 @@ import type { NavLink } from '~/common';
 import SidePanelNav from '~/components/SidePanel/Nav';
 import ExpandedPanel from './ExpandedPanel';
 import { cn } from '~/utils';
+import useLocalize from '~/hooks/useLocalize';
 
 function Sidebar({
   links,
@@ -27,6 +28,7 @@ function Sidebar({
   onResizeStart: (e: React.MouseEvent) => void;
   onResizeKeyboard: (direction: 'shrink' | 'grow') => void;
 }) {
+  const localize = useLocalize();
   return (
     <>
       <div className="flex h-full w-full overflow-hidden">
@@ -56,7 +58,7 @@ function Sidebar({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize sidebar"
+        aria-label={localize('com_lsm_ui_resize_sidebar')}
         aria-valuenow={Math.round(width)}
         aria-valuemin={Math.round(minWidth)}
         aria-valuemax={Math.round(maxWidth)}

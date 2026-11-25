@@ -48,7 +48,7 @@ const EditBadgesComponent = ({
           <Button
             size="sm"
             variant="destructive"
-            aria-label="Cancel"
+            aria-label={localize('com_ui_cancel')}
             onClick={handleCancelBadges}
             className="h-8"
           >
@@ -57,7 +57,7 @@ const EditBadgesComponent = ({
           <Button
             size="sm"
             variant="submit"
-            aria-label="Save changes"
+            aria-label={localize('com_lsm_ui_save_changes')}
             onClick={handleSaveBadges}
             className="h-8 rounded-b-lg rounded-tr-xl"
           >

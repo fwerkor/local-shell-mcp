@@ -165,7 +165,7 @@ export function CompositeCitation(props: CompositeCitationProps) {
                   onClick={handlePrevPage}
                   disabled={currentPage === 0}
                   className="size-7"
-                  aria-label="Previous source"
+                  aria-label={localize('com_lsm_ui_previous_source')}
                 >
                   <ChevronLeft className="size-3.5" aria-hidden="true" />
                 </Button>
@@ -195,7 +195,7 @@ export function CompositeCitation(props: CompositeCitationProps) {
                   onClick={handleNextPage}
                   disabled={currentPage === totalPages - 1}
                   className="size-7"
-                  aria-label="Next source"
+                  aria-label={localize('com_lsm_ui_next_source')}
                 >
                   <ChevronRight className="size-3.5" aria-hidden="true" />
                 </Button>
@@ -234,7 +234,7 @@ export function CompositeCitation(props: CompositeCitationProps) {
                   onClick={handlePrevPage}
                   disabled={currentPage === 0}
                   className="size-7"
-                  aria-label="Previous source"
+                  aria-label={localize('com_lsm_ui_previous_source')}
                 >
                   <ChevronLeft className="size-3.5" aria-hidden="true" />
                 </Button>
@@ -264,7 +264,7 @@ export function CompositeCitation(props: CompositeCitationProps) {
                   onClick={handleNextPage}
                   disabled={currentPage === totalPages - 1}
                   className="size-7"
-                  aria-label="Next source"
+                  aria-label={localize('com_lsm_ui_next_source')}
                 >
                   <ChevronRight className="size-3.5" aria-hidden="true" />
                 </Button>

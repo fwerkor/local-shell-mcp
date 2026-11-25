@@ -1,6 +1,8 @@
 import { useRecoilValue } from 'recoil';
 import { Dropdown, Spinner } from '@librechat/client';
 import { useLocalize } from '~/hooks';
+import { normalizeLocale, supportedLocales } from '~/locales/i18n';
+import english from '~/locales/en/translation.json';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -49,6 +51,50 @@ export const ThemeSelector = ({
   );
 };
 
+const languageLabels = {
+  'ar': 'com_nav_lang_arabic',
+  'bo': 'com_nav_lang_tibetan',
+  'bs': 'com_nav_lang_bosnian',
+  'ca': 'com_nav_lang_catalan',
+  'cs': 'com_nav_lang_czech',
+  'da': 'com_nav_lang_danish',
+  'de': 'com_nav_lang_german',
+  'en': 'com_nav_lang_english',
+  'es': 'com_nav_lang_spanish',
+  'et': 'com_nav_lang_estonian',
+  'fa': 'com_nav_lang_persian',
+  'fi': 'com_nav_lang_finnish',
+  'fr': 'com_nav_lang_french',
+  'he': 'com_nav_lang_hebrew',
+  'hu': 'com_nav_lang_hungarian',
+  'hy': 'com_nav_lang_armenian',
+  'id': 'com_nav_lang_indonesia',
+  'is': 'com_nav_lang_icelandic',
+  'it': 'com_nav_lang_italian',
+  'ja': 'com_nav_lang_japanese',
+  'ka': 'com_nav_lang_georgian',
+  'ko': 'com_nav_lang_korean',
+  'lt': 'com_nav_lang_lithuanian',
+  'lv': 'com_nav_lang_latvian',
+  'nb': 'com_nav_lang_norwegian_bokmal',
+  'nl': 'com_nav_lang_dutch',
+  'nn': 'com_nav_lang_norwegian_nynorsk',
+  'pl': 'com_nav_lang_polish',
+  'pt-BR': 'com_nav_lang_brazilian_portuguese',
+  'pt-PT': 'com_nav_lang_portuguese',
+  'ru': 'com_nav_lang_russian',
+  'sk': 'com_nav_lang_slovak',
+  'sl': 'com_nav_lang_slovenian',
+  'sv': 'com_nav_lang_swedish',
+  'th': 'com_nav_lang_thai',
+  'tr': 'com_nav_lang_turkish',
+  'ug': 'com_nav_lang_uyghur',
+  'uk': 'com_nav_lang_ukrainian',
+  'vi': 'com_nav_lang_vietnamese',
+  'zh-Hans': 'com_nav_lang_chinese',
+  'zh-Hant': 'com_nav_lang_traditional_chinese',
+} as const;
+
 export const LangSelector = ({
   langcode,
   onChange,
@@ -67,9 +113,7 @@ export const LangSelector = ({
 
   const languageOptions = [
     { value: 'auto', label: localize('com_nav_lang_auto') },
-    { value: 'en-US', label: localize('com_nav_lang_english') },
-    { value: 'zh-Hans', label: localize('com_nav_lang_chinese') },
-    { value: 'zh-Hant', label: localize('com_nav_lang_traditional_chinese') },
+    ...supportedLocales.map((value) => ({ value, label: english[languageLabels[value]].trim() })),
   ];
 
   const labelId = 'language-selector-label';
@@ -89,7 +133,7 @@ export const LangSelector = ({
           </span>
         )}
         <Dropdown
-          value={langcode}
+          value={langcode === 'auto' ? 'auto' : normalizeLocale(langcode)}
           onChange={onChange}
           sizeClasses={cn('z-50 w-[220px]', popoverClassName)}
           options={languageOptions}
