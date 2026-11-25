@@ -22,6 +22,9 @@ class ProviderConfig:
     token: str
     timeout_s: float = 180.0
     sampling: dict = field(default_factory=dict)
+    account_channel: str | None = None
+    account_id: str | None = None
+    auth_method: str | None = None
 
 
 def _require_https_or_loopback(value: str) -> str:
@@ -54,7 +57,7 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
         raise ValueError("No available models in this channel")
     name = model or value["models"][0]
     if kind in {"openai", "openai-responses"}:
-        if not token and urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"}:
+        if not token and not value.get("oauth_id") and urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("An OpenAI-compatible model API key is required")
         url = _require_https_or_loopback(base.rstrip("/") + ("/responses" if kind == "openai-responses" else "/chat/completions"))
     elif kind == "anthropic":
@@ -70,7 +73,9 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
     else:
         raise ValueError("Unsupported model provider")
     return ProviderConfig(kind, name, url, token,
-                          sampling=(value.get('model_sampling') or {}).get(name, {}))
+                          sampling=(value.get('model_sampling') or {}).get(name, {}),
+                          account_channel=value.get('name') if value.get('oauth_id') else None,
+                          account_id=value.get('oauth_id'), auth_method=value.get('auth_method'))
 
 
 async def _data_frames(response) -> AsyncIterator[str]:

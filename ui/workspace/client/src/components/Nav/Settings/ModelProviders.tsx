@@ -19,6 +19,8 @@ type Profile = {
   model_sync_at?: number | null;
   model_sync_error?: string | null;
   configured: boolean;
+  auth_method?: string;
+  oauth_error?: string | null;
   source: Source;
 };
 type Profiles = { providers: Profile[] };
@@ -27,6 +29,15 @@ type Draft = { name: string; provider: Kind; base: string; models: string;
   autoDiscover: boolean; reportedContexts: Record<string, number>;
   contexts: Record<string, string>; sampling: Record<string, SamplingDraft>; apiKey: string };
 type Editor = { original: Profile | null };
+type AccountMethod = { id: string; label: string; defaultName: string };
+const accountMethods: AccountMethod[] = [
+  { id: 'chatgpt', label: 'Continue with ChatGPT', defaultName: 'Codex' },
+];
+type Authorization = { method: AccountMethod; name: string; reauthorize: boolean; manual: boolean;
+  flow?: string; authorizationUrl?: string };
+export const isLoopback = (hostname = window.location.hostname) => /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|::1)$/i.test(hostname);
+const statusPath = (url: string, flow: string) => url + '/oauth/status?flow=' + encodeURIComponent(flow);
+
 const input = 'w-full rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary';
 const button = 'rounded-lg border border-border-medium px-3 py-2 text-sm text-text-primary hover:bg-surface-secondary disabled:opacity-40';
 const kinds: { value: Kind; label: string; defaultUrl: string }[] = [
@@ -57,6 +68,12 @@ export default function ModelProviders() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [addMenu, setAddMenu] = useState(false);
+  const [authorization, setAuthorization] = useState<Authorization | null>(null);
+  const [callback, setCallback] = useState('');
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthError, setOauthError] = useState('');
+  const [callbackSent, setCallbackSent] = useState(false);
   const [draft, setDraft] = useState<Draft>(newDraft);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [forceDelete, setForceDelete] = useState<string | null>(null);
@@ -89,6 +106,7 @@ export default function ModelProviders() {
       client.invalidateQueries({ queryKey: [name], refetchType: 'all' })));
   };
   const beginAdd = () => {
+    setAddMenu(false);
     setEditor({ original: null });
     setDraft(newDraft());
     setPreview('idle');
@@ -120,6 +138,107 @@ export default function ModelProviders() {
     setError('');
     setSuccess('');
   };
+  const beginOAuth = async (pending: Authorization) => {
+    setOauthBusy(true);
+    setOauthError('');
+    setCallbackSent(false);
+    // Open synchronously with the initiating click to avoid popup blockers.
+    const popup = window.open('', '_blank');
+    if (popup) popup.opener = null;
+    try {
+      const result = await request.post(url + '/oauth/start', {
+        method: pending.method.id, name: pending.name, reauthorize: pending.reauthorize,
+        manual: pending.manual,
+      }) as { flow: string; authorization_url: string; manual: boolean };
+      setAuthorization({ ...pending, flow: result.flow, authorizationUrl: result.authorization_url, manual: result.manual });
+      if (popup) popup.location.href = result.authorization_url;
+    } catch (reason) {
+      popup?.close();
+      setOauthError(errorMessage(reason));
+    } finally {
+      setOauthBusy(false);
+    }
+  };
+  const selectAccount = (method: AccountMethod, profile?: Profile) => {
+    setAddMenu(false);
+    setEditor(null);
+    setError('');
+    setSuccess('');
+    setCallback('');
+    setOauthError('');
+    setCallbackSent(false);
+    let name = profile?.name ?? method.defaultName;
+    for (let suffix = 2; !profile && channels.some((item) => item.name?.toLowerCase() === name.toLowerCase()); suffix++) {
+      name = method.defaultName + ' ' + suffix;
+    }
+    const pending = { method, name, reauthorize: Boolean(profile), manual: !isLoopback() };
+    setAuthorization(pending);
+    if (!pending.manual) void beginOAuth(pending);
+  };
+  const cancelOAuth = async () => {
+    const flow = authorization?.flow;
+    setAuthorization(null);
+    setCallback('');
+    setCallbackSent(false);
+    setOauthError('');
+    if (flow) {
+      try { await request.delete(statusPath(url, flow)); } catch { /* expired or already completed */ }
+    }
+  };
+  const submitCallback = async () => {
+    if (!authorization?.flow || !callback.trim()) return;
+    setOauthBusy(true);
+    setOauthError('');
+    try {
+      await request.post(statusPath(url, authorization.flow), { callback_url: callback.trim() });
+      setCallback('');
+      setCallbackSent(true);
+    } catch (reason) {
+      setOauthError(errorMessage(reason));
+    } finally {
+      setOauthBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (!authorization?.flow) return;
+    let live = true;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const result = await request.get(statusPath(url, authorization.flow!)) as
+          { status: string; name?: string; error?: string };
+        if (!live) return;
+        if (result.status === 'complete') {
+          const data = await request.get<Profiles>(url);
+          if (!live) return;
+          setProfiles(data.providers);
+          const connected = data.providers.find((item) => item.name === result.name);
+          if (connected) beginEdit(connected);
+          setAuthorization(null);
+          setCallback('');
+          setSuccess('Account connected.');
+          await Promise.all([QueryKeys.models, QueryKeys.endpoints, QueryKeys.tokenConfig].map((name) =>
+            client.invalidateQueries({ queryKey: [name], refetchType: 'all' })));
+          return;
+        }
+        if (result.status !== 'pending') {
+          setOauthError(result.error ?? 'Authorization ended. Start again.');
+          setAuthorization((current) => current ? { ...current, flow: undefined, authorizationUrl: undefined } : null);
+          setCallbackSent(false);
+          return;
+        }
+        if (live) timer = window.setTimeout(() => void poll(), 1000);
+      } catch (reason) {
+        if (live) {
+          setOauthError(errorMessage(reason));
+          setAuthorization((current) => current ? { ...current, flow: undefined, authorizationUrl: undefined } : null);
+          setCallbackSent(false);
+        }
+      }
+    };
+    void poll();
+    return () => { live = false; if (timer != null) window.clearTimeout(timer); };
+  }, [authorization?.flow, url]);
   const original = editor?.original;
   const base = draft.base.trim().replace(/\/+$/, '');
   const apiKey = draft.apiKey.trim();
@@ -279,7 +398,15 @@ export default function ModelProviders() {
         
         <p className="text-sm text-text-secondary">Each channel has its own name, protocol, endpoint, credentials and models.</p>
       </div>
-      <button type="button" disabled={busy} onClick={beginAdd} className={button}>Add channel</button>
+      <div className="relative">
+        <button type="button" disabled={busy || authorization != null} onClick={() => setAddMenu((value) => !value)}
+          aria-label="Add channel" aria-expanded={addMenu} aria-haspopup="menu" className={button}>Add channel ▾</button>
+        {addMenu && <div role="menu" className="absolute right-0 z-20 mt-1 min-w-52 rounded-lg border border-border-medium bg-surface-primary p-1 shadow-lg">
+          <button role="menuitem" type="button" onClick={beginAdd} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">Manual configuration</button>
+          {accountMethods.map((method) => <button role="menuitem" type="button" key={method.id}
+            onClick={() => selectAccount(method)} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{method.label}</button>)}
+        </div>}
+      </div>
     </div>
     {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
     {success && <p role="status" className="text-sm text-text-primary">{success}</p>}
@@ -289,9 +416,11 @@ export default function ModelProviders() {
           <div className="min-w-0 flex-1">
             <p className="break-words font-medium text-text-primary">{channelLabel(profile)}</p>
             <p className="text-xs text-text-secondary">{protocolLabel(profile.provider)} · {profile.models.length} model{profile.models.length === 1 ? '' : 's'}
-              {profile.source === 'environment' ? ' · Environment-configured' : ''}
+              {profile.auth_method && ' · ' + (accountMethods.find((method) => method.id === profile.auth_method)?.defaultName ?? profile.auth_method) + ' account'}
+              {profile.source === 'environment'  ? ' · Environment-configured' : ''}
               {profile.source === 'saved' ? ' · Legacy configuration' : ''}
             </p>
+            {profile.oauth_error && <p className="text-xs text-status-error">Account authorization expired · sign in again</p>}
             {profile.auto_discover && <p className="text-xs text-text-secondary">
               {profile.model_sync_error ? 'Sync failed · using saved models' :
                 profile.model_sync_at ? 'Synced ' + new Date(profile.model_sync_at * 1000).toLocaleString() : 'Automatic discovery'}
@@ -300,7 +429,10 @@ export default function ModelProviders() {
           <div className="flex flex-wrap items-center gap-2">
             {profile.auto_discover && <button type="button" className={button} disabled={busy || editor != null}
               onClick={() => void refreshSaved(profile)} aria-label={'Refresh ' + channelLabel(profile)}>Refresh</button>}
-            <button type="button" className={button} disabled={busy} onClick={() => beginEdit(profile)} aria-label={'Edit ' + channelLabel(profile)}>Edit</button>
+            {accountMethods.filter((method) => method.id === profile.auth_method).map((method) =>
+              <button type="button" key={method.id} className={button} disabled={busy || authorization != null}
+                onClick={() => selectAccount(method, profile)}>Reauthorize</button>)}
+            <button type="button" className={button} disabled={busy || authorization != null} onClick={() => beginEdit(profile)} aria-label={'Edit ' + channelLabel(profile)}>Edit</button>
             {profile.source !== 'environment' && (
               confirmDelete === channelId(profile) ? <>
                 {forceDelete === channelId(profile)
@@ -319,6 +451,38 @@ export default function ModelProviders() {
         </li>)}
       </ul> : <p className="rounded-lg border border-dashed border-border-medium p-5 text-sm text-text-secondary">No channels added yet. Select “Add channel” to configure your first model endpoint.</p>
     )}
+    {authorization && (authorization.manual ?
+      <div role="dialog" aria-modal="true" aria-label="Connect account" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <section className="max-h-full w-full max-w-md space-y-4 overflow-y-auto rounded-xl border border-border-medium bg-surface-primary p-5 text-sm text-text-primary shadow-lg">
+          <h3 className="text-lg font-semibold">{authorization.method.label}</h3>
+          <p>This LSM instance is not being accessed through a loopback address. Complete the OAuth callback manually.</p>
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>Click Start authorization and sign in on the new official authorization page.</li>
+            <li>After approving access, the browser redirects to 127.0.0.1. A connection error is expected.</li>
+            <li>Copy the entire callback URL from the address bar and paste it here. Do not share it elsewhere.</li>
+          </ol>
+          {!authorization.flow ? <button type="button" className={button} disabled={oauthBusy} onClick={() => void beginOAuth(authorization)}>Start authorization</button> :
+            <>
+              <label className="block space-y-1"><span>Full callback URL</span>
+                <textarea className={input} autoComplete="off" spellCheck={false} rows={3}
+                  value={callback} onChange={(event) => setCallback(event.target.value)}
+                  disabled={callbackSent} placeholder="http://127.0.0.1:…/auth/callback?…" />
+              </label>
+              <button type="button" className={button} disabled={oauthBusy || callbackSent || !callback.trim()}
+                onClick={() => void submitCallback()}>{callbackSent ? 'Completing authorization…' : 'Complete authorization'}</button>
+              {authorization.authorizationUrl && <a className="block underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">Reopen authorization page</a>}
+            </>}
+          {oauthError && <p role="alert" className="text-status-error">{oauthError}</p>}
+          <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>Cancel</button>
+        </section>
+      </div> :
+      <div className="space-y-2 rounded-lg border border-border-medium p-3 text-sm text-text-primary">
+        <p role="status">{authorization.flow ? 'Waiting for account authorization…' : oauthBusy ? 'Opening authorization page…' : 'Account authorization'}</p>
+        {authorization.authorizationUrl && <a className="underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">Reopen authorization page</a>}
+        {oauthError && <p role="alert" className="text-status-error">{oauthError}</p>}
+        {!authorization.flow && !oauthBusy && <button type="button" className={button} onClick={() => void beginOAuth(authorization)}>Start authorization</button>}
+        <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>Cancel</button>
+      </div>)}
     {editor && <form aria-label="Channel configuration" className="space-y-4 rounded-lg border border-border-medium bg-surface-secondary p-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <h3 className="font-semibold text-text-primary">{editor.original ? 'Edit ' + channelLabel(editor.original) : 'Add channel'}</h3>
       <div inert={busy ? '' : undefined} className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -334,11 +498,14 @@ export default function ModelProviders() {
           </select>
         </label>
         <label className="space-y-1 text-sm text-text-primary"><span>API base URL</span>
-          <input aria-label="Model API base URL" className={input} value={draft.base} onChange={(event) => setDraft({ ...draft, base: event.target.value })} required />
+          <input aria-label="Model API base URL" className={input} value={draft.base} disabled={Boolean(original?.auth_method)} onChange={(event) => setDraft({ ...draft, base: event.target.value })} required />
         </label>
-        <label className="space-y-1 text-sm text-text-primary"><span>API key</span>
+        {original?.auth_method ? <div className="space-y-1 text-sm text-text-primary">
+          <span>Account authorization</span>
+          <p className="text-text-secondary">{original.oauth_error ? 'Reauthorization required' : 'Connected · credentials refresh automatically'}</p>
+        </div> : <label className="space-y-1 text-sm text-text-primary"><span>API key</span>
           <input type="password" autoComplete="new-password" aria-label="Model API key" className={input} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={editor.original?.configured ? 'Leave blank to keep current key' : 'Optional for local services'} />
-        </label>
+        </label>}
         <div className="space-y-3 sm:col-span-2">
           <label className="flex items-center justify-between gap-3 text-sm font-medium text-text-primary">
             <span>Automatically discover model information</span>

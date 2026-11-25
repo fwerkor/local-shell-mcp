@@ -81,7 +81,7 @@ def profile(channel: str) -> dict:
 
 
 def configured(value: dict) -> bool:
-    return bool(value["models"] and (value.get("api_key") or (
+    return bool(value["models"] and (value.get("api_key") or (value.get("oauth_id") and not value.get("oauth_error")) or (
         value["provider"] in {"openai", "openai-responses"} and urlsplit(value["base_url"]).hostname in {"127.0.0.1", "localhost", "::1"})))
 
 
@@ -97,7 +97,9 @@ def _redact(value: dict) -> dict:
             "model_context_overrides": value.get("model_context_overrides") or {},
             "model_sync_at": value.get("model_sync_at"),
             "model_sync_error": value.get("model_sync_error"),
-            "configured": configured(value)}
+            "configured": configured(value),
+            **({"auth_method": value["auth_method"], "oauth_error": value.get("oauth_error")}
+               if value.get("oauth_id") else {})}
 
 
 def all_profiles() -> list[dict]:
@@ -277,6 +279,11 @@ async def provider_profiles(request):
         key = (_CHANNEL_PREFIX + name) if name is not None else (_PREFIX + value["provider"])
         discovery = None
         previous_connection = None
+        previous_key = _CHANNEL_PREFIX + old_name if renaming else key
+        saved = _repo().setting(_OWNER, previous_key)
+        if isinstance(saved, dict) and saved.get("oauth_id"):
+            if value["api_key"] is not None or value["base_url"] != saved["base_url"] or value["provider"] != saved["provider"]:
+                raise HTTPException(400, detail="Account channel authentication and endpoint cannot be changed")
         if value["auto_discover"]:
             from .model_discovery import prepare_auto_save
 
@@ -311,6 +318,11 @@ async def provider_profiles(request):
                     _default_profile(value["provider"]) if name is None else {})
             if previous and previous.get("provider") != value["provider"]:
                 raise HTTPException(409, detail="Existing channel provider type cannot be changed")
+            if previous.get("oauth_id"):
+                if value["api_key"] is not None or value["base_url"] != previous["base_url"] or value["provider"] != previous["provider"]:
+                    raise HTTPException(400, detail="Account channel authentication and endpoint cannot be changed")
+                for field in ("auth_method", "oauth_id", "oauth_credentials", "oauth_error"):
+                    value[field] = previous[field]
             if value["api_key"] is None:
                 value["api_key"] = previous.get("api_key", "")
             if value["model_sampling"] is None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from .approval_runtime import truncate_approval_result
 from .mcp_projection import HARD_MAX_TOOL_RESULT_CHARS, project_artifact_messages
@@ -15,7 +16,7 @@ _MAX_ARGUMENTS = 1024 * 1024
 
 def _scope(config: ProviderConfig) -> str:
     # Never replay opaque provider state to another endpoint, account or model.
-    return hashlib.sha256(json.dumps([config.url, config.model, config.token]).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([config.url, config.model, config.account_id or config.token]).encode()).hexdigest()
 
 
 def _parts(content, *, assistant=False) -> list[dict]:
@@ -132,9 +133,18 @@ def responses_input(config: ProviderConfig, messages: list[dict]) -> list[dict]:
         elif role in {"system", "developer", "user"}:
             content = _parts(message.get("content"))
             if content:
-                result.append({"role": role, "content": content})
+                result.append({"role": "developer" if role == "system" and config.auth_method == "chatgpt" else role, "content": content})
         else:
             raise ValueError("Unsupported Responses message role")
+    if config.auth_method == "chatgpt":
+        calls = {}
+        for item in result:
+            if item.get("type") == "function_call":
+                item["namespace"] = "lsm"
+                calls[item["call_id"]] = item["name"]
+            elif item.get("type") == "function_call_output" and item.get("call_id") in calls:
+                item["namespace"] = "lsm"
+                item["name"] = calls[item["call_id"]]
     return result
 
 
@@ -163,6 +173,28 @@ def _metadata_item(item: dict) -> dict | None:
     return None
 
 
+
+@asynccontextmanager
+async def _response_stream(client, config, body, headers):
+    """Resolve account credentials just before use; retry only a pre-stream 401."""
+    if not config.account_id:
+        async with client.stream("POST", config.url, json=body, headers=headers) as response:
+            yield response
+        return
+    from .model_oauth import access_token, adapter
+    from .routes import _repo
+    if config.url != adapter(config.auth_method).base_url + "/responses":
+        raise ValueError("Account authorization cannot be used at a different API endpoint")
+    database = _repo().database
+    token = await access_token(database, config.account_channel, config.account_id)
+    for attempt in range(2):
+        async with client.stream("POST", config.url, json=body,
+                                 headers={**headers, "Authorization": "Bearer " + token}) as response:
+            if response.status_code != 401 or attempt:
+                yield response
+                return
+        token = await access_token(database, config.account_channel, config.account_id, rejected=token)
+
 async def stream_responses(config: ProviderConfig, messages: list[dict], *, tools: list[dict],
                            max_tokens: int | None = None, temperature: float | None = None,
                            top_p: float | None = None, emit_finish_reason: bool = False
@@ -176,16 +208,20 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
     body = {"model": config.model, "input": responses_input(config, messages),
             "stream": True, "store": False, "include": ["reasoning.encrypted_content"]}
     if tools:
-        body.update(tools=_tools(tools), tool_choice="auto", parallel_tool_calls=True)
+        wire_tools = _tools(tools)
+        if config.auth_method == "chatgpt":
+            # Namespaces are required by ChatGPT plan usage; keep function names stable.
+            wire_tools = [{"type": "namespace", "name": "lsm", "description": "Local tools", "tools": wire_tools}]
+        body.update(tools=wire_tools, tool_choice="auto", parallel_tool_calls=True)
     for key, value in (("max_output_tokens", max_tokens), ("temperature", temperature), ("top_p", top_p)):
-        if value is not None:
+        if value is not None and config.auth_method != "chatgpt":
             body[key] = value
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     done: dict[int, dict] = {}
     seen_text: dict[int, str] = {}
     terminal = None
     async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", config.url, json=body, headers=headers) as response:
+        async with _response_stream(client, config, body, headers) as response:
             response.raise_for_status()
             async for frame in _data_frames(response):
                 if frame == "[DONE]":
@@ -254,6 +290,8 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
             if incomplete or item.get("status") not in {None, "completed"}:
                 raise RuntimeError("Responses generation ended with an incomplete tool call")
             identity, name, args = item.get("call_id"), item.get("name"), item.get("arguments")
+            if config.auth_method == "chatgpt" and item.get("namespace") not in {None, "lsm"}:
+                raise ValueError("Invalid Responses function namespace")
             if not tools or not isinstance(identity, str) or not identity or identity in identities or not isinstance(name, str) or not name:
                 raise ValueError("Invalid Responses function call")
             if not isinstance(args, str) or len(args) > _MAX_ARGUMENTS:
