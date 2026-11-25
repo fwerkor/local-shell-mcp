@@ -543,6 +543,11 @@ async def test_model_discovery_uses_saved_key_only_at_original_endpoint(setup_pr
             {'id': 'pro', 'context_length': 128000}, {'id': 'unknown', 'context_window': True},
             {'id': 'output-only', 'max_output_tokens': 8192}, {'id': 'flash'}, None,
             {'id': 'invalid\n'}, {'id': 'too-big', 'max_model_len': 2000001},
+            {'id': 'text-embedding-3-small'}, {'id': 'whisper-1'},
+            {'id': 'gpt-image-1'}, {'id': 'vendor/reranker-v2'},
+            {'id': 'arbitrary', 'architecture': {'output_modalities': ['image']}},
+            {'id': 'other', 'supported_endpoints': ['/v1/embeddings']},
+            {'id': 'explicit-chat', 'supported_endpoints': ['/v1/chat/completions']},
         ]})
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original_client(transport=httpx.MockTransport(respond), **kw))
     path = '/api/lsm/providers/discover'
@@ -555,7 +560,7 @@ async def test_model_discovery_uses_saved_key_only_at_original_endpoint(setup_pr
         probe = {'provider': 'openai', 'base_url': body['base_url'], 'existing_channel': 'Discovery'}
         result = await client.post(path, headers=_ADMIN, json=probe)
         assert result.status_code == 200, result.text
-        assert result.json() == {'models': ['flash', 'pro', 'unknown', 'output-only', 'too-big'],
+        assert result.json() == {'models': ['flash', 'pro', 'unknown', 'output-only', 'too-big', 'explicit-chat'],
                                  'model_contexts': {'flash': 1048576, 'pro': 128000}}
         assert result.headers['cache-control'] == 'no-store'
         assert 'secret' not in result.text
@@ -653,3 +658,25 @@ async def test_discovery_bounds_and_pagination_errors(kind, mode, match, monkeyp
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
     with pytest.raises(ValueError, match=match):
         await _fetch_models(kind, 'http://127.0.0.1:8000/v1', '')
+
+
+@pytest.mark.asyncio
+async def test_keyless_channel_can_discover_at_changed_endpoint(setup_profiles, monkeypatch):
+    _, app = setup_profiles
+    original = httpx.AsyncClient
+    requests = []
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={'data': [{'id': 'local-chat'}]})
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
+    async with original(transport=httpx.ASGITransport(app=app), base_url='https://lsm.invalid', headers=_ADMIN) as client:
+        assert (await client.put('/api/lsm/providers', json={
+            'name': 'Local', 'provider': 'openai', 'base_url': 'http://127.0.0.1:8000/v1',
+            'models': ['old']})).status_code == 200
+        response = await client.post('/api/lsm/providers/discover', json={
+            'provider': 'openai', 'base_url': 'http://127.0.0.1:9000/v1',
+            'existing_channel': 'Local'})
+        assert response.status_code == 200, response.text
+        assert response.json()['models'] == ['local-chat']
+        assert str(requests[0].url) == 'http://127.0.0.1:9000/v1/models'
+        assert 'authorization' not in requests[0].headers

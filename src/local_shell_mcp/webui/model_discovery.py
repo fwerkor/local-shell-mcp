@@ -3,17 +3,42 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
+import time
 
 import httpx
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
-from .provider_profiles import _access, profile, validate_connection
-from .routes import _body
+from .provider_profiles import (
+    _access, _OWNER, _PREFIX, _CHANNEL_PREFIX, _DEFAULTS, profile, public_profiles,
+    validate_connection,
+)
+from .routes import _body, _repo
+
+logger = logging.getLogger(__name__)
 
 _MAX_MODELS = 128
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+def _chat_compatible(model: str, item: dict) -> bool:
+    # Some OpenAI-compatible catalogs (e.g. OpenRouter) include explicit
+    # output modalities or supported endpoints. Prefer those to ID heuristics.
+    architecture = item.get('architecture')
+    modalities = architecture.get('output_modalities') if isinstance(architecture, dict) else None
+    if isinstance(modalities, list) and modalities and 'text' not in modalities:
+        return False
+    endpoints = item.get('supported_endpoints')
+    if isinstance(endpoints, list) and endpoints:
+        return any(isinstance(e, str) and e.rstrip('/').endswith('chat/completions') for e in endpoints)
+    # Older catalogs often expose only IDs, including non-chat OpenAI models.
+    leaf = model.lower().rsplit('/', 1)[-1]
+    return not re.search(
+        r'(?:^|[-_.])(?:embeddings?|rerank(?:er)?|whisper|tts|transcri(?:be|ption)|'
+        r'dall-e|image|moderation|realtime)(?:$|[-_.0-9])', leaf
+    )
 
 
 def _parse_page(kind: str, data: dict, models: dict[str, int | None]) -> dict:
@@ -34,6 +59,8 @@ def _parse_page(kind: str, data: dict, models: dict[str, int | None]) -> dict:
             if not re.fullmatch(r'[A-Za-z0-9_.-]+', model):
                 continue
         if not model.strip() or model != model.strip() or len(model) > 200 or any(ord(c) < 32 for c in model):
+            continue
+        if kind == 'openai' and not _chat_compatible(model, item):
             continue
         fields = ('inputTokenLimit',) if kind == 'google' else (
             'context_window', 'context_length', 'max_model_len', 'max_context_tokens', 'max_input_tokens')
@@ -106,12 +133,140 @@ async def discover_models(request):
         channel = body.get('existing_channel')
         if token is None and channel is not None:
             saved = profile(channel)
-            if saved['provider'] != kind or saved['base_url'].rstrip('/') != base:
-                raise ValueError('Enter an API key to discover models at a changed endpoint')
             token = saved.get('api_key')
+            if token and (saved['provider'] != kind or saved['base_url'].rstrip('/') != base):
+                raise ValueError('Enter an API key to discover models at a changed endpoint')
         result = await _fetch_models(kind, base, token or '')
     except (httpx.HTTPError, TimeoutError, json.JSONDecodeError, UnicodeError):
         raise HTTPException(502, detail='Could not retrieve model list. Check the endpoint and API key, or enter models manually.') from None
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from None
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+# The Controller owns this cadence; no browser, toggle-specific timer or user
+# interval preference is required.
+REFRESH_INTERVAL = 600
+_SYNC_ERROR = 'Unable to refresh model information. Last successful data is retained.'
+
+
+def connection_identity(value: dict) -> tuple:
+    return (value.get('provider'), value.get('base_url'), value.get('api_key') or '')
+
+
+def _apply_catalog(value: dict, catalog: dict, overrides: dict) -> None:
+    models = catalog['models']
+    reported = {m: n for m, n in catalog['model_contexts'].items() if m in models}
+    overrides = {m: n for m, n in overrides.items() if m in models}
+    value.update(
+        models=models,
+        discovered_model_contexts=reported,
+        model_context_overrides=overrides,
+        model_contexts={**reported, **overrides},
+        model_sync_at=time.time(),
+        model_sync_error=None,
+    )
+    # Only active models need defaults in the editable catalog. Historical
+    # conversations and Agent references are not rewritten.
+    value['model_sampling'] = {m: v for m, v in (value.get('model_sampling') or {}).items()
+                               if m in models}
+
+
+async def prepare_auto_save(value: dict, previous: dict) -> tuple[tuple, dict | None]:
+    """Resolve and probe a connection before opening the SQLite write transaction."""
+    identity = connection_identity(previous)
+    same_endpoint = identity[:2] == connection_identity(value)[:2]
+    if value['api_key'] is None and identity[2] and not same_endpoint:
+        raise HTTPException(400, detail='Enter an API key to use automatic discovery at a changed endpoint')
+    token = value['api_key'] if value['api_key'] is not None else identity[2]
+    try:
+        return identity, await _fetch_models(value['provider'], value['base_url'], token)
+    except (httpx.HTTPError, TimeoutError, ValueError, UnicodeError):
+        # A newly configured connection must have a verified catalog. An
+        # existing connection may still be saved during a temporary outage.
+        if same_endpoint and token == identity[2] and previous.get('models'):
+            return identity, None
+        raise HTTPException(502, detail='Unable to discover models. Check the connection or turn off automatic discovery.') from None
+
+
+def apply_auto_save(value: dict, previous: dict, catalog: dict | None) -> None:
+    overrides = value['model_contexts']
+    if catalog is not None:
+        _apply_catalog(value, catalog, overrides)
+        return
+    if previous.get('auto_discover') is True:
+        reported = previous.get('discovered_model_contexts') or {}
+    else:
+        # An old/manual list is a valid fallback, not discovered metadata.
+        reported = {}
+        overrides = {**(previous.get('model_contexts') or {}), **overrides}
+    _apply_catalog(value, {'models': previous['models'], 'model_contexts': reported}, overrides)
+    value['model_sync_at'] = previous.get('model_sync_at')
+    value['model_sync_error'] = _SYNC_ERROR
+
+
+async def _refresh_snapshot(database, key: str, raw: str) -> bool:
+    """Fetch without a write lock; CAS prevents stale replies from undoing edits/deletes."""
+    value = json.loads(raw)
+    if value.get('auto_discover') is not True:
+        return False
+    try:
+        kind, base, token = validate_connection(value)
+        catalog = await _fetch_models(kind, base, token or '')
+    except (httpx.HTTPError, TimeoutError, ValueError, UnicodeError):
+        value['model_sync_error'] = _SYNC_ERROR
+    else:
+        _apply_catalog(value, catalog, value.get('model_context_overrides') or {})
+    with database.connect() as db:
+        cursor = db.execute(
+            'UPDATE settings SET value=? WHERE owner=? AND key=? AND value=?',
+            (json.dumps(value), _OWNER, key, raw))
+        return cursor.rowcount == 1
+
+
+async def refresh_model_channels(database) -> None:
+    with database.connect() as db:
+        rows = db.execute(
+            "SELECT key,value FROM settings WHERE owner=? AND "
+            "(key LIKE ? OR key LIKE ?) AND json_extract(value,'$.auto_discover')=1",
+            (_OWNER, _PREFIX + '%', _CHANNEL_PREFIX + '%')).fetchall()
+    semaphore = asyncio.Semaphore(4)
+
+    async def refresh(row):
+        async with semaphore:
+            await _refresh_snapshot(database, row['key'], row['value'])
+
+    results = await asyncio.gather(*(refresh(row) for row in rows), return_exceptions=True)
+    for result in results:
+        if isinstance(result, Exception):
+            # Do not log upstream URLs, bodies or credentials.
+            logger.warning('Model catalog refresh failed: %s', type(result).__name__)
+
+
+async def serve_model_refresh(database) -> None:
+    while True:
+        try:
+            await refresh_model_channels(database)
+        except Exception as exc:
+            logger.warning('Model catalog refresh cycle failed: %s', type(exc).__name__)
+        await asyncio.sleep(REFRESH_INTERVAL)
+
+
+async def refresh_model_channel(request):
+    _access(request)
+    body = await _body(request)
+    channel = body.get('channel')
+    if not isinstance(channel, str):
+        raise HTTPException(400, detail='Specify a saved channel')
+    key = _PREFIX + channel if channel in _DEFAULTS else _CHANNEL_PREFIX + channel
+    database = _repo().database
+    with database.connect() as db:
+        row = db.execute('SELECT value FROM settings WHERE owner=? AND key=?',
+                         (_OWNER, key)).fetchone()
+    if row is None:
+        raise HTTPException(404, detail='Channel not found')
+    if json.loads(row['value']).get('auto_discover') is not True:
+        raise HTTPException(409, detail='Automatic model discovery is disabled')
+    if not await _refresh_snapshot(database, key, row['value']):
+        raise HTTPException(409, detail='Channel changed during refresh; retry')
+    return JSONResponse(public_profiles(), headers={'Cache-Control': 'no-store'})
