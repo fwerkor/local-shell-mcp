@@ -338,9 +338,13 @@ async def test_poll_clamps_to_worker_timeout_and_returns_current_controller_valu
 
     monkeypatch.setattr(remote, "_wait_for_remote_poll_item", fake_poll_wait)
 
-    result = await manager.poll(worker.token, {"poll_timeout_s": 10})
+    # Control the deadline clock: real scheduling overhead may exceed the
+    # default pytest.approx tolerance on a loaded CI runner.
+    with monkeypatch.context() as clock:
+        clock.setattr(asyncio.get_running_loop(), "time", lambda: 100.0)
+        result = await manager.poll(worker.token, {"poll_timeout_s": 10})
 
-    assert captured == [pytest.approx(10)]
+    assert captured == [10.0]
     assert result["poll_timeout_s"] == 50.0
 
 
