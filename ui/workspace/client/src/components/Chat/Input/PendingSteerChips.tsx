@@ -21,14 +21,7 @@ import type { SteeringControls, QueuedMessageContext } from '~/hooks/Chat/useSte
 import type { PendingSteer, QueuedMessage } from '~/store/families';
 import type { RestoreToComposer } from './InFlightSteers';
 import type { MenuEntry } from './SteerMenu';
-import {
-  RowMenu,
-  ICON_BTN_CLASS,
-  PRIMARY_BTN_CLASS,
-  EscalateNowButton,
-  useDefaultToggleEntry,
-  useInterruptToggleEntry,
-} from './SteerMenu';
+import { RowMenu, ICON_BTN_CLASS, PRIMARY_BTN_CLASS, EscalateNowButton } from './SteerMenu';
 import {
   recoveryDispositionsFamily,
   recoveryDisposition,
@@ -141,8 +134,6 @@ function QueuedRow({
 }) {
   const localize = useLocalize();
   const { showToast } = useToastContext();
-  const toggleEntry = useDefaultToggleEntry(steering);
-  const interruptToggle = useInterruptToggleEntry();
   const fileCount = message.files?.length ?? 0;
   const quoteCount = message.quotes?.length ?? 0;
   const dispositions = useAtomValue(recoveryDispositionsFamily(steering.queueKey));
@@ -305,7 +296,6 @@ function QueuedRow({
       },
     );
   }
-  const preferences: MenuEntry[] = [toggleEntry, interruptToggle];
 
   return (
     <div role="listitem" className={ROW_CLASS} data-testid="queued-message-row">
@@ -375,11 +365,7 @@ function QueuedRow({
       >
         <Trash2 className="h-4 w-4" aria-hidden="true" />
       </button>
-      <RowMenu
-        label={localize('com_ui_more_options')}
-        entries={entries}
-        preferences={preferences}
-      />
+      <RowMenu label={localize('com_ui_more_options')} entries={entries} />
     </div>
   );
 }
@@ -398,8 +384,6 @@ function FailedSteerRow({
   ) => void;
 }) {
   const localize = useLocalize();
-  const toggleEntry = useDefaultToggleEntry(steering);
-  const interruptToggle = useInterruptToggleEntry();
   const canRetry = !steer.deliveryUncertain || steer.generationProtocolVersion === 2;
 
   const entries: MenuEntry[] = steer.deliveryUncertain
@@ -431,7 +415,6 @@ function FailedSteerRow({
             ),
         },
       ];
-  const preferences: MenuEntry[] = [toggleEntry, interruptToggle];
 
   return (
     <div
@@ -490,11 +473,7 @@ function FailedSteerRow({
           <X className="h-4 w-4" aria-hidden="true" />
         </button>
       )}
-      <RowMenu
-        label={localize('com_ui_more_options')}
-        entries={entries}
-        preferences={preferences}
-      />
+      <RowMenu label={localize('com_ui_more_options')} entries={entries} />
     </div>
   );
 }

@@ -28,7 +28,6 @@ import { EngineSTTSetting, EngineTTSSetting } from './SpeechControls';
 import FontSizeSelector from '../SettingsTabs/Chat/FontSizeSelector';
 import ChatTitleInTab from '../SettingsTabs/General/ChatTitleInTab';
 import AdvancedPrompts from '../SettingsTabs/Chat/AdvancedPrompts';
-import DuringRunAction from '../SettingsTabs/Chat/DuringRunAction';
 import ApprovalModeSetting from '~/components/Chat/approval/ApprovalModeSetting';
 import StatefulWorkspaceDefault from './StatefulWorkspaceDefault';
 import { ForkSettings } from '../SettingsTabs/Chat/ForkSettings';
@@ -206,27 +205,6 @@ export const registry: SettingEntry[] = [
       localizationKey: 'com_nav_enter_to_send',
       switchId: 'enterToSend',
       hoverCardText: 'com_nav_info_enter_to_send',
-    }),
-  },
-  {
-    id: 'duringRunDefaultAction',
-    tab: CHAT,
-    section: 'sending',
-    labelKey: 'com_nav_during_run_action',
-    keywords: ['steer', 'queue', 'interrupt', 'generating'],
-    Component: DuringRunAction,
-  },
-  {
-    id: 'steerInterruptsByDefault',
-    tab: CHAT,
-    section: 'sending',
-    labelKey: 'com_ui_steer_interrupts_default',
-    keywords: ['steer', 'interrupt', 'preempt', 'generating', 'stop'],
-    Component: toggleControl({
-      stateAtom: store.steerInterruptsByDefault,
-      localizationKey: 'com_ui_steer_interrupts_default',
-      switchId: 'steerInterruptsByDefault',
-      hoverCardText: 'com_ui_steer_interrupts_default_info',
     }),
   },
   {

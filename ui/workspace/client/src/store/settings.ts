@@ -62,19 +62,6 @@ const preferenceAtoms = {
 
   // Chat settings
   enterToSend: atomWithServerPreference('enterToSend', true),
-  /** What Enter does while a run is generating: steer (inject mid-run) or queue (send after). */
-  duringRunDefaultAction: atomWithServerPreference<'steer' | 'queue'>(
-    'duringRunDefaultAction',
-    'steer',
-  ),
-  /**
-   * Whether a steer interrupts generation at the next safe boundary instead of
-   * waiting for the run's next tool step. Orthogonal to
-   * `duringRunDefaultAction`: that chooses steer-vs-queue, this chooses how
-   * soon a steer lands. The composer's interrupt button always interrupts
-   * regardless — this only governs the default Enter/steer route.
-   */
-  steerInterruptsByDefault: atomWithServerPreference('steerInterruptsByDefault', false),
   maximizeChatSpace: atomWithServerPreference('maximizeChatSpace', false),
   chatDirection: atomWithServerPreference('chatDirection', 'LTR'),
   autoExpandTools: atomWithServerPreference(LocalStorageKeys.AUTO_EXPAND_TOOLS, false),

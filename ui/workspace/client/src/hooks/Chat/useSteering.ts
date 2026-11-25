@@ -57,9 +57,6 @@ import { useFileMapContext } from '~/Providers';
 import useLocalize from '~/hooks/useLocalize';
 import store from '~/store';
 
-/** During-run submit routes: inject into the live run, or queue for after it. */
-export type DuringRunAction = 'steer' | 'queue';
-
 /** Composer state consumed into a queued item alongside the text. */
 export interface QueuedMessageContext {
   quotes?: string[];
@@ -441,10 +438,6 @@ export default function useSteering({
   const { mutate: markFilesUsage } = useMarkFilesUsageMutation();
   const { mutate: enqueueAgentQueuedTurn } = useEnqueueAgentQueuedTurnMutation();
   const { mutateAsync: cancelAgentQueuedTurn } = useCancelAgentQueuedTurnMutation();
-  const defaultAction = useRecoilValue<DuringRunAction>(store.duringRunDefaultAction);
-  const setDefaultAction = useSetRecoilState(store.duringRunDefaultAction);
-  const steerInterruptsByDefault = useRecoilValue(store.steerInterruptsByDefault);
-
   const { selected: codeApprovalMode } = useCodeApprovalMode(conversation, addedConversation);
   const endpoint = conversation?.endpointType ?? conversation?.endpoint;
   const steerable = !isAssistantsEndpoint(endpoint);
@@ -751,16 +744,12 @@ export default function useSteering({
     enabled && isSubmitting ? answerModeActive || (liveMessageState?.approval ?? false) : false;
 
   /** Whether a steer can reach the live run right now — independent of the
-   *  user's default action, so the per-send menu can always override to
-   *  steer when it's genuinely available. */
+   *  default queue route; explicit steering is available when supported. */
   const canSteer = hasRealConvoId && canControlGeneration && !pausedOnApproval;
   /** Whether a queued row has a real immediate-send path. Answer mode keeps
    * `isSubmitting` true while hiding during-run steering, so presenting Send
    * now there would be an enabled no-op. */
   const canSendQueuedNow = (!isSubmitting && !revealPending) || (duringRunActive && canSteer);
-  /** Steering needs a live server-side job; degrade to queue otherwise. */
-  const effectiveAction: DuringRunAction = canSteer ? defaultAction : 'queue';
-
   /** Live submission state for POST callbacks — the closure value can be
    *  stale by the time the steer response arrives. */
   const isSubmittingRef = useRef(isSubmitting);
@@ -2214,27 +2203,10 @@ export default function useSteering({
     ],
   );
 
-  /** Routes a during-run submit to the effective action. Returns true when consumed. */
+  /** Ordinary during-run sends always queue a follow-up. */
   const submitDuringRun = useCallback(
-    (text: string): boolean => {
-      if (!duringRunActive) {
-        return false;
-      }
-      if (effectiveAction === 'steer') {
-        /** Only the DEFAULT route honours the preference — the explicit Steer
-         *  row and the Ctrl/Cmd+Enter alternate stay non-preempting, or they
-         *  would become indistinguishable from Interrupt & steer. */
-        return steerFromComposer(text, steerInterruptsByDefault);
-      }
-      return queueFromComposer(text);
-    },
-    [
-      duringRunActive,
-      effectiveAction,
-      steerInterruptsByDefault,
-      steerFromComposer,
-      queueFromComposer,
-    ],
+    (text: string): boolean => duringRunActive && queueFromComposer(text),
+    [duringRunActive, queueFromComposer],
   );
 
   /** Memoized so consumers like `memo(PendingSteerChips)` can bail on the
@@ -2247,10 +2219,7 @@ export default function useSteering({
       canControlGeneration,
       duringRunActive,
       canSendQueuedNow,
-      effectiveAction,
-      defaultAction,
       pausedOnApproval,
-      setDefaultAction,
       submitDuringRun,
       steerFromComposer,
       queueFromComposer,
@@ -2274,10 +2243,7 @@ export default function useSteering({
       canControlGeneration,
       duringRunActive,
       canSendQueuedNow,
-      effectiveAction,
-      defaultAction,
       pausedOnApproval,
-      setDefaultAction,
       submitDuringRun,
       steerFromComposer,
       queueFromComposer,

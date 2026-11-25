@@ -1,16 +1,10 @@
-import { Fragment, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
-import { useRecoilState } from 'recoil';
+import { useEffect, useId, useSyncExternalStore } from 'react';
 import * as Ariakit from '@ariakit/react';
-import { Zap, ZapOff, Clock } from 'lucide';
-import { MorphIcon } from '@librechat/client';
-import { ArrowUp, CircleHelp, MoreHorizontal } from 'lucide-react';
+import { ArrowUp, MoreHorizontal } from 'lucide-react';
 import type { Ref } from 'react';
-import type { SteeringControls } from '~/hooks/Chat/useSteering';
 import { useShortcutAriaKey, useShortcutDisplay } from '~/hooks/useKeyboardShortcuts';
-import { QUEUE_ICON, STEER_ICON } from '~/components/Chat/Steering/identity';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
-import store from '~/store';
 
 /** Shared row/bubble affordances for the during-run surfaces: the in-flight
  *  steer bubbles (`InFlightSteers`) and the queued/failed rows
@@ -77,87 +71,22 @@ export type MenuEntry = {
   icon: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
-  /** Localized description announced on the action and exposed by a help disclosure. */
-  info?: string;
 };
 
-/**
- * Per-row "…" overflow menu: message actions first, then a visually separated
- * "Preferences" section for the sticky mode toggles, so one-off actions and
- * persistent behavior changes never read as the same kind of choice.
- */
+/** Per-message actions only; sending preferences do not belong to a queued row. */
 export function RowMenu({
   label,
   entries,
-  preferences,
   buttonRef,
 }: {
   label: string;
   entries: MenuEntry[];
-  preferences?: MenuEntry[];
   buttonRef?: Ref<HTMLButtonElement>;
 }) {
-  const localize = useLocalize();
   const menu = Ariakit.useMenuStore({ placement: 'top-end' });
-  const descriptionPrefix = useId();
-  const preferencesLabelId = `${descriptionPrefix}-preferences`;
-  const [expandedInfoKey, setExpandedInfoKey] = useState<string | null>(null);
-  const renderEntry = (entry: MenuEntry) => {
-    const descriptionId = entry.info == null ? undefined : `${descriptionPrefix}-${entry.key}`;
-    const infoExpanded = entry.info != null && expandedInfoKey === entry.key;
-    const action = (
-      <Ariakit.MenuItem
-        className={MENU_ITEM_CLASS}
-        disabled={entry.disabled === true}
-        accessibleWhenDisabled
-        aria-describedby={descriptionId}
-        onClick={() => {
-          entry.onClick();
-          setExpandedInfoKey(null);
-          menu.hide();
-        }}
-      >
-        {entry.icon}
-        {entry.label}
-      </Ariakit.MenuItem>
-    );
-
-    if (entry.info == null || descriptionId == null) {
-      return <Fragment key={entry.key}>{action}</Fragment>;
-    }
-
-    return (
-      <div key={entry.key} role="none">
-        <div role="none" className="flex items-center gap-0.5">
-          <div role="none" className="min-w-0 flex-1">
-            {action}
-          </div>
-          <Ariakit.MenuItem
-            aria-label={`${localize('com_ui_more_info')}: ${entry.label}`}
-            aria-expanded={infoExpanded}
-            aria-controls={descriptionId}
-            hideOnClick={false}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-xheavy data-[active-item]:bg-surface-tertiary"
-            onClick={() =>
-              setExpandedInfoKey((current) => (current === entry.key ? null : entry.key))
-            }
-          >
-            <CircleHelp className="h-3.5 w-3.5" aria-hidden="true" />
-          </Ariakit.MenuItem>
-        </div>
-        <div
-          id={descriptionId}
-          className={cn(
-            infoExpanded
-              ? 'mx-2 mb-1 rounded-lg bg-surface-tertiary px-2 py-1.5 text-xs leading-relaxed text-text-secondary'
-              : 'sr-only',
-          )}
-        >
-          {entry.info}
-        </div>
-      </div>
-    );
-  };
+  if (entries.length === 0) {
+    return null;
+  }
   return (
     <>
       <Ariakit.MenuButton
@@ -169,21 +98,21 @@ export function RowMenu({
         <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
       </Ariakit.MenuButton>
       <Ariakit.Menu store={menu} portal gutter={6} className={MENU_CLASS}>
-        {entries.map(renderEntry)}
-        {preferences != null && preferences.length > 0 && (
-          <>
-            <div role="separator" className="mx-2 my-1 border-t border-border-light" />
-            <div role="group" aria-labelledby={preferencesLabelId}>
-              <div
-                id={preferencesLabelId}
-                className="px-2 pb-0.5 pt-1 text-[11px] font-medium uppercase tracking-wide text-text-secondary"
-              >
-                {localize('com_ui_preferences')}
-              </div>
-              {preferences.map(renderEntry)}
-            </div>
-          </>
-        )}
+        {entries.map((entry) => (
+          <Ariakit.MenuItem
+            key={entry.key}
+            className={MENU_ITEM_CLASS}
+            disabled={entry.disabled === true}
+            accessibleWhenDisabled
+            onClick={() => {
+              entry.onClick();
+              menu.hide();
+            }}
+          >
+            {entry.icon}
+            {entry.label}
+          </Ariakit.MenuItem>
+        ))}
       </Ariakit.Menu>
     </>
   );
@@ -268,74 +197,5 @@ export function EscalateNowButton({
         {chord && isActive ? `${label} · ${chord}` : label}
       </Ariakit.Tooltip>
     </Ariakit.TooltipProvider>
-  );
-}
-
-/**
- * The overflow item that flips the Enter-during-run default. Shown as the
- * OPPOSITE of the current default (the action you would switch to), matching
- * the reference UX ("Turn on queueing" while steer is the default).
- */
-export function useDefaultToggleEntry(steering: SteeringControls): MenuEntry {
-  const localize = useLocalize();
-  return useMemo(() => {
-    const next = steering.defaultAction === 'steer' ? 'queue' : 'steer';
-    return {
-      key: 'toggle-default',
-      label:
-        next === 'queue'
-          ? localize('com_ui_turn_on_queueing')
-          : localize('com_ui_turn_on_steering'),
-      icon: (
-        <MorphIcon
-          icon={next === 'queue' ? Clock : Zap}
-          className={cn('h-4 w-4', next === 'queue' ? QUEUE_ICON : STEER_ICON)}
-        />
-      ),
-      info: localize('com_nav_info_during_run_action'),
-      onClick: () => steering.setDefaultAction(next),
-    };
-  }, [steering, localize]);
-}
-
-/**
- * The overflow item that flips whether a default steer interrupts generation
- * (`steerInterruptsByDefault`). Worded as the mode you would switch to, like
- * the queue/steer toggle above.
- */
-export function useInterruptToggleEntry(): MenuEntry {
-  const localize = useLocalize();
-  const [interrupts, setInterrupts] = useRecoilState(store.steerInterruptsByDefault);
-  const [defaultAction, setDefaultAction] = useRecoilState(store.duringRunDefaultAction);
-  const interruptsByDefault = defaultAction === 'steer' && interrupts;
-  return useMemo(
-    () => ({
-      key: 'toggle-interrupt',
-      label: interruptsByDefault
-        ? localize('com_ui_wait_for_tool_steps')
-        : localize('com_ui_always_interrupt'),
-      icon: (
-        <MorphIcon
-          icon={interruptsByDefault ? Zap : ZapOff}
-          className={cn('h-4 w-4', STEER_ICON)}
-        />
-      ),
-      info: localize(
-        !interruptsByDefault && defaultAction === 'queue'
-          ? 'com_ui_steer_interrupts_enable_info'
-          : 'com_ui_steer_interrupts_default_info',
-      ),
-      onClick: () => {
-        if (interruptsByDefault) {
-          setInterrupts(false);
-          return;
-        }
-        if (defaultAction === 'queue') {
-          setDefaultAction('steer');
-        }
-        setInterrupts(true);
-      },
-    }),
-    [defaultAction, interruptsByDefault, localize, setDefaultAction, setInterrupts],
   );
 }
