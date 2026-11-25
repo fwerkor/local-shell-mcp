@@ -148,12 +148,6 @@ export function offsetActivityPhaseBoundary(
 }
 
 /**
- * Mirrors `SUBSTANTIAL_TEXT_CHARS` in `activityPhases/runtime.ts`. Short
- * commentary belongs inside a phase; a real block of prose ends one.
- */
-const SUBSTANTIAL_TEXT_CHARS = 200;
-
-/**
  * Activities a span needs before it is worth folding, matching the server's
  * `MIN_ACTIVITIES`. Below it the child groups already read as a short list
  * and a card would add a disclosure without hiding anything.
@@ -181,17 +175,11 @@ const ACTIVITY_BLOCK_TYPES = new Set<string>([
   ContentTypes.AGENT_UPDATE,
 ]);
 
-/**
- * True at a hard UI boundary — where a fold has to stop.
- *
- * Prose is the strictest case. `groupSequentialToolCalls` absorbs only
- * `commentary` text into an activity block, so anything else the model says is
- * an answer the reader came for and must never end up behind a disclosure —
- * including a two-word reply on a provider that never stamps `phase`, which
- * the server's own 200-character rule would let through. Long commentary ends
- * a fold too, matching `SUBSTANTIAL_TEXT_CHARS`, so a card cannot swallow an
- * essay. Steers and existing phase markers end one because the server says so.
- */
+/** Nonempty assistant prose always ends a fold, irrespective of its phase. */
+function isVisibleProse(part: TMessageContentParts | undefined): boolean {
+  return part?.type === ContentTypes.TEXT && textValue(part).trim().length > 0;
+}
+
 function isFoldBoundaryPart(part: TMessageContentParts | undefined): boolean {
   if (part == null) {
     return false;
@@ -200,20 +188,14 @@ function isFoldBoundaryPart(part: TMessageContentParts | undefined): boolean {
     return true;
   }
   if (part.type === ContentTypes.TEXT) {
-    const text = textValue(part).trim();
-    if (text.length === 0) {
-      return false;
-    }
-    return (
-      (part as { phase?: string }).phase !== 'commentary' || text.length > SUBSTANTIAL_TEXT_CHARS
-    );
+    return isVisibleProse(part);
   }
   return !ACTIVITY_BLOCK_TYPES.has(part.type);
 }
 
 /**
  * True when the part is one an activity label can CLAIM. Mirrors
- * `isGroupableToolCall` plus the block's reasoning and commentary members: a
+ * `isGroupableToolCall` plus the block's reasoning members: a
  * handoff call is never groupable, so a label covering only handoffs claims
  * nothing and renders standalone rather than heading a group.
  */
@@ -223,9 +205,6 @@ function claimsActivity(part: TMessageContentParts | undefined): boolean {
   }
   if (part.type === ContentTypes.THINK) {
     return true;
-  }
-  if (part.type === ContentTypes.TEXT) {
-    return (part as { phase?: string }).phase === 'commentary';
   }
   if (part.type !== ContentTypes.TOOL_CALL) {
     return false;
@@ -658,7 +637,7 @@ export function groupActivityPhases(
       pushContent(adjacent, cursor);
     }
     const labelText = getActivityLabelText(part);
-    if (labelText) {
+    if (labelText && !phase.content.some(isVisibleProse)) {
       segments.push({
         type: 'phase',
         content: phase.content,
@@ -669,7 +648,9 @@ export function groupActivityPhases(
         hasContent: phase.hasContent,
       });
     } else {
-      /** A failed/empty parent stays visually feature-off, but its bounds are
+      /** Legacy phase ranges may include commentary. Keep those ranges open
+       *  so prose cannot disappear; ordinary child groups can still fold.
+       *  A failed/empty parent stays visually feature-off, but its bounds are
        *  still authoritative: delayed child labels must move back beside the
        *  tools they describe instead of rendering after the final answer. */
       pushContent(phase, start);

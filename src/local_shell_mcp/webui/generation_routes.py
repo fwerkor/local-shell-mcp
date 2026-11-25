@@ -314,6 +314,12 @@ async def _run_model(
                     current_content_type = 'think'
                 elif part.get('type') == 'text' and part.get('text'):
                     current_content_type = 'text'
+            # A paused/recovered tool batch can sit after the last open
+            # message step. Never append new prose or thoughts to that earlier
+            # slot, even when the next provider chunk has the same type.
+            needs_post_tool_step = any(
+                part.get('type') == 'tool_call' for part in parts[step_index + 1:]
+            )
         else:
             if resume_history is not None:
                 snapshot, _ = repo.resume_snapshot(owner, generation.run_id)

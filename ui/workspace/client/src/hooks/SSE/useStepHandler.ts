@@ -600,7 +600,21 @@ export default function useStepHandler({
       );
     }
 
-    if (!updatedContent[index] && contentType !== ContentTypes.TOOL_CALL) {
+    const reservedPart = updatedContent[index];
+    // A reconnect can restore a message-creation slot before the first delta
+    // tells us whether it contains thought or prose. Only empty reservations
+    // may change type; never overwrite already emitted user-visible text.
+    const emptyTextReservation =
+      reservedPart?.type === ContentTypes.TEXT &&
+      (reservedPart.text == null || reservedPart.text === '');
+    const emptyThinkReservation =
+      reservedPart?.type === ContentTypes.THINK &&
+      (reservedPart.think == null || reservedPart.think === '');
+    if (
+      (!reservedPart && contentType !== ContentTypes.TOOL_CALL) ||
+      (emptyTextReservation && contentType === ContentTypes.THINK) ||
+      (emptyThinkReservation && contentType === ContentTypes.TEXT)
+    ) {
       updatedContent[index] = { type: contentPart.type as AllContentTypes };
     }
 
