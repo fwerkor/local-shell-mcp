@@ -4,11 +4,11 @@ import asyncio
 
 import httpx
 import pytest
+from test_webui_provider_profiles import _ADMIN
+from test_webui_provider_profiles import setup_profiles as setup_profiles
 
 from local_shell_mcp.webui import model_discovery, routes
 from local_shell_mcp.webui.provider_profiles import profile
-from test_webui_provider_profiles import setup_profiles, _ADMIN  # noqa: F401
-
 
 PATH = '/api/lsm/providers'
 BASE = 'https://models.invalid/v1'

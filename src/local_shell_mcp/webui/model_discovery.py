@@ -12,7 +12,13 @@ from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
 from .provider_profiles import (
-    _access, _OWNER, _PREFIX, _CHANNEL_PREFIX, _DEFAULTS, profile, public_profiles,
+    _CHANNEL_PREFIX,
+    _DEFAULTS,
+    _OWNER,
+    _PREFIX,
+    _access,
+    profile,
+    public_profiles,
     validate_connection,
 )
 from .routes import _body, _repo
