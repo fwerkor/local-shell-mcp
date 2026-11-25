@@ -18,6 +18,7 @@ type Profile = {
   source: Source;
 };
 type Profiles = { providers: Profile[] };
+type DiscoveredModels = { models: string[]; model_contexts: Record<string, number> };
 type Draft = { name: string; provider: Kind; base: string; models: string;
   contexts: Record<string, string>; sampling: Record<string, SamplingDraft>; includeUsage: boolean; apiKey: string };
 type Editor = { original: Profile | null };
@@ -55,6 +56,7 @@ export default function ModelProviders() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [manualOpen, setManualOpen] = useState(false);
   const url = apiBaseUrl() + '/api/lsm/providers';
   const channels = profiles.filter((profile) => profile.source !== 'default');
   const draftModels = [...new Set(draft.models.split(/[\n,]/).map((model) => model.trim()).filter(Boolean))];
@@ -78,6 +80,7 @@ export default function ModelProviders() {
   const beginAdd = () => {
     setEditor({ original: null });
     setDraft(newDraft());
+    setManualOpen(false);
     setConfirmDelete(null);
     setForceDelete(null);
     setError('');
@@ -85,6 +88,7 @@ export default function ModelProviders() {
   };
   const beginEdit = (profile: Profile) => {
     setEditor({ original: profile });
+    setManualOpen(false);
     setDraft({
       name: profile.name ?? '',
       provider: profile.provider,
@@ -100,6 +104,37 @@ export default function ModelProviders() {
     setError('');
     setSuccess('');
   };
+  const fetchCatalog = async (): Promise<DiscoveredModels> => {
+    const original = editor?.original;
+    return request.post(url + '/discover', {
+      provider: draft.provider,
+      base_url: draft.base.trim(),
+      ...(draft.apiKey.trim() ? { api_key: draft.apiKey } : {}),
+      ...(original ? { existing_channel: original.name ?? original.provider } : {}),
+    });
+  };
+  const fillContexts = (found: DiscoveredModels) => ({
+    ...Object.fromEntries(Object.entries(found.model_contexts).map(([model, tokens]) => [model, String(tokens)])),
+    ...Object.fromEntries(Object.entries(draft.contexts).filter(([, value]) => value.trim())),
+  });
+  const fetchIntoDraft = async () => {
+    setBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const found = await fetchCatalog();
+      // Keep previously selected IDs (including private aliases) and manual limits.
+      const models = [...new Set([...draftModels, ...found.models])];
+      if (models.length > 128) throw new Error('More than 128 models; select the desired models manually');
+      setDraft({ ...draft, models: models.join('\n'), contexts: fillContexts(found) });
+      setSuccess(`Fetched ${found.models.length} models. Save to apply.`);
+    } catch (reason) {
+      setError(errorMessage(reason));
+      setManualOpen(true);
+    } finally {
+      setBusy(false);
+    }
+  };
   const save = async () => {
     if (!editor) return;
     setBusy(true);
@@ -109,10 +144,22 @@ export default function ModelProviders() {
       const original = editor.original;
       const name = draft.name.trim();
       if ((!original || original.name) && !name) throw new Error('Channel name is required');
-      const models = draftModels;
+      let models = draftModels;
+      let contexts = draft.contexts;
+      if (!models.length) {
+        try {
+          const found = await fetchCatalog();
+          models = found.models;
+          contexts = fillContexts(found);
+          setDraft({ ...draft, models: models.join('\n'), contexts });
+        } catch (reason) {
+          setManualOpen(true);
+          throw reason;
+        }
+      }
       const modelContexts: Record<string, number> = {};
       for (const model of models) {
-        const raw = draft.contexts[model]?.trim();
+        const raw = contexts[model]?.trim();
         if (!raw) continue;
         const tokens = Number(raw);
         if (!Number.isInteger(tokens) || tokens < 1 || tokens > 2_000_000) {
@@ -210,7 +257,7 @@ export default function ModelProviders() {
     )}
     {editor && <form aria-label="Channel configuration" className="space-y-4 rounded-lg border border-border-medium bg-surface-secondary p-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <h3 className="font-semibold text-text-primary">{editor.original ? 'Edit ' + channelLabel(editor.original) : 'Add channel'}</h3>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div inert={busy ? '' : undefined} className="grid min-w-0 gap-4 sm:grid-cols-2">
         {(!editor.original || editor.original.name) && <label className="space-y-1 text-sm text-text-primary"><span>Channel name</span>
           <input aria-label="Channel name" className={input} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Research Gateway" maxLength={64} required />
         </label>}
@@ -228,20 +275,29 @@ export default function ModelProviders() {
         <label className="space-y-1 text-sm text-text-primary"><span>API key</span>
           <input type="password" autoComplete="new-password" aria-label="Model API key" className={input} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={editor.original?.configured ? 'Leave blank to keep current key' : 'Optional for local services'} />
         </label>
-        <label className="space-y-1 text-sm text-text-primary sm:col-span-2"><span>Models / 模型 (one per line)</span>
-          <textarea aria-label="Model identifiers" className={input} value={draft.models} onChange={(event) => setDraft({ ...draft, models: event.target.value })} rows={3} required />
-        </label>
-        {draftModels.length > 0 && <div className="space-y-2 sm:col-span-2">
-          <p className="text-sm text-text-primary">Context window per model (optional, tokens)</p>
-          {draftModels.map((model) => <label key={model} className="flex items-center gap-3 text-xs text-text-secondary">
-            <span className="min-w-0 flex-1 break-all">{model}</span>
-            <input className={input + ' max-w-40'} type="number" min={1} max={2000000}
-              placeholder="Unknown" aria-label={'Context window for ' + model}
-              value={draft.contexts[model] ?? ''} onChange={(event) => setDraft({ ...draft,
-                contexts: { ...draft.contexts, [model]: event.target.value } })} />
-          </label>)}
-          <p className="text-xs text-text-tertiary">Leave blank if unknown. The model API usually does not publish this limit.</p>
-        </div>}
+        <div className="space-y-2 sm:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-text-primary">{draftModels.length ? `${draftModels.length} models configured` : 'Models will be discovered automatically when saving.'}</p>
+            <button type="button" disabled={busy || !draft.base.trim()} onClick={() => void fetchIntoDraft()} className={button}>Fetch models</button>
+          </div>
+          <details open={manualOpen} onToggle={(event) => setManualOpen(event.currentTarget.open)} className="space-y-3 rounded-lg border border-border-light p-3">
+            <summary className="cursor-pointer text-sm text-text-secondary">Edit models and context windows manually</summary>
+            <label className="space-y-1 text-sm text-text-primary"><span>Models / 模型 (one per line)</span>
+              <textarea aria-label="Model identifiers" className={input} value={draft.models} onChange={(event) => setDraft({ ...draft, models: event.target.value })} rows={3} />
+            </label>
+            {draftModels.length > 0 && <div className="space-y-2">
+              <p className="text-sm text-text-primary">Context window per model (optional, tokens)</p>
+              {draftModels.map((model) => <label key={model} className="flex items-center gap-3 text-xs text-text-secondary">
+                <span className="min-w-0 flex-1 break-all">{model}</span>
+                <input className={input + ' max-w-40'} type="number" min={1} max={2000000}
+                  placeholder="Unknown" aria-label={'Context window for ' + model}
+                  value={draft.contexts[model] ?? ''} onChange={(event) => setDraft({ ...draft,
+                    contexts: { ...draft.contexts, [model]: event.target.value } })} />
+              </label>)}
+              <p className="text-xs text-text-tertiary">Automatically filled when reported by the API. You may override it manually.</p>
+            </div>}
+          </details>
+        </div>
         {draftModels.length > 0 && <details className="space-y-3 rounded-lg border border-border-light p-3 sm:col-span-2">
           <summary className="cursor-pointer text-sm font-medium text-text-primary">Model defaults / 模型默认参数</summary>
           {draftModels.map((model) => <div key={model} className="space-y-2">
@@ -258,7 +314,7 @@ export default function ModelProviders() {
       </div>
       <p className="text-xs text-text-secondary">{editor.original?.name ? 'Renaming a channel in use is restricted to protect Agent and conversation references. ' : ''}Keys are stored on the server and never returned here; an empty key preserves an existing one.</p>
       <div className="flex flex-wrap gap-2">
-        <button type="submit" disabled={busy || !draft.models.trim()} className={button}>{busy ? 'Saving…' : 'Save model channel'}</button>
+        <button type="submit" disabled={busy || !draft.base.trim()} className={button}>{busy ? 'Saving…' : 'Save model channel'}</button>
         <button type="button" disabled={busy} className={button} onClick={() => { setEditor(null); setError(''); }}>Cancel</button>
       </div>
     </form>}

@@ -118,15 +118,12 @@ def public_profiles() -> dict:
     return {"providers": entries}
 
 
-def _validate(body: dict) -> dict:
+def validate_connection(body: dict) -> tuple[str, str, str | None]:
     from .providers import _require_https_or_loopback
 
     kind = body.get("provider")
     if not isinstance(kind, str) or kind not in _DEFAULTS:
         raise ValueError("Unsupported model provider")
-    name = body.get("name")
-    if name is not None and (not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or (name.lower() in _RESERVED or name.lower().endswith("assistants"))):
-        raise ValueError("Invalid or reserved channel name")
     base = body.get("base_url")
     if not isinstance(base, str) or not base.strip() or len(base) > 2048:
         raise ValueError("A model provider base URL is required")
@@ -141,6 +138,17 @@ def _validate(body: dict) -> dict:
         raise ValueError("Invalid model provider base URL")
     if parsed.query:
         raise ValueError("A model provider base URL must not contain a query")
+    key = body.get("api_key")
+    if key is not None and (not isinstance(key, str) or len(key) > 16384 or any(ord(char) < 32 for char in key)):
+        raise ValueError("Invalid model API key")
+    return kind, base, (key.strip() or None) if key else None
+
+
+def _validate(body: dict) -> dict:
+    kind, base, key = validate_connection(body)
+    name = body.get("name")
+    if name is not None and (not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or (name.lower() in _RESERVED or name.lower().endswith("assistants"))):
+        raise ValueError("Invalid or reserved channel name")
     models = body.get("models")
     if not isinstance(models, list) or not models or len(models) > 128:
         raise ValueError("Provide between 1 and 128 model identifiers")
@@ -150,9 +158,6 @@ def _validate(body: dict) -> dict:
     models = list(dict.fromkeys(item.strip() for item in models))
     if kind == "google" and any(any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in item) for item in models):
         raise ValueError("Unsupported Gemini model identifier")
-    key = body.get("api_key")
-    if key is not None and (not isinstance(key, str) or len(key) > 16384 or any(ord(char) < 32 for char in key)):
-        raise ValueError("Invalid model API key")
     model_contexts = body.get('model_contexts', {})
     if not isinstance(model_contexts, dict) or any(
         model not in models or type(limit) is not int or not 1 <= limit <= 2_000_000
@@ -168,7 +173,7 @@ def _validate(body: dict) -> dict:
     if include_usage is not None and type(include_usage) is not bool:
         raise ValueError('include_usage must be a boolean')
     return {**({"name": name} if name is not None else {}), "provider": kind, "base_url": base,
-            "models": models, "api_key": (key.strip() or None) if key else None,
+            "models": models, "api_key": key,
             "model_contexts": model_contexts,
             "model_sampling": model_sampling,
             'include_usage': include_usage}
