@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # Tìm kiếm web và đọc tài liệu trong WebUI
 
 Tìm kiếm web được bật mặc định trong trò
@@ -49,3 +49,11 @@ Câu trả lời nên dẫn URL gốc và số trang PDF
 nếu có thể. Nội dung ngoài không đáng tin cậy
 và không được phép thay đổi yêu cầu của người
 dùng hoặc cấu hình Agent.
+
+Các trang HTML rỗng hoặc phụ thuộc JavaScript được thử lại trong ngữ cảnh
+Chromium headless mới nếu đã cài extra browser tùy chọn và Chromium.
+Trang tĩnh và PDF không khởi động trình duyệt. Kết xuất dùng cùng giao vận HTTP
+chỉ cho IP công cộng, chặn yêu cầu không phải đọc và kết nối trực tiếp của trình duyệt,
+giới hạn 25 giây và 128 yêu cầu. Trang cần đăng nhập, CAPTCHA hoặc chuyển hướng
+hay yêu cầu không được hỗ trợ vẫn có thể không đọc được.
+Từ chối truy cập và kết quả rỗng được báo lỗi, không lưu bộ nhớ đệm.

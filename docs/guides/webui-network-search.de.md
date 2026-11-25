@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # Websuche und Dokumentenlesen in WebUI
 
 Im WebUI-Chat ist die Websuche standardmäßig
@@ -57,3 +57,11 @@ PDF-Seitenzahlen nennen. Externe Inhalte
 gelten als nicht vertrauenswürdig und dürfen
 Anweisungen des Nutzers oder die
 Agent-Konfiguration nicht überschreiben.
+
+Leere oder JavaScript-abhängige HTML-Seiten werden in einem neuen
+Headless-Chromium-Kontext erneut geladen, sofern das optionale Browser-Extra
+und Chromium installiert sind. Statische Seiten und PDFs starten keinen Browser.
+Das Rendering nutzt denselben auf öffentliche IPs begrenzten HTTP-Transport,
+blockiert nicht lesende Anfragen und direkte Browserverbindungen und ist auf
+25 Sekunden und 128 Anfragen begrenzt. Anmeldungen, CAPTCHA und nicht unterstützte
+Weiterleitungen können weiterhin scheitern. Zugriffsfehler und leere Ergebnisse werden nicht gecacht.

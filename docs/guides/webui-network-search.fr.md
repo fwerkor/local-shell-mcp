@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # Recherche web et lecture de documents dans WebUI
 
 La recherche web est activée par défaut dans
@@ -55,3 +55,11 @@ URL d'origine et les pages PDF si possible.
 Les contenus externes ne sont pas fiables et
 ne peuvent modifier ni les instructions de
 l'utilisateur ni la configuration de l'Agent.
+
+Les pages HTML vides ou dépendantes de JavaScript sont réessayées dans un nouveau
+contexte Chromium sans interface si le supplément browser et Chromium sont installés.
+Les pages statiques et PDF ne lancent pas de navigateur. Le rendu utilise le même
+transport HTTP limité aux IP publiques, bloque les requêtes autres que la lecture
+et les connexions directes du navigateur, avec une limite de 25 secondes et 128 requêtes.
+Les pages nécessitant une connexion, un CAPTCHA ou des redirections non prises en charge
+peuvent rester illisibles. Les refus d'accès et résultats vides ne sont pas mis en cache.

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # Wyszukiwanie w sieci i odczyt dokumentów w WebUI
 
 W czacie WebUI wyszukiwanie internetowe jest
@@ -54,3 +54,11 @@ oryginalne URL i numery stron PDF, gdy to
 możliwe. Zewnętrzne treści nie są zaufane i
 nie mogą zastępować poleceń użytkownika ani
 ustawień Agent.
+
+Puste strony HTML lub zależne od JavaScript są ponawiane w nowym kontekście
+Chromium bez interfejsu, jeśli zainstalowano opcjonalny dodatek browser i Chromium.
+Strony statyczne i PDF nie uruchamiają przeglądarki. Renderowanie używa tego samego
+transportu HTTP ograniczonego do publicznych IP, blokuje żądania inne niż odczyt
+i bezpośrednie połączenia przeglądarki; limit to 25 sekund i 128 żądań.
+Logowanie, CAPTCHA i nieobsługiwane przekierowania mogą nadal uniemożliwiać odczyt.
+Odmowy dostępu i puste wyniki są zgłaszane, a nie zapisywane w pamięci podręcznej.

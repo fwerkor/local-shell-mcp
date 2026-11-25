@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 78ec7a5b5dc75473db69b12cf1626f81c3071f52661bf1023047af5d6d24e3ee -->
+<!-- i18n-source-sha256: 2fb1887d3d0f7ca8ac19f19375829b9269f666b08197e4915c0230669303c8fe -->
 # Búsqueda web y lectura de documentos en WebUI
 
 La búsqueda web está activada de forma
@@ -56,3 +56,11 @@ sea posible. Los resultados externos no son
 fiables y sus instrucciones nunca sustituyen
 las instrucciones del usuario ni la
 configuración del Agent.
+
+Las páginas HTML vacías o dependientes de JavaScript se reintentan en un contexto
+nuevo de Chromium sin interfaz si están instalados el extra browser y Chromium.
+Las páginas estáticas y PDF no abren el navegador. El renderizado utiliza el mismo
+transporte HTTP limitado a IP públicas, bloquea las solicitudes que no sean de lectura
+y la red directa del navegador, con un límite de 25 segundos y 128 solicitudes.
+Las páginas con inicio de sesión, CAPTCHA o redirecciones no admitidas pueden fallar.
+Los accesos denegados y resultados vacíos se notifican y no se almacenan en caché.
