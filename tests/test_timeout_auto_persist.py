@@ -5,6 +5,7 @@ import json
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import python_shell_command
@@ -448,14 +449,28 @@ async def test_dead_runner_returns_lost_before_deadline(isolated_job_workspace, 
             )
         return {"job_id": "lost_job", "session_id": "dead_session"}
 
+    # Exercise the polling deadline without counting CI scheduling and disk I/O.
+    elapsed = 0.0
+    polls = []
+
+    async def advance_clock(delay):
+        nonlocal elapsed
+        elapsed += delay
+
     async def no_shells():
+        polls.append(elapsed)
         return {"sessions": []}
+
+    monkeypatch.setattr(jobs, "time", SimpleNamespace(time=time.time, monotonic=lambda: elapsed))
+    monkeypatch.setattr(jobs, "asyncio", SimpleNamespace(sleep=advance_clock))
 
     monkeypatch.setattr(jobs, "start_job", fake_start)
     monkeypatch.setattr(jobs, "list_shells", no_shells)
     monkeypatch.setattr(jobs, "_attempt_paths", lambda *_: {"log": log, "status": status})
     result = await run_job_with_timeout("false", ".", 10)
-    assert result["duration_ms"] < 3000
+    assert len(polls) == 1
+    assert 0.5 <= polls[0] < 1.0
+    assert 500 <= result["duration_ms"] < 1000
     assert result["job_status"] == "lost"
     assert result["ok"] is False
     assert result["timed_out"] is False
