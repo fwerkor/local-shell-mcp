@@ -196,7 +196,8 @@ class SQLiteSubagentTaskHost:
                 "task": task}
 
     async def start(self, invocation: SubagentInvocation, *, thread_id: str | None = None,
-                    mcp_enabled: bool = False) -> str:
+                    mcp_enabled: bool = False, web_search_enabled: bool = True,
+                    chat_model: str | None = None, chat_parameters: dict | None = None) -> str:
         """Persist immutable owner/parent/tool identity before launching any child run."""
         if not invocation.parent_tool_call_id or not invocation.parent_run_id:
             return _json({"status": "rejected", "tool": "subagent",
@@ -206,9 +207,10 @@ class SQLiteSubagentTaskHost:
         if invocation.grant_expires is not None and invocation.grant_expires <= time.time():
             raise PermissionError("Authentication grant expired")
         source_agent = invocation.agent.get("id")
-        parent_agent = invocation.parent_agent_id or source_agent
+        parent_agent = "default" if invocation.ordinary_chat else (invocation.parent_agent_id or source_agent)
         repository = AgentRepository(self.db)
-        if repository.get(self.owner, source_agent) is None or repository.get(self.owner, parent_agent) is None:
+        if not invocation.ordinary_chat and (repository.get(self.owner, source_agent) is None
+                                             or repository.get(self.owner, parent_agent) is None):
             raise PermissionError("Subagent or parent Agent is not owned by the current principal")
         key = _json([invocation.parent_run_id, parent_agent, invocation.parent_tool_call_id])
         task_text = invocation.messages[-1]["content"]
@@ -218,7 +220,7 @@ class SQLiteSubagentTaskHost:
             db.execute("BEGIN IMMEDIATE")
             self._sweep(db, now)
             parent = db.execute(
-                "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "SELECT r.agent_id,r.state,r.conversation_id FROM runs r JOIN conversations c ON c.id=r.conversation_id "
                 "LEFT JOIN subagent_tasks t ON t.child_run_id=r.id "
                 "WHERE r.id=? AND c.owner=? AND (r.conversation_id=? OR "
                 "(t.owner=? AND t.parent_conversation_id=? AND t.status='running'))",
@@ -227,6 +229,17 @@ class SQLiteSubagentTaskHost:
             ).fetchone()
             if parent is None:
                 raise PermissionError("Parent run is not owned by this conversation")
+            chat_options = {}
+            if invocation.ordinary_chat:
+                if (parent["agent_id"] is not None or parent["conversation_id"] != self.conversation_id
+                        or invocation.parent_agent_id is not None or source_agent is not None
+                        or invocation.subagent_type != "self" or invocation.remaining_depth != 0
+                        or invocation.child_configs):
+                    raise PermissionError("Ordinary chat subagent requires an owned model-chat parent")
+                parent_state = json.loads(parent["state"])
+                chat_options = {"ordinary_chat": True, "provider": parent_state["provider"],
+                                "model": chat_model or parent_state["model"],
+                                "parameters": chat_parameters or {}}
             previous = self._existing(db, key, fingerprint)
             if previous is not None:
                 if not previous["accepted"]:
@@ -287,7 +300,8 @@ class SQLiteSubagentTaskHost:
                                    "recursion_limit": invocation.recursion_limit,
                                    "remaining_depth": invocation.remaining_depth,
                                    "child_types": [config.type for config in invocation.child_configs],
-                                   "mcp_enabled": mcp_enabled}), task_text,
+                                   "mcp_enabled": mcp_enabled, "web_search_enabled": web_search_enabled,
+                                   **chat_options}), task_text,
                             _json(history), _json(sorted(invocation.scopes)), invocation.grant_expires,
                             reserved_child_id, "running", now, now))
                 # The original completion trigger is pre-enqueued in the
@@ -488,16 +502,28 @@ class SQLiteSubagentTaskHost:
         heartbeat = None
         try:
             agent = json.loads(row["agent_config"])
-            if AgentRepository(self.db).get(self.owner, agent["id"]) is None:
+            options = json.loads(row["execution_options"])
+            ordinary_chat = options.get("ordinary_chat") is True
+            profile = None
+            payload = {"text": row["input"], "clientRequestId": "subagent:" + task_id, "endpoint": "agents"}
+            if ordinary_chat:
+                from .providers import provider_config
+                parent = store.get(self.owner, row["parent_run_id"])
+                if (parent is None or parent.agent_id is not None
+                        or parent.conversation_id != self.conversation_id or row["parent_agent_id"] != "default"):
+                    raise RuntimeSafetyError("Ordinary chat subagent parent was revoked")
+                agent = None
+                profile = provider_config(options["provider"], options.get("model") or None)
+                payload.update(provider=options["provider"], model=profile.model, endpoint=options["provider"])
+            elif AgentRepository(self.db).get(self.owner, agent["id"]) is None:
                 raise RuntimeSafetyError("Subagent was revoked")
             admit_agent_graph(self.owner, agent, AgentRepository(self.db))
             scopes = frozenset(json.loads(row["granted_scopes"]))
-            options = json.loads(row["execution_options"])
+            payload["web_search"] = options.get("web_search_enabled", True)
             if row["grant_expires"] is not None and row["grant_expires"] <= time.time():
                 raise RuntimeSafetyError("Authentication grant expired")
             child_generation, _ = store.begin(
-                self.owner, {"text": row["input"], "clientRequestId": "subagent:" + task_id,
-                             "endpoint": "agents"}, agent,
+                self.owner, payload, agent,
                 trusted_new_conversation_id=row["child_conversation_id"],
             )
             with self.db.connect() as db:
@@ -536,7 +562,9 @@ class SQLiteSubagentTaskHost:
                 self.owner, child_generation, self.db, store, scopes=scopes,
                 grant_expires=row["grant_expires"], stream_tools=self.stream_tools,
                 stream_text=self.stream_text, on_text=emit,
-                agent=agent, mcp_enabled=bool(options.get("mcp_enabled")), ask_user_enabled=False,
+                agent=agent, profile=profile, parameters=options.get("parameters") if ordinary_chat else None,
+                mcp_enabled=bool(options.get("mcp_enabled")), ask_user_enabled=False,
+                web_search_enabled=options.get("web_search_enabled", True),
                 background_deny=True, authorization_conversation_id=self.conversation_id,
                 task_control_host=self, task_control_id=task_id,
                 selected_tools=options.get("selected_tools"),
@@ -544,7 +572,7 @@ class SQLiteSubagentTaskHost:
                 subagent_depth=options.get("remaining_depth", 0),
             )
             initial = json.loads(row["initial_messages"])
-            if not agent.get("edges"):
+            if not (agent or {}).get("edges"):
                 from .attachments import with_agent_context
 
                 # Match the foreground child path: reference documents belong
@@ -564,7 +592,7 @@ class SQLiteSubagentTaskHost:
             # For graph teams the tool result is deliberately only the designated
             # sink. Their whole thread transcript remains inside graph checkpoint.
             canonical = result
-            if agent.get("resultAgentId") and agent.get("edges"):
+            if (agent or {}).get("resultAgentId") and agent.get("edges"):
                 from .graph_checkpoint import OwnedGraphCheckpointer
 
                 checkpointer = OwnedGraphCheckpointer(self.db, self.owner)

@@ -52,7 +52,8 @@ from .semantic_index import (
     snapshot_compaction_semantic_index,
 )
 from .steering import SteeringStore, merged_text
-from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
+from .subagents import (MAX_SUBAGENT_DEPTH, build_subagent_configs, chat_subagent_config,
+                        invoke_subagent, subagent_tools)
 
 # The hosted Agent has an owner/Agent-aware Skill tool. Native MCP aliases
 # bypass per-user activation and must remain exclusive to external MCP clients.
@@ -235,6 +236,8 @@ class AgentRunner:
         configs = self.child_configs if self.child_configs is not None else build_subagent_configs(
             self.owner, agent, self.database,
         )
+        if unrestricted and self.child_configs is None and not self.namespace and not self.background_deny:
+            configs = [chat_subagent_config(self.owner)]
         if self.subagent_depth <= 0:
             configs = []
         self.configs[identity] = configs
@@ -568,8 +571,13 @@ class AgentRunner:
             )
             return await invoke_subagent(
                 call, self.configs[(state.context.agent or {}).get("id") or "default"],
-                execute_child=self._child, start_background=lambda invocation, thread: host.start(
-                    invocation, thread_id=thread, mcp_enabled=self.mcp_enabled), owner=self.owner,
+                execute_child=lambda invocation: self._child(
+                    invocation, profile=state.context.profile, parameters=state.context.parameters),
+                start_background=lambda invocation, thread: host.start(
+                    invocation, thread_id=thread, mcp_enabled=self.mcp_enabled,
+                    web_search_enabled=self.web_search_enabled,
+                    chat_model=state.context.profile.model,
+                    chat_parameters=state.context.parameters), owner=self.owner,
                 conversation_id=self.authorization_conversation_id, parent_run_id=self.generation.run_id,
                 parent_agent_id=(state.context.agent or {}).get("id"),
                 scopes=frozenset(self.scopes), grant_expires=self.grant_expires, database=self.database,
@@ -639,14 +647,17 @@ class AgentRunner:
             # Keep their type for recovery without copying secrets to the model.
             return "Tool failed (" + type(error).__name__ + ")"
 
-    async def _child(self, invocation):
+    async def _child(self, invocation, *, profile=None, parameters=None):
         async def quiet(text):
             pass
 
         child = AgentRunner(self.owner, self.generation, self.database, self.store,
                             scopes=self.scopes, grant_expires=self.grant_expires,
                             stream_tools=self.stream_tools, stream_text=self.stream_text,
-                            on_text=quiet, agent=invocation.agent, mcp_enabled=self.mcp_enabled,
+                            on_text=quiet, agent=None if invocation.ordinary_chat else invocation.agent,
+                            profile=(profile or self.initial_profile) if invocation.ordinary_chat else None,
+                            parameters=(parameters or self.initial_parameters) if invocation.ordinary_chat else None,
+                            mcp_enabled=self.mcp_enabled,
                             namespace=self.namespace + "/subagent:" + invocation.parent_tool_call_id,
                             child_configs=invocation.child_configs, selected_tools=invocation.selected_tools,
                             resume_history=self.resume_history, resume_namespace=self.resume_namespace,
@@ -658,7 +669,7 @@ class AgentRunner:
                             wakeup_lease=self.wakeup_lease,
                             event_delivery_lease=self.event_delivery_lease,
                             actor_lease=self.actor_lease, recovery_steers=self.recovery_steers,
-                            web_search_enabled=self.web_search_enabled)
+                            web_search_enabled=self.web_search_enabled, webui_cookie=self.webui_cookie)
         from .attachments import with_agent_context
 
         history = with_agent_context(self.database, self.owner, invocation.agent,
