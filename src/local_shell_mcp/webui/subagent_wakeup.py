@@ -341,7 +341,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
             row = db.execute(
                 "SELECT w.*,t.status AS child_status,t.result_claimed,t.result_claim_key,"
                 "t.granted_scopes,t.grant_expires,t.thread_id,t.subagent_type,t.result,t.error AS child_error,"
-                "t.id,t.child_conversation_id,t.child_run_id,t.parent_tool_call_id "
+                "t.id,t.child_conversation_id,t.child_run_id,t.parent_tool_call_id,t.execution_options "
                 "FROM subagent_wakeups w JOIN subagent_tasks t ON t.id=w.task_id "
                 "WHERE w.task_id=? AND w.owner=t.owner AND w.parent_conversation_id=t.parent_conversation_id "
                 "AND w.parent_run_id=t.parent_run_id AND w.parent_agent_id=t.parent_agent_id",
@@ -352,6 +352,8 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
             owner = row["owner"]
             scopes = frozenset(json.loads(row["granted_scopes"]))
             expiry = row["grant_expires"]
+            options = json.loads(row["execution_options"])
+            ordinary_chat = options.get("ordinary_chat") is True and row["parent_agent_id"] == "default"
             if row["status"] == "pending":
                 if now - row["created_at"] < _DELAY_MS:
                     continue
@@ -415,9 +417,9 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                         target.get("parentMessageId") != original):
                     _retire(db, task_id, "Wakeup target lineage mismatch")
                     continue
-                agent = AgentRepository(database).get(owner, row["parent_agent_id"])
-                if agent is None:
-                    _retire(db, task_id, "Original parent Agent was removed")
+                agent = None if ordinary_chat else AgentRepository(database).get(owner, row["parent_agent_id"])
+                if (ordinary_chat and parent["agent_id"] is not None) or (not ordinary_chat and agent is None):
+                    _retire(db, task_id, "Original parent Agent was removed or changed")
                     continue
                 branch = _latest_branch(db, row["parent_conversation_id"], original)
                 if branch is None:
@@ -429,7 +431,8 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     # Pure-text wakeups do not require machine OAuth grants.
                     # Every actual native tool operation revalidates its own
                     # persisted scopes and effective per-machine policy.
-                    profile = provider_config(selected_provider({}, agent), agent.get("model"))
+                    profile = (provider_config(options["provider"], options.get("model") or None)
+                               if ordinary_chat else provider_config(selected_provider({}, agent), agent.get("model")))
                 except (PermissionError, ValueError):
                     _retire(db, task_id, "Parent provider or delegated permission unavailable")
                     continue
@@ -442,7 +445,10 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                             ":requeue:" + str(row["requeue_count"])
                             if row["requeue_count"] else ""
                         ),
-                        "endpoint": "agents",
+                        "endpoint": options["provider"] if ordinary_chat else "agents",
+                        **({"provider": options["provider"], "model": profile.model,
+                            "web_search": options.get("web_search_enabled", True)}
+                           if ordinary_chat else {}),
                     }, agent, _connection=db)
                 except GenerationConflict:
                     _defer_pending(db, row, now)
@@ -483,8 +489,8 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     _dead_dispatched(db, store, row, task_id, now,
                                      'Parent authorization expired during wakeup')
                     continue
-                agent = AgentRepository(database).get(owner, row["parent_agent_id"])
-                if agent is None:
+                agent = None if ordinary_chat else AgentRepository(database).get(owner, row["parent_agent_id"])
+                if (ordinary_chat and generation.agent_id is not None) or (not ordinary_chat and agent is None):
                     _dead_dispatched(db, store, row, task_id, now,
                                      'Parent Agent removed during continuation')
                     continue
@@ -494,7 +500,8 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     # Pure-text wakeups do not require machine OAuth grants.
                     # Every actual native tool operation revalidates its own
                     # persisted scopes and effective per-machine policy.
-                    profile = provider_config(selected_provider({}, agent), agent.get("model"))
+                    profile = (provider_config(options["provider"], options.get("model") or None)
+                               if ordinary_chat else provider_config(selected_provider({}, agent), agent.get("model")))
                 except (ValueError, PermissionError):
                     _dead_dispatched(db, store, row, task_id, now,
                                      'Parent provider or delegated permission unavailable')
@@ -525,7 +532,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                                    native_file_tools=any(v in {"read", "write"} for v in policy.values()),
                                    write_tools=any(v == "write" for v in policy.values()),
                                    ask_user_enabled=ask_user_requested(agent, {}),
-                                   mcp_enabled=flags["mcp"],
+                                   mcp_enabled=flags["mcp"] and (not ordinary_chat or bool(options.get("mcp_enabled"))),
                                    resume_history=None if new_turn else store.history(
                                        owner, generation.conversation_id,
                                        message_id=generation.user_message_id),

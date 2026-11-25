@@ -43,6 +43,7 @@ class SubagentConfig:
     self_spawn: bool = False
     allow_nested: bool = False
     children: tuple[SubagentConfig, ...] = ()
+    ordinary_chat: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,15 @@ class SubagentInvocation:
     subagent_type: str
     child_configs: tuple[SubagentConfig, ...]
     parent_agent_id: str | None = None
+    ordinary_chat: bool = False
+
+
+def chat_subagent_config(owner: str) -> SubagentConfig:
+    """Ordinary model chat delegates to itself without creating a saved Agent."""
+    return SubagentConfig(
+        "self", "self", "Run a focused subtask with the current model and chat permissions in an isolated context.",
+        {}, None, owner, self_spawn=True, ordinary_chat=True,
+    )
 
 
 def resolve_subagent_max_turns(agent: dict, endpoint_config: dict | None = None) -> int | None:
@@ -326,7 +336,7 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
         scopes=frozenset(scopes), grant_expires=grant_expires, owner=owner,
         conversation_id=conversation_id, parent_run_id=parent_run_id,
         parent_tool_call_id=call.call_id, subagent_type=kind,
-        parent_agent_id=parent_agent_id,
+        parent_agent_id=parent_agent_id, ordinary_chat=config.ordinary_chat,
         child_configs=config.children if max_depth > 1 else (),
     )
     if background:
