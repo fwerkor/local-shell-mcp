@@ -62,14 +62,33 @@ def test_expired_browser_session_cannot_renew(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("isolated_controller_settings")
-async def test_first_party_oauth_ticket_is_renewable_after_short_bearer(tmp_path, monkeypatch):
+@pytest.mark.parametrize("client_name,approved,redirects,renewable", [
+    ("WebUI", True, ["https://lsm.example.test/auth/login"], True),
+    ("External API", True, ["https://lsm.example.test/auth/login"], False),
+    ("WebUI", False, ["https://lsm.example.test/auth/login"], False),
+    ("WebUI", True, ["https://other.example.test/auth/login"], False),
+    ("WebUI", True, ["https://lsm.example.test/auth/login", "https://other.example.test/callback"], False),
+])
+async def test_first_party_oauth_ticket_is_renewable_after_short_bearer(
+    tmp_path, monkeypatch, client_name, approved, redirects, renewable,
+):
     import httpx
     from starlette.applications import Starlette
 
-    settings = SimpleNamespace(auth_mode='oauth', state_dir=tmp_path,
-                               public_base_url='https://lsm.example.test', oauth_jwt_secret='x' * 48)
-    monkeypatch.setattr(auth, 'get_settings', lambda: settings)
-    monkeypatch.setattr(auth, '_store', lambda: auth.WebAuthStore(tmp_path))
+    from local_shell_mcp import oauth
+    from local_shell_mcp import settings as settings_module
+
+    for key, value in {
+        "WORKSPACE_ROOT": str(tmp_path), "STATE_DIR": str(tmp_path / ".local-shell-mcp"),
+        "AUTH_MODE": "oauth", "MODE": "http", "PUBLIC_BASE_URL": "https://lsm.example.test",
+        "OAUTH_ACCESS_TOKEN_TTL_S": "80",
+    }.items():
+        monkeypatch.setenv("LOCAL_SHELL_MCP_" + key, value)
+    settings_module.get_settings.cache_clear()
+    monkeypatch.setattr(oauth, "_get_client", lambda client_id: oauth.OAuthClient(
+        client_id=client_id, client_name=client_name, approved=approved,
+        redirect_uris=redirects,
+    ))
     from local_shell_mcp import auth as controller_auth
     monkeypatch.setattr(controller_auth, '_verify_oauth', lambda request, settings: SimpleNamespace(
         subject='alice', claims={'client_id': 'oauth-browser', 'scope': 'shell:read',
@@ -86,7 +105,14 @@ async def test_first_party_oauth_ticket_is_renewable_after_short_bearer(tmp_path
         assert token.status_code == 200
         import jwt
         claims = jwt.decode(token.json()['token'], options={'verify_signature': False})
-        assert claims['exp'] > auth.time.time() + 29 * 86400
+        assert auth.time.time() < claims['exp'] <= auth.time.time() + 80
+        cookie = client.cookies[auth.COOKIE]
+        session = auth._store().session(cookie)
+        if renewable:
+            assert session.grant_until > auth.time.time() + 29 * 86400
+        else:
+            assert session.grant_until <= auth.time.time() + 80
+    settings_module.get_settings.cache_clear()
 
 
 def test_bounded_session_does_not_slide_or_extend_oauth_grant(tmp_path, monkeypatch):

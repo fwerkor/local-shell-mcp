@@ -11,7 +11,6 @@ import pytest
 from starlette.applications import Starlette
 
 from local_shell_mcp.webui import auth, frontend
-from local_shell_mcp.webui.auth import SESSION_TTL
 
 
 @pytest.mark.asyncio
@@ -156,14 +155,16 @@ async def test_local_bypass_does_not_replace_explicit_oauth_grant(tmp_path, monk
         async with httpx.AsyncClient(transport=transport, base_url=origin) as client:
             response = await client.post("/api/ui/webui-ticket", headers={"Authorization": f"Bearer {token}"})
             assert response.status_code == 200, response.text
-            _, grant = auth.WebAuthStore(get_settings().state_dir).redeem(response.json()["ticket"])
+            store = auth.WebAuthStore(get_settings().state_dir)
+            cookie, grant = store.redeem(response.json()["ticket"])
             assert grant.owner == "oauth-alice"
             assert set(grant.scopes.split()) == set(scopes.split())
-            # A fresh OAuth proof opens a separate, revocable browser login whose
-            # idle lifetime is independent of the short-lived bearer used to mint
-            # the ticket. The bearer can never expand the delegated scopes above.
-            assert grant.grant_until > int(time.time()) + 300
-            assert grant.grant_until <= int(time.time()) + SESSION_TTL
+            # An arbitrary OAuth client cannot upgrade its bounded bearer to a
+            # sliding browser session, even over a direct localhost connection.
+            import jwt
+
+            assert grant.grant_until == jwt.decode(token, options={"verify_signature": False})["exp"]
+            assert store.renew(cookie) == grant
             # A local connection cannot turn a forged bearer into a valid grant.
             rejected = await client.post("/api/ui/webui-ticket", headers={"Authorization": "Bearer forged"})
             assert rejected.status_code == 401
