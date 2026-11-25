@@ -14,7 +14,12 @@ from functools import lru_cache
 from typing import Any
 
 from ..audit import audit
-from .machine_permissions import MachineReadOnlyError, agent_access_policy, authorize_machine_action, resolve_access
+from .machine_permissions import (
+    MachineReadOnlyError,
+    agent_access_policy,
+    authorize_machine_action,
+    resolve_access,
+)
 from .providers import ModelToolCall
 
 # Controller management belongs to the `local` machine and requires its
