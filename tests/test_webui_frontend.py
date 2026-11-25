@@ -150,3 +150,13 @@ def test_pwa_icon_dimensions():
             assert image.size == (size, size)
             if name == "maskable-icon.png":
                 assert image.convert("RGBA").getchannel("A").getextrema() == (255, 255)
+
+
+def test_localized_webui_uses_lsm_brand():
+    import json
+
+    locales = Path(__file__).resolve().parents[1] / "ui/workspace/client/src/locales"
+    for path in locales.glob("*/translation.json"):
+        translations = json.loads(path.read_text(encoding="utf-8"))
+        assert all("librechat" not in value.casefold() for value in translations.values()
+                   if isinstance(value, str)), path
