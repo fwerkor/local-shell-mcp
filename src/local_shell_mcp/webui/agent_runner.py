@@ -474,7 +474,7 @@ class AgentRunner:
             await callback(call)
 
     async def _invoke(self, call, state):
-        from .lsm_tool_registry import call_tool
+        from .lsm_tool_registry import ToolPermissionDenied, call_tool
         from .nested_mcp import approved_call, discover
 
         self._check_grant()
@@ -668,6 +668,8 @@ class AgentRunner:
                                    run_id=self.generation.run_id,
                                    authorization_conversation_id=self.authorization_conversation_id,
                                    agent_id=(state.context.agent or {}).get("id"))
+        except ToolPermissionDenied as error:
+            return "Blocked: " + str(error)
         except PermissionError as error:
             raise RuntimeSafetyError(str(error)) from error
         except Exception as error:
