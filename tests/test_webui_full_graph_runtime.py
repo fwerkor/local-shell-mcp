@@ -525,12 +525,16 @@ async def test_graph_members_receive_complete_artifact_prompts_and_root_ephemera
     prompt = agent_instructions(parent, 'openai', 'shadcnui')
     await actor.run([{'role': 'system', 'content': prompt},
                      *store.history('local', generation.conversation_id)])
-    assert len(seen['artifact-root']) == 1
-    assert seen['artifact-root'][0] == prompt
-    assert 'Additional Artifact Instructions for React Components' in seen['artifact-root'][0]
-    assert len(seen['artifact-child']) == 1
-    assert 'Child only guidance' in seen['artifact-child'][0]
-    assert 'Additional Artifact Instructions for React Components' in seen['artifact-child'][0]
+    for member in ('artifact-root', 'artifact-child'):
+        restrictions, _ = seen[member]
+        assert restrictions.startswith('Current native machine access restrictions (server-enforced):')
+        assert '- No access: local' in restrictions
+    root_prompt = seen['artifact-root'][1]
+    child_prompt = seen['artifact-child'][1]
+    assert root_prompt == prompt
+    assert 'Additional Artifact Instructions for React Components' in root_prompt
+    assert 'Child only guidance' in child_prompt
+    assert 'Additional Artifact Instructions for React Components' in child_prompt
 
 
 @pytest.mark.asyncio
