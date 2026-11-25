@@ -96,6 +96,8 @@ http://127.0.0.1:8765/ui
 
 When OpenTUI is installed, the OAuth screen lets you choose Web UI or OpenTUI before authorization, and the interface selector can switch modes after login. Native Web UI routes use URL hashes such as `#/overview` and `#/console`, so a selected mode or page can be bookmarked. The OpenTUI console retains the existing authenticated xterm.js/PTY transport, mouse interaction, automatic resizing, reconnects, fullscreen mode, and mobile shortcut row.
 
+The integrated React workspace can also be installed as a Progressive Web App (PWA). Open the Controller's HTTPS origin (or localhost), sign in, and use your browser's **Install app** command (Chrome/Edge) or **Add to Home Screen** (Safari on iOS). LSM then launches in a standalone window; the Controller and its normal authentication are still required.
+
 Standalone release executables and Docker images include the WebUI and native terminal but **do not bundle OpenTUI**. Their TUI controls are hidden unless a separately installed runtime is available. The Python wheel and source-development build retain optional OpenTUI support. To enable it, install an appropriate sidecar, set `LOCAL_SHELL_MCP_UI_TUI_COMMAND=/path/to/local-shell-mcp-tui`, and launch:
 
 ```bash

@@ -1,5 +1,7 @@
 """Python serves the original React UI without a resident Node.js process."""
 
+from pathlib import Path
+
 import httpx
 import pytest
 from starlette.applications import Starlette
@@ -91,3 +93,60 @@ async def test_oauth_result_pages_render_publicly_without_login(tmp_path, monkey
             assert (await client.get("/c/new")).status_code == 303
     finally:
         get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_pwa_assets_are_public_without_login(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    bundle = tmp_path / "bundle"
+    assets = bundle / "assets"
+    assets.mkdir(parents=True)
+    (bundle / "index.html").write_text("<title>LSM</title>")
+    (bundle / "manifest.webmanifest").write_text('{"name": "local-shell-mcp"}')
+    for script in ("sw.js", "sw-heal.js", "registerSW.js"):
+        (bundle / script).write_text("// service worker")
+    source = Path(__file__).parents[1] / "ui/workspace/client/public/assets"
+    for icon in ("icon-192x192.png", "icon-512x512.png", "maskable-icon.png"):
+        (assets / icon).write_bytes((source / icon).read_bytes())
+    monkeypatch.setattr(frontend, "bundled_frontend", lambda: bundle)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    get_settings.cache_clear()
+    app = Starlette(routes=frontend.frontend_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://chat.example.org") as client:
+        assert (await client.get("/")).status_code == 303
+        for method in ("GET", "HEAD"):
+            response = await client.request(method, "/manifest.webmanifest")
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "application/manifest+json"
+            assert response.headers["cache-control"] == "no-cache"
+        for script in ("sw.js", "sw-heal.js", "registerSW.js"):
+            response = await client.get("/" + script)
+            assert response.status_code == 200
+            assert response.headers["cache-control"] == "no-cache"
+        for icon in ("icon-192x192.png", "icon-512x512.png", "maskable-icon.png"):
+            response = await client.get("/assets/" + icon)
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "image/png"
+            assert response.content == (source / icon).read_bytes()
+        assert (await client.get("/assets/missing-pwa-icon.png")).status_code == 404
+        assert (await client.post("/manifest.webmanifest")).status_code == 404
+
+
+def test_pwa_icon_dimensions():
+    from PIL import Image
+
+    assets = Path(__file__).parents[1] / "ui/workspace/client/public/assets"
+    for name, size in (
+        ("favicon-16x16.png", 16),
+        ("favicon-32x32.png", 32),
+        ("apple-touch-icon-180x180.png", 180),
+        ("icon-192x192.png", 192),
+        ("icon-512x512.png", 512),
+        ("maskable-icon.png", 512),
+    ):
+        with Image.open(assets / name) as image:
+            assert image.format == "PNG"
+            assert image.size == (size, size)
+            if name == "maskable-icon.png":
+                assert image.convert("RGBA").getchannel("A").getextrema() == (255, 255)

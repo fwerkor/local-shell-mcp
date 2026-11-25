@@ -6,6 +6,7 @@ import gzip
 import hashlib
 import importlib.util
 import io
+import json
 import tarfile
 from pathlib import Path
 
@@ -77,3 +78,23 @@ def test_source_frontend_resolves_first_party_workspace() -> None:
     if not (root / "client" / "dist" / "index.html").is_file():
         pytest.skip("React UI not built in this source checkout")
     assert frontend.bundled_frontend() == root / "client" / "dist"
+
+
+def test_built_pwa_manifest_and_icons() -> None:
+    from PIL import Image
+
+    dist = Path(__file__).resolve().parents[1] / "ui/workspace/client/dist"
+    if not (dist / "index.html").is_file():
+        pytest.skip("React UI not built in this source checkout")
+    assert 'rel="manifest"' in (dist / "index.html").read_text()
+    manifest = json.loads((dist / "manifest.webmanifest").read_text())
+    assert manifest["name"] == "local-shell-mcp"
+    assert manifest["short_name"] == "LSM"
+    assert manifest["id"] == manifest["scope"] == manifest["start_url"] == "/"
+    assert manifest["display"] == "standalone"
+    sizes = set()
+    for icon in manifest["icons"]:
+        with Image.open(dist / icon["src"]) as image:
+            assert icon["sizes"] == f"{image.width}x{image.height}"
+            sizes.add((icon["sizes"], icon.get("purpose", "any")))
+    assert {("192x192", "any"), ("512x512", "any"), ("512x512", "maskable")} <= sizes
