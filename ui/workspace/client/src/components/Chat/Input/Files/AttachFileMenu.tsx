@@ -377,62 +377,14 @@ const AttachFileMenu = ({
     }
   };
 
-  if (isUnifiedMode) {
-    return (
-      <>
-        <FileUpload
-          ref={inputRef}
-          handleFileChange={(e) => {
-            handleFileChange(e, toolResourceRef.current);
-          }}
-        >
-          {sharePointEnabled === true ? (
-            <DropdownPopup
-              menuId="attach-file-menu"
-              className="overflow-visible"
-              isOpen={isPopoverActive}
-              setIsOpen={setIsPopoverActive}
-              modal={false}
-              portal={true}
-              unmountOnHide={true}
-              trigger={menuTrigger}
-              items={unifiedSourceItems}
-              iconClassName="mr-0"
-            />
-          ) : (
-            <TooltipAnchor
-              render={
-                <IconButton
-                  type="button"
-                  size="theme"
-                  shape="theme"
-                  disabled={isUploadDisabled}
-                  id="attach-file-button"
-                  label={localize('com_sidepanel_attach_files')}
-                  onClick={handleUnifiedUpload}
-                  aria-keyshortcuts={uploadFileAriaKey}
-                  className="p-1 hover:bg-surface-composer-hover"
-                >
-                  <AttachmentIcon />
-                </IconButton>
-              }
-              id="attach-file-button"
-              description={uploadFileTooltip}
-              disabled={isUploadDisabled}
-            />
-          )}
-        </FileUpload>
-        <SharePointPickerDialog
-          isOpen={isSharePointDialogOpen}
-          onOpenChange={setIsSharePointDialogOpen}
-          onFilesSelected={handleSharePointFilesSelected}
-          isDownloading={isProcessing}
-          downloadProgress={downloadProgress}
-          maxSelectionCount={endpointFileConfig?.fileLimit}
-        />
-      </>
-    );
-  }
+  const items = isUnifiedMode ? unifiedSourceItems : dropdownItems;
+  const directUpload = isUnifiedMode
+    ? sharePointEnabled !== true
+      ? handleUnifiedUpload
+      : undefined
+    : items.length === 1 && !items[0].subItems
+      ? items[0].onClick
+      : undefined;
 
   return (
     <>
@@ -443,18 +395,41 @@ const AttachFileMenu = ({
           toolResourceRef.current = undefined;
         }}
       >
-        <DropdownPopup
-          menuId="attach-file-menu"
-          className="overflow-visible"
-          isOpen={isPopoverActive}
-          setIsOpen={setIsPopoverActive}
-          modal={false}
-          portal={true}
-          unmountOnHide={true}
-          trigger={menuTrigger}
-          items={dropdownItems}
-          iconClassName="mr-0"
-        />
+        {directUpload ? (
+          <TooltipAnchor
+            render={
+              <IconButton
+                type="button"
+                size="theme"
+                shape="theme"
+                disabled={isUploadDisabled}
+                id="attach-file-button"
+                label={localize('com_sidepanel_attach_files')}
+                onClick={directUpload}
+                aria-keyshortcuts={uploadFileAriaKey}
+                className="p-1 hover:bg-surface-composer-hover"
+              >
+                <AttachmentIcon />
+              </IconButton>
+            }
+            id="attach-file-button"
+            description={uploadFileTooltip}
+            disabled={isUploadDisabled}
+          />
+        ) : (
+          <DropdownPopup
+            menuId="attach-file-menu"
+            className="overflow-visible"
+            isOpen={isPopoverActive}
+            setIsOpen={setIsPopoverActive}
+            modal={false}
+            portal={true}
+            unmountOnHide={true}
+            trigger={menuTrigger}
+            items={items}
+            iconClassName="mr-0"
+          />
+        )}
       </FileUpload>
       <SharePointPickerDialog
         isOpen={isSharePointDialogOpen}
