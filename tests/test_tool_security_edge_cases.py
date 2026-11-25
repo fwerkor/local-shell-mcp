@@ -208,6 +208,21 @@ def test_tools_transport_security_ipv6_and_invalid_host(
     security = mcp_tools._transport_security_settings()
     assert "not-an-ip" not in security.allowed_hosts
 
+
+def test_retired_bridge_does_not_extend_transport_host_allowlist(monkeypatch):
+    monkeypatch.setattr(
+        mcp_tools,
+        "get_settings",
+        lambda: SimpleNamespace(host="0.0.0.0", public_base_url=None, port=8000),
+    )
+    monkeypatch.setenv("LOCAL_SHELL_MCP_LIBRECHAT_URL", "http://old-bridge")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_LIBRECHAT_INTERNAL_HOST", "host.docker.internal")
+    security = mcp_tools._transport_security_settings()
+    assert security.enable_dns_rebinding_protection
+    assert "local-shell-mcp:8000" not in security.allowed_hosts
+    assert "host.docker.internal:8000" not in security.allowed_hosts
+
+
 def test_tools_live_workspace_html_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakePath:
         def __init__(self, *args):

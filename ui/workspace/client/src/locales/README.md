@@ -1,6 +1,6 @@
 # Locales in the LSM chat shell
 
-The bundled LibreChat shell supports English, Simplified Chinese and Traditional
+The LSM WebUI supports English, Simplified Chinese and Traditional
 Chinese. Other browser languages fall back to English. The Controller has its
 own independent, fully translated documentation and WebUI.
 
