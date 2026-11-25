@@ -113,7 +113,6 @@ export default defineConfig(({ command }) => ({
           '**/*.map',
           'index.html',
           'sw-heal.js',
-          'assets/rum.*.js',
           'assets/locale-*.js',
           'assets/query-devtools*.js',
         ],
@@ -230,10 +229,6 @@ export default defineConfig(({ command }) => ({
                     return 'polyfills';
                   }
 
-                  if (normalizedId.includes('@hyperdx/')) {
-                    return 'rum';
-                  }
-
                   // IMPORTANT: mermaid and ALL its dependencies must be in the same chunk
                   // to avoid initialization order issues. This includes chevrotain, langium,
                   // dagre-d3-es, and their nested lodash-es dependencies.
@@ -283,10 +278,7 @@ export default defineConfig(({ command }) => ({
                   if (normalizedId.includes('react-router')) {
                     return 'routing';
                   }
-                  if (
-                    normalizedId.includes('qrcode.react') ||
-                    normalizedId.includes('@marsidev/react-turnstile')
-                  ) {
+                  if (normalizedId.includes('qrcode.react')) {
                     return 'security-ui';
                   }
 

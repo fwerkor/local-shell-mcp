@@ -125,3 +125,18 @@ async def test_arxiv_html_to_pdf_fallback(monkeypatch, tmp_path):
     result = await web.web_fetch('alice', 'https://arxiv.org/abs/2502.09992')
     assert urls == ['https://arxiv.org/html/2502.09992', 'https://arxiv.org/pdf/2502.09992']
     assert result['content'] == 'paper fulltext'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('prefix', ['A' * 500, 'ß' * 500])
+async def test_query_window_contains_match_with_small_limit_and_unicode(monkeypatch, tmp_path, prefix):
+    async def download(url, **kwargs):
+        return url, 'text/plain; charset=utf-8', (prefix + 'TARGET MATCH' + 'B' * 500).encode()
+
+    monkeypatch.setattr(web, '_download', download)
+    monkeypatch.setattr(web, '_public_address', lambda host: True)
+    monkeypatch.setattr(web, '_cache_file', lambda owner, url: tmp_path / 'document.json')
+    result = await web.web_fetch('alice', 'https://example.org/doc', query='target match', limit=100)
+    assert 'TARGET MATCH' in result['content']
+    assert result['offset'] < len(prefix) < result['next_offset']
+    assert len(result['content']) == 100
