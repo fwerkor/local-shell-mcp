@@ -4,17 +4,27 @@ import json
 
 import httpx
 import pytest
+from test_webui_provider_profiles import _ADMIN
+from test_webui_provider_profiles import setup_profiles as setup_profiles
 
 from local_shell_mcp.webui.agent_runtime import (
-    AgentContext, AgentLoopState, ToolBatchOutput, run_agent_loop,
+    AgentContext,
+    AgentLoopState,
+    ToolBatchOutput,
+    run_agent_loop,
 )
 from local_shell_mcp.webui.model_discovery import _parse_page
 from local_shell_mcp.webui.provider_responses import responses_input
 from local_shell_mcp.webui.providers import (
-    ModelFinish, ModelThought, ModelToolCall, ModelUsage, ProviderConfig,
-    provider_config, stream_model, stream_model_with_tools,
+    ModelFinish,
+    ModelThought,
+    ModelToolCall,
+    ModelUsage,
+    ProviderConfig,
+    provider_config,
+    stream_model,
+    stream_model_with_tools,
 )
-from test_webui_provider_profiles import setup_profiles, _ADMIN  # noqa: F401
 
 PROFILE = ProviderConfig("openai-responses", "test", "https://model.invalid/v1/responses", "secret")
 TOOLS = [{"type": "function", "function": {"name": "read", "description": "Read a file",

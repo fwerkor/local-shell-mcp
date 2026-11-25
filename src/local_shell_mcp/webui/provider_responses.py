@@ -7,7 +7,15 @@ from collections.abc import AsyncIterator
 
 from .approval_runtime import truncate_approval_result
 from .mcp_projection import HARD_MAX_TOOL_RESULT_CHARS, project_artifact_messages
-from .providers import ModelFinish, ModelThought, ModelToolCall, ModelUsage, ProviderConfig, _data_frames, _usage_frame
+from .providers import (
+    ModelFinish,
+    ModelThought,
+    ModelToolCall,
+    ModelUsage,
+    ProviderConfig,
+    _data_frames,
+    _usage_frame,
+)
 
 PROTOCOL = "openai-responses"
 _MAX_ARGUMENTS = 1024 * 1024
@@ -184,40 +192,42 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
     done: dict[int, dict] = {}
     seen_text: dict[int, str] = {}
     terminal = None
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", config.url, json=body, headers=headers) as response:
-            response.raise_for_status()
-            async for frame in _data_frames(response):
-                if frame == "[DONE]":
-                    break
-                try:
-                    event = json.loads(frame)
-                except json.JSONDecodeError as exc:
-                    raise ValueError("Invalid Responses SSE frame") from exc
-                if not isinstance(event, dict):
-                    raise ValueError("Invalid Responses SSE event")
-                kind = event.get("type")
-                if kind in {"error", "response.failed", "response.cancelled"}:
-                    raise RuntimeError("Responses provider rejected or cancelled generation")
-                if kind in {"response.output_text.delta", "response.refusal.delta"}:
-                    delta, index = event.get("delta"), event.get("output_index")
-                    if not isinstance(delta, str) or type(index) is not int or index < 0:
-                        raise ValueError("Invalid Responses text delta")
-                    seen_text[index] = seen_text.get(index, "") + delta
-                    if delta:
-                        yield delta
-                elif kind in {"response.reasoning_summary_text.delta", "response.reasoning_text.delta"}:
-                    delta = event.get("delta")
-                    if isinstance(delta, str) and delta:
-                        yield ModelThought("thinking", text=delta)
-                elif kind == "response.output_item.done":
-                    index, item = event.get("output_index"), event.get("item")
-                    if type(index) is not int or index < 0 or not isinstance(item, dict):
-                        raise ValueError("Invalid Responses output item")
-                    done[index] = item
-                elif kind in {"response.completed", "response.incomplete"}:
-                    terminal = event
-                    break
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream("POST", config.url, json=body, headers=headers) as response,
+    ):
+        response.raise_for_status()
+        async for frame in _data_frames(response):
+            if frame == "[DONE]":
+                break
+            try:
+                event = json.loads(frame)
+            except json.JSONDecodeError as exc:
+                raise ValueError("Invalid Responses SSE frame") from exc
+            if not isinstance(event, dict):
+                raise ValueError("Invalid Responses SSE event")
+            kind = event.get("type")
+            if kind in {"error", "response.failed", "response.cancelled"}:
+                raise RuntimeError("Responses provider rejected or cancelled generation")
+            if kind in {"response.output_text.delta", "response.refusal.delta"}:
+                delta, index = event.get("delta"), event.get("output_index")
+                if not isinstance(delta, str) or type(index) is not int or index < 0:
+                    raise ValueError("Invalid Responses text delta")
+                seen_text[index] = seen_text.get(index, "") + delta
+                if delta:
+                    yield delta
+            elif kind in {"response.reasoning_summary_text.delta", "response.reasoning_text.delta"}:
+                delta = event.get("delta")
+                if isinstance(delta, str) and delta:
+                    yield ModelThought("thinking", text=delta)
+            elif kind == "response.output_item.done":
+                index, item = event.get("output_index"), event.get("item")
+                if type(index) is not int or index < 0 or not isinstance(item, dict):
+                    raise ValueError("Invalid Responses output item")
+                done[index] = item
+            elif kind in {"response.completed", "response.incomplete"}:
+                terminal = event
+                break
     if terminal is None:
         # A dropped stream must never execute partially observed tool calls.
         raise RuntimeError("Responses stream ended without a terminal event")

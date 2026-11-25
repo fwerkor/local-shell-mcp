@@ -44,7 +44,14 @@ from .memory import (
     tool_definitions,
 )
 from .memory_protection import configured_filters
-from .providers import ModelFinish, ModelThought, ModelToolCall, ModelUsage, provider_config, selected_provider
+from .providers import (
+    ModelFinish,
+    ModelThought,
+    ModelToolCall,
+    ModelUsage,
+    provider_config,
+    selected_provider,
+)
 from .semantic_index import (
     render_compaction_semantic_index,
     snapshot_compaction_semantic_index,
