@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useSetRecoilState } from 'recoil';
+import { useMenuContext } from '@ariakit/react';
+import { settingsTabState } from '~/components/Nav/Settings/state';
 import { Settings2 } from 'lucide-react';
 import { TooltipAnchor } from '@librechat/client';
 import { getConfigDefaults } from 'librechat-data-provider';
@@ -20,6 +22,27 @@ import { useConversationSampling } from './ConversationSamplingDialog';
 import { useLocalize } from '~/hooks';
 
 const defaultInterface = getConfigDefaults().interface;
+
+function ModelSettingsButton() {
+  const menu = useMenuContext();
+  const setSettingsTab = useSetRecoilState(settingsTabState);
+  const localize = useLocalize();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        menu?.hide();
+        setSettingsTab('models');
+      }}
+      data-testid="model-selector-settings"
+      aria-label={localize('com_lsm_settings_models')}
+      title={localize('com_lsm_settings_models')}
+      className="flex size-9 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
+    >
+      <Settings2 className="size-4" aria-hidden="true" />
+    </button>
+  );
+}
 
 function ModelSelectorContent() {
   const localize = useLocalize();
@@ -107,17 +130,7 @@ function ModelSelectorContent() {
         onSearch={(value) => setSearchValue(value)}
         combobox={<input id="model-search" placeholder=" " />}
         comboboxLabel={localize('com_endpoint_search_models')}
-        searchAction={
-          <Link
-            to="/control/settings#models"
-            data-testid="model-selector-settings"
-            aria-label="渠道与模型设置 / Channels & models settings"
-            title="渠道与模型设置 / Channels & models settings"
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
-          >
-            <Settings2 className="size-4" aria-hidden="true" />
-          </Link>
-        }
+        searchAction={<ModelSettingsButton />}
         trigger={trigger}
       >
         {searchResults ? (

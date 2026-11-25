@@ -19,9 +19,9 @@ function CurrentPath() {
 }
 
 describe('mobile sidebar keyboard navigation', () => {
-  it('leaves controller settings for the selected panel', () => {
+  it('leaves controller overview for the selected panel', () => {
     render(
-      <MemoryRouter initialEntries={['/control/settings']}>
+      <MemoryRouter initialEntries={['/control/overview']}>
         <ShortcutTargets links={links} />
         <CurrentPath />
       </MemoryRouter>,

@@ -1,14 +1,13 @@
 import { useParams, NavLink, Navigate } from 'react-router-dom';
 import {
-  Activity, Archive, Blocks, FileText, FolderOpen, LayoutDashboard,
-  Monitor, Server, TerminalSquare, ShieldCheck, Settings2,
+  Activity, Blocks, FolderOpen, LayoutDashboard,
+  Monitor, Server, TerminalSquare, ShieldCheck,
 } from 'lucide-react';
 import useLocalize from '~/hooks/useLocalize';
 import Overview from './Overview';
 import Files from './Files';
 import Operations from './Operations';
 import Desktop from './Desktop';
-import Settings from './Settings';
 
 export const SECTIONS = [
   { id: 'overview', title: 'Overview', titleKey: 'com_lsm_section_overview', descriptionKey: 'com_lsm_section_overview_description', icon: LayoutDashboard, description: 'Controller health and live activity' },
@@ -18,11 +17,8 @@ export const SECTIONS = [
   { id: 'sessions', title: 'Sessions', titleKey: 'com_lsm_section_sessions', descriptionKey: 'com_lsm_section_sessions_description', icon: Blocks, description: 'Logical sessions and lifecycle' },
   { id: 'remotes', title: 'Remotes', titleKey: 'com_lsm_section_remotes', descriptionKey: 'com_lsm_section_remotes_description', icon: Server, description: 'Connected workers' },
   { id: 'audit', title: 'Audit', titleKey: 'com_lsm_section_audit', descriptionKey: 'com_lsm_section_audit_description', icon: ShieldCheck, description: 'Tool activity and inspection' },
-  { id: 'settings', title: 'Settings', titleKey: 'com_lsm_section_settings', descriptionKey: 'com_lsm_section_settings_description', icon: Settings2, description: 'Controller configuration and restart' },
 ] as const;
 export type Section = typeof SECTIONS[number]['id'];
-export const sectionName = (section: string): string =>
-  SECTIONS.find((item) => item.id === section)?.title || 'Controller';
 
 export function ControlSidebar() {
   const localize = useLocalize();
@@ -47,6 +43,7 @@ export default function Control() {
   const localize = useLocalize();
   const { section = 'overview' } = useParams<{ section: string }>();
   const selected = SECTIONS.find((item) => item.id === section);
+  if (section === 'settings') return null; // GlobalSettings handles the legacy URL.
   if (!selected) return <Navigate to="/control/overview" replace />;
   const Icon = selected.icon;
   return (
@@ -77,7 +74,6 @@ export default function Control() {
         {section === 'overview' && <Overview />}
         {section === 'files' && <Files />}
         {section === 'desktop' && <Desktop />}
-        {section === 'settings' && <Settings />}
         {['terminals', 'sessions', 'remotes', 'audit'].includes(section) &&
           <Operations key={section} section={section as 'terminals' | 'sessions' | 'remotes' | 'audit'} />}
       </div>

@@ -1,5 +1,5 @@
 import { createElement } from 'react';
-import { MessageSquare, Info } from 'lucide-react';
+import { MessageSquare, Info, Server, Layers } from 'lucide-react';
 import { SettingsTabValues } from 'librechat-data-provider';
 import { GearIcon, DataIcon, SpeechIcon } from '@librechat/client';
 import type { ComponentType, ReactNode } from 'react';
@@ -10,7 +10,9 @@ export type SettingsTab =
   | SettingsTabValues.CHAT
   | SettingsTabValues.SPEECH
   | SettingsTabValues.DATA
-  | SettingsTabValues.ABOUT;
+  | SettingsTabValues.ABOUT
+  | 'models'
+  | 'controller';
 
 export type SectionId =
   | 'appearance'
@@ -32,7 +34,9 @@ export type SectionId =
   | 'profile'
   | 'security'
   | 'billing'
-  | 'about';
+  | 'about'
+  | 'models'
+  | 'controller';
 
 export interface SettingsContextValue {
   balanceEnabled: boolean;
@@ -120,6 +124,18 @@ export const TABS: TabMeta[] = [
       { id: 'apiKeys', labelKey: 'com_ui_settings_section_api_keys' },
       { id: 'danger', labelKey: 'com_ui_settings_section_danger_zone', danger: true },
     ],
+  },
+  {
+    id: 'models',
+    labelKey: 'com_lsm_settings_models',
+    icon: createElement(Layers, { className: 'icon-sm', 'aria-hidden': true }),
+    sections: [{ id: 'models', labelKey: 'com_lsm_settings_models' }],
+  },
+  {
+    id: 'controller',
+    labelKey: 'com_lsm_settings_title',
+    icon: createElement(Server, { className: 'icon-sm', 'aria-hidden': true }),
+    sections: [{ id: 'controller', labelKey: 'com_lsm_settings_title' }],
   },
   {
     id: SettingsTabValues.ABOUT,
