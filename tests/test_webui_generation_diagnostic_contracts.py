@@ -7,7 +7,8 @@ import httpx
 import pytest
 from starlette.exceptions import HTTPException
 
-from local_shell_mcp.webui import auth, generation_routes as routes
+from local_shell_mcp.webui import auth
+from local_shell_mcp.webui import generation_routes as routes
 from local_shell_mcp.webui.error_diagnostics import generation_failure
 
 
