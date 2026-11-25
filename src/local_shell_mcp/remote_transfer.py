@@ -21,6 +21,7 @@ from starlette.routing import Route
 
 from .audit import audit
 from .fs_ops import relative_display, resolve_path
+from .settings import controller_base_url as _public_base_url
 from .settings import get_settings
 from .transfer_ops import (
     MAX_HTTP_TRANSFER_CHUNK_BYTES,
@@ -82,18 +83,6 @@ def _now() -> float:
 
 def _token_id(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
-
-
-def _public_base_url() -> str:
-    settings = get_settings()
-    if settings.public_base_url:
-        return settings.public_base_url.rstrip("/")
-    host = settings.host
-    if host in {"", "0.0.0.0", "::"}:
-        host = "127.0.0.1"
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    return f"http://{host}:{settings.port}"
 
 
 def _ticket_ttl_s() -> int:

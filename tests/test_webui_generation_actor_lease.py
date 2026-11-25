@@ -324,3 +324,74 @@ async def test_tool_progress_sse_refuses_stale_actor_token(context):
     with pytest.raises(RuntimeSafetyError, match='lease'):
         runner._tool_step(ModelToolCall('old-call', 'plan_manage', {'action': 'list'}))
     assert not any(e.get('event') == 'on_run_step' for _, e in store.events('local', job.run_id))
+
+
+@pytest.mark.asyncio
+async def test_shutdown_before_actor_first_tick_releases_lease(context):
+    first, second, store, job = context
+    profile = generation_routes.provider_config()
+    assert await generation_routes._start_task('local', job, profile, None)
+    # No scheduling point between creation and shutdown: the task's coroutine
+    # has not entered, so its own finally block cannot run.
+    await generation_routes.shutdown_generations()
+    assert job.run_id not in generation_routes._TASKS
+    assert not generation_routes._SHUTDOWN_TASKS
+    assert job.run_id not in active_run_ids(first)
+    assert store.get('local', job.run_id).status == 'running'
+    replacement = ActorLease.claim(second, 'local', job.run_id)
+    assert replacement is not None
+    replacement.release()
+
+
+@pytest.mark.asyncio
+async def test_instruction_failure_does_not_claim_actor(context, monkeypatch):
+    first, _, _, job = context
+
+    def invalid(*args):
+        raise ValueError('invalid instructions')
+
+    monkeypatch.setattr(generation_routes, 'agent_instructions', invalid)
+    with pytest.raises(ValueError, match='invalid instructions'):
+        await generation_routes._start_task('local', job, generation_routes.provider_config(), None)
+    assert job.run_id not in active_run_ids(first)
+
+
+@pytest.mark.asyncio
+async def test_memory_cleanup_failure_cannot_strand_suspended_actor(context, monkeypatch):
+    from local_shell_mcp.webui import agent_runner, memory_agent
+    from local_shell_mcp.webui.agent_runtime import AgentSuspended
+
+    first, _, store, job = context
+    started = asyncio.Event()
+
+    async def memory(*args, **kwargs):
+        started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            raise RuntimeError('memory cleanup failed') from None
+
+    async def suspend(self, history):
+        await started.wait()
+        raise AgentSuspended()
+
+    monkeypatch.setattr(memory_agent, 'run_automatic_memory', memory)
+    monkeypatch.setattr(agent_runner.AgentRunner, 'run', suspend)
+    assert await generation_routes._start_task('local', job, generation_routes.provider_config(), None)
+    task = generation_routes._TASKS[job.run_id]
+    await asyncio.wait_for(task, 5)
+    assert job.run_id not in generation_routes._TASKS
+    assert job.run_id not in active_run_ids(first)
+    assert store.get('local', job.run_id).status == 'running'
+
+
+def test_step_event_query_is_owner_scoped_and_excludes_text_deltas(context):
+    _, _, store, job = context
+    store.append('local', job.run_id, {'event': 'on_run_step',
+        'data': {'id': 'answer', 'index': 0, 'type': 'message_creation'}})
+    store.append('local', job.run_id, {'event': 'on_message_delta',
+        'data': {'id': 'answer', 'delta': {'content': {'type': 'text', 'text': 'hello'}}}})
+    store.append('local', job.run_id, {'event': 'on_run_step_closed', 'data': {'id': 'answer'}})
+    assert [event['event'] for event in store.message_step_events('local', job.run_id)] == [
+        'on_run_step', 'on_run_step_closed']
+    assert store.message_step_events('other', job.run_id) == []

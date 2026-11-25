@@ -108,19 +108,7 @@ def _last_open_message_step(store: GenerationStore, owner: str, run_id: str):
     opened: dict[str, dict] = {}
     order: list[str] = []
     closed: set[str] = set()
-    def replay_events():
-        cursor = 0
-        while True:
-            page = store.events(owner, run_id, cursor, limit=200)
-            if not page:
-                return
-            for _, event in page:
-                yield event
-            cursor = page[-1][0]
-            if len(page) < 200:
-                return
-
-    for event in replay_events():
+    for event in store.message_step_events(owner, run_id):
         data = event.get('data') or {}
         if event.get('event') == 'on_run_step' and data.get('type') == 'message_creation':
             identifier = data.get('id')
@@ -222,22 +210,6 @@ async def _run_model(
     needs_post_tool_step = False
     now_ms = int(time.time() * 1000)
     memory_task: asyncio.Task | None = None
-    if resume_history is not None:
-        # A human continuation must append into the last text step, which may
-        # have been advanced past a STEER part before suspension.
-        with _database().connect() as db:
-            prior = db.execute(
-                "SELECT data FROM generation_events WHERE run_id=? "
-                "AND json_extract(data,'$.event')='on_run_step' ORDER BY seq DESC LIMIT 1",
-                (generation.run_id,),
-            ).fetchone()
-        if prior:
-            saved = json.loads(prior['data']).get('data') or {}
-            if saved.get('type') == 'message_creation' and isinstance(saved.get('id'), str):
-                step_id = saved['id']
-                step_index = saved.get('index', 0)
-                now_ms = saved.get('created_at', now_ms)
-
     def check_wakeup_lease():
         if actor_lease is not None:
             actor_lease.assert_current()
@@ -457,19 +429,23 @@ async def _run_model(
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
                                                              "".join(text_parts)), actor_lease=actor_lease)
     finally:
-        if memory_task is not None and not memory_task.done():
-            memory_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await memory_task
-        if heartbeat is not None:
-            heartbeat.cancel()
-            await asyncio.gather(heartbeat, return_exceptions=True)
-        if actor_lease is not None:
-            actor_lease.release()
-        _SHUTDOWN_TASKS.discard(asyncio.current_task())
-        async with _TASK_GUARD:
-            if _TASKS.get(generation.run_id) is asyncio.current_task():
-                _TASKS.pop(generation.run_id, None)
+        children = [task for task in (memory_task, heartbeat) if task is not None]
+        for task in children:
+            if not task.done():
+                task.cancel()
+        try:
+            # Retrieve exceptions even if the primary run suspended before
+            # awaiting automatic memory; it cannot prevent actor cleanup.
+            await asyncio.gather(*children, return_exceptions=True)
+        finally:
+            try:
+                if actor_lease is not None:
+                    actor_lease.release()
+            finally:
+                _SHUTDOWN_TASKS.discard(asyncio.current_task())
+                async with _TASK_GUARD:
+                    if _TASKS.get(generation.run_id) is asyncio.current_task():
+                        _TASKS.pop(generation.run_id, None)
 
 
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
@@ -486,6 +462,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       checkpoint_text: str | None = None) -> bool:
     from .generation_actor_lease import ActorLease
 
+    instructions = agent_instructions(agent, profile.provider, artifacts_mode)
     previous = _TASKS.get(generation.run_id)
     if oauth_claim is not None and previous is not None and not previous.done():
         try:
@@ -514,9 +491,21 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
             except Exception:
                 actor_lease.release()
                 raise
+        def cleanup_failed_task(task):
+            # Cancellation before the coroutine's first tick cannot enter its
+            # finally block. Release by token so replacement actors are safe.
+            if not task.cancelled() and task.exception() is None:
+                return
+            try:
+                actor_lease.release()
+            finally:
+                _SHUTDOWN_TASKS.discard(task)
+                if _TASKS.get(generation.run_id) is task:
+                    _TASKS.pop(generation.run_id, None)
+
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
-                       instructions=agent_instructions(agent, profile.provider, artifacts_mode),
+                       instructions=instructions,
                        parameters=(agent or {}).get("model_parameters") or {},
                        native_file_tools=native_file_tools, write_tools=write_tools,
                        ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
@@ -529,6 +518,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task
+        task.add_done_callback(cleanup_failed_task)
         return True
 
 

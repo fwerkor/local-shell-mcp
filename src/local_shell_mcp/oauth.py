@@ -96,7 +96,9 @@ def public_base_url(request: Request | None = None) -> str:
             or request.url.netloc
         )
         return f"{proto}://{host}".rstrip("/")
-    return "http://127.0.0.1:8765"
+    from .settings import controller_base_url
+
+    return controller_base_url()
 
 
 def issuer_url(request: Request | None = None) -> str:

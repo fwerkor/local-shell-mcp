@@ -20,6 +20,7 @@ from starlette.routing import Route
 
 from .audit import audit
 from .fs_ops import relative_display, resolve_path
+from .settings import controller_base_url as _public_base_url
 from .settings import get_settings
 
 _DOWNLOAD_PREFIX = "/download"
@@ -149,18 +150,6 @@ def _write_store_locked(store: dict[str, Any]) -> None:
     with contextlib.suppress(OSError):
         tmp.chmod(0o600)
     os.replace(tmp, path)
-
-
-def _public_base_url() -> str:
-    settings = get_settings()
-    if settings.public_base_url:
-        return settings.public_base_url.rstrip("/")
-    host = settings.host
-    if host in {"", "0.0.0.0", "::"}:
-        host = "127.0.0.1"
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    return f"http://{host}:{settings.port}"
 
 
 def _coerce_ttl(ttl_s: int | None) -> int:
