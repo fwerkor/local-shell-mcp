@@ -142,27 +142,25 @@ def test_environment_provider_inventory_redacts_url_credentials(setup_profiles, 
 
 
 @pytest.mark.asyncio
-async def test_profile_usage_option_survives_config_updates_and_rejects_invalid_values(setup_profiles):
+async def test_legacy_usage_option_is_ignored_and_not_persisted(setup_profiles):
     _, app = setup_profiles
+    from local_shell_mcp.webui.provider_profiles import profile
+
     body = {'provider': 'openai', 'base_url': 'http://127.0.0.1:9000/v1',
-            'models': ['compatible'], 'include_usage': True}
+            'models': ['compatible']}
+    # A channel saved by an older release may explicitly disable usage.
+    routes._repo().save_setting('__lsm_controller__', 'model.provider.openai', {
+        **body, 'api_key': '', 'include_usage': False})
+    assert provider_config('openai').model == 'compatible'
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                  base_url='https://lsm.invalid', headers=_ADMIN) as client:
-        result = await client.put('/api/lsm/providers', json=body)
+        listed = (await client.get('/api/lsm/providers')).json()['providers'][0]
+        assert 'include_usage' not in listed
+        # Older clients can still submit the field; it has no effect.
+        result = await client.put('/api/lsm/providers', json={**body, 'include_usage': False})
         assert result.status_code == 200
-        assert provider_config('openai').include_usage is True
-        assert result.json()['providers'][0]['include_usage'] is True
-        # Updating the key/model must preserve the explicitly enabled usage
-        # option; callers may explicitly disable it again.
-        without_option = {key: value for key, value in body.items() if key != 'include_usage'}
-        assert (await client.put('/api/lsm/providers', json=without_option)).status_code == 200
-        assert provider_config('openai').include_usage is True
-        assert (await client.put('/api/lsm/providers', json={**body, 'include_usage': False})).status_code == 200
-        assert provider_config('openai').include_usage is False
-        for invalid in (1, 'yes', [], {}, 0):
-            failed = await client.put('/api/lsm/providers', json={**body, 'include_usage': invalid})
-            assert failed.status_code == 400
-            assert provider_config('openai').include_usage is False
+        assert 'include_usage' not in result.json()['providers'][0]
+        assert 'include_usage' not in profile('openai')
 
 
 @pytest.mark.asyncio
@@ -436,7 +434,6 @@ async def test_model_context_limits_in_token_config_and_input_validation(setup_p
                 'models': ['m1', 'm2'], 'model_contexts': {'m1': 128000, 'm2': 8192}}
         response = await client.put('/api/lsm/providers', headers=_ADMIN, json=data)
         assert response.status_code == 200, response.text
-        assert provider_config('Window Test').include_usage is True
         assert (await client.get('/api/endpoints/token-config', headers=_ADMIN)).json() == {
             'Window Test': {'m1': {'context': 128000}, 'm2': {'context': 8192}}}
         listed = (await client.get('/api/lsm/providers', headers=_ADMIN)).json()['providers']
@@ -529,3 +526,154 @@ async def test_model_sampling_defaults_are_independent_and_validated(setup_profi
         assert provider_config("Research", "a").sampling == body["model_sampling"]["a"]
         assert (await client.put("/api/lsm/providers", json={**body, "model_sampling": {}})).status_code == 200
         assert provider_config("Research", "a").sampling == {}
+
+
+@pytest.mark.asyncio
+async def test_model_discovery_uses_saved_key_only_at_original_endpoint(setup_profiles, monkeypatch):
+    _, app = setup_profiles
+    original_client = httpx.AsyncClient
+    outbound = []
+    def respond(request):
+        outbound.append(request)
+        return httpx.Response(200, json={'data': [
+            {'id': 'flash', 'context_window': 1048576, 'max_output_tokens': 393216},
+            {'id': 'pro', 'context_length': 128000}, {'id': 'unknown', 'context_window': True},
+            {'id': 'output-only', 'max_output_tokens': 8192}, {'id': 'flash'}, None,
+            {'id': 'invalid\n'}, {'id': 'too-big', 'max_model_len': 2000001},
+            {'id': 'text-embedding-3-small'}, {'id': 'whisper-1'},
+            {'id': 'gpt-image-1'}, {'id': 'vendor/reranker-v2'},
+            {'id': 'arbitrary', 'architecture': {'output_modalities': ['image']}},
+            {'id': 'other', 'supported_endpoints': ['/v1/embeddings']},
+            {'id': 'explicit-chat', 'supported_endpoints': ['/v1/chat/completions']},
+        ]})
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original_client(transport=httpx.MockTransport(respond), **kw))
+    path = '/api/lsm/providers/discover'
+    body = {'name': 'Discovery', 'provider': 'openai', 'base_url': 'https://models.invalid/v1',
+            'models': ['old'], 'api_key': 'secret', 'model_contexts': {'old': 8192}}
+    async with original_client(transport=httpx.ASGITransport(app=app), base_url='https://lsm.invalid') as client:
+        assert (await client.post(path, json=body)).status_code == 401
+        assert (await client.post(path, headers={'x-test-scope': 'files:read'}, json=body)).status_code == 403
+        assert (await client.put('/api/lsm/providers', headers=_ADMIN, json=body)).status_code == 200
+        probe = {'provider': 'openai', 'base_url': body['base_url'], 'existing_channel': 'Discovery'}
+        result = await client.post(path, headers=_ADMIN, json=probe)
+        assert result.status_code == 200, result.text
+        assert result.json() == {'models': ['flash', 'pro', 'unknown', 'output-only', 'too-big', 'explicit-chat'],
+                                 'model_contexts': {'flash': 1048576, 'pro': 128000}}
+        assert result.headers['cache-control'] == 'no-store'
+        assert 'secret' not in result.text
+        assert outbound[0].headers['authorization'] == 'Bearer secret'
+        assert str(outbound[0].url) == 'https://models.invalid/v1/models'
+        for changed in ({'base_url': 'https://different.invalid/v1'}, {'provider': 'anthropic'},
+                        {'existing_channel': 'nonexistent'}, {'base_url': 'http://external.invalid'}):
+            assert (await client.post(path, headers=_ADMIN, json={**probe, **changed})).status_code == 400
+        assert len(outbound) == 1
+        assert (await client.post(path, headers=_ADMIN, json={**probe, 'base_url': 'https://different.invalid/v1', 'api_key': 'new'})).status_code == 200
+        assert outbound[-1].headers['authorization'] == 'Bearer new'
+        # Discovery alone is not an update: the catalog changes only after Save.
+        from local_shell_mcp.webui.provider_profiles import profile
+        assert profile('Discovery')['models'] == ['old']
+        assert profile('Discovery')['model_contexts'] == {'old': 8192}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['anthropic', 'google'])
+async def test_native_discovery_pagination(kind, monkeypatch):
+    from local_shell_mcp.webui.model_discovery import _fetch_models
+    original = httpx.AsyncClient
+    requests = []
+    def respond(request):
+        requests.append(request)
+        if kind == 'google':
+            assert request.headers['x-goog-api-key'] == 'key'
+            if len(requests) == 1:
+                return httpx.Response(200, json={'models': [
+                    {'name': 'models/gemini', 'supportedGenerationMethods': ['generateContent'], 'inputTokenLimit': 1000000},
+                    {'name': 'models/embedding', 'supportedGenerationMethods': ['embedContent']},
+                    {'name': 'models/invalid/name', 'supportedGenerationMethods': ['generateContent']},
+                    {'name': 'models/invalid', 'supportedGenerationMethods': 5}], 'nextPageToken': 'next'})
+            assert request.url.params['pageToken'] == 'next'
+            return httpx.Response(200, json={'models': [{'name': 'models/next', 'supportedGenerationMethods': ['generateContent']}]})
+        assert request.headers['x-api-key'] == 'key'
+        assert request.headers['anthropic-version'] == '2023-06-01'
+        if len(requests) == 1:
+            return httpx.Response(200, json={'data': [{'id': 'claude', 'max_input_tokens': 200000}], 'has_more': True, 'last_id': 'claude'})
+        assert request.url.params['after_id'] == 'claude'
+        return httpx.Response(200, json={'data': [{'id': 'next'}], 'has_more': False})
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
+    result = await _fetch_models(kind, 'https://native.invalid/v1', 'key')
+    model, limit = ('gemini', 1000000) if kind == 'google' else ('claude', 200000)
+    assert result == {'models': [model, 'next'], 'model_contexts': {model: limit}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,payload,expected', [
+    (302, {}, 502), (401, {'error': 'private detail'}, 502), (200, [], 400),
+    (200, {'data': []}, 400), (200, {'data': None}, 400),
+    (200, {'data': [{'id': f'm{i}'} for i in range(129)]}, 400),
+    (200, None, 502),
+])
+async def test_discovery_failure_returns_safe_error_and_no_save(setup_profiles, monkeypatch, status, payload, expected):
+    _, app = setup_profiles
+    original = httpx.AsyncClient
+    def respond(request):
+        if payload is None:
+            return httpx.Response(status, text='private detail')
+        return httpx.Response(status, json=payload, headers={'location': 'https://redirect.invalid'})
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
+    async with original(transport=httpx.ASGITransport(app=app), base_url='https://lsm.invalid') as client:
+        response = await client.post('/api/lsm/providers/discover', headers=_ADMIN, json={
+            'provider': 'openai', 'base_url': 'https://models.invalid', 'api_key': 'private-key'})
+        assert response.status_code == expected
+        assert 'private detail' not in response.text and 'private-key' not in response.text
+        assert not any(p['configured'] for p in (await client.get('/api/lsm/providers', headers=_ADMIN)).json()['providers'])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind,mode,match', [
+    ('google', 'invalid_cursor', 'Invalid model list cursor'),
+    ('anthropic', 'invalid_cursor', 'Invalid model list cursor'),
+    ('google', 'repeat', 'repeated a model list page'),
+    ('google', 'many_pages', 'too many pages'),
+    ('openai', 'oversized', 'model list is too large'),
+])
+async def test_discovery_bounds_and_pagination_errors(kind, mode, match, monkeypatch):
+    from local_shell_mcp.webui.model_discovery import _fetch_models
+    original = httpx.AsyncClient
+    count = 0
+
+    def respond(request):
+        nonlocal count
+        count += 1
+        assert 'authorization' not in request.headers
+        if mode == 'oversized':
+            return httpx.Response(200, content=b' ' * (2 * 1024 * 1024 + 1))
+        if kind == 'anthropic':
+            return httpx.Response(200, json={'data': [], 'has_more': True})
+        cursor = 5 if mode == 'invalid_cursor' else ('repeat' if mode == 'repeat' else str(count))
+        return httpx.Response(200, json={'models': [], 'nextPageToken': cursor})
+
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
+    with pytest.raises(ValueError, match=match):
+        await _fetch_models(kind, 'http://127.0.0.1:8000/v1', '')
+
+
+@pytest.mark.asyncio
+async def test_keyless_channel_can_discover_at_changed_endpoint(setup_profiles, monkeypatch):
+    _, app = setup_profiles
+    original = httpx.AsyncClient
+    requests = []
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={'data': [{'id': 'local-chat'}]})
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
+    async with original(transport=httpx.ASGITransport(app=app), base_url='https://lsm.invalid', headers=_ADMIN) as client:
+        assert (await client.put('/api/lsm/providers', json={
+            'name': 'Local', 'provider': 'openai', 'base_url': 'http://127.0.0.1:8000/v1',
+            'models': ['old']})).status_code == 200
+        response = await client.post('/api/lsm/providers/discover', json={
+            'provider': 'openai', 'base_url': 'http://127.0.0.1:9000/v1',
+            'existing_channel': 'Local'})
+        assert response.status_code == 200, response.text
+        assert response.json()['models'] == ['local-chat']
+        assert str(requests[0].url) == 'http://127.0.0.1:9000/v1/models'
+        assert 'authorization' not in requests[0].headers

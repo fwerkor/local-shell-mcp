@@ -52,7 +52,7 @@ def _endpoint_info(*, memory_available: bool = False) -> dict:
         # The native LibreChat endpointSchema uses OpenAI-compatible transport
         # for a custom name unless provider='anthropic'. LSM additionally has
         # an explicit Google native channel, never a generic custom client.
-        endpoint_type = ("openAI" if value["provider"] == "openai" else value["provider"])
+        endpoint_type = ("openAI" if value["provider"] in {"openai", "openai-responses"} else value["provider"])
         result[name] = {
             "order": index, "type": endpoint_type, "name": name,
             "modelDisplayLabel": "Model", "userProvide": False,
@@ -231,9 +231,12 @@ async def delete_preset(request: Request):
 
 def config_routes() -> list[Route]:
     from .provider_profiles import provider_profiles
+    from .model_discovery import discover_models, refresh_model_channel
 
     return [
         Route("/api/lsm/providers", provider_profiles, methods=["GET", "PUT", "DELETE"]),
+        Route("/api/lsm/providers/discover", discover_models, methods=["POST"]),
+        Route("/api/lsm/providers/refresh", refresh_model_channel, methods=["POST"]),
         Route("/api/config", startup_config, methods=["GET"]),
         Route("/api/endpoints", endpoint_configs, methods=["GET"]),
         Route("/api/endpoints/token-config", token_configs, methods=["GET"]),
