@@ -19,7 +19,8 @@ import { useGetStartupConfig, useGetUserBalance } from '~/data-provider';
 import { useAuthContext } from '~/hooks/AuthContext';
 import { openInNewTab } from '~/utils';
 import { useLocalize } from '~/hooks';
-import Settings from './Settings';
+import { SettingsTabValues } from 'librechat-data-provider';
+import { settingsTabState } from './Settings/state';
 import store from '~/store';
 
 const DOCUMENTATION_URL = 'https://fwerkor.github.io/local-shell-mcp/';
@@ -101,7 +102,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
   const balanceQuery = useGetUserBalance({
     enabled: !!isAuthenticated && startupConfig?.balance?.enabled,
   });
-  const [showSettings, setShowSettings] = useState(false);
+  const setSettingsTab = useSetRecoilState(settingsTabState);
   const setShowShortcutsDialog = useSetRecoilState(store.showShortcutsDialog);
   const [showArchived, setShowArchived] = useState(false);
   const accountSettingsButtonRef = useRef<HTMLButtonElement>(null);
@@ -165,7 +166,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
           {localize('com_nav_archived_chats')}
         </Menu.MenuItem>
         <Menu.MenuItem
-          onClick={() => setShowSettings(true)}
+          onClick={() => setSettingsTab(SettingsTabValues.GENERAL)}
           className="select-item text-sm"
           data-testid="nav-settings"
         >
@@ -185,7 +186,6 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
           triggerRef={accountSettingsButtonRef}
         />
       )}
-      {showSettings && <Settings open={showSettings} onOpenChange={setShowSettings} />}
     </Menu.MenuProvider>
   );
 }

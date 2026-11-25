@@ -1,3 +1,5 @@
+import ModelProviders from './ModelProviders';
+import ControllerSettings from './ControllerSettings';
 import { SettingsTabValues } from 'librechat-data-provider';
 import type { SettingEntry } from './types';
 import {
@@ -680,6 +682,23 @@ export const registry: SettingEntry[] = [
     section: 'danger',
     labelKey: 'com_ui_settings_label_clear_chats',
     Component: ClearChats,
+  },
+
+  {
+    id: 'modelProviders',
+    tab: 'models',
+    section: 'models',
+    labelKey: 'com_lsm_settings_models',
+    keywords: ['channel', 'model', 'provider', 'endpoint', 'api key', '渠道', '模型'],
+    Component: ModelProviders,
+  },
+  {
+    id: 'controllerSettings',
+    tab: 'controller',
+    section: 'controller',
+    labelKey: 'com_lsm_settings_title',
+    keywords: ['controller', 'config', 'restart', 'port', 'host', '控制器', '配置', '重启'],
+    Component: ControllerSettings,
   },
 
   // About

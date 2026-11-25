@@ -29,6 +29,7 @@ import {
   useAgentsMap,
   useFileMap,
 } from '~/hooks';
+import GlobalSettings from '~/components/Nav/Settings/GlobalSettings';
 import KeyboardShortcutsDialog from '~/components/Nav/KeyboardShortcutsDialog';
 import KeyboardDeleteDialog from '~/components/Nav/KeyboardDeleteDialog';
 import { useUserTermsQuery, useGetStartupConfig } from '~/data-provider';
@@ -205,6 +206,7 @@ export default function Root() {
                     )}
                   </div>
                 </div>
+                <GlobalSettings />
               </PromptGroupsProvider>
               <KeyboardShortcutsProvider />
             </AgentsMapContext.Provider>

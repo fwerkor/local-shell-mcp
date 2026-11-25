@@ -13,13 +13,17 @@ import Content from './Content';
 import { TABS } from './types';
 import { cn } from '~/utils';
 
-export default function SettingsDialog({ open, onOpenChange }: TDialogProps) {
+export default function SettingsDialog({
+  open,
+  onOpenChange,
+  initialTab = SettingsTabValues.GENERAL,
+}: TDialogProps & { initialTab?: SettingsTab }) {
   const localize = useLocalize();
   const ctx = useSettingsContext();
   const isSmallScreen = useMediaQuery('(max-width: 767px)');
-  const [activeTab, setActiveTab] = useState<SettingsTab>(SettingsTabValues.GENERAL);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [query, setQuery] = useState('');
-  const [mobileDetail, setMobileDetail] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(initialTab !== SettingsTabValues.GENERAL);
 
   const searching = query.trim().length > 0;
   const inDetail = isSmallScreen && mobileDetail && !searching;
@@ -118,7 +122,7 @@ export default function SettingsDialog({ open, onOpenChange }: TDialogProps) {
                   />
                 )}
                 {showContent && (
-                  <div className="flex-1 overflow-y-auto md:pr-1">
+                  <div className="min-w-0 flex-1 overflow-y-auto md:pr-1">
                     {searching ? (
                       <Content activeTab={effectiveTab} query={query} ctx={ctx} />
                     ) : (

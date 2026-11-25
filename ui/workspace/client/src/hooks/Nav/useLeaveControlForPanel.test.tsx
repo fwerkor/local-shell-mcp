@@ -27,7 +27,7 @@ describe('leaving the controller for a sidebar panel', () => {
   it.each(['agents', 'conversations', 'mcp-builder'])(
     'opens the chat workspace when selecting %s from controller settings',
     (panelId) => {
-      expect(clickPanel('/control/settings', panelId)).toBe('/c/new');
+      expect(clickPanel('/control/overview', panelId)).toBe('/c/new');
     },
   );
 

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiBaseUrl, request, QueryKeys } from 'librechat-data-provider';
 
@@ -161,16 +160,16 @@ export default function ModelProviders() {
       setBusy(false);
     }
   };
-  return <section id="models" aria-labelledby="model-settings-title" className="space-y-4 rounded-xl border border-border-light p-5">
+  return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="space-y-1">
-        <h2 id="model-settings-title" className="text-lg font-semibold">Channels &amp; models / 渠道与模型</h2>
+        
         <p className="text-sm text-text-secondary">Each channel has its own name, protocol, endpoint, credentials and models.</p>
       </div>
       <button type="button" disabled={busy} onClick={beginAdd} className={button}>Add channel</button>
     </div>
     {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
-    {success && <p role="status" className="text-sm text-text-primary">{success} <Link className="underline" to="/c/new">Start a new chat and select a model</Link></p>}
+    {success && <p role="status" className="text-sm text-text-primary">{success}</p>}
     {loading ? <p className="text-sm text-text-secondary">Loading channels…</p> : (
       channels.length ? <ul aria-label="Configured channels" className="divide-y divide-border-light rounded-lg border border-border-light">
         {channels.map((profile) => <li key={channelId(profile)} className="flex flex-wrap items-center justify-between gap-3 p-3">
@@ -246,5 +245,5 @@ export default function ModelProviders() {
         <button type="button" disabled={busy} className={button} onClick={() => { setEditor(null); setError(''); }}>Cancel</button>
       </div>
     </form>}
-  </section>;
+  </div>;
 }

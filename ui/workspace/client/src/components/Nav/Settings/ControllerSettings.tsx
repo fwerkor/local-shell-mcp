@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, LockKeyhole, RefreshCw, RotateCcw, Save, Search, Settings2,
+  AlertTriangle, CheckCircle2, LockKeyhole, RefreshCw, RotateCcw, Save, Search,
 } from 'lucide-react';
 import useLocalize from '~/hooks/useLocalize';
-import ModelProviders from './ModelProviders';
-import { useControllerServices } from './hooks';
+import { useControllerServices } from '~/components/LSM/hooks';
 
 type SettingField = {
   name: string;
@@ -82,7 +81,7 @@ function nativeSettingsUrl(): string {
   return entry.split('#')[0] + '#/settings';
 }
 
-export default function Settings() {
+export default function ControllerSettings() {
   const localize = useLocalize();
   const { read, write } = useControllerServices();
   const [snapshot, setSnapshot] = useState<ConfigSnapshot | null>(null);
@@ -154,28 +153,32 @@ export default function Settings() {
     setNotice('');
   };
 
+  const restartController = async () => {
+    setRestarting(true);
+    setNotice(localize('com_lsm_settings_restart_requested'));
+    await write('settings/restart', {});
+    for (let attempt = 0; attempt < 35 && mounted.current; attempt++) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1400));
+      if (!mounted.current) return;
+      try {
+        const next = await read<ConfigSnapshot>('settings/view');
+        if (!mounted.current) return;
+        if (attempt < 3) continue;
+        setSnapshot(next);
+        setDraft({});
+        setNotice(localize('com_lsm_settings_restart_done'));
+        return;
+      } catch { /* A temporary disconnect is expected during restart. */ }
+    }
+    if (mounted.current) setError(localize('com_lsm_settings_restart_unreachable'));
+  };
+
   const restart = async () => {
     if (!window.confirm(localize('com_lsm_settings_restart_confirm'))) return;
     setBusy(true);
-    setRestarting(true);
     setError('');
-    setNotice(localize('com_lsm_settings_restart_requested'));
     try {
-      await write('settings/restart', {});
-      // LibreChat remains available while the Controller restarts.
-      for (let attempt = 0; attempt < 35 && mounted.current; attempt++) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1400));
-        try {
-          const next = await read<ConfigSnapshot>('settings/view');
-          if (!mounted.current) return;
-          if (attempt < 3) continue;
-          setSnapshot(next);
-          setDraft({});
-          setNotice(localize('com_lsm_settings_restart_done'));
-          return;
-        } catch { /* A temporary disconnect is expected during restart. */ }
-      }
-      if (mounted.current) setError(localize('com_lsm_settings_restart_unreachable'));
+      await restartController();
     } catch (reason) {
       if (mounted.current) setError(String(reason));
     } finally {
@@ -200,26 +203,7 @@ export default function Settings() {
       setSnapshot(next);
       setDraft({});
       setNotice(localize('com_lsm_settings_saved'));
-      if (restartAfter) {
-        setRestarting(true);
-        setNotice(localize('com_lsm_settings_restart_requested'));
-        await write('settings/restart', {});
-        let connected = false;
-        for (let attempt = 0; attempt < 35 && mounted.current; attempt++) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1400));
-          try {
-            const current = await read<ConfigSnapshot>('settings/view');
-            if (attempt < 3) continue;
-            if (mounted.current) {
-              setSnapshot(current);
-              setNotice(localize('com_lsm_settings_restart_done'));
-            }
-            connected = true;
-            break;
-          } catch { /* Retry while the Controller is stopping or starting. */ }
-        }
-        if (!connected && mounted.current) setError(localize('com_lsm_settings_restart_unreachable'));
-      }
+      if (restartAfter) await restartController();
     } catch (reason) {
       if (mounted.current) setError(String(reason));
     } finally {
@@ -228,10 +212,8 @@ export default function Settings() {
   };
 
   return <div className="space-y-5">
-    <ModelProviders />
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
-        <h2 className="flex items-center gap-2 text-xl font-semibold"><Settings2 size={21} />{localize('com_lsm_settings_title')}</h2>
         <p className="mt-1 text-sm text-text-secondary">{localize('com_lsm_settings_description')}</p>
         {snapshot && <p className="mt-2 break-all font-mono text-xs text-text-secondary">{snapshot.path}</p>}
       </div>
