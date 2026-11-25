@@ -1,4 +1,10 @@
 {
+  "com_ui_tool_approval_mode": "工具审批模式",
+  "com_ui_tool_approval_auto": "自动执行",
+  "com_ui_tool_approval_dangerous": "危险操作审批",
+  "com_ui_tool_approval_all": "全部审批",
+  "com_ui_tool_approval_inherit": "继承默认设置",
+  "com_ui_tool_approval_description": "机器权限仍然有效。危险操作包括写入、任意命令和未知工具。",
   "com_error_details_diagnostic": "完整错误信息",
   "chat_direction_left_to_right": "从左到右",
   "chat_direction_right_to_left": "从右到左",

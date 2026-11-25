@@ -178,6 +178,10 @@ def clean_subagents(value: Any, *, max_subagents: int = 10) -> dict:
 def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
     obj = _require(payload, dict, "Agent configuration")
     result = {}
+    if "approval_mode" in obj:
+        from .approval_settings import validate_mode
+
+        result["approval_mode"] = validate_mode(obj["approval_mode"], inherit=True)
     if "machine_permissions" in obj:
         # Reuse the chat ACL vocabulary and identifier validation. This is an
         # Agent-specific ceiling; a chat grant is still required at execution.

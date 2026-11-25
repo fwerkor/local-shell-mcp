@@ -1016,6 +1016,7 @@ export type Agent = {
   additional_instructions?: string | null;
   tools?: string[];
   /** Per-machine Agent ceiling; the chat's effective ACL still applies. */
+  approval_mode?: 'inherit' | 'automatic' | 'dangerous' | 'all';
   machine_permissions?: Record<string, 'none' | 'read' | 'write'>;
   tool_kwargs?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -1145,6 +1146,7 @@ export type AgentUpdateParams = {
   | 'support_contact'
   | 'tool_options'
   | 'machine_permissions'
+  | 'approval_mode'
   | 'skills'
   | 'skills_enabled'
   | 'skill_authoring_enabled'

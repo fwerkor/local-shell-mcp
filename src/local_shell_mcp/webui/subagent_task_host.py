@@ -196,7 +196,7 @@ class SQLiteSubagentTaskHost:
                 "task": task}
 
     async def start(self, invocation: SubagentInvocation, *, thread_id: str | None = None,
-                    mcp_enabled: bool = False) -> str:
+                    mcp_enabled: bool = False, parent_approval_mode=None) -> str:
         """Persist immutable owner/parent/tool identity before launching any child run."""
         if not invocation.parent_tool_call_id or not invocation.parent_run_id:
             return _json({"status": "rejected", "tool": "subagent",
@@ -287,7 +287,8 @@ class SQLiteSubagentTaskHost:
                                    "recursion_limit": invocation.recursion_limit,
                                    "remaining_depth": invocation.remaining_depth,
                                    "child_types": [config.type for config in invocation.child_configs],
-                                   "mcp_enabled": mcp_enabled}), task_text,
+                                   "mcp_enabled": mcp_enabled,
+                                   "parent_approval_mode": parent_approval_mode}), task_text,
                             _json(history), _json(sorted(invocation.scopes)), invocation.grant_expires,
                             reserved_child_id, "running", now, now))
                 # The original completion trigger is pre-enqueued in the
@@ -538,6 +539,7 @@ class SQLiteSubagentTaskHost:
                 stream_text=self.stream_text, on_text=emit,
                 agent=agent, mcp_enabled=bool(options.get("mcp_enabled")), ask_user_enabled=False,
                 background_deny=True, authorization_conversation_id=self.conversation_id,
+                parent_approval_mode=options.get("parent_approval_mode"),
                 task_control_host=self, task_control_id=task_id,
                 selected_tools=options.get("selected_tools"),
                 child_configs=nested,

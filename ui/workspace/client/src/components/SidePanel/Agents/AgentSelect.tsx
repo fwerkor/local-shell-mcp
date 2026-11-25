@@ -112,6 +112,7 @@ function AgentSelect({
         repositoryInstructions: fullAgent.repositoryInstructions,
         code_workspace_id: fullAgent.code_workspace_id,
         git_identity: fullAgent.git_identity,
+        approval_mode: fullAgent.approval_mode ?? 'inherit',
       };
 
       // A pre-machine-ACL Agent must retain its legacy tool allowlist until

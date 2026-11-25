@@ -1,4 +1,10 @@
 {
+  "com_ui_tool_approval_mode": "Tool approval mode",
+  "com_ui_tool_approval_auto": "Automatic",
+  "com_ui_tool_approval_dangerous": "Review risky operations",
+  "com_ui_tool_approval_all": "Review all tools",
+  "com_ui_tool_approval_inherit": "Inherit default",
+  "com_ui_tool_approval_description": "Machine access still applies. Risky operations include writes, arbitrary commands, and unknown tools.",
   "com_ui_background_tasks": "Background tasks",
   "com_ui_background_tasks_cancel_disabled": "Stopping background tools is not enabled on this server",
   "com_ui_background_tasks_checked": "Checked background tasks",

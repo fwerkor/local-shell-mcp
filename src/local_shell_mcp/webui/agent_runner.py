@@ -20,8 +20,6 @@ from .agent_runtime import (
 from .agents import AgentRepository
 from .approval_runtime import (
     ApprovalBatch,
-    approval_policy_decision,
-    ask_user_approval_policy,
     build_approval_payload,
     execute_approval_batch,
 )
@@ -70,7 +68,8 @@ class AgentRunner:
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
                  on_injected=None, wakeup_lease=None, event_delivery_lease=None,
-                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, webui_cookie=None, web_search_enabled=True):
+                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, webui_cookie=None, web_search_enabled=True,
+                 parent_approval_mode=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.webui_cookie = webui_cookie
@@ -85,6 +84,7 @@ class AgentRunner:
         self.graph_max_handoffs = graph_max_handoffs
         self.authorization_conversation_id = authorization_conversation_id or generation.conversation_id
         self.background_deny = background_deny
+        self.parent_approval_mode = parent_approval_mode
         self.task_control_host, self.task_control_id = task_control_host, task_control_id
         self.subagent_depth = subagent_depth
         self.on_injected = on_injected
@@ -569,7 +569,8 @@ class AgentRunner:
             return await invoke_subagent(
                 call, self.configs[(state.context.agent or {}).get("id") or "default"],
                 execute_child=self._child, start_background=lambda invocation, thread: host.start(
-                    invocation, thread_id=thread, mcp_enabled=self.mcp_enabled), owner=self.owner,
+                    invocation, thread_id=thread, mcp_enabled=self.mcp_enabled,
+                    parent_approval_mode=self._approval_mode(state.context.agent)), owner=self.owner,
                 conversation_id=self.authorization_conversation_id, parent_run_id=self.generation.run_id,
                 parent_agent_id=(state.context.agent or {}).get("id"),
                 scopes=frozenset(self.scopes), grant_expires=self.grant_expires, database=self.database,
@@ -653,6 +654,7 @@ class AgentRunner:
                             partial_text=self.partial_text,
                             authorization_conversation_id=self.authorization_conversation_id,
                             background_deny=self.background_deny,
+                            parent_approval_mode=self._approval_mode(),
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
                             subagent_depth=invocation.remaining_depth,
                             wakeup_lease=self.wakeup_lease,
@@ -778,6 +780,14 @@ class AgentRunner:
         result = await self._invoke(call, state)
         return filtered_tool_output(call.name, result, filters)
 
+    def _approval_mode(self, agent=None):
+        from .approval_settings import effective_mode
+        from .storage import WorkspaceRepository
+
+        return effective_mode(WorkspaceRepository(self.database), self.owner,
+                              self.authorization_conversation_id, agent or self.root_agent,
+                              parent_mode=self.parent_approval_mode)
+
     async def _dispatch(self, calls, state):
         from .routes import _repo
 
@@ -793,11 +803,13 @@ class AgentRunner:
                 self._tool_step(call)
         endpoints = _repo().setting(self.owner, "endpoints", {}) or {}
         policy = (endpoints.get("agents") or {}).get("toolApproval")
+        from .approval_settings import call_decision
+
+        mode = self._approval_mode(state.context.agent)
         ask = []
         questions = []
         for call in unresolved:
-            selected_policy = ask_user_approval_policy(policy) if call.name == "ask_user_question" else policy
-            decision = approval_policy_decision(selected_policy, call.name)
+            decision = call_decision(mode, policy, call.name, call.arguments)
             if self._blocked_call(call):
                 continue
             if decision and decision["decision"] == "deny":
