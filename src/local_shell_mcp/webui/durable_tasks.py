@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..audit import audit
-from .machine_permissions import authorize_machine_action
+from .machine_permissions import agent_access_policy, authorize_machine_action
 
 log = logging.getLogger(__name__)
 _STARTS = frozenset({"job_start", "shell_start", "job_retry", "remote_transfer"})
@@ -288,15 +288,14 @@ def _revoked(row: Any) -> bool:
             agent = AgentRepository(_repo().database).get(row["owner"], agent_id)
             if agent is None:
                 return True
-            if "machine_permissions" in agent:
-                from .machine_permissions import validate_access_map
-
-                agent_policy = validate_access_map(agent["machine_permissions"])
+            policy = agent_access_policy(agent)
+            if policy is not None:
+                agent_policy, default = policy
             elif "tools" in agent and row["tool"] not in agent["tools"]:
                 # Agents predating machine ACLs retain their explicit tool list.
                 return True
         for machine, operation in json.loads(row["requirements"]).items():
-            if agent_policy is not None and not _agent_allows(agent_policy, machine, operation):
+            if agent_policy is not None and not _agent_allows(agent_policy, machine, operation, default):
                 return True
             authorize_machine_action(row["owner"], permission_conversation_id, machine, operation,
                                      scopes=set(json.loads(row["scopes"])), expires=row["grant_expires"])

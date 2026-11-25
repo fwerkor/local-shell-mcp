@@ -122,11 +122,13 @@ async def test_enabled_registry_and_nested_mcp_error_guards(runner_parts, monkey
 
     calls = []
 
-    async def lookup(*args):
+    async def lookup(*args, agent_id=None):
+        assert agent_id is None
         calls.append('search')
         return 'searched'
 
-    async def execute(*args):
+    async def execute(*args, agent_id=None):
+        assert agent_id is None
         calls.append('call')
         return 'called'
 

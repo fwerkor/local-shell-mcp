@@ -110,11 +110,15 @@
   replace a human administrator's direct Controller authorization. Permissions
   are rechecked immediately before every native tool invocation and cannot
   elevate the user's frozen OAuth scopes.
-- Agent machine permissions are **per machine**, with `none`, `read`, `write`
-  levels. They inherit **global defaults → project defaults → conversation
-  overrides** in the same SQLite database. An explicit `none` blocks inherited
-  access, and unknown/new Worker machines start without permission. The legacy
-  chat-level `lsm` Boolean is informational and **cannot** grant access.
+- Agent machine permissions are an additional ceiling on **global defaults →
+  project defaults → conversation overrides**. The Builder stores
+  `machine_default_permission` (`none`, `read`, or `write`) and explicit
+  `machine_permissions` overrides. New Builder Agents default to `none`;
+  newly registered Workers inherit that Agent's default unless overridden.
+  Existing machine ACLs without a default retain their implicit `write`;
+  Agents without either field retain legacy per-tool access. Unregistered
+  machine IDs are not implicitly granted. The legacy chat-level `lsm`
+  Boolean is informational and **cannot** grant access.
 - Each function call rechecks the effective policy before touching the machine.
   Read operations require `shell:read`; write operations additionally require
   `shell:write`; remote operations require `remote:use`, including OAuth expiry

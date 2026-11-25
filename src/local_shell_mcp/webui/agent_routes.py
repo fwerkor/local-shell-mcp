@@ -55,7 +55,7 @@ async def detail(request: Request):
         try:
             body = await _body(request)
             result = repository.update(owner, agent_id, body)
-            if "machine_permissions" in body or "tools" in body:
+            if {"machine_permissions", "machine_default_permission", "tools"} & body.keys():
                 from .durable_tasks import mark_revoked
 
                 mark_revoked(owner)

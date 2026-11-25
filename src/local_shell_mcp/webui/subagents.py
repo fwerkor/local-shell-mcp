@@ -317,7 +317,8 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
         # Machine-configured Agents inherit their native tool set from the
         # machine ACL; legacy Agents retain a requested tool subset.
         selected_tools=(tuple(config.agent.get("tools") or [])
-                        if "machine_permissions" not in config.agent and config.agent.get("tools")
+                        if not ({"machine_permissions", "machine_default_permission"} & config.agent.keys())
+                        and config.agent.get("tools")
                         else None),
         max_turns=config.max_turns,
         recursion_limit=config.max_turns * 3 if config.max_turns is not None else None,
