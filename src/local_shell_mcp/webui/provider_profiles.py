@@ -281,9 +281,10 @@ async def provider_profiles(request):
         previous_connection = None
         previous_key = _CHANNEL_PREFIX + old_name if renaming else key
         saved = _repo().setting(_OWNER, previous_key)
-        if isinstance(saved, dict) and saved.get("oauth_id"):
-            if value["api_key"] is not None or value["base_url"] != saved["base_url"] or value["provider"] != saved["provider"]:
-                raise HTTPException(400, detail="Account channel authentication and endpoint cannot be changed")
+        if isinstance(saved, dict) and saved.get("oauth_id") and (
+            value["api_key"] is not None or value["base_url"] != saved["base_url"] or value["provider"] != saved["provider"]
+        ):
+            raise HTTPException(400, detail="Account channel authentication and endpoint cannot be changed")
         if value["auto_discover"]:
             from .model_discovery import prepare_auto_save
 
