@@ -7,6 +7,7 @@ import { useLocalize, useAgentCapabilities } from '~/hooks';
 import { useAgentFileEntries } from './Tools/hooks';
 import { useAgentPanelContext } from '~/Providers';
 import { useProviderIcon } from '~/hooks/Endpoint';
+import { ApprovalModeSelect } from '~/components/Chat/approval/ApprovalModeSetting';
 import ToolsSection from './Tools/ToolsSection';
 import { cn } from '~/utils';
 import Instructions from './Instructions';
@@ -139,6 +140,13 @@ export default function AgentConfig() {
       <Instructions />
 
       {/* TOOLS — unified built-ins / tools / actions / mcp / skills */}
+      <Controller
+        name="approval_mode"
+        control={control}
+        render={({ field }) => (
+          <ApprovalModeSelect value={field.value ?? 'inherit'} inherit onChange={field.onChange} />
+        )}
+      />
       <ToolsSection agentId={agent_id} />
 
       {/* FILE CONTEXT — standalone section, separate from the tool library */}

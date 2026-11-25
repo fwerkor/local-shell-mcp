@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, RotateCcw, ShieldCheck, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import ApprovalModeSetting from '../approval/ApprovalModeSetting';
 import { request } from 'librechat-data-provider';
 
 type Access = 'none' | 'read' | 'write';
@@ -310,6 +311,7 @@ export default function LsmChatPermissions({
                 </div>
               </>
             )}
+            {active === 'chat' && hasChat && <ApprovalModeSetting conversationId={chatId} />}
             {isUnavailable || mutation.isError ? (
               <p role="alert" className="mt-2 text-xs text-status-error">权限加载或保存失败，请重试。</p>
             ) : null}

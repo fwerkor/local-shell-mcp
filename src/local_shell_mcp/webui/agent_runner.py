@@ -20,8 +20,6 @@ from .agent_runtime import (
 from .agents import AgentRepository
 from .approval_runtime import (
     ApprovalBatch,
-    approval_policy_decision,
-    ask_user_approval_policy,
     build_approval_payload,
     execute_approval_batch,
 )
@@ -52,7 +50,13 @@ from .semantic_index import (
     snapshot_compaction_semantic_index,
 )
 from .steering import SteeringStore, merged_text
-from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
+from .subagents import (
+    MAX_SUBAGENT_DEPTH,
+    build_subagent_configs,
+    chat_subagent_config,
+    invoke_subagent,
+    subagent_tools,
+)
 
 # The hosted Agent has an owner/Agent-aware Skill tool. Native MCP aliases
 # bypass per-user activation and must remain exclusive to external MCP clients.
@@ -70,7 +74,8 @@ class AgentRunner:
                  authorization_conversation_id=None, background_deny=False,
                  task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH,
                  on_injected=None, wakeup_lease=None, event_delivery_lease=None,
-                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, webui_cookie=None, web_search_enabled=True):
+                 actor_lease=None, recovery_steers=False, on_tool_completed=None, compaction_semantic_index=None, webui_cookie=None, web_search_enabled=True,
+                 parent_approval_mode=None):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.webui_cookie = webui_cookie
@@ -85,6 +90,7 @@ class AgentRunner:
         self.graph_max_handoffs = graph_max_handoffs
         self.authorization_conversation_id = authorization_conversation_id or generation.conversation_id
         self.background_deny = background_deny
+        self.parent_approval_mode = parent_approval_mode
         self.task_control_host, self.task_control_id = task_control_host, task_control_id
         self.subagent_depth = subagent_depth
         self.on_injected = on_injected
@@ -190,11 +196,15 @@ class AgentRunner:
         unrestricted = agent is None and selected_tools is None
         # Legacy agents retain their per-tool allowlist. Agents configured in
         # the new builder expose all audited native tools allowed by both ACLs.
-        machine_policy = (agent or {}).get("machine_permissions")
-        machine_configured = isinstance(machine_policy, dict)
+        from .machine_permissions import agent_access_policy
+
+        policy = agent_access_policy(agent or {})
+        machine_configured = policy is not None
+        machine_policy, machine_default = policy if policy is not None else (None, "write")
         native = available_tools(self.owner, self.authorization_conversation_id,
                                  scopes=set(self.scopes), expires=self.grant_expires,
-                                 agent_permissions=machine_policy if machine_configured else None)
+                                 agent_permissions=machine_policy,
+                                 agent_default_permission=machine_default)
         machine_exposed = selected_tools is None and machine_configured
         tools = [tool for tool in native
                  if tool["function"]["name"] not in _HOSTED_SKILL_ALIASES
@@ -203,9 +213,11 @@ class AgentRunner:
         if self.web_search_enabled:
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
-        if self.mcp_enabled:
+        if self.mcp_enabled and (agent or {}).get("mcp_servers") != []:
+            mcp_configured = "mcp_servers" in (agent or {})
+            mcp_exposed = mcp_configured or (selected_tools is None and not selected)
             tools += [tool for tool in nested_tools()
-                      if unrestricted or machine_exposed or (selected_tools is None and not selected)
+                      if unrestricted or machine_exposed or mcp_exposed
                       or tool["function"]["name"] in selected]
         from .storage import WorkspaceRepository
         settings = WorkspaceRepository(self.database)
@@ -213,7 +225,10 @@ class AgentRunner:
 
         filters = configured_filters(settings, self.owner)
         validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
-        parameters = (agent or {}).get('model_parameters') or self.initial_parameters
+        from .sampling import merge_sampling
+
+        profile = profile or provider_config(selected_provider({}, agent), (agent or {}).get("model"))
+        parameters = merge_sampling(profile.sampling, (agent or {}).get('model_parameters') or self.initial_parameters)
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
         from .misc_routes import effective_features
@@ -235,6 +250,8 @@ class AgentRunner:
         configs = self.child_configs if self.child_configs is not None else build_subagent_configs(
             self.owner, agent, self.database,
         )
+        if unrestricted and self.child_configs is None and not self.namespace and not self.background_deny:
+            configs = [chat_subagent_config(self.owner)]
         if self.subagent_depth <= 0:
             configs = []
         self.configs[identity] = configs
@@ -263,8 +280,7 @@ class AgentRunner:
                 tools += check_background_task_tools()
         override = (agent or {}).get("recursion_limit")
         limit = int(override) if type(override) in (int, float) and override > 0 else None
-        return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
-                            tools, (agent or {}).get("model_parameters") or self.initial_parameters,
+        return AgentContext(profile, tools, parameters,
                             recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent,
                             compaction_semantic_index=self.compaction_semantic_index)
 
@@ -568,8 +584,15 @@ class AgentRunner:
             )
             return await invoke_subagent(
                 call, self.configs[(state.context.agent or {}).get("id") or "default"],
-                execute_child=self._child, start_background=lambda invocation, thread: host.start(
-                    invocation, thread_id=thread, mcp_enabled=self.mcp_enabled), owner=self.owner,
+                execute_child=lambda invocation: self._child(
+                    invocation, profile=state.context.profile, parameters=state.context.parameters,
+                    parent_approval_mode=self._approval_mode(state.context.agent)),
+                start_background=lambda invocation, thread: host.start(
+                    invocation, thread_id=thread, mcp_enabled=self.mcp_enabled,
+                    web_search_enabled=self.web_search_enabled,
+                    chat_model=state.context.profile.model,
+                    chat_parameters=state.context.parameters,
+                    parent_approval_mode=self._approval_mode(state.context.agent)), owner=self.owner,
                 conversation_id=self.authorization_conversation_id, parent_run_id=self.generation.run_id,
                 parent_agent_id=(state.context.agent or {}).get("id"),
                 scopes=frozenset(self.scopes), grant_expires=self.grant_expires, database=self.database,
@@ -624,9 +647,11 @@ class AgentRunner:
                 return await invoke_action(self.owner, current_id, call.name, call.arguments, self.database,
                                            oauth_token=oauth_token, expected_version=operation["action_version"])
             if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
-                return await discover(self.owner, self.authorization_conversation_id, set(self.scopes), call)
+                return await discover(self.owner, self.authorization_conversation_id, set(self.scopes), call,
+                                      agent_id=(state.context.agent or {}).get("id"))
             if call.name == "mcp_tool_call":
-                return await approved_call(self.owner, self.authorization_conversation_id, set(self.scopes), call)
+                return await approved_call(self.owner, self.authorization_conversation_id, set(self.scopes), call,
+                                           agent_id=(state.context.agent or {}).get("id"))
             return await call_tool(self.owner, self.generation.conversation_id, call,
                                    granted_scopes=set(self.scopes), grant_expires=self.grant_expires,
                                    run_id=self.generation.run_id,
@@ -639,26 +664,30 @@ class AgentRunner:
             # Keep their type for recovery without copying secrets to the model.
             return "Tool failed (" + type(error).__name__ + ")"
 
-    async def _child(self, invocation):
+    async def _child(self, invocation, *, profile=None, parameters=None, parent_approval_mode=None):
         async def quiet(text):
             pass
 
         child = AgentRunner(self.owner, self.generation, self.database, self.store,
                             scopes=self.scopes, grant_expires=self.grant_expires,
                             stream_tools=self.stream_tools, stream_text=self.stream_text,
-                            on_text=quiet, agent=invocation.agent, mcp_enabled=self.mcp_enabled,
+                            on_text=quiet, agent=None if invocation.ordinary_chat else invocation.agent,
+                            profile=(profile or self.initial_profile) if invocation.ordinary_chat else None,
+                            parameters=(parameters or self.initial_parameters) if invocation.ordinary_chat else None,
+                            mcp_enabled=self.mcp_enabled,
                             namespace=self.namespace + "/subagent:" + invocation.parent_tool_call_id,
                             child_configs=invocation.child_configs, selected_tools=invocation.selected_tools,
                             resume_history=self.resume_history, resume_namespace=self.resume_namespace,
                             partial_text=self.partial_text,
                             authorization_conversation_id=self.authorization_conversation_id,
                             background_deny=self.background_deny,
+                            parent_approval_mode=parent_approval_mode or self._approval_mode(),
                             task_control_host=self.task_control_host, task_control_id=self.task_control_id,
                             subagent_depth=invocation.remaining_depth,
                             wakeup_lease=self.wakeup_lease,
                             event_delivery_lease=self.event_delivery_lease,
                             actor_lease=self.actor_lease, recovery_steers=self.recovery_steers,
-                            web_search_enabled=self.web_search_enabled)
+                            web_search_enabled=self.web_search_enabled, webui_cookie=self.webui_cookie)
         from .attachments import with_agent_context
 
         history = with_agent_context(self.database, self.owner, invocation.agent,
@@ -778,6 +807,14 @@ class AgentRunner:
         result = await self._invoke(call, state)
         return filtered_tool_output(call.name, result, filters)
 
+    def _approval_mode(self, agent=None):
+        from .approval_settings import effective_mode
+        from .storage import WorkspaceRepository
+
+        return effective_mode(WorkspaceRepository(self.database), self.owner,
+                              self.authorization_conversation_id, agent or self.root_agent,
+                              parent_mode=self.parent_approval_mode)
+
     async def _dispatch(self, calls, state):
         from .routes import _repo
 
@@ -793,11 +830,13 @@ class AgentRunner:
                 self._tool_step(call)
         endpoints = _repo().setting(self.owner, "endpoints", {}) or {}
         policy = (endpoints.get("agents") or {}).get("toolApproval")
+        from .approval_settings import call_decision
+
+        mode = self._approval_mode(state.context.agent)
         ask = []
         questions = []
         for call in unresolved:
-            selected_policy = ask_user_approval_policy(policy) if call.name == "ask_user_question" else policy
-            decision = approval_policy_decision(selected_policy, call.name)
+            decision = call_decision(mode, policy, call.name, call.arguments)
             if self._blocked_call(call):
                 continue
             if decision and decision["decision"] == "deny":

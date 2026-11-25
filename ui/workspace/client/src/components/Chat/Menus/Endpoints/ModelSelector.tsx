@@ -18,6 +18,7 @@ import { ModelSelectorChatProvider } from './ModelSelectorChatContext';
 import { getSelectedIcon, getDisplayValue } from './utils';
 import { CustomMenu as Menu } from './CustomMenu';
 import DialogManager from './DialogManager';
+import { useConversationSampling } from './ConversationSamplingDialog';
 import { useLocalize } from '~/hooks';
 
 const defaultInterface = getConfigDefaults().interface;
@@ -67,6 +68,8 @@ function ModelSelectorContent() {
     keyDialogEndpoint,
   } = useModelSelectorContext();
 
+  const sampling = useConversationSampling(endpointsConfig);
+
   const selectedIcon = useMemo(
     () =>
       getSelectedIcon({
@@ -115,6 +118,7 @@ function ModelSelectorContent() {
   return (
     <div className="relative flex min-w-0 max-w-[60vw] flex-col items-center gap-2 sm:max-w-xs">
       <Menu
+        additionalSearchAction={sampling.action}
         values={selectedValues}
         onValuesChange={(values: Record<string, any>) => {
           setSelectedValues({
@@ -145,6 +149,7 @@ function ModelSelectorContent() {
           </>
         )}
       </Menu>
+      {sampling.dialog}
       <DialogManager
         keyDialogOpen={keyDialogOpen}
         onOpenChange={onOpenChange}

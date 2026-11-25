@@ -422,3 +422,130 @@ async def test_same_background_thread_busy_and_reserved_child_survives_orphan_sc
     release.set()
     await poll_until(host, first['background_task_id'])
     await shutdown_subagent_tasks()
+
+
+@pytest.mark.asyncio
+async def test_ordinary_chat_self_subagent_inherits_model_without_recursive_spawn(runtime, monkeypatch):
+    database, _, store, _, parent = runtime
+    from local_shell_mcp.webui import lsm_tool_registry
+
+    profile = ProviderConfig("openai", "selected-model", "https://named.invalid", "")
+    acl_calls = []
+    def native(owner, conversation, **kwargs):
+        acl_calls.append((owner, conversation, kwargs))
+        return []
+    monkeypatch.setattr(lsm_tool_registry, "available_tools", native)
+    generation, _ = store.begin("local", {"text": "parent-only history", "provider": "named",
+                                          "model": profile.model, "web_search": False})
+    observed = []
+
+    async def model(active_profile, history, **kwargs):
+        observed.append((active_profile, list(history), kwargs))
+        if any(item.get("content") == "isolated task" for item in history):
+            names = {t["function"]["name"] for t in kwargs.get("tools", [])}
+            assert "subagent" not in names and "ask_user_question" not in names
+            assert not names.intersection({"web_search", "web_fetch"})
+            assert kwargs.get("temperature") == 0.3
+            yield "child answer"
+        elif any(item.get("role") == "tool" for item in history):
+            yield "parent answer"
+        else:
+            yield ModelToolCall("self-sync", "subagent", {
+                "description": "isolated task", "subagent_type": "self"})
+
+    runner = AgentRunner("local", generation, database, store, scopes=frozenset(), grant_expires=None,
+                         stream_tools=model, stream_text=model, on_text=_noop, profile=profile,
+                         parameters={"temperature": 0.3}, web_search_enabled=False)
+    ctx = runner._context(None, profile=profile)
+    tool = next(t["function"] for t in ctx.tools if t["function"]["name"] == "subagent")
+    assert tool["parameters"]["properties"]["subagent_type"]["enum"] == ["self"]
+    assert "run_in_background" in tool["parameters"]["properties"]
+    result = await runner.run(store.history("local", generation.conversation_id))
+    assert result[-1]["content"] == "parent answer"
+    assert next(m["content"] for m in result if m["role"] == "tool") == "child answer"
+    assert all(active == profile for active, _, _ in observed)
+    child_history = next(history for _, history, _ in observed
+                         if any(m.get("content") == "isolated task" for m in history))
+    assert not any(m.get("content") == "parent-only history" for m in child_history)
+    assert all(conversation == generation.conversation_id and not options["scopes"]
+               for _, conversation, options in acl_calls)
+    assert all(not options["agent_permissions"] for _, _, options in acl_calls)
+    # Saved Agents' existing explicit configuration is unchanged.
+    disabled = {**parent, "subagents": {"enabled": False}}
+    assert not any(t["function"]["name"] == "subagent"
+                   for t in runner._context(disabled, profile=profile).tools)
+    restricted = runner._context(None, profile=profile, selected_tools=[])
+    assert not any(t["function"]["name"] == "subagent" for t in restricted.tools)
+
+
+@pytest.mark.asyncio
+async def test_ordinary_chat_background_recovery_and_wakeup(runtime, monkeypatch):
+    from local_shell_mcp.webui import providers, subagent_wakeup
+    database, _, store, _, _ = runtime
+    profile = ProviderConfig("openai", "chosen-model", "https://named.invalid", "")
+    resolved = []
+    def resolve(channel, model):
+        resolved.append((channel, model))
+        return profile
+    monkeypatch.setattr(providers, "provider_config", resolve)
+    monkeypatch.setattr(subagent_wakeup, "_DELAY_MS", 0)
+    ready, release = asyncio.Event(), asyncio.Event()
+    child_histories = []
+
+    async def model(active_profile, history, **kwargs):
+        assert active_profile == profile
+        if any(m.get("content") == "detached task" for m in history):
+            child_histories.append(list(history))
+            ready.set()
+            await release.wait()
+            yield "detached result"
+        elif any(m.get("role") == "tool" for m in history):
+            yield "parent continues"
+        else:
+            yield ModelToolCall("self-bg", "subagent", {
+                "description": "detached task", "subagent_type": "self", "run_in_background": True})
+
+    generation, _ = store.begin("local", {"text": "parent only", "provider": "named-channel",
+                                          "model": profile.model, "web_search": False})
+    runner = AgentRunner("local", generation, database, store, scopes=frozenset(), grant_expires=None,
+                         stream_tools=model, stream_text=model, on_text=_noop, profile=profile,
+                         parameters={"temperature": 0.2}, web_search_enabled=False)
+    results = await runner.run(store.history("local", generation.conversation_id))
+    handle = json.loads(next(m["content"] for m in results if m["role"] == "tool"))
+    assert handle["status"] == "running"
+    task_id = handle["background_task_id"]
+    host = SQLiteSubagentTaskHost(database, "local", generation.conversation_id,
+                                  stream_tools=model, stream_text=model)
+    try:
+        await asyncio.wait_for(ready.wait(), 5)
+        row = host._get(task_id)
+        assert row["parent_agent_id"] == "default"
+        options = json.loads(row["execution_options"])
+        assert options["ordinary_chat"] and options["remaining_depth"] == 0
+        assert options["parameters"] == {"temperature": 0.2}
+        assert not options["web_search_enabled"] and not options["mcp_enabled"]
+        assert store.get("local", row["child_run_id"]).agent_id is None
+        await shutdown_subagent_tasks()
+        assert host._get(task_id)["status"] == "running"
+        release.set()
+        await host.check({"background_task_id": task_id})
+        await poll_until(host, task_id)
+        assert len(child_histories) == 2
+        store.finish("local", generation.run_id, status="complete", text="parent continues")
+        dispatched = []
+
+        async def dispatch(owner, wakeup, active_profile, agent, **kwargs):
+            dispatched.append((owner, wakeup, active_profile, agent))
+
+        assert await subagent_wakeup.process_wakeups(database, dispatch=dispatch) == 1
+        assert len(dispatched) == 1
+        owner, wakeup, active_profile, agent = dispatched[0]
+        assert owner == "local" and active_profile == profile and agent is None
+        assert wakeup.agent_id is None and not wakeup.web_search_enabled
+        assert all(pair == ("named-channel", profile.model) for pair in resolved)
+        assert len(resolved) >= 3
+        assert any("detached result" in (m.get("content") or "")
+                   for m in store.history("local", wakeup.conversation_id, message_id=wakeup.user_message_id))
+    finally:
+        release.set()
+        await shutdown_subagent_tasks()

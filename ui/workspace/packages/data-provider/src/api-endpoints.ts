@@ -536,10 +536,6 @@ export const userTerms = () => `${BASE_URL}/api/user/terms`;
 export const acceptUserTerms = () => `${BASE_URL}/api/user/terms/accept`;
 export const banner = () => `${BASE_URL}/api/banner`;
 
-// Message Feedback
-export const feedback = (conversationId: string, messageId: string) =>
-  `${BASE_URL}/api/messages/${conversationId}/${messageId}/feedback`;
-
 // Two-Factor Endpoints
 export const enableTwoFactor = () => `${BASE_URL}/api/auth/2fa/enable`;
 export const verifyTwoFactor = () => `${BASE_URL}/api/auth/2fa/verify`;

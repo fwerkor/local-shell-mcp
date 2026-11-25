@@ -1,4 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
+import { useFormContext, useWatch } from 'react-hook-form';
+import type { AgentForm } from '~/common';
 import { request } from 'librechat-data-provider';
 import { useLocalize } from '~/hooks';
 
@@ -20,12 +22,18 @@ export function useLsmExternalMcpServers() {
   });
 }
 
-/** Server discovery is informational: the Agent never receives a fake
- * LibreChat tool id. Runtime uses LSM's nested MCP search/inspect/call tools,
- * gated by the chat's External MCP permission and call approval. */
 export default function LsmExternalMcpServers() {
   const localize = useLocalize();
   const { data, isLoading, isError } = useLsmExternalMcpServers();
+  const { control, setValue } = useFormContext<AgentForm>();
+  const selected = useWatch({ control, name: 'mcp_servers' });
+
+  function toggle(name: string, enabled: boolean) {
+    const next = new Set(selected ?? (data?.servers ?? []).filter((s) => s.enabled).map((s) => s.name));
+    if (enabled) next.add(name);
+    else next.delete(name);
+    setValue('mcp_servers', [...next].sort(), { shouldDirty: true, shouldValidate: true });
+  }
 
   return (
     <section aria-label={localize('com_lsm_external_mcp_title')} className="space-y-2">
@@ -37,6 +45,12 @@ export default function LsmExternalMcpServers() {
           {localize('com_lsm_external_mcp_help')}
         </p>
       </div>
+      {selected !== null && (
+        <button type="button" className="text-xs text-text-secondary underline"
+          onClick={() => setValue('mcp_servers', null, { shouldDirty: true, shouldValidate: true })}>
+          {localize('com_lsm_external_mcp_inherit')}
+        </button>
+      )}
       {isLoading && <p className="text-xs text-text-secondary">{localize('com_lsm_agent_machine_loading')}</p>}
       {isError && <p role="alert" className="text-xs text-status-error">{localize('com_lsm_external_mcp_error')}</p>}
       {!isLoading && !isError && data?.servers.length === 0 && (
@@ -55,9 +69,17 @@ export default function LsmExternalMcpServers() {
               {server.transport} · {server.tool_count} {localize('com_lsm_external_mcp_tools')}
             </div>
           </div>
-          <span className="shrink-0 text-xs text-text-secondary">
-            {server.enabled ? localize('com_lsm_external_mcp_enabled') : localize('com_lsm_external_mcp_disabled')}
-          </span>
+          <label className="flex shrink-0 items-center gap-2 text-xs text-text-secondary">
+            <input
+              type="checkbox"
+              aria-label={server.name}
+              checked={server.enabled && (selected == null || selected.includes(server.name))}
+              disabled={!server.enabled || isError}
+              onChange={(event) => toggle(server.name, event.target.checked)}
+            />
+            {localize(server.enabled && (selected == null || selected.includes(server.name))
+              ? 'com_lsm_external_mcp_enabled' : 'com_lsm_external_mcp_disabled')}
+          </label>
         </div>
       ))}
     </section>

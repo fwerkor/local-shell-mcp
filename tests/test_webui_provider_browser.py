@@ -78,6 +78,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
                 await page.get_by_label("Model API key").fill("private-test-token")
                 await page.get_by_label("Model identifiers").fill("first-model\nsecond-model")
+                await page.get_by_text("Model defaults / 模型默认参数", exact=True).click()
+                await page.get_by_label("second-model Temperature", exact=True).fill("0.4")
+                await page.get_by_label("second-model Max Output Tokens", exact=True).fill("144")
                 async with page.expect_response(lambda response: response.request.method == "PUT" and response.url.endswith("/api/lsm/providers")) as saved:
                     await page.get_by_role("button", name="Save model channel", exact=True).click()
                 response = await saved.value
@@ -92,6 +95,13 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 await page.locator("#model-search").fill("second-model")
                 await page.get_by_text("second-model", exact=True).first.click()
                 await page.get_by_test_id("model-selector-button").get_by_text("second-model", exact=True).wait_for()
+                assert await page.get_by_test_id("nav-panel-parameters").count() == 0
+                await page.get_by_test_id("model-selector-button").click()
+                await page.get_by_test_id("model-selector-parameters").click()
+                sampling_dialog = page.get_by_role("dialog").last
+                await sampling_dialog.get_by_label("Top P", exact=True).fill("0.73")
+                await sampling_dialog.get_by_role("button", name="Save", exact=True).click()
+                await sampling_dialog.wait_for(state="hidden")
                 await page.get_by_test_id("text-input").fill("Verify configured model.")
                 await page.locator('button[type="submit"]').first.click()
                 if reject_provider:
@@ -102,6 +112,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.reload()
                     await page.get_by_test_id("screenshot-target").get_by_text("The model provider request failed (HTTPStatusError).", exact=False).wait_for(timeout=15000)
                 assert requests and requests[-1]["model"] == "second-model"
+                assert requests[-1]["temperature"] == 0.4
+                assert requests[-1]["top_p"] == 0.73
+                assert requests[-1]["max_completion_tokens"] == 144
                 if reject_provider:
                     # Correcting an invalid credential must recover without a
                     # server restart and without rewriting old conversations.
@@ -110,8 +123,17 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.get_by_role("button", name="Edit Primary Research").click()
                     await page.get_by_label("Model API key").fill("recovered-test-token")
                     await page.get_by_label("Model identifiers").fill("recovered-model")
-                    await page.get_by_role("button", name="Save model channel").click()
+                    async with page.expect_response(lambda response: response.request.method == "PUT" and response.url.endswith("/api/lsm/providers")) as recovered_saved:
+                        await page.get_by_role("button", name="Save model channel").click()
+                    assert (await recovered_saved.value).status == 200
+                    await page.get_by_role("button", name="Edit Primary Research").wait_for()
                     await page.get_by_role("button", name="Close Settings").click()
+                    # The unified settings dialog preserves the active conversation.
+                    # Start a fresh chat and explicitly select the replacement model.
+                    await page.goto(f"http://127.0.0.1:{port}/c/new", wait_until="domcontentloaded")
+                    await page.get_by_test_id("model-selector-button").click()
+                    await page.locator("#model-search").fill("recovered-model")
+                    await page.get_by_text("recovered-model", exact=True).first.click()
                     await page.get_by_test_id("model-selector-button").get_by_text("recovered-model", exact=True).wait_for(timeout=15000)
                     await page.get_by_test_id("text-input").fill("Credential fixed.")
                     await page.locator('button[type="submit"]').first.click()

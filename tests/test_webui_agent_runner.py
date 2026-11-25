@@ -43,14 +43,18 @@ async def _wait_tasks():
 
 
 @pytest.mark.asyncio
-async def test_real_batch_edit_and_reject_resume_updates_only_reviewed_file(runtime, monkeypatch):
+@pytest.mark.parametrize("mode", ["legacy", "dangerous", "all"])
+async def test_real_batch_edit_and_reject_resume_updates_only_reviewed_file(runtime, monkeypatch, mode):
     root, database, store, profile = runtime
     agent = AgentRepository(database).create("local", {
         "name": "Writer", "provider": "openAI", "model": "test", "tools": ["file_write"],
     })
-    _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {
-        "enabled": True, "ask": ["file_write"],
-    }}})
+    if mode == "legacy":
+        _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {
+            "enabled": True, "ask": ["file_write"],
+        }}})
+    else:
+        _repo().save_setting("local", "approval.mode", mode)
     generation, _ = store.begin("local", {"text": "write two files"}, agent)
     requests = 0
 

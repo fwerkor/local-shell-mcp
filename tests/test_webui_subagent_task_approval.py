@@ -18,7 +18,8 @@ from local_shell_mcp.webui.subagent_task_host import SQLiteSubagentTaskHost, shu
 
 
 @pytest.mark.asyncio
-async def test_detached_child_denies_file_write_requiring_parent_approval(tmp_path, monkeypatch):
+@pytest.mark.parametrize("legacy", [True, False])
+async def test_detached_child_denies_file_write_requiring_parent_approval(tmp_path, monkeypatch, legacy):
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
@@ -30,12 +31,13 @@ async def test_detached_child_denies_file_write_requiring_parent_approval(tmp_pa
     child = repo.create("local", {"name": "writer", "provider": "openAI", "model": "writer",
                                   "tools": ["file_write"]})
     parent = repo.create("local", {"name": "parent", "provider": "openAI", "model": "parent",
-                                   "tools": [], "subagents": {"enabled": True, "allowSelf": False,
+                                   "tools": [], "approval_mode": "inherit" if legacy else "dangerous", "subagents": {"enabled": True, "allowSelf": False,
                                                               "agent_ids": [child["id"]]}})
     _repo().save_setting("local", "agent.machine_policy.global", {"local": "write"})
-    _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {
-        "enabled": True, "ask": ["file_write"], "allow": ["subagent"],
-    }}})
+    if legacy:
+        _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {
+            "enabled": True, "ask": ["file_write"], "allow": ["subagent"],
+        }}})
     seen = []
 
     async def model(profile, messages, **kwargs):

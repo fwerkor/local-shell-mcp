@@ -152,18 +152,36 @@ async def feature_defaults(request: Request):
     return JSONResponse(effective_features(owner, repo=repo))
 
 
-async def registered_mcp_servers(request: Request):
-    _owner(request)
-    from ..dynamic_mcp import DynamicMCPManager
-    from ..settings import get_settings
+async def approval_preferences(request: Request):
+    from .agents import AgentRepository
+    from .approval_settings import CHAT_PREFIX, GLOBAL_KEY, effective_mode, validate_mode
 
-    result = await DynamicMCPManager(get_settings().state_dir).manage(action="list")
-    # The composer needs only names, enabled state and counts. Do not expose
-    # commands, paths, URLs or connection configuration to this endpoint.
-    return JSONResponse({"servers": [
-        {"name": server["name"], "enabled": server["enabled"],
-         "tool_count": server["tool_count"]} for server in result["servers"]
-    ]})
+    owner = _owner(request)
+    repo = _repo()
+    conversation_id = request.path_params.get("conversation_id")
+    agent = None
+    if conversation_id:
+        conversation = repo.conversation(owner, conversation_id)
+        if conversation is None:
+            raise HTTPException(404, detail="Conversation not found")
+        from .generations import GenerationStore
+
+        latest = GenerationStore(repo.database).latest(owner, conversation_id)
+        agent_id = latest.agent_id if latest else conversation.get("agent_id")
+        if agent_id:
+            agent = AgentRepository(repo.database).get(owner, agent_id)
+    key = CHAT_PREFIX + conversation_id if conversation_id else GLOBAL_KEY
+    default = "inherit" if conversation_id else "automatic"
+    if request.method == "PUT":
+        body = await _body(request)
+        try:
+            mode = validate_mode(body.get("mode"), inherit=bool(conversation_id))
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+        repo.save_setting(owner, key, mode)
+    mode = repo.setting(owner, key, default)
+    effective = effective_mode(repo, owner, conversation_id, agent) if conversation_id else mode
+    return JSONResponse({"mode": mode, "effective": effective})
 
 
 async def conversation_permissions(request: Request):
@@ -264,8 +282,9 @@ def misc_routes() -> list[Route]:
         Route("/api/banner", banner, methods=["GET"]),
         Route("/api/keys", user_key, methods=["GET"]),
         Route("/api/agents/tools/calls", tool_calls, methods=["GET"]),
+        Route("/api/lsm/approval", approval_preferences, methods=["GET", "PUT"]),
+        Route("/api/lsm/approval/{conversation_id}", approval_preferences, methods=["GET", "PUT"]),
         Route("/api/lsm/feature-defaults", feature_defaults, methods=["GET", "PUT"]),
-        Route("/api/lsm/mcp/servers", registered_mcp_servers, methods=["GET"]),
         Route("/api/lsm/preferences/{conversation_id}", conversation_permissions, methods=["GET", "PUT"]),
         Route("/api/files/config", files_config, methods=["GET"]),
         Route("/api/agents/tools/web_search/auth", web_search_auth, methods=["GET"]),

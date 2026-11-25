@@ -33,8 +33,7 @@ export default function ScheduleEmptyState({
     <EmptyState
       icon={CalendarClock}
       title={localize('com_ui_no_schedules_title')}
-      // Only invite creation where the panel actually offers it: a USE-only role
-      // has no create button, so telling it to create one is a dead end.
+      // Only invite creation when the authenticated schedule API is available.
       description={canCreate ? localize('com_ui_no_schedules') : undefined}
     />
   );

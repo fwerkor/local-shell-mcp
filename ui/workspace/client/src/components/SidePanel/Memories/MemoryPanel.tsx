@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { matchSorter } from 'match-sorter';
-import { SystemRoles, PermissionTypes, Permissions } from 'librechat-data-provider';
+import { PermissionTypes, Permissions } from 'librechat-data-provider';
 import {
   Button,
   Checkbox,
@@ -17,12 +17,11 @@ import {
   useMemoriesQuery,
   useGetUserQuery,
 } from '~/data-provider';
-import { useLocalize, useAuthContext, useHasAccess } from '~/hooks';
-import { PanelFooter, PanelContent } from '~/components/ui';
+import { useLocalize, useHasAccess } from '~/hooks';
+import { PanelContent } from '~/components/ui';
 import MemoryCardSkeleton from './MemoryCardSkeleton';
 import MemoryCreateDialog from './MemoryCreateDialog';
 import MemoryUsageBadge from './MemoryUsageBadge';
-import AdminSettings from './AdminSettings';
 import MemoryList from './MemoryList';
 import { cn } from '~/utils';
 
@@ -32,7 +31,6 @@ const PARTITION_PERSONAL = 'personal';
 
 export default function MemoryPanel() {
   const localize = useLocalize();
-  const { user } = useAuthContext();
   const { data: userData } = useGetUserQuery();
   const { data: memData, isLoading } = useMemoriesQuery();
   const { showToast } = useToastContext();
@@ -247,12 +245,6 @@ export default function MemoryPanel() {
           isFiltered={searchQuery.length > 0}
         />
       </PanelContent>
-
-      {user?.role === SystemRoles.ADMIN && (
-        <PanelFooter>
-          <AdminSettings />
-        </PanelFooter>
-      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useContext } from 'react';
 import { MCPIcon, AttachmentIcon } from '@librechat/client';
 import {
   Bot,
@@ -8,25 +8,22 @@ import {
   ScrollText,
   CalendarClock,
   ArrowRightToLine,
-  SlidersHorizontal,
 } from 'lucide-react';
 import {
   Permissions,
   EModelEndpoint,
   PermissionTypes,
-  isParamEndpoint,
-  isAgentsEndpoint,
   isAssistantsEndpoint,
 } from 'librechat-data-provider';
 import type { TInterfaceConfig, TEndpointsConfig } from 'librechat-data-provider';
 import type { NavLink } from '~/common';
 import { useAgentCapabilities, useGetAgentsConfig, useHasAccess } from '~/hooks';
+import { AuthContext } from '~/hooks/AuthContext';
 import LsmNestedMcpPanel from '~/components/SidePanel/MCPBuilder/LsmNestedMcpPanel';
 import AgentPanelSwitch from '~/components/SidePanel/Agents/AgentPanelSwitch';
 import BookmarkPanel from '~/components/SidePanel/Bookmarks/BookmarkPanel';
 import PanelSwitch from '~/components/SidePanel/Builder/PanelSwitch';
 import { SchedulePanel } from '~/components/SidePanel/Schedules';
-import Parameters from '~/components/SidePanel/Parameters/Panel';
 import { MemoryPanel } from '~/components/SidePanel/Memories';
 import FilesPanel from '~/components/SidePanel/Files/Panel';
 import { PromptsAccordion } from '~/components/Prompts';
@@ -36,7 +33,6 @@ export default function useSideNavLinks({
   hidePanel,
   keyProvided,
   endpoint,
-  endpointType,
   interfaceConfig,
   endpointsConfig,
   includeHidePanel = true,
@@ -44,7 +40,6 @@ export default function useSideNavLinks({
   hidePanel?: () => void;
   keyProvided: boolean;
   endpoint?: EModelEndpoint | null;
-  endpointType?: EModelEndpoint | null;
   interfaceConfig: Partial<TInterfaceConfig>;
   endpointsConfig: TEndpointsConfig;
   includeHidePanel?: boolean;
@@ -77,16 +72,25 @@ export default function useSideNavLinks({
     permissionType: PermissionTypes.AGENTS,
     permission: Permissions.CREATE,
   });
-  const hasAccessToSchedules = useHasAccess({
-    permissionType: PermissionTypes.SCHEDULES,
-    permission: Permissions.USE,
-  });
+  // LSM grants schedules to every authenticated controller user. Do not wait for
+  // legacy role metadata or a startup-config cache to discover the built-in feature.
+  const isAuthenticated = useContext(AuthContext)?.isAuthenticated === true;
 
   const { agentsConfig } = useGetAgentsConfig({ endpointsConfig });
   const { skillsEnabled } = useAgentCapabilities(agentsConfig?.capabilities);
 
   const Links = useMemo(() => {
     const links: NavLink[] = [];
+
+    if (isAuthenticated) {
+      links.push({
+        title: 'com_ui_schedules',
+        label: '',
+        icon: CalendarClock,
+        id: 'schedules',
+        Component: SchedulePanel,
+      });
+    }
 
     if (
       endpointsConfig?.[EModelEndpoint.agents] &&
@@ -132,26 +136,6 @@ export default function useSideNavLinks({
       });
     }
 
-    // Scheduled chats are EXPERIMENTAL and default-OFF: the server enables them only
-    // when an admin opts in explicitly, so ABSENT config means disabled here too.
-    // Mirrors getLimits exactly — absent/null/`false` are all off, `true` is on, and the
-    // object form is on unless it sets `use: false`. Any mismatch would show an entry
-    // whose create/run operations the backend rejects.
-    const schedulesConfig = interfaceConfig.schedules;
-    const schedulesEnabled =
-      schedulesConfig != null &&
-      schedulesConfig !== false &&
-      !(typeof schedulesConfig === 'object' && schedulesConfig.use === false);
-    if (hasAccessToSchedules && schedulesEnabled) {
-      links.push({
-        title: 'com_ui_schedules',
-        label: '',
-        icon: CalendarClock,
-        id: 'schedules',
-        Component: SchedulePanel,
-      });
-    }
-
     if (hasAccessToPrompts) {
       links.push({
         title: 'com_ui_prompts',
@@ -190,21 +174,6 @@ export default function useSideNavLinks({
       Component: FilesPanel,
     });
 
-    if (
-      interfaceConfig.parameters === true &&
-      isParamEndpoint(endpoint ?? '', endpointType ?? '') === true &&
-      !isAgentsEndpoint(endpoint) &&
-      keyProvided
-    ) {
-      links.push({
-        title: 'com_sidepanel_parameters',
-        label: '',
-        icon: SlidersHorizontal,
-        id: 'parameters',
-        Component: Parameters,
-      });
-    }
-
     links.push({
       title: 'com_nav_setting_mcp',
       label: '',
@@ -235,11 +204,8 @@ export default function useSideNavLinks({
     skillsEnabled,
     hasAccessToMemories,
     hasAccessToReadMemories,
-    hasAccessToSchedules,
-    interfaceConfig.schedules,
-    interfaceConfig.parameters,
-    endpointType,
-    hasAccessToBookmarks,
+    isAuthenticated,
+      hasAccessToBookmarks,
     includeHidePanel,
     hidePanel,
   ]);

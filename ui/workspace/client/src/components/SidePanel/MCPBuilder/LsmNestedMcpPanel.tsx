@@ -1,8 +1,8 @@
 import useLocalize from '~/hooks/useLocalize';
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { ChevronDown, CirclePlus, Plug, RefreshCw, Trash2 } from 'lucide-react';
-import { useControllerServices } from '~/components/LSM/hooks';
+import { useControllerQuery, useControllerServices } from '~/components/LSM/hooks';
 
 type Server = {
   name: string;
@@ -25,9 +25,12 @@ const iconStyle = 'rounded-lg p-2 text-text-secondary hover:bg-surface-hover hov
 /** LibreChat's MCP sidebar manages Controller-persisted nested servers, never LibreChat's registry. */
 export default function LsmNestedMcpPanel() {
   const localize = useLocalize();
-  const { read, write } = useControllerServices();
-  const [servers, setServers] = useState<Server[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { write } = useControllerServices();
+  const registry = useControllerQuery<{ servers: Server[] }>('nested-mcp', {}, {
+    refetchInterval: 5_000,
+  });
+  const servers = registry.data?.servers ?? [];
+  const loading = registry.isLoading;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -46,16 +49,9 @@ export default function LsmNestedMcpPanel() {
   const [credentialKey, setCredentialKey] = useState('');
   const [credentialValue, setCredentialValue] = useState('');
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await read<{ servers: Server[] }>('nested-mcp');
-      setServers(result.servers ?? []);
-      setError('');
-    } catch (err) { setError(String(err)); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
+  const refresh = async () => {
+    await registry.refetch();
+  };
 
   const manage = async (action: Action, server: Server, key?: string, value?: string) => {
     if (pending) return;
@@ -125,11 +121,11 @@ export default function LsmNestedMcpPanel() {
           <h2 className="text-sm font-semibold">{localize('com_lsm_mcp_servers')}</h2>
           <p className="text-xs text-text-secondary">{localize('com_lsm_mcp_managed_by')}</p>
         </div>
-        <button className={iconStyle} title={localize('com_lsm_mcp_refresh_list_title')} aria-label={localize('com_lsm_mcp_refresh_list')} onClick={() => void refresh()} disabled={loading || pending}><RefreshCw size={17} /></button>
+        <button className={iconStyle} title={localize('com_lsm_mcp_refresh_list_title')} aria-label={localize('com_lsm_mcp_refresh_list')} onClick={() => void refresh()} disabled={registry.isFetching || pending}><RefreshCw size={17} /></button>
         <button className={iconStyle} title={localize('com_lsm_mcp_add_server_title')} aria-label={localize('com_lsm_mcp_add_nested')} onClick={() => setAdding(v => !v)}><CirclePlus size={19} /></button>
       </header>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4">
-        {error && <p role="alert" className="rounded-lg border border-status-error-border bg-status-error-subtle p-3 text-xs text-status-error">{error}</p>}
+        {(error || registry.isError) && <p role="alert" className="rounded-lg border border-status-error-border bg-status-error-subtle p-3 text-xs text-status-error">{error || String(registry.error)}</p>}
         {notice && <p role="status" className="rounded-lg bg-surface-secondary p-3 text-xs">{notice}</p>}
         {adding && (
           <form onSubmit={event => void addServer(event)} className="space-y-3 rounded-xl border border-border-medium bg-surface-secondary p-3">
