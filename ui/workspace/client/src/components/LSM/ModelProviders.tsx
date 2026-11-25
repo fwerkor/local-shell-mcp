@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiBaseUrl, request, QueryKeys } from 'librechat-data-provider';
+import SamplingFields, { samplingDraft, parseSampling } from '~/components/Endpoints/SamplingFields';
+import type { Sampling, SamplingDraft } from '~/components/Endpoints/SamplingFields';
 
 type Kind = 'openai' | 'anthropic' | 'google';
 type Source = 'default' | 'environment' | 'saved' | 'named';
@@ -11,13 +13,14 @@ type Profile = {
   base_url: string;
   models: string[];
   model_contexts?: Record<string, number>;
+  model_sampling?: Record<string, Sampling>;
   include_usage?: boolean;
   configured: boolean;
   source: Source;
 };
 type Profiles = { providers: Profile[] };
 type Draft = { name: string; provider: Kind; base: string; models: string;
-  contexts: Record<string, string>; includeUsage: boolean; apiKey: string };
+  contexts: Record<string, string>; sampling: Record<string, SamplingDraft>; includeUsage: boolean; apiKey: string };
 type Editor = { original: Profile | null };
 const input = 'w-full rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary';
 const button = 'rounded-lg border border-border-medium px-3 py-2 text-sm text-text-primary hover:bg-surface-secondary disabled:opacity-40';
@@ -30,7 +33,7 @@ const protocolLabel = (provider: Kind) => kinds.find((kind) => kind.value === pr
 const channelLabel = (profile: Profile) => profile.name ?? protocolLabel(profile.provider) + ' (legacy)';
 const channelId = (profile: Profile) => profile.name ?? 'legacy:' + profile.provider;
 const newDraft = (): Draft => ({ name: '', provider: 'openai', base: kinds[0].defaultUrl,
-  models: '', contexts: {}, includeUsage: true, apiKey: '' });
+  models: '', contexts: {}, sampling: {}, includeUsage: true, apiKey: '' });
 const errorMessage = (reason: unknown) => {
   const error = reason as { response?: { data?: { detail?: string; message?: string } | string }; message?: string };
   const data = error?.response?.data;
@@ -89,6 +92,7 @@ export default function ModelProviders() {
       base: profile.base_url,
       models: profile.models.join('\n'),
       contexts: Object.fromEntries(Object.entries(profile.model_contexts ?? {}).map(([key, value]) => [key, String(value)])),
+      sampling: Object.fromEntries(Object.entries(profile.model_sampling ?? {}).map(([model, value]) => [model, samplingDraft(value)])),
       includeUsage: profile.include_usage !== false,
       apiKey: '',
     });
@@ -118,11 +122,15 @@ export default function ModelProviders() {
         modelContexts[model] = tokens;
       }
       if (!models.length) throw new Error('At least one model identifier is required');
+      const modelSampling = Object.fromEntries(models
+        .map((model) => [model, parseSampling(draft.sampling[model] ?? samplingDraft(), draft.provider)] as const)
+        .filter(([, value]) => Object.keys(value).length > 0));
       await request.put(url, {
         provider: draft.provider,
         base_url: draft.base.trim(),
         models,
         model_contexts: modelContexts,
+        model_sampling: modelSampling,
         ...(draft.provider === 'openai' ? { include_usage: draft.includeUsage } : {}),
         ...(original?.name || !original ? { name } : {}),
         ...(original?.name && name !== original.name ? { previous_name: original.name } : {}),
@@ -235,6 +243,15 @@ export default function ModelProviders() {
           </label>)}
           <p className="text-xs text-text-tertiary">Leave blank if unknown. The model API usually does not publish this limit.</p>
         </div>}
+        {draftModels.length > 0 && <details className="space-y-3 rounded-lg border border-border-light p-3 sm:col-span-2">
+          <summary className="cursor-pointer text-sm font-medium text-text-primary">Model defaults / 模型默认参数</summary>
+          {draftModels.map((model) => <div key={model} className="space-y-2">
+            <p className="break-all text-sm text-text-secondary">{model}</p>
+            <SamplingFields provider={draft.provider} prefix={model} value={draft.sampling[model] ?? samplingDraft()}
+              onChange={(value) => setDraft((previous) => ({ ...previous,
+                sampling: { ...previous.sampling, [model]: value } }))} />
+          </div>)}
+        </details>}
         {draft.provider === 'openai' && <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
           <input type="checkbox" checked={draft.includeUsage} onChange={(event) => setDraft({ ...draft, includeUsage: event.target.checked })} />
           Request exact token usage from the model API (auto-fallback when unsupported)

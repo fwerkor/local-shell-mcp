@@ -11,6 +11,7 @@ export interface CustomMenuProps extends Ariakit.MenuButtonProps<'div'> {
   combobox?: Ariakit.ComboboxProps['render'];
   comboboxLabel?: string;
   searchAction?: React.ReactNode;
+  additionalSearchAction?: React.ReactNode;
   trigger?: Ariakit.MenuButtonProps['render'];
   defaultOpen?: boolean;
 }
@@ -26,6 +27,7 @@ export const CustomMenu = React.forwardRef<HTMLDivElement, CustomMenuProps>(func
     combobox,
     comboboxLabel,
     searchAction,
+    additionalSearchAction,
     trigger,
     defaultOpen,
     ...props
@@ -104,6 +106,7 @@ export const CustomMenu = React.forwardRef<HTMLDivElement, CustomMenuProps>(func
                       </label>
                     )}
                   </div>
+                  {additionalSearchAction}
                   {searchAction}
                 </div>
               </div>

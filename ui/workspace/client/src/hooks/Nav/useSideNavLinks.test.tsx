@@ -17,7 +17,6 @@ jest.mock('~/components/SidePanel/Agents/AgentPanelSwitch', () => () => null);
 jest.mock('~/components/SidePanel/Bookmarks/BookmarkPanel', () => () => null);
 jest.mock('~/components/SidePanel/Builder/PanelSwitch', () => () => null);
 jest.mock('~/components/SidePanel/Schedules', () => ({ SchedulePanel: () => null }));
-jest.mock('~/components/SidePanel/Parameters/Panel', () => () => null);
 jest.mock('~/components/SidePanel/Memories', () => ({ MemoryPanel: () => null }));
 jest.mock('~/components/SidePanel/Files/Panel', () => () => null);
 jest.mock('~/components/Prompts', () => ({ PromptsAccordion: () => null }));
@@ -33,6 +32,7 @@ describe('native scheduled chat navigation', () => {
     );
     const { result } = renderHook(() => useSideNavLinks(options), { wrapper });
     expect(result.current.some((link) => link.id === 'schedules')).toBe(isAuthenticated);
+    expect(result.current.some((link) => link.id === 'parameters')).toBe(false);
     if (isAuthenticated) {
       expect(result.current[0].id).toBe('schedules');
     }

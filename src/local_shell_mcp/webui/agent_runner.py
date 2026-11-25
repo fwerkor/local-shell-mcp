@@ -213,7 +213,10 @@ class AgentRunner:
 
         filters = configured_filters(settings, self.owner)
         validate_agent_instructions(str((agent or {}).get('instructions') or ''), filters)
-        parameters = (agent or {}).get('model_parameters') or self.initial_parameters
+        from .sampling import merge_sampling
+
+        profile = profile or provider_config(selected_provider({}, agent), (agent or {}).get("model"))
+        parameters = merge_sampling(profile.sampling, (agent or {}).get('model_parameters') or self.initial_parameters)
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
         from .misc_routes import effective_features
@@ -263,8 +266,7 @@ class AgentRunner:
                 tools += check_background_task_tools()
         override = (agent or {}).get("recursion_limit")
         limit = int(override) if type(override) in (int, float) and override > 0 else None
-        return AgentContext(profile or provider_config(selected_provider({}, agent), (agent or {}).get("model")),
-                            tools, (agent or {}).get("model_parameters") or self.initial_parameters,
+        return AgentContext(profile, tools, parameters,
                             recursion_limit=limit, tool_end=bool((agent or {}).get("end_after_tools")), agent=agent,
                             compaction_semantic_index=self.compaction_semantic_index)
 

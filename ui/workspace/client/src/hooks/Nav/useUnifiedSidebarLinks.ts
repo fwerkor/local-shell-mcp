@@ -3,7 +3,7 @@ import { useRecoilValue } from 'recoil';
 import { LayoutDashboard, MessagesSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useUserKeyQuery } from 'librechat-data-provider/react-query';
-import { getConfigDefaults, getEndpointField } from 'librechat-data-provider';
+import { getConfigDefaults } from 'librechat-data-provider';
 import type { TEndpointsConfig } from 'librechat-data-provider';
 import type { NavLink } from '~/common';
 import { useGetEndpointsQuery, useGetStartupConfig } from '~/data-provider';
@@ -27,11 +27,6 @@ export default function useUnifiedSidebarLinks() {
     [startupConfig],
   );
 
-  const endpointType = useMemo(
-    () => getEndpointField(endpointsConfig, endpoint, 'type'),
-    [endpoint, endpointsConfig],
-  );
-
   const userProvidesKey = useMemo(
     () => !!(endpointsConfig?.[endpoint ?? '']?.userProvide ?? false),
     [endpointsConfig, endpoint],
@@ -47,7 +42,6 @@ export default function useUnifiedSidebarLinks() {
   const sideNavLinks = useSideNavLinks({
     keyProvided,
     endpoint,
-    endpointType,
     interfaceConfig,
     endpointsConfig,
     includeHidePanel: false,

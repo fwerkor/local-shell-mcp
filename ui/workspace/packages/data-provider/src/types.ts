@@ -143,6 +143,7 @@ export type TEphemeralAgent = {
 
 export type TPayload = Partial<TMessage> &
   Partial<TEndpointOption> & {
+    lsmSampling?: TConversation['lsmSampling'];
     isContinued: boolean;
     isRegenerate?: boolean;
     /** Manual context compaction: summarize the branch up to `parentMessageId`
