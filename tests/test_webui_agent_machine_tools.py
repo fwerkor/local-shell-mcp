@@ -368,3 +368,78 @@ def test_default_machine_permission_filters_tools_and_revokes_jobs(machine_agent
         assert ("file_read" in names) is readable
         assert ("file_write" in names) is writable
         assert {"session_manage", "plan_manage"} <= names
+
+
+def test_live_machine_context_is_provider_only(machine_agent):
+    from types import SimpleNamespace
+
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    repo, _, agents, agent = machine_agent
+    store = GenerationStore(repo.database)
+    generation, _ = store.begin("local", {"text": "Inspect"}, agent)
+    cid = generation.conversation_id
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid,
+                      {"local": "write", "worker1": "none"})
+    profile = ProviderConfig("openai", "test", "https://test.invalid", "")
+    runner = AgentRunner(
+        "local", generation, repo.database, store, scopes=SCOPES, grant_expires=None,
+        stream_tools=None, stream_text=None, on_text=None, profile=profile, agent=agent,
+    )
+    history = [{"role": "system", "content": "Custom instructions"},
+               {"role": "user", "content": "Inspect"}]
+    state = SimpleNamespace(messages=history, context=SimpleNamespace(agent=agent, fading_tier=None))
+    projected = runner._project_model_messages(state)
+    assert projected[0]["role"] == "system"
+    assert "Read-only: local" in projected[0]["content"]
+    assert "No access: worker1" in projected[0]["content"]
+    assert projected[1:] == history
+    assert len(history) == 2
+
+    # Edits to both ceilings must take effect even with the original Agent
+    # object and canonical history still held by the running graph.
+    agents.update("local", agent["id"], {"machine_permissions": {}})
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid, {})
+    assert runner._project_model_messages(state) == history
+
+    agents.update("local", agent["id"], {"machine_default_permission": "read"})
+    projected = runner._project_model_messages(state)
+    assert "Read-only: local, worker1" in projected[0]["content"]
+    assert "Agent default for newly registered machines: read-only" in projected[0]["content"]
+    assert len(history) == 2
+
+
+def test_machine_context_respects_principal_scopes(machine_agent):
+    from local_shell_mcp.webui.machine_permissions import machine_access_context
+
+    repo, cid, _, _ = machine_agent
+    context = machine_access_context("local", cid, agent=None,
+                                     scopes={"shell:read"}, repo=repo)
+    assert "Read-only: local" in context
+    assert "No access: worker1" in context
+    context = machine_access_context("local", cid, agent=None,
+                                     scopes=SCOPES - {"shell:execute"}, repo=repo)
+    assert "Read/write: local" in context
+    assert "execution-class operations are not authorized" in context
+
+
+@pytest.mark.asyncio
+async def test_remote_discovery_reports_effective_machine_access(machine_agent, monkeypatch):
+    import json
+
+    _, cid, agents, agent = machine_agent
+    agents.update("local", agent["id"], {"machine_permissions": {"worker1": "write"}})
+
+    async def invoke(*args, **kwargs):
+        return json.dumps({"ok": True, "data": {"machines": [{"name": "worker1"}]}})
+
+    monkeypatch.setattr(registry, "_invoke_registered", invoke)
+    result = await registry.call_tool(
+        "local", cid, ModelToolCall("discovery", "remote_manage", {"action": "list"}),
+        granted_scopes=SCOPES, agent_id=agent["id"],
+    )
+    assert json.loads(result)["data"]["machines"] == [
+        {"name": "worker1", "effective_access": "read"},
+    ]

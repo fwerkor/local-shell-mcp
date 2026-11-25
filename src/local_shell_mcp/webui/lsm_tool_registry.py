@@ -349,6 +349,27 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
         )
         if run_id is not None and json.loads(result).get("ok", True) is not False:
             durable_tasks.mark_stopped(owner, conversation_id, tool.name, arguments)
+        if tool.name == "remote_manage" and arguments.get("action", "").strip().lower() == "list":
+            from .agents import AgentRepository
+            from .machine_permissions import effective_machine_access
+            from .routes import _repo
+
+            payload = json.loads(result)
+            if isinstance(payload, dict) and payload.get("ok", True):
+                data = payload.get("data")
+                if isinstance(data, dict) and isinstance(data.get("machines"), list):
+                    repo = _repo()
+                    agent = AgentRepository(repo.database).get(owner, agent_id) if agent_id else None
+                    if agent_id and agent is None:
+                        agent = {"machine_default_permission": "none"}
+                    access, _ = effective_machine_access(
+                        owner, permission_conversation_id, agent=agent,
+                        scopes=granted_scopes, expires=grant_expires, repo=repo,
+                    )
+                    for row in data["machines"]:
+                        if isinstance(row, dict):
+                            row["effective_access"] = access.get(row.get("name"), "none")
+                    return json.dumps(payload, ensure_ascii=False)
         return result
     except PermissionError:
         audit("webui_agent_lsm_tool_revoked", owner=owner, conversation_id=conversation_id,

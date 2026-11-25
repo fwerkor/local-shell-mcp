@@ -97,6 +97,65 @@ def resolve_access(owner: str, conversation_id: str | None = None, *, project_id
     return policy
 
 
+def effective_machine_access(owner: str, conversation_id: str, *, agent: dict | None,
+                             scopes: set[str], expires: int | None = None,
+                             repo: Any = None) -> tuple[dict[str, str], str]:
+    """Resolve the machine ACL subject to the Agent and principal ceilings."""
+    from ..settings import get_settings
+
+    policy = resolve_access(owner, conversation_id, repo=repo)
+    agent_policy, default = agent_access_policy(agent or {}) or ({}, "write")
+    rank = {"none": 0, "read": 1, "write": 2}
+    settings = get_settings()
+    effective: dict[str, str] = {}
+    for name, level in sorted(policy.items()):
+        level = min(level, agent_policy.get(name, default), key=rank.__getitem__)
+        if (name == "local" and settings.disable_local
+                or name != "local" and not settings.remote_enabled):
+            level = "none"
+        else:
+            try:
+                require_machine_scope(scopes, name, "read", expires=expires)
+            except PermissionError:
+                level = "none"
+            if level == "write":
+                try:
+                    require_machine_scope(scopes, name, "write", expires=expires)
+                except PermissionError:
+                    level = "read"
+        effective[name] = level
+    return effective, default
+
+
+def machine_access_context(owner: str, conversation_id: str, *, agent: dict | None,
+                           scopes: set[str], expires: int | None = None,
+                           repo: Any = None) -> str:
+    """Render the live native-machine ACL, not a grant or a history message."""
+    effective, default = effective_machine_access(
+        owner, conversation_id, agent=agent, scopes=scopes, expires=expires, repo=repo,
+    )
+    groups: dict[str, list[str]] = {"none": [], "read": [], "write": []}
+    for name, level in effective.items():
+        groups[level].append(name)
+    execution_restricted = "shell:execute" not in scopes and bool(groups["write"])
+    if not (groups["none"] or groups["read"] or default != "write" or execution_restricted):
+        return ""
+    lines = ["Current native machine access restrictions (server-enforced):"]
+    for level, label in (("none", "No access"), ("read", "Read-only"), ("write", "Read/write")):
+        if groups[level]:
+            lines.append(f"- {label}: {', '.join(groups[level])}")
+    if default != "write":
+        label = {"none": "no access", "read": "read-only"}[default]
+        lines.append(f"- Agent default for newly registered machines: {label}")
+    if execution_restricted:
+        lines.append("- Shell and other execution-class operations are not authorized.")
+    lines.append("Unlisted, unregistered machines are not implicitly authorized. "
+                 "Use read-only inspection tools on read-only machines; do not run shell "
+                 "commands, scripts, or other mutating operations on them. "
+                 "Other tool-specific restrictions still apply.")
+    return "\n".join(lines)
+
+
 def access_level(owner: str, conversation_id: str, machine: str, *, repo: Any = None) -> str:
     return resolve_access(owner, conversation_id, repo=repo).get(machine, "none")
 
