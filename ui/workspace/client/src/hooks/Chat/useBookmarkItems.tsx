@@ -1,10 +1,9 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
 import { useRecoilValue } from 'recoil';
-import { BookmarkPlusIcon } from 'lucide-react';
+import { Plus, Tag } from 'lucide-react';
 import { useToastContext } from '@librechat/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { Constants, QueryKeys } from 'librechat-data-provider';
-import { BookmarkFilledIcon, BookmarkIcon } from '@radix-ui/react-icons';
 
 import type { TConversationTag } from 'librechat-data-provider';
 import type { ReactNode } from 'react';
@@ -62,7 +61,7 @@ export default function useBookmarkItems({
     },
     onError: () => {
       showToast({
-        message: 'Error adding bookmark',
+        message: localize('com_ui_bookmarks_update_error'),
         severity: NotificationSeverity.ERROR,
       });
     },
@@ -124,7 +123,7 @@ export default function useBookmarkItems({
       {
         id: '%___new___bookmark___%',
         label: localize('com_ui_bookmarks_new'),
-        icon: <BookmarkPlusIcon className="size-4" />,
+        icon: <Plus className="size-4" />,
         hideOnClick: false,
         ref: newBookmarkRef,
         render: (props) => <button {...props} />,
@@ -140,9 +139,9 @@ export default function useBookmarkItems({
           label: tag.tag,
           hideOnClick: false,
           icon: isSelected ? (
-            <BookmarkFilledIcon className="size-4" />
+            <Tag fill="currentColor" className="size-4" />
           ) : (
-            <BookmarkIcon className="size-4" />
+            <Tag className="size-4" />
           ),
           onClick: () => handleSubmit(tag.tag),
           disabled: mutation.isLoading,

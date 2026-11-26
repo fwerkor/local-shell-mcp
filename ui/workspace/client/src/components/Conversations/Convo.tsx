@@ -1,6 +1,6 @@
 import React, { memo, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useDrag } from 'react-dnd';
-import { Link2 } from 'lucide-react';
+import { Link2, Tag } from 'lucide-react';
 import { useRecoilValue } from 'recoil';
 import { useParams } from 'react-router-dom';
 import { Constants } from 'librechat-data-provider';
@@ -280,6 +280,7 @@ function Conversation({
 
   const convoOptionsProps = {
     title,
+    tags: conversation.tags,
     isPinned: conversation.pinned,
     /* The row's own state, not the list's: the sidebar shows unarchived pins beside an
        archived list, and the previous page's rows stay on screen while the next loads. */
@@ -385,6 +386,15 @@ function Conversation({
         >
           <ConversationEndpointIcon conversation={conversation} size={20} context="menu-item" />
         </ConvoLink>
+      )}
+      {!!conversation.tags?.length && (
+        <span
+          className="flex max-w-[96px] shrink-0 items-center gap-1 truncate text-xs text-text-secondary"
+          title={conversation.tags.join(', ')}
+        >
+          <Tag className="size-3 shrink-0" />
+          <span className="truncate">{conversation.tags.join(', ')}</span>
+        </span>
       )}
       {isSharedBadgeVisible && (
         <Link2 className="icon-sm mr-1 shrink-0 text-text-secondary" aria-hidden="true" />

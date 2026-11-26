@@ -229,7 +229,7 @@ async def test_media_magic_variants_and_text_binary_size_guards(context, tmp_pat
         'text': 'Please consult attachments',
         'files': [txt, nul, large, image, {'file_id': 412}, {'file_id': 'not-available'}],
     }, root)
-    assert len(result) == 5
+    assert len(result) == 6
     assert result[1]['text'].endswith('Human-readable context')
     assert result[2]['text'].endswith('use authorized file tools if available.')
     assert result[3]['text'].endswith('use authorized file tools if available.')
@@ -253,13 +253,13 @@ async def test_media_budget_and_storage_move_degrade_without_losing_steer(contex
     too_large = insert_file(db, root, 'big.png', b'\x89PNG\r\n\x1a\n' + b'a' * (4 * 1024 * 1024), 'image/png')
     result = await encode_steer_media(db, 'local', {
         'text': 'Always keep instruction', 'files': [too_large]}, root)
-    assert len(result) == 2 and result[0]['text'] == 'Always keep instruction'
+    assert len(result) == 3 and result[0]['text'] == 'Always keep instruction'
     assert result[1]['type'] == 'text'
     assert 'data:' not in str(result)
     # Valid recorded file path but bytes missing after deferred removal.
     (root / 'attachments' / '2026' / '11' / 'big.png').unlink()
     assert len(await encode_steer_media(db, 'local', {
-        'text': 'Unchanged', 'files': [too_large]}, root)) == 2
+        'text': 'Unchanged', 'files': [too_large]}, root)) == 3
 
 
 @pytest.mark.asyncio
@@ -330,3 +330,96 @@ async def test_assembled_context_policy_checks_inlined_text_steer_before_provide
         assert len(exposed) == 2
         assert body in str(exposed[-1])
         assert store.get('local', job.run_id).status == 'complete'
+
+
+@pytest.mark.asyncio
+async def test_attachment_only_native_then_path_fallback(context, monkeypatch):
+    from local_shell_mcp.webui.providers import UnsupportedImageInput
+
+    db, store, previous, root = context
+    file = insert_file(db, root, 'only image.png', b'\x89PNG\r\n\x1a\nMEDIA')
+    job, _ = store.begin('local', {'text': '', 'files': [file]})
+    history = store.history('local', job.conversation_id)
+    assert '[image](' in history[-1]['content']
+    assert 'only image.png' in history[-1]['content']
+    assert 'base64' not in json.dumps(history)
+    seen = []
+
+    async def model(profile, messages, **kwargs):
+        seen.append(messages)
+        if len(seen) == 1:
+            assert any(p['type'] == 'image_url' for p in messages[-1]['content'])
+            raise UnsupportedImageInput('No vision')
+        assert isinstance(messages[-1]['content'], str)
+        assert '[image](' in messages[-1]['content']
+        assert 'base64' not in str(messages)
+        yield 'Used path.'
+
+    monkeypatch.setattr(generation_routes, 'stream_model_with_tools', model)
+    await generation_routes._run_model('local', job, ProviderConfig('openai', 'stub', 'http://localhost:10', ''))
+    assert len(seen) == 2
+    assert any(e.get('event') == 'on_attachment_image_fallback' for _, e in store.events('local', job.run_id))
+    with db.connect() as conn:
+        assert conn.execute('SELECT text FROM messages WHERE id=?', (job.user_message_id,)).fetchone()[0] == ''
+    with pytest.raises(ValueError):
+        store.begin('local', {'text': '  '})
+    with pytest.raises(KeyError):
+        store.begin('foreign', {'text': '', 'files': [file]})
+
+
+@pytest.mark.asyncio
+async def test_attachment_only_non_image_and_replay(context):
+    from local_shell_mcp.webui.steer_media import stamp_model_messages
+
+    db, store, _, root = context
+    document = insert_file(db, root, 'notes.txt', b'plain text', 'text/plain')
+    image = insert_file(db, root, 'image.png', b'\x89PNG\r\n\x1a\nMEDIA')
+    job, _ = store.begin('local', {'files': [document, image]})
+    assert store.finish('local', job.run_id, status='complete', text='Acknowledged.')
+    followup, _ = store.begin('local', {'text': 'Continue',
+        'conversationId': job.conversation_id, 'parentMessageId': job.response_message_id})
+    history = store.history('local', job.conversation_id, message_id=followup.user_message_id)
+    original = next(m for m in history if m.get('source') == 'attachment')
+    assert '[file](' in original['content'] and '[image](' in original['content']
+    prepared = await stamp_model_messages(db, 'local', history, root)
+    assert any(p['type'] == 'image_url' for p in prepared[0]['content'])
+    assert prepared[-1]['content'] == 'Continue'
+    assert 'base64' not in json.dumps(history)
+    steer = await encode_steer_media(db, 'local', {'text': '', 'files': [image]}, root)
+    assert steer[0]['type'] == 'text' and '[image](' in steer[0]['text']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,problem,unsupported', [
+    (400, 'This model does not support image input', True),
+    (422, 'image_url is unsupported for this model', True),
+    (400, 'Invalid tool schema', False),
+    (401, 'This model does not support image input', False),
+    (500, 'Image input is not supported', False),
+])
+async def test_explicit_image_rejection_only(status, problem, unsupported):
+    from local_shell_mcp.webui.providers import UnsupportedImageInput, check_image_response
+
+    response = httpx.Response(status, json={'error': {'message': problem}},
+                              request=httpx.Request('POST', 'https://example.invalid'))
+    with pytest.raises(UnsupportedImageInput if unsupported else httpx.HTTPStatusError):
+        await check_image_response(response)
+
+@pytest.mark.asyncio
+async def test_generic_steer_image_fallback_uses_owned_provenance(context):
+    from local_shell_mcp.webui.steer_media import stamp_model_messages, without_attachment_images
+
+    db, _, _, root = context
+    image = insert_file(db, root, 'scan.bin', b'\x89PNG\r\n\x1a\nMEDIA',
+                        'application/octet-stream')
+    unrelated = {'role': 'user', 'content': [{'type': 'image_url',
+                                              'image_url': {'url': 'https://example.invalid/a.png'}}]}
+    original = {'role': 'user', 'source': 'steer', 'content': 'Inspect scan', 'files': [image]}
+    prepared = await stamp_model_messages(db, 'local', [original, unrelated], root)
+    assert any(p['type'] == 'image_url' for p in prepared[0]['content'])
+    assert any('[file](' in p.get('text', '') for p in prepared[0]['content'])
+    fallback, changed = without_attachment_images(prepared)
+    assert changed and '[file](' in fallback[0]['content']
+    assert 'Inspect scan' in fallback[0]['content']
+    assert 'base64' not in json.dumps(fallback[0])
+    assert fallback[1] == unrelated

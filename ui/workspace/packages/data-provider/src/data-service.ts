@@ -1580,6 +1580,18 @@ export interface ActiveJobsResponse {
   activeJobIds: string[];
 }
 
+export type LiveCompactionReceipt = { runId: string; requestId: string };
+
+export function requestLiveCompaction(conversationId: string): Promise<LiveCompactionReceipt> {
+  return request.post(endpoints.liveCompaction(), { conversationId });
+}
+
+export function getLiveCompactionStatus(
+  receipt: LiveCompactionReceipt,
+): Promise<{ status: 'pending' | 'complete' | 'failed' }> {
+  return request.get(endpoints.liveCompactionStatus(receipt.runId, receipt.requestId));
+}
+
 export const getActiveJobs = (): Promise<ActiveJobsResponse> => {
   return request.get(endpoints.activeJobs());
 };

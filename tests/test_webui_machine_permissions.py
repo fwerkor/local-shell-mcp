@@ -177,6 +177,21 @@ async def test_permission_http_ui_preferences_do_not_require_token_scope_changes
                                  json={"machines": {"worker1": "write"}})).status_code == 200
         assert (await client.put("/api/lsm/permissions/defaults", headers=no_scopes,
                                  json={"machines": {"local": "write"}})).status_code == 200
+        # Inheritance is stored as the absence of a per-machine override,
+        # not a copy of the current parent permission.
+        reset_chat = await client.put(f"/api/lsm/preferences/{cid}", headers=owner,
+                                      json={"machines": {}})
+        assert reset_chat.json()["machines"] == {}
+        assert reset_chat.json()["effective"] == {"local": "write", "worker1": "write"}
+        reset_project = await client.put(f"/api/lsm/permissions/projects/{pid}", headers=owner,
+                                         json={"machines": {}})
+        assert reset_project.json()["machines"] == {}
+        await client.put("/api/lsm/permissions/defaults", headers=owner,
+                         json={"machines": {"local": "read", "worker1": "none"}})
+        inherited = (await client.get(f"/api/lsm/preferences/{cid}", headers=owner)).json()
+        assert inherited["machines"] == {}
+        assert inherited["effective"] == {"local": "read", "worker1": "none"}
+        assert all(inherited[flag] is False for flag in ("web", "mcp", "memory"))
         assert (await client.get(f"/api/lsm/preferences/{cid}", headers=bob)).status_code == 404
         assert (await client.put("/api/lsm/permissions/defaults", headers=owner,
                                  json={"machines": {"unknown-worker": "admin"}})).status_code == 400

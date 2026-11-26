@@ -87,6 +87,9 @@ async def test_compaction_with_actual_openai_sse_and_browser_continue(tmp_path, 
             assert store.finish('local', job.run_id, status='complete', text=f'Historical answer {index}.')
             cid, parent = job.conversation_id, job.response_message_id
         with database.connect() as connection:
+            # Conversation metadata is independent of the compacted transcript.
+            connection.execute('UPDATE conversations SET title=? WHERE id=?',
+                               ('Summary regression conversation', cid))
             count_before = connection.execute('SELECT count(*) FROM messages WHERE conversation_id=?',
                                               (cid,)).fetchone()[0]
         async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{server_port}') as http:

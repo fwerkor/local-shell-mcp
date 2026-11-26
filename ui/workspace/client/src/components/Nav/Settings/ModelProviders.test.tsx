@@ -4,10 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
 import ModelProviders, { isLoopback } from './ModelProviders';
 
+let mockLocale: 'en' | 'zh-Hans' = 'en';
+
 jest.mock('~/hooks/useLocalize', () => ({
   __esModule: true,
   default: () => (key: string, options: Record<string, unknown> = {}) => {
-    const messages = jest.requireActual('~/locales/en/translation.json');
+    const messages = mockLocale === 'zh-Hans'
+      ? jest.requireActual('~/locales/zh-Hans/translation.json')
+      : jest.requireActual('~/locales/en/translation.json');
     return (messages[key] ?? key).replace(/\{\{([^}]+)\}\}/g, (_: string, name: string) =>
       String(options[name] ?? ''));
   },
@@ -236,5 +240,31 @@ it('allows pasting the same callback when the local listener is unreachable', as
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   } finally {
     popup.mockRestore();
+  }
+});
+
+it('localizes the manual account authorization instructions and callback controls', async () => {
+  mockLocale = 'zh-Hans';
+  const popup = jest.spyOn(window, 'open').mockReturnValue(null);
+  try {
+    post.mockResolvedValueOnce({ flow: 'localized-flow', authorization_url: 'https://auth.openai.com/example', manual: true });
+    get.mockImplementation(async (target) => target.includes('/oauth/status') ?
+      { status: 'pending' } : { providers: [] });
+    mount();
+    const messages = jest.requireActual('~/locales/zh-Hans/translation.json');
+    fireEvent.click(await screen.findByRole('button', { name: messages.com_lsm_channel_add }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '使用 ChatGPT 账号继续' }));
+    expect(screen.getByRole('dialog', { name: '连接账号' })).toBeInTheDocument();
+    expect(screen.getByText('当前通过非回环地址访问 LSM 实例，需要手动完成 OAuth 回调。')).toBeInTheDocument();
+    expect(screen.getByText(/出现连接错误属于正常现象/)).toBeInTheDocument();
+    expect(screen.getByText(/请勿在其他地方分享此链接/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '开始授权' }));
+    expect(await screen.findByLabelText('完整回调 URL')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '完成授权' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: '重新打开授权页面' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: messages.com_ui_cancel }));
+  } finally {
+    popup.mockRestore();
+    mockLocale = 'en';
   }
 });

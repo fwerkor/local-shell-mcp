@@ -247,6 +247,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.event_trigger_routes import event_trigger_routes
             from .webui.generation_routes import generation_routes
             from .webui.memory_routes import memory_routes
+            from .webui.message_bookmark_routes import message_bookmark_routes
             from .webui.misc_routes import misc_routes
             from .webui.routes import webui_routes
             from .webui.schedule_routes import schedule_routes
@@ -263,7 +264,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             routes[2:2] = event_trigger_routes()
             routes[2:2] = misc_routes()
             routes[2:2] = memory_routes()
-            routes[2:2] = tag_routes()
+            routes[2:2] = [*tag_routes(), *message_bookmark_routes()]
             routes[2:2] = skill_routes()
             routes[2:2] = skill_tree_routes()
             routes[2:2] = schedule_routes()

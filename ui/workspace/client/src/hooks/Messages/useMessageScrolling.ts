@@ -25,7 +25,10 @@ const prefersReducedMotion = () =>
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export default function useMessageScrolling(messagesTree?: TMessage[] | null) {
+export default function useMessageScrolling(
+  messagesTree?: TMessage[] | null,
+  skipAutoLanding = false,
+) {
   const autoScroll = useAtomValue(autoScrollAtom);
 
   const scrollableRef = useRef<HTMLDivElement | null>(null);
@@ -430,7 +433,7 @@ export default function useMessageScrolling(messagesTree?: TMessage[] | null) {
    * has scrolled away back to the bottom.
    */
   useEffect(() => {
-    if (!autoScroll) {
+    if (!autoScroll || skipAutoLanding) {
       /** Switching the setting off releases the landing, so switching it back
        *  on while the same conversation is open honours it again. */
       landedConversationRef.current = null;
@@ -466,7 +469,7 @@ export default function useMessageScrolling(messagesTree?: TMessage[] | null) {
 
     landedConversationRef.current = conversationId;
     scrollToBottom();
-  }, [autoScroll, conversationId, messagesTree, scrollToBottom]);
+  }, [autoScroll, conversationId, messagesTree, scrollToBottom, skipAutoLanding]);
 
   return {
     conversation,

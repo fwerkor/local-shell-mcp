@@ -80,6 +80,8 @@ describe.each(['light', 'dark'])('%s theme', (theme) => {
     const write = await screen.findByRole('button', { name: 'local 读写' });
     await waitFor(() => expect(write).not.toBeDisabled());
     expect(write).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: 'local 继承' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '全部恢复继承' })).not.toBeInTheDocument();
     expect(screen.getByText('本机')).toHaveClass('text-text-secondary');
     fireEvent.click(screen.getByRole('button', { name: 'local 只读' }));
     await waitFor(() => expect(put).toHaveBeenCalledWith('/api/lsm/permissions/defaults', {
@@ -100,8 +102,10 @@ it('can edit project defaults independently when starting a project chat', async
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'worker1 读写' })).toHaveAttribute('aria-pressed', 'true'),
   );
-  expect(screen.getByText('继承 · 读写')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'worker1 恢复继承' }));
+  expect(screen.getByText('继承 · 读写 · 全局默认')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'local 继承' })).toHaveAttribute('aria-pressed', 'true');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'worker1 继承' })).not.toBeDisabled());
+  fireEvent.click(screen.getByRole('button', { name: 'worker1 继承' }));
   await waitFor(() => expect(put).toHaveBeenCalledWith(
     '/api/lsm/permissions/projects/project-1', { machines: {} },
   ));
@@ -111,13 +115,15 @@ it('shows inherited machine access in a saved chat and leaves token scopes untou
   mount('chat-1');
   fireEvent.click(screen.getByRole('button', { name: '工具权限' }));
   expect(screen.getByRole('button', { name: '当前会话' })).toHaveAttribute('aria-pressed', 'true');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'worker1 读写' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'worker1 继承' }))
     .toHaveAttribute('aria-pressed', 'true'));
-  expect(screen.getByText('继承 · 读写')).toBeInTheDocument();
+  await screen.findByText('继承 · 读写 · 项目默认');
+  expect(screen.getByRole('button', { name: 'worker1 读写' })).toHaveAttribute('aria-pressed', 'false');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'local 继承' })).not.toBeDisabled());
 
-  fireEvent.click(screen.getByRole('button', { name: 'local 恢复继承' }));
+  fireEvent.click(screen.getByRole('button', { name: 'local 继承' }));
   await waitFor(() => expect(put).toHaveBeenCalledWith('/api/lsm/preferences/chat-1', {
-    machines: {}, web: true, mcp: false, memory: true,
+    machines: {},
   }));
   expect(put.mock.calls[0][1]).not.toHaveProperty('scopes');
   expect(put.mock.calls[0][1]).not.toHaveProperty('token');
@@ -140,7 +146,7 @@ it('keeps new-chat machine overrides local to the draft without changing default
   expect(client.getQueryData(['lsm', 'draft-machine-permissions', 0, 'project-1']))
     .toEqual({ local: 'read' });
   expect(put).not.toHaveBeenCalled();
-  const reset = screen.getByRole('button', { name: 'local 恢复继承' });
+  const reset = screen.getByRole('button', { name: 'local 继承' });
   await waitFor(() => expect(reset).not.toBeDisabled());
   fireEvent.click(reset);
   await waitFor(() => expect(client.getQueryData(['lsm', 'draft-machine-permissions', 0, 'project-1'])).toEqual({}));
@@ -157,4 +163,41 @@ it('keeps the popup inside the viewport when the composer is near the middle', (
   const dialog = screen.getByRole('dialog');
   expect(dialog.style.top).toBe('348px');
   expect(Number.parseFloat(dialog.style.maxHeight)).toBeLessThanOrEqual(window.innerHeight - 356);
+});
+
+it('can explicitly choose the same permission as the inherited value and reset every draft override', async () => {
+  const { client } = mount('new', 'project-1');
+  fireEvent.click(screen.getByRole('button', { name: '工具权限' }));
+  const key = ['lsm', 'draft-machine-permissions', 0, 'project-1'];
+  const write = await screen.findByRole('button', { name: 'local 读写' });
+  await waitFor(() => expect(write).not.toBeDisabled());
+  expect(write).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(write);
+  await waitFor(() => expect(write).toHaveAttribute('aria-pressed', 'true'));
+  fireEvent.click(screen.getByRole('button', { name: 'worker1 无' }));
+  expect(client.getQueryData(key)).toEqual({ local: 'write', worker1: 'none' });
+  const reset = screen.getByRole('button', { name: '全部恢复继承' });
+  await waitFor(() => expect(reset).not.toBeDisabled());
+  fireEvent.click(reset);
+  expect(client.getQueryData(key)).toEqual({});
+  await waitFor(() => expect(screen.getByRole('button', { name: 'local 继承' })).toHaveAttribute('aria-pressed', 'true'));
+  expect(screen.getByRole('button', { name: 'worker1 继承' })).toHaveAttribute('aria-pressed', 'true');
+  expect(put).not.toHaveBeenCalled();
+});
+
+it('resets all saved overrides in the current scope only', async () => {
+  mount('chat-1');
+  fireEvent.click(screen.getByRole('button', { name: '工具权限' }));
+  const reset = screen.getByRole('button', { name: '全部恢复继承' });
+  await waitFor(() => expect(reset).not.toBeDisabled());
+  fireEvent.click(reset);
+  await waitFor(() => expect(put).toHaveBeenCalledWith('/api/lsm/preferences/chat-1', {
+    machines: {},
+  }));
+  fireEvent.click(screen.getByRole('button', { name: '项目默认' }));
+  await waitFor(() => expect(reset).not.toBeDisabled());
+  fireEvent.click(reset);
+  await waitFor(() => expect(put).toHaveBeenCalledWith('/api/lsm/permissions/projects/project-1', {
+    machines: {},
+  }));
 });

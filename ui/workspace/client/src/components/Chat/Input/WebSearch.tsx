@@ -24,7 +24,7 @@ function WebSearch() {
   const { badgeTriggerRef } = searchApiKeyForm;
 
   return (
-    (isPinned || webSearch) && (
+    isPinned && (
       <CheckboxButton
         disabled={!context?.features.canEdit}
         ref={badgeTriggerRef}

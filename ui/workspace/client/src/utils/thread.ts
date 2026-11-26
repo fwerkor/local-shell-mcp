@@ -331,3 +331,22 @@ export function changedParentKeys(previous: ThreadIndex | null, next: ThreadInde
   }
   return changed;
 }
+
+/** Reversed sibling selections needed to reveal a message on any saved branch. */
+export function messageBranchSelections(index: ThreadIndex, target: string): Map<string, number> {
+  const selections = new Map<string, number>();
+  const visited = new Set<string>();
+  let current = target;
+  while (index.messages.has(current) && !visited.has(current)) {
+    visited.add(current);
+    const parent = index.messages.get(current)?.parentMessageId;
+    const key = parent && index.children.get(parent)?.includes(current) ? parent : ROOT_KEY;
+    const siblings = index.children.get(key) ?? [];
+    const position = siblings.indexOf(current);
+    if (position < 0) break;
+    selections.set(key, siblings.length - position - 1);
+    if (key === ROOT_KEY) break;
+    current = key;
+  }
+  return selections;
+}

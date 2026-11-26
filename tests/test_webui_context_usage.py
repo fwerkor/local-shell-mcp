@@ -193,11 +193,14 @@ async def test_runner_persists_exact_provider_usage_without_known_window(setup):
                            [{'role': 'user', 'content': 'hello'}])
     await runner._before_model(state)
     assert not any(evt.get('event') == 'on_context_usage' for _, evt in store.events('alice', job.run_id))
-    await runner._observe_model_usage(ModelUsage('openai', 1000, 51), state)
+    await runner._observe_model_usage(ModelUsage('openai', 1000, 51, 0), state)
     events = [evt['data'] for _, evt in store.events('alice', job.run_id)
               if evt.get('event') == 'on_context_usage']
     assert len(events) == 1
     assert (events[0]['providerInputTokens'], events[0]['providerOutputTokens']) == (1000, 51)
+    assert events[0]['cacheRead'] == 0
+    assert 'cacheWrite' not in events[0]
+    assert events[0]['breakdown']['messageTokens'] > 0
     assert events[0]['breakdown']['maxContextTokens'] == 0
     store.finish('alice', job.run_id, status='complete', text='Response')
     reopened = WorkspaceRepository(SQLiteDatabase(db.root))
@@ -235,3 +238,20 @@ async def test_runner_uses_saved_model_window_without_agent_parameter(setup, mon
     assert len(snapshots) == 2
     assert snapshots[-1]['providerInputTokens'] == 1024
     assert snapshots[-1]['breakdown']['maxContextTokens'] == 8192
+
+def test_provider_snapshot_reports_tool_composition():
+    from local_shell_mcp.webui.context_budget import provider_usage_snapshot
+
+    tools = [{'type': 'function', 'function': {'name': 'demo', 'parameters': {}}},
+             {'type': 'function', 'function': {'name': 'other_mcp_server', 'parameters': {}}}]
+    messages = [{'role': 'user', 'content': 'Hello'},
+                {'role': 'assistant', 'content': '', 'tool_calls': [
+                    {'id': 'call-1', 'type': 'function', 'function': {'name': 'demo', 'arguments': '{}'}}]},
+                {'role': 'tool', 'tool_call_id': 'call-1', 'content': 'result'}]
+    event = provider_usage_snapshot(input_tokens=100, output_tokens=5,
+        provider='openai', model='test', messages=messages, tools=tools,
+        max_context_tokens=None, run_id='run', cache_read=20)
+    breakdown = event['breakdown']
+    assert event['cacheRead'] == 20
+    assert sum(breakdown['toolTokenCounts'].values()) == breakdown['toolSchemaTokens']
+    assert 0 < breakdown['toolMessageTokenCounts']['demo'] <= breakdown['toolMessageTokens']

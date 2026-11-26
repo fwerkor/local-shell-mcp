@@ -19,9 +19,12 @@ from .providers import (
     ModelToolCall,
     ModelUsage,
     ProviderConfig,
+    UnsupportedImageInput,
     _anthropic_omits_sampling_parameters,
     _data_frames,
     _usage_frame,
+    check_image_response,
+    image_input_rejected,
 )
 
 
@@ -217,7 +220,7 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
     async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
         "POST", config.url, headers=headers, json=body,
     ) as response:
-        response.raise_for_status()
+        await check_image_response(response)
         async for frame in _data_frames(response):
             if frame == "[DONE]":
                 break
@@ -226,6 +229,8 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
             except json.JSONDecodeError:
                 continue
             if "error" in event or event.get("type") == "error":
+                if image_input_rejected(json.dumps(event)):
+                    raise UnsupportedImageInput("Provider does not support image input")
                 raise RuntimeError("Model provider rejected the generation request")
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "anthropic":

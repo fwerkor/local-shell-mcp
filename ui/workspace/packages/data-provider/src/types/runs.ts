@@ -272,6 +272,8 @@ export type TTokenBudgetBreakdown = {
 
 /** Per-model-call context snapshot, dispatched after pruning and before the LLM call. */
 export type TContextUsageEvent = {
+  /** Last automatic or live compaction attempt in this run. */
+  compactionStatus?: 'running' | 'complete' | 'failed';
   runId?: string;
   agentId?: string;
   breakdown: TTokenBudgetBreakdown;

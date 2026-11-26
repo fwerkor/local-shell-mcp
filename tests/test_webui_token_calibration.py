@@ -102,6 +102,16 @@ def test_sqlite_calibration_survives_restart_and_model_partition(tmp_path):
 
 @pytest.mark.parametrize('provider,event,expected', [
     ('openai', {'usage': {'prompt_tokens': 120, 'completion_tokens': 15}}, ModelUsage('openai', 120, 15)),
+    ('openai', {'usage': {'prompt_tokens': 120, 'completion_tokens': 15,
+                          'prompt_tokens_details': {'cached_tokens': 0}}}, ModelUsage('openai', 120, 15, 0)),
+    ('openai', {'usage': {'input_tokens': 120, 'output_tokens': 15,
+                          'input_tokens_details': {'cached_tokens': 80}}}, ModelUsage('openai', 120, 15, 80)),
+    ('openai', {'usage': {'prompt_tokens': 120, 'completion_tokens': 15,
+                          'prompt_cache_hit_tokens': 100}}, ModelUsage('openai', 120, 15, 100)),
+    ('openai', {'usage': {'prompt_tokens': 120, 'completion_tokens': 15,
+                          'prompt_tokens_details': {'cached_tokens': 200}}}, ModelUsage('openai', 120, 15)),
+    ('google', {'usageMetadata': {'promptTokenCount': 90, 'candidatesTokenCount': 25,
+                                 'cachedContentTokenCount': 50}}, ModelUsage('google', 90, 25, 50)),
     ('openai', {'usage': {'prompt_tokens': True, 'completion_tokens': 2}}, None),
     ('openai', {'usage': {'prompt_tokens': -1, 'completion_tokens': 2}}, None),
     ('anthropic', {'type': 'message_start', 'message': {'usage': {'input_tokens': 60, 'output_tokens': 0}}},
@@ -292,9 +302,11 @@ def test_anthropic_cached_input_telemetry_is_not_discarded():
     start = _usage_frame('anthropic', {'type': 'message_start', 'message': {
         'usage': {'input_tokens': 20, 'cache_read_input_tokens': 70,
                   'cache_creation_input_tokens': 10, 'output_tokens': 0}}})
-    assert start == ModelUsage('anthropic', 100, 0)
+    assert start == ModelUsage('anthropic', 100, 0, 70, 10)
     assert _usage_frame('anthropic', {'type': 'message_delta', 'usage': {
-        'output_tokens': 30}}, start) == ModelUsage('anthropic', 100, 30)
+        'input_tokens': 25, 'output_tokens': 30}}, start) == ModelUsage('anthropic', 105, 30, 70, 10)
+    assert _usage_frame('anthropic', {'type': 'message_delta', 'usage': {
+        'output_tokens': 30}}, start) == ModelUsage('anthropic', 100, 30, 70, 10)
     assert _usage_frame('anthropic', {'type': 'message_start', 'message': {
         'usage': {'input_tokens': 50, 'cache_read_input_tokens': 'invalid',
                   'output_tokens': 0}}}) is None

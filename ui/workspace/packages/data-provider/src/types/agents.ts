@@ -1018,7 +1018,7 @@ export type Agent = {
   /** Per-machine Agent ceiling; the chat's effective ACL still applies. */
   approval_mode?: 'inherit' | 'automatic' | 'dangerous' | 'all';
   machine_permissions?: Record<string, 'none' | 'read' | 'write'>;
-  machine_default_permission?: 'none' | 'read' | 'write';
+  machine_default_permission?: 'inherit' | 'none' | 'read' | 'write';
   mcp_servers?: string[] | null;
   tool_kwargs?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
