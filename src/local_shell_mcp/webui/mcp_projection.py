@@ -183,12 +183,23 @@ def _bounded_native_image(block):
     if len(data) <= limit:
         return block
     from PIL import Image, ImageOps
+
     from ..image_ops import MAX_PREVIEW_SOURCE_PIXELS
 
-    with Image.open(BytesIO(data)) as opened:
+    try:
+        opened = Image.open(BytesIO(data))
+    except Image.DecompressionBombError as exc:
+        raise ValueError("Tool image exceeds safe decode dimensions") from exc
+    with opened:
         if opened.width * opened.height > MAX_PREVIEW_SOURCE_PIXELS:
             raise ValueError("Tool image exceeds safe decode dimensions")
-        frame = ImageOps.exif_transpose(opened).convert("RGB")
+        frame = ImageOps.exif_transpose(opened)
+        if "A" in frame.getbands() or "transparency" in frame.info:
+            rgba = frame.convert("RGBA")
+            frame = Image.new("RGB", rgba.size, "white")
+            frame.paste(rgba, mask=rgba.getchannel("A"))
+        else:
+            frame = frame.convert("RGB")
         frame.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
         while True:
             out = BytesIO()

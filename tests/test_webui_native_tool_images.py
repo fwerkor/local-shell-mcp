@@ -7,7 +7,9 @@ import pytest
 from PIL import Image
 
 from local_shell_mcp.webui.mcp_projection import (
-    mcp_tool_history_message, openai_wire_messages, project_artifact_messages,
+    mcp_tool_history_message,
+    openai_wire_messages,
+    project_artifact_messages,
 )
 from local_shell_mcp.webui.provider_responses import responses_input
 from local_shell_mcp.webui.provider_tool_protocols import native_messages
@@ -113,3 +115,38 @@ def test_real_native_dispatch_encoding(large_png):
     assert message["artifact"]["content"][0]["image_url"]["url"].endswith(large_png)
     assert "worker" in message["content"]
     assert large_png not in message["content"]
+
+def test_native_image_decompression_bomb_is_unavailable(large_png, monkeypatch):
+    monkeypatch.setenv("MCP_IMAGE_DATA_MAX_BYTES", "50000")
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 10)
+    raw = json.dumps({"content": [
+        {"type": "image", "mimeType": "image/png", "data": large_png},
+        {"type": "text", "text": "/tmp/oversized.png"},
+    ]})
+    result = mcp_tool_history_message(ModelToolCall("id", "image_view", {}), raw, "openai")
+    assert "unavailable" in result["content"]
+    assert "/tmp/oversized.png" in result["content"]
+    assert result["raw_result"] == raw
+    assert not result.get("artifact")
+
+
+def test_native_image_resize_composites_transparency(monkeypatch):
+    import random
+
+    alpha = Image.frombytes("L", (400, 400), random.Random(42).randbytes(400 * 400))
+    alpha.paste(0, (0, 0, 100, 100))
+    alpha.paste(255, (300, 300, 400, 400))
+    rgba = Image.new("RGBA", (400, 400), (0, 0, 0, 0))
+    rgba.putalpha(alpha)
+    out = io.BytesIO()
+    rgba.save(out, format="PNG")
+    monkeypatch.setenv("MCP_IMAGE_DATA_MAX_BYTES", "50000")
+    raw = json.dumps({"content": [{"type": "image", "mimeType": "image/png",
+                                   "data": base64.b64encode(out.getvalue()).decode()}]})
+    result = mcp_tool_history_message(ModelToolCall("id", "image_view", {}), raw, "openai")
+    url = result["artifact"]["content"][0]["image_url"]["url"]
+    assert url.startswith("data:image/jpeg;base64,")
+    with Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))) as image:
+        w, h = image.size
+        assert min(image.getpixel((w // 10, h // 10))) > 220
+        assert max(image.getpixel((w * 9 // 10, h * 9 // 10))) < 35
