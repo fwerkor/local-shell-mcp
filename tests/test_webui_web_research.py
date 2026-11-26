@@ -15,6 +15,9 @@ def test_default_on_and_explicit_off():
     assert _web_search_requested(None, {'ephemeralAgent': {'web_search': False}}) is False
     assert _web_search_requested(None, {'ephemeralAgent': {'web_search': True}}) is True
     assert _web_search_requested({'model_parameters': {'web_search': False}}, {}) is False
+    assert _web_search_requested({'web_search': False}, {}) is False
+    assert _web_search_requested({'web_search': True, 'model_parameters': {'web_search': False}}, {}) is True
+    assert _web_search_requested({'web_search': False}, {'ephemeralAgent': {'web_search': True}}) is True
     assert _web_search_requested(None, {'web_search': False}) is False
     assert _web_search_requested(None, {'ephemeralAgent': {'web_search': 'false'}}) is True
 

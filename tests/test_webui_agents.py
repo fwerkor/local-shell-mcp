@@ -103,3 +103,31 @@ async def test_agent_http_routes_enforce_identity(tmp_path, monkeypatch):
         assert len((await client.get(f"/api/agents/{aid}/versions", headers=alice)).json()) == 2
         assert (await client.delete(f"/api/agents/{aid}", headers=bob)).status_code == 404
         assert (await client.delete(f"/api/agents/{aid}", headers=alice)).status_code == 200
+
+
+def test_legacy_agent_model_controls_migrate_without_losing_search_preference(tmp_path):
+    import json
+
+    repo = AgentRepository(SQLiteDatabase(tmp_path))
+    agent = repo.create("alice", {"name": "Legacy", "provider": "openAI", "model": "m"})
+    with repo.database.connect() as db:
+        config = json.loads(db.execute("SELECT config FROM agents WHERE id=?", (agent["id"],)).fetchone()[0])
+        config.pop("web_search")
+        config["model_parameters"] = {"temperature": 0, "web_search": False,
+                                      "useResponsesApi": True, "resendFiles": True}
+        db.execute("UPDATE agents SET config=? WHERE id=?", (json.dumps(config), agent["id"]))
+    loaded = repo.get("alice", agent["id"])
+    assert loaded["web_search"] is False
+    assert loaded["model_parameters"] == {"temperature": 0}
+    saved = repo.update("alice", agent["id"], {"name": "Updated"})
+    assert saved["web_search"] is False
+    assert saved["model_parameters"] == {"temperature": 0}
+    clone = repo.duplicate("alice", agent["id"])["agent"]
+    assert clone["web_search"] is False
+    updated = repo.update("alice", agent["id"], {"web_search": True, "model_parameters": {
+        "web_search": False, "useResponsesApi": False, "temperature": 0.5}})
+    assert updated["web_search"] is True
+    assert updated["model_parameters"] == {"temperature": 0.5}
+    restored = repo.revert("alice", agent["id"], 1)
+    assert restored["web_search"] is False
+    assert restored["model_parameters"] == {"temperature": 0}

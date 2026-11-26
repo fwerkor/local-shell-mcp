@@ -48,6 +48,7 @@ export const getDefaultAgentFormValues = (
   statefulCodeEnvironment: StatefulCodeEnvironment = 'user',
 ) => ({
   ...defaultAgentFormValues,
+  web_search: true,
   // New Builder Agents deny access unless explicitly granted.
   // Existing Agents retain their stored machine or legacy tool policy.
   machine_permissions: {},
