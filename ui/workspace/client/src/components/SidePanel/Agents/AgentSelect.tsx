@@ -79,7 +79,7 @@ function AgentSelect({
       };
 
       const capabilities: TAgentCapabilities = {
-        [AgentCapabilities.web_search]: false,
+        [AgentCapabilities.web_search]: true,
         [AgentCapabilities.file_search]: false,
         [AgentCapabilities.execute_code]: false,
         [AgentCapabilities.memory]: false,
@@ -97,6 +97,9 @@ function AgentSelect({
 
         agentTools.push(tool);
       });
+
+      capabilities.web_search =
+        fullAgent.web_search ?? fullAgent.model_parameters?.web_search ?? true;
 
       const formValues: Partial<AgentForm & TAgentCapabilities> = {
         ...capabilities,

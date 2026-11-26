@@ -11,6 +11,53 @@ ROOT = Path(__file__).resolve().parents[1] / "ui/workspace/client/src"
 LOCALES = ROOT / "locales"
 REPO = Path(__file__).resolve().parents[1]
 TOKEN = re.compile(r"\{\{[^{}]+\}\}|</?\d+>|</?[a-zA-Z][^>]*>")
+# Product, API and platform labels intentionally keep their original names.
+UNCHANGED_LABELS = {
+    "com_ui_code_environment_shell_posix",
+    "com_ui_web_search_scraper_keenable",
+    "com_ui_web_search_scraper_serper",
+    "com_ui_web_search_scraper_tavily",
+    "com_lsm_channel_protocol_openai",
+}
+# Distinct actions and states should not collapse into the same label.
+DISTINCT_STATES = (
+    ("enabled", "disabled"), ("enable", "disable"), ("on", "off"),
+    ("open", "close"), ("read", "write"), ("allow", "deny"),
+    ("saved", "saving"), ("running", "completed"), ("running", "stopped"),
+    ("running", "failed"), ("success", "error"), ("ascending", "descending"),
+    ("add", "remove"), ("start", "stop"), ("show", "hide"), ("yes", "no"),
+    ("public", "private"), ("accept", "reject"), ("checked", "checking"),
+    ("deleted", "deleting"), ("expanded", "collapsed"), ("expand", "collapse"),
+    ("select_all", "deselect_all"), ("connect", "disconnect"),
+    ("connected", "disconnected"), ("manual", "auto"), ("revoke", "grant"),
+    ("copy", "copied"),
+)
+
+
+def quality_findings(english: dict[str, str], catalog: dict[str, str]) -> list[str]:
+    """Heuristics only: flag likely fallbacks and indistinguishable controls."""
+    findings = []
+    keys = english.keys() & catalog.keys()
+    for key in sorted(keys):
+        value = catalog[key]
+        if not isinstance(value, str):
+            continue
+        # Exclude short labels (often shared loanwords) and language endonyms.
+        if (value == english[key] and key not in UNCHANGED_LABELS
+                and not key.startswith("com_nav_lang_")
+                and len(TOKEN.sub("", value).split()) >= 3
+                and re.search(r"[a-zA-Z]{3,}", value)):
+            findings.append(f"{key}: possible untranslated English text")
+        for first, second in DISTINCT_STATES:
+            if not key.endswith("_" + first):
+                continue
+            other = key[:-len(first)] + second
+            if (other in keys and isinstance(catalog[other], str)
+                    and english[key].strip().casefold() != english[other].strip().casefold()
+                    and value.strip().casefold() == catalog[other].strip().casefold()):
+                findings.append(f"{key} / {other}: identical labels for distinct states")
+    return findings
+
 
 
 def read_catalog(path: Path) -> dict[str, str]:
@@ -59,10 +106,13 @@ def main() -> int:
     loaders = set(re.findall(r"import\('\./([^/]+)/translation\.json'\)", source))
     files = {path.parent.name: path for path in LOCALES.glob("*/translation.json")}
     errors = []
+    quality = []
     if set(files) != locales or loaders != locales - {"en"}:
         errors.append("Locale catalogs, supportedLocales and lazy loaders are out of sync")
     for locale, path in sorted(files.items()):
         catalog = read_catalog(path)
+        if locale != "en":
+            quality.extend(f"{locale}: {finding}" for finding in quality_findings(english, catalog))
         missing = set(english) - set(catalog)
         extra = set(catalog) - set(english)
         if missing or extra:
@@ -81,6 +131,11 @@ def main() -> int:
         print("\n".join(errors), file=sys.stderr)
         return 1
     print(f"Validated {len(files)} WebUI locale catalogs × {len(english)} messages")
+    if quality:
+        print(f"Translation quality audit: {len(quality)} candidates (review in context)")
+        print("\n".join(f"  {finding}" for finding in quality))
+    else:
+        print("Translation quality audit: no fallback or state-collision candidates")
     report_unreferenced(set(english))
     return 0
 

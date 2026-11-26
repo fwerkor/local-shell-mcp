@@ -53,9 +53,11 @@ def _endpoint_info(*, memory_available: bool = False) -> dict:
         # for a custom name unless provider='anthropic'. LSM additionally has
         # an explicit Google native channel, never a generic custom client.
         endpoint_type = ("openAI" if value["provider"] in {"openai", "openai-responses"} else value["provider"])
+        responses = value["provider"] == "openai-responses"
         result[name] = {
             "order": index, "type": endpoint_type, "name": name,
             "modelDisplayLabel": "Model", "userProvide": False,
+            "responsesApiRouting": {"*": {"default": responses, "on": responses, "off": responses}},
         }
     return result
 

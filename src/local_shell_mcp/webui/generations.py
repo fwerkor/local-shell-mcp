@@ -87,6 +87,8 @@ def _web_search_requested(agent: dict | None, payload: dict) -> bool:
         return ephemeral['web_search']
     if type(payload.get('web_search')) is bool:
         return payload['web_search']
+    if type((agent or {}).get('web_search')) is bool:
+        return agent['web_search']
     options = (agent or {}).get('model_parameters') or {}
     if isinstance(options, dict) and type(options.get('web_search')) is bool:
         return options['web_search']
