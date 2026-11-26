@@ -99,3 +99,41 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
                                   json={"presetId": preset["presetId"]})).json()["success"] is True
         assert (await client.get("/api/presets", headers=alice)).json() == []
         assert (await client.get("/api/presets", headers={"x-test-owner": "bob"})).json() == []
+
+
+@pytest.mark.asyncio
+async def test_startup_config_real_auth_middleware_preserves_optional_identity(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    from local_shell_mcp import auth, settings as settings_module
+
+    settings = SimpleNamespace(auth_mode="oauth", public_base_url="https://lsm.example.invalid",
+                               state_dir=tmp_path)
+    monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+
+    def verify(request, _settings):
+        token = request.headers.get("authorization")
+        if token not in {"Bearer alice", "Bearer bob"}:
+            raise HTTPException(401, detail="Invalid bearer")
+        return SimpleNamespace(subject=token.split()[1])
+
+    monkeypatch.setattr(auth, "_verify_oauth", verify)
+    app = auth.AuthMiddleware(Starlette(routes=config_routes.config_routes()))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                base_url="https://lsm.example.invalid") as client:
+        anonymous = await client.get("/api/config")
+        assert anonymous.status_code == 200
+        assert "compactionEnabled" not in anonymous.json()
+        assert anonymous.headers["cache-control"] == "no-store"
+        invalid = await client.get("/api/config", headers={"Authorization": "Bearer expired"})
+        assert invalid.status_code == 200
+        assert "compactionEnabled" not in invalid.json()
+        repo = routes._repo()
+        repo.save_setting("alice", "endpoints", {"summarization": {"enabled": False}})
+        alice = await client.get("/api/config", headers={"Authorization": "Bearer alice"})
+        bob = await client.get("/api/config", headers={"Authorization": "Bearer bob"})
+        assert alice.json()["compactionEnabled"] is False
+        assert bob.json()["compactionEnabled"] is True
+        assert alice.headers["cache-control"] == "no-store"
+        assert "compactionEnabled" not in (await client.get("/api/config")).json()
