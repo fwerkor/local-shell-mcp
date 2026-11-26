@@ -56,8 +56,8 @@ from .semantic_index import (
     render_compaction_semantic_index,
     snapshot_compaction_semantic_index,
 )
-from .steering import SteeringStore, merged_text
 from .sleep_tool import SLEEP_TOOLS, invoke_sleep, sleep_seconds
+from .steering import SteeringStore, merged_text
 from .subagents import (
     MAX_SUBAGENT_DEPTH,
     build_subagent_configs,
