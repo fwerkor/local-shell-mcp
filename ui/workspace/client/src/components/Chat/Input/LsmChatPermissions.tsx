@@ -4,6 +4,7 @@ import { ChevronDown, RotateCcw, ShieldCheck, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ApprovalModeSetting from '../approval/ApprovalModeSetting';
 import { request } from 'librechat-data-provider';
+import useLocalize from '~/hooks/useLocalize';
 
 type Access = 'none' | 'read' | 'write';
 type Scope = 'global' | 'project' | 'chat';
@@ -13,12 +14,11 @@ type ChatPolicy = Policy & Flags & { projectId: string | null };
 type Machine = { name: string; status: string };
 type Project = { id: string; name: string };
 
-const levels: ReadonlyArray<{ value: Access; label: string }> = [
-  { value: 'none', label: '无' },
-  { value: 'read', label: '只读' },
-  { value: 'write', label: '读写' },
-];
-const levelName = (value: Access) => levels.find((level) => level.value === value)?.label ?? '无';
+const levels = [
+  { value: 'none', label: 'com_lsm_permission_none' },
+  { value: 'read', label: 'com_lsm_permission_read' },
+  { value: 'write', label: 'com_lsm_permission_write' },
+] as const;
 
 function MachineAccessRow({
   machine,
@@ -37,7 +37,9 @@ function MachineAccessRow({
   disabled: boolean;
   onChange: (next: Access | 'inherit') => void;
 }) {
+  const localize = useLocalize();
   const effective = explicit ?? inherited;
+  const inheritedLabel = localize(levels.find((level) => level.value === inherited)?.label ?? 'com_lsm_permission_none');
   return (
     <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg py-2">
       <div className="min-w-0 flex-1">
@@ -46,21 +48,21 @@ function MachineAccessRow({
         </div>
         <div className="mt-0.5 text-[11px] text-text-secondary">
           {canInherit && explicit === undefined
-            ? `继承 · ${levelName(inherited)}`
+            ? localize('com_lsm_permission_inherited', { access: inheritedLabel })
             : status === 'offline'
-              ? '离线'
+              ? localize('com_lsm_permission_offline')
               : status === 'disabled'
-                ? '已禁用'
+                ? localize('com_lsm_permission_disabled')
                 : machine === 'local'
-                  ? '本机'
-                  : '自定义'}
+                  ? localize('com_lsm_permission_local')
+                  : localize('com_lsm_permission_custom')}
         </div>
       </div>
-      <div role="group" aria-label={`${machine} 机器权限`}
+      <div role="group" aria-label={localize('com_lsm_permission_machine_label', { machine })}
         className="flex shrink-0 items-center gap-0.5 rounded-lg bg-surface-tertiary p-0.5">
         {levels.map(({ value, label }) => (
           <button type="button" key={value}
-            aria-label={`${machine} ${label}`}
+            aria-label={localize('com_lsm_permission_access_label', { machine, access: localize(label) })}
             aria-pressed={effective === value}
             disabled={disabled}
             onClick={() => onChange(value)}
@@ -69,12 +71,12 @@ function MachineAccessRow({
                 ? 'bg-surface-primary font-semibold text-text-primary shadow-sm'
                 : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
             }`}>
-            {label}
+            {localize(label)}
           </button>
         ))}
       </div>
       {canInherit && (
-        <button type="button" aria-label={`${machine} 恢复继承`} title="使用上级默认"
+        <button type="button" aria-label={localize('com_lsm_permission_reset_label', { machine })} title={localize('com_lsm_permission_inherit_default')}
           disabled={disabled || explicit === undefined} onClick={() => onChange('inherit')}
           className="flex size-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:invisible">
           <RotateCcw size={14} aria-hidden="true" />
@@ -92,6 +94,7 @@ export default function LsmChatPermissions({
   conversationId?: string | null;
   projectId?: string | null;
 }) {
+  const localize = useLocalize();
   const client = useQueryClient();
   const hasChat = !!conversationId && !['new', 'new_conversation'].includes(conversationId);
   const chatId = hasChat ? conversationId! : '';
@@ -229,31 +232,31 @@ export default function LsmChatPermissions({
   return (
     <>
       <button type="button" ref={trigger} aria-haspopup="dialog" aria-expanded={open}
-        aria-label="工具权限" title="工具权限"
+        aria-label={localize('com_lsm_permission_tool_permissions')} title={localize('com_lsm_permission_tool_permissions')}
         className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary ${
           open ? 'bg-surface-hover text-text-primary' : 'text-text-secondary'
         }`}
         onClick={() => setOpen((wasOpen) => !wasOpen)}>
         <ShieldCheck size={15} aria-hidden="true" />
-        <span>权限</span>
+        <span>{localize('com_lsm_permission_permissions')}</span>
         <ChevronDown size={12} aria-hidden="true" className={open ? 'rotate-180' : ''} />
       </button>
 
       {open && createPortal(
-        <div ref={panel} role="dialog" aria-label="工具权限"
+        <div ref={panel} role="dialog" aria-label={localize('com_lsm_permission_tool_permissions')}
           className="lsm-permissions-dialog fixed z-[1000] flex w-96 max-w-[calc(100vw-16px)] max-h-[min(70vh,650px)] flex-col overflow-hidden rounded-2xl border border-border-light bg-surface-primary text-text-primary shadow-xl"
           style={{ right: position.right, bottom: position.bottom }}>
           <div className="flex shrink-0 items-start justify-between gap-2 px-4 pb-3 pt-4">
             <div>
-              <h2 className="text-sm font-semibold">工具权限</h2>
-              <p className="mt-1 text-xs text-text-secondary">控制 AI 可以使用哪些机器工具</p>
+              <h2 className="text-sm font-semibold">{localize('com_lsm_permission_tool_permissions')}</h2>
+              <p className="mt-1 text-xs text-text-secondary">{localize('com_lsm_permission_description')}</p>
             </div>
-            <button type="button" aria-label="关闭权限设置" onClick={() => setOpen(false)}
+            <button type="button" aria-label={localize('com_lsm_permission_close')} onClick={() => setOpen(false)}
               className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-text-primary">
               <X size={16} aria-hidden="true" />
             </button>
           </div>
-          <div className="mx-4 flex shrink-0 gap-1 rounded-lg bg-surface-secondary p-1" role="group" aria-label="权限配置范围">
+          <div className="mx-4 flex shrink-0 gap-1 rounded-lg bg-surface-secondary p-1" role="group" aria-label={localize('com_lsm_permission_scope')}>
             {(['chat', 'project', 'global'] as const).filter((item) => item !== 'chat' || hasChat)
               .map((item) => (
                 <button type="button" key={item} aria-pressed={active === item}
@@ -263,7 +266,7 @@ export default function LsmChatPermissions({
                       : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
                   }`}
                   onClick={() => setScope(item)}>
-                  {item === 'chat' ? '当前会话' : item === 'project' ? '项目默认' : '实例默认'}
+                  {item === 'chat' ? localize('com_lsm_permission_chat') : item === 'project' ? localize('com_lsm_permission_project') : localize('com_lsm_permission_global')}
                 </button>
               ))}
           </div>
@@ -272,15 +275,15 @@ export default function LsmChatPermissions({
             {active === 'project' && (
               associatedProject ? (
                 <div className="mb-3 rounded-lg bg-surface-secondary px-3 py-2 text-xs text-text-secondary">
-                  {projectName || '当前所属项目'}
+                  {projectName || localize('com_lsm_permission_current_project')}
                 </div>
               ) : (
                 <label className="mb-3 block text-xs text-text-secondary">
-                  选择项目
-                  <select aria-label="选择项目" value={selectedProjectId}
+                  {localize('com_lsm_permission_select_project')}
+                  <select aria-label={localize('com_lsm_permission_select_project')} value={selectedProjectId}
                     onChange={(event) => setSelectedProjectId(event.target.value)}
                     className="mt-1 w-full rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary">
-                    <option value="">选择项目…</option>
+                    <option value="">{localize('com_lsm_permission_select_project_placeholder')}</option>
                     {(projects.data?.projects ?? []).map((item) =>
                       <option key={item.id} value={item.id}>{item.name}</option>)}
                   </select>
@@ -288,17 +291,17 @@ export default function LsmChatPermissions({
               )
             )}
             {active === 'project' && !currentProject ? (
-              <p className="py-4 text-center text-xs text-text-secondary">选择项目后可设置该项目的默认权限。</p>
+              <p className="py-4 text-center text-xs text-text-secondary">{localize('com_lsm_permission_select_project_help')}</p>
             ) : (
               <>
                 <div className="mb-1 flex items-center justify-between">
-                  <h3 className="text-xs font-semibold text-text-secondary">机器</h3>
+                  <h3 className="text-xs font-semibold text-text-secondary">{localize('com_lsm_permission_machines')}</h3>
                   <span className="text-[11px] text-text-secondary">
-                    {active === 'global' ? '默认读写' : '未设置时继承上级'}
+                    {active === 'global' ? localize('com_lsm_permission_default_write') : localize('com_lsm_permission_inherit_help')}
                   </span>
                 </div>
                 {machineNames.length === 0 && !machines.isFetching && (
-                  <p className="py-4 text-xs text-text-secondary">暂无可配置机器。</p>
+                  <p className="py-4 text-xs text-text-secondary">{localize('com_lsm_permission_empty')}</p>
                 )}
                 <div className="divide-y divide-border-light">
                   {machineNames.map((machine) => (
@@ -313,12 +316,12 @@ export default function LsmChatPermissions({
             )}
             {active === 'chat' && hasChat && <ApprovalModeSetting conversationId={chatId} />}
             {isUnavailable || mutation.isError ? (
-              <p role="alert" className="mt-2 text-xs text-status-error">权限加载或保存失败，请重试。</p>
+              <p role="alert" className="mt-2 text-xs text-status-error">{localize('com_lsm_permission_error')}</p>
             ) : null}
             <p className="mt-3 text-[11px] text-text-secondary">
-              {active === 'global' ? '新聊天默认使用此配置。' :
-                active === 'project' ? '当前项目的聊天默认继承此配置，可单独覆盖。' :
-                  '修改只影响当前聊天，未覆盖的机器自动继承默认权限。'}
+              {active === 'global' ? localize('com_lsm_permission_global_help') :
+                active === 'project' ? localize('com_lsm_permission_project_help') :
+                  localize('com_lsm_permission_chat_help')}
             </p>
           </div>
         </div>, document.body)}

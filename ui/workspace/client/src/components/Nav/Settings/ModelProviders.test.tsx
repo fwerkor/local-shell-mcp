@@ -3,6 +3,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
 import ModelProviders from './ModelProviders';
 
+jest.mock('~/hooks/useLocalize', () => ({
+  __esModule: true,
+  default: () => (key: string, options: Record<string, unknown> = {}) => {
+    const messages = jest.requireActual('~/locales/en/translation.json');
+    return (messages[key] ?? key).replace(/\{\{([^}]+)\}\}/g, (_: string, name: string) =>
+      String(options[name] ?? ''));
+  },
+}));
+
 jest.mock('librechat-data-provider', () => ({
   apiBaseUrl: () => '',
   QueryKeys: { models: 'models', endpoints: 'endpoints', tokenConfig: 'tokenConfig' },

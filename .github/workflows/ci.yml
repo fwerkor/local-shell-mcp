@@ -62,6 +62,9 @@ jobs:
       - name: Documentation i18n check
         run: python scripts/check-doc-i18n.py
 
+      - name: WebUI i18n check
+        run: python scripts/check-webui-i18n.py
+
       - name: Build documentation strictly
         run: mkdocs build --strict
 

@@ -1,9 +1,19 @@
-# Locales in the LSM chat shell
+# WebUI translations
 
-The LSM WebUI supports English, Simplified Chinese and Traditional
-Chinese. Other browser languages fall back to English. The Controller has its
-own independent, fully translated documentation and WebUI.
+The chat and integrated Controller interface support 41 locales. English is
+bundled initially; other locales are loaded on demand. The language picker
+uses each language's own name and browser language preferences are normalized
+to a supported locale.
 
-Keep this set in sync with `i18n.ts` and the Appearance language selector. If
-another language is required, add the translation and loader together rather
-than copying the upstream locale catalog in full.
+When adding or changing a message, update every catalog in this directory.
+Keep interpolation names (for example `{{count}}`) and markup placeholders
+unchanged. Preserve product and protocol names and use the language's natural
+technical terminology. Run `python scripts/check-webui-i18n.py` from the
+repository root to verify catalog coverage and placeholder integrity. The check
+also reports keys without direct source references. Review dynamic keys,
+API-provided labels, and plural forms before removing candidates; do not delete
+keys solely because the audit reports them.
+
+Some entries were restored from upstream translations and missing entries
+were filled with machine translation. Native-speaker review and terminology
+corrections are welcome.

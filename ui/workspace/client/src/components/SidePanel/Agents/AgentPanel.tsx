@@ -499,7 +499,7 @@ export default function AgentPanel() {
       <form
         onSubmit={handleSubmit(onSubmit)}
         className="scrollbar-gutter-stable flex flex-1 flex-col px-3 pb-3 pt-2"
-        aria-label="Agent configuration form"
+        aria-label={localize('com_lsm_ui_agent_form')}
       >
         <div className="flex-1">
           <div className="flex w-full flex-wrap gap-2">

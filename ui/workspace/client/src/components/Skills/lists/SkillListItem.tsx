@@ -338,7 +338,7 @@ function SkillListItem({
             type="button"
             onClick={handleChevronClick}
             className="-mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-text-secondary hover:text-text-primary"
-            aria-label="Toggle files"
+            aria-label={localize('com_lsm_ui_toggle_files')}
             tabIndex={-1}
           >
             <ChevronDown
