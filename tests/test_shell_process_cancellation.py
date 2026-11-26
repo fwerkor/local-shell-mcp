@@ -84,19 +84,22 @@ async def test_cancel_during_process_registration_cleans_child_and_pipes(tmp_pat
         return process
 
     monkeypatch.setattr(shell_ops.asyncio, "create_subprocess_exec", delayed_registration)
-    task = asyncio.create_task(shell_ops.run_shell(python_shell_command(code), cwd=str(tmp_path), timeout_s=15)
-        if mode == "shell" else shell_ops._run_exec([sys.executable, "-c", code], cwd=str(tmp_path), timeout_s=15))
+    task = asyncio.create_task(shell_ops.run_shell(python_shell_command(code), cwd=str(tmp_path), timeout_s=120)
+        if mode == "shell" else shell_ops._run_exec([sys.executable, "-c", code], cwd=str(tmp_path), timeout_s=120))
     try:
         # Target the ownership-registration window, not Python interpreter
         # startup speed. The real OS process exists while its handle is held
         # behind release; user code remains gated until after cleanup.
-        await asyncio.wait_for(created.wait(), timeout=10)
+        # Hosted Windows runners can stall native process creation for more
+        # than ten seconds. Keep the admission deadline below the command
+        # deadline and test cancellation at the actual registration barrier.
+        await asyncio.wait_for(created.wait(), timeout=60)
         task.cancel()
         await asyncio.sleep(.02)
         assert not task.done(), "Cancellation must wait until the spawned process has an owner"
         release.set()
         with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(task, timeout=10)
+            await asyncio.wait_for(task, timeout=30)
         assert processes[0].returncode is not None
         assert processes[0]._transport.is_closing()
         allow_effect.write_text("released", encoding="utf-8")

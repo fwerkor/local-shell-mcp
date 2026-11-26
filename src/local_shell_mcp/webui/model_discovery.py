@@ -108,7 +108,7 @@ def _parse_page(kind: str, data: dict, models: dict[str, int | None]) -> dict:
     return {}
 
 
-async def _fetch_models(kind: str, base: str, token: str, *, allow_empty: bool = False) -> dict:
+async def _fetch_models(kind: str, base: str, token: str, *, allow_empty: bool = False, account: bool = False) -> dict:
     headers = {'accept': 'application/json'}
     if token:
         if kind == 'google':
@@ -136,6 +136,11 @@ async def _fetch_models(kind: str, base: str, token: str, *, allow_empty: bool =
             data = json.loads(content)
             if not isinstance(data, dict):
                 raise ValueError('Invalid provider model list')
+            if account:
+                if not isinstance(data.get("models"), list):
+                    raise ValueError("Invalid account model list")
+                data = {"data": [{**item, "id": item.get("slug")} for item in data["models"]
+                                 if isinstance(item, dict) and item.get("visibility") == "list"]}
             params = _parse_page(kind, data, models)
             if not params:
                 break
@@ -158,6 +163,12 @@ async def discover_models(request):
         channel = body.get('existing_channel')
         if token is None and channel is not None:
             saved = profile(channel)
+            if saved.get("oauth_id"):
+                if (saved["provider"], saved["base_url"]) != (kind, base):
+                    raise ValueError("Account credentials are bound to the original API endpoint")
+                from .model_oauth import catalog_for
+                result = await catalog_for(_repo().database, saved)
+                return JSONResponse(result, headers={"Cache-Control": "no-store"})
             token = saved.get('api_key')
             if token and (saved['provider'] != kind or saved['base_url'].rstrip('/') != base):
                 raise ValueError('Enter an API key to discover models at a changed endpoint')
@@ -176,7 +187,7 @@ _SYNC_ERROR = 'Unable to refresh model information. Last successful data is reta
 
 
 def connection_identity(value: dict) -> tuple:
-    return (value.get('provider'), (value.get('base_url') or '').rstrip('/'), value.get('api_key') or '')
+    return (value.get('provider'), (value.get('base_url') or '').rstrip('/'), value.get('oauth_id') or value.get('api_key') or '')
 
 
 def _apply_catalog(value: dict, catalog: dict, overrides: dict) -> None:
@@ -200,6 +211,12 @@ def _apply_catalog(value: dict, catalog: dict, overrides: dict) -> None:
 async def prepare_auto_save(value: dict, previous: dict) -> tuple[tuple, dict | None]:
     """Resolve and probe a connection before opening the SQLite write transaction."""
     identity = connection_identity(previous)
+    if previous.get("oauth_id"):
+        from .model_oauth import catalog_for
+        try:
+            return identity, await catalog_for(_repo().database, previous)
+        except (httpx.HTTPError, TimeoutError, ValueError):
+            return identity, None
     same_endpoint = identity[:2] == connection_identity(value)[:2]
     if value['api_key'] is None and identity[2] and not same_endpoint:
         raise HTTPException(400, detail='Enter an API key to use automatic discovery at a changed endpoint')
@@ -237,13 +254,26 @@ async def _refresh_snapshot(database, key: str, raw: str) -> bool:
     if value.get('auto_discover') is not True:
         return False
     try:
-        kind, base, token = validate_connection(value)
-        catalog = await _fetch_models(kind, base, token or '', allow_empty=True)
+        if value.get("oauth_id"):
+            from .model_oauth import catalog_for
+            catalog = await catalog_for(database, value)
+        else:
+            kind, base, token = validate_connection(value)
+            catalog = await _fetch_models(kind, base, token or '', allow_empty=True)
     except (httpx.HTTPError, TimeoutError, ValueError, UnicodeError):
         value['model_sync_error'] = _SYNC_ERROR
     else:
         _apply_catalog(value, catalog, value.get('model_context_overrides') or {})
     with database.connect() as db:
+        if value.get("oauth_id"):
+            current = db.execute("SELECT value FROM settings WHERE owner=? AND key=?", (_OWNER, key)).fetchone()
+            if current:
+                latest, original = json.loads(current[0]), json.loads(raw)
+                fields = ("oauth_credentials", "oauth_error")
+                if all(latest.get(k) == original.get(k) for k in set(latest) | set(original) if k not in fields):
+                    for k in fields:
+                        value[k] = latest.get(k)
+                    raw = current[0]
         cursor = db.execute(
             'UPDATE settings SET value=? WHERE owner=? AND key=? AND value=?',
             (json.dumps(value), _OWNER, key, raw))
@@ -254,13 +284,18 @@ async def refresh_model_channels(database) -> None:
     with database.connect() as db:
         rows = db.execute(
             "SELECT key,value FROM settings WHERE owner=? AND "
-            "(key LIKE ? OR key LIKE ?) AND json_extract(value,'$.auto_discover')=1",
+            "(key LIKE ? OR key LIKE ?) AND (json_extract(value,'$.auto_discover')=1 OR json_extract(value,'$.oauth_id') IS NOT NULL)",
             (_OWNER, _PREFIX + '%', _CHANNEL_PREFIX + '%')).fetchall()
     semaphore = asyncio.Semaphore(4)
 
     async def refresh(row):
         async with semaphore:
-            await _refresh_snapshot(database, row['key'], row['value'])
+            value = json.loads(row['value'])
+            if value.get("oauth_id") and not value.get("auto_discover"):
+                from .model_oauth import access_token
+                await access_token(database, value["name"], value["oauth_id"])
+            else:
+                await _refresh_snapshot(database, row['key'], row['value'])
 
     results = await asyncio.gather(*(refresh(row) for row in rows), return_exceptions=True)
     for result in results:

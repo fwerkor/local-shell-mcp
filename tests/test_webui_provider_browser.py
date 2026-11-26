@@ -73,6 +73,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 await page.get_by_role("heading", name="Channels & models").wait_for()
                 await page.get_by_text("No channels added yet", exact=False).wait_for()
                 await page.get_by_role("button", name="Add channel").click()
+                await page.get_by_role("menuitem", name="Manual configuration").click()
                 await page.get_by_label("Channel name").fill("Primary Research")
                 await page.get_by_label("Model provider", exact=True).select_option("openai")
                 await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
@@ -152,6 +153,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.get_by_test_id("model-selector-button").click()
                     await page.get_by_test_id("model-selector-settings").click()
                     await page.get_by_role("button", name="Add channel").click()
+                    await page.get_by_role("menuitem", name="Manual configuration").click()
                     await page.get_by_label("Channel name").fill("Secondary Research")
                     await page.get_by_label("Model provider").select_option("openai")
                     await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
@@ -187,6 +189,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
 
                     # Deletion requires an explicit second action and removes the model inventory.
                     await page.get_by_role("button", name="Add channel").click()
+                    await page.get_by_role("menuitem", name="Manual configuration").click()
                     await page.get_by_label("Channel name").fill("Temporary Research")
                     await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
                     switch = page.get_by_role("switch", name="Automatically discover model information")

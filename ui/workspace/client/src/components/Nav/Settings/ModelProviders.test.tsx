@@ -1,7 +1,8 @@
+/** @jest-environment-options {"url":"https://lsm.invalid/"} */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
-import ModelProviders from './ModelProviders';
+import ModelProviders, { isLoopback } from './ModelProviders';
 
 jest.mock('~/hooks/useLocalize', () => ({
   __esModule: true,
@@ -45,6 +46,7 @@ async function addChannel() {
   mount();
   await screen.findByText(/No channels added yet/);
   fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Manual configuration' }));
   fireEvent.change(screen.getByLabelText('Channel name'), { target: { value: 'DeepSeek' } });
   fireEvent.change(screen.getByLabelText('Model API base URL'), { target: { value: 'https://api.deepseek.com' } });
   fireEvent.change(screen.getByLabelText('Model API key'), { target: { value: 'key' } });
@@ -168,4 +170,71 @@ it('uses the existing channel form for the fourth, Responses protocol', async ()
   expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
     provider: 'openai-responses', auto_discover: true,
   }));
+});
+
+it('recognizes loopback hosts without relying on the API address', () => {
+  for (const host of ['localhost', '127.0.0.1', '127.1.2.3', '[::1]', '::1']) {
+    expect(isLoopback(host)).toBe(true);
+  }
+  for (const host of ['192.168.1.1', 'localhost.example.org', '127.0.0.1.example.org', 'lsm.invalid']) {
+    expect(isLoopback(host)).toBe(false);
+  }
+});
+
+it('shows the remote callback instructions before opening the official authorization page', async () => {
+  const popup = jest.spyOn(window, 'open').mockReturnValue(null);
+  try {
+    post.mockResolvedValueOnce({ flow: 'mock-flow', authorization_url: 'https://auth.openai.com/example', manual: true });
+    get.mockImplementation(async (target) => target.includes('/oauth/status') ?
+      { status: 'pending' } : { providers: [] });
+    mount();
+    await screen.findByText(/No channels added yet/);
+    fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Continue with ChatGPT' }));
+    expect(screen.getByRole('dialog', { name: 'Connect account' })).toBeInTheDocument();
+    expect(popup).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start authorization' }));
+    const field = await screen.findByLabelText('Full callback URL');
+    expect(popup).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(path + '/oauth/start', {
+      method: 'chatgpt', name: 'Codex', reauthorize: false, manual: true,
+    });
+    expect(screen.getByRole('button', { name: 'Complete authorization' })).toBeDisabled();
+    fireEvent.change(field, { target: { value: 'http://127.0.0.1:1455/auth/callback?code=mock' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Complete authorization' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(path + '/oauth/status?flow=mock-flow', {
+      callback_url: 'http://127.0.0.1:1455/auth/callback?code=mock',
+    }));
+    expect(await screen.findByRole('button', { name: 'Completing authorization…' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  } finally {
+    popup.mockRestore();
+  }
+});
+
+it('allows pasting the same callback when the local listener is unreachable', async () => {
+  const popup = jest.spyOn(window, 'open').mockReturnValue(null);
+  try {
+    post.mockResolvedValueOnce({ flow: 'container-flow', authorization_url: 'https://auth.openai.com/example', manual: false });
+    get.mockImplementation(async (target) => target.includes('/oauth/status') ?
+      { status: 'pending' } : { providers: [] });
+    mount();
+    await screen.findByText(/No channels added yet/);
+    fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Continue with ChatGPT' }));
+    const start = screen.queryByRole('button', { name: 'Start authorization' });
+    if (start) fireEvent.click(start);
+    fireEvent.click(await screen.findByText('Callback not received?'));
+    const field = await screen.findByLabelText('Full callback URL');
+    fireEvent.change(field, { target: { value: 'http://127.0.0.1:1455/auth/callback?code=mock&state=mock' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Complete authorization' }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(path + '/oauth/status?flow=container-flow', {
+      callback_url: 'http://127.0.0.1:1455/auth/callback?code=mock&state=mock',
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  } finally {
+    popup.mockRestore();
+  }
 });
