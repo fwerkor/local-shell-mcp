@@ -12,9 +12,9 @@ export const useMemoriesQuery = (
   config?: UseQueryOptions<MemoriesResponse>,
 ): QueryObserverResult<MemoriesResponse> => {
   return useQuery<MemoriesResponse>([QueryKeys.memories], () => dataService.getMemories(), {
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    refetchOnMount: false,
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: 'always',
+    refetchOnMount: 'always',
     ...config,
   });
 };
@@ -112,30 +112,7 @@ export const useCreateMemoryMutation = (
     {
       ...options,
       onSuccess: (data, variables, context) => {
-        queryClient.setQueryData<MemoriesResponse>([QueryKeys.memories], (oldData) => {
-          if (!oldData) return oldData;
-
-          const newMemories = [...oldData.memories, data.memory];
-          /** Usage totals track the shared personal pool only */
-          const totalTokens = newMemories.reduce(
-            (sum, memory) => sum + (memory.agentId ? 0 : memory.tokenCount || 0),
-            0,
-          );
-          const tokenLimit = oldData.tokenLimit;
-          let usagePercentage = oldData.usagePercentage;
-
-          if (tokenLimit && tokenLimit > 0) {
-            usagePercentage = Math.min(100, Math.round((totalTokens / tokenLimit) * 100));
-          }
-
-          return {
-            ...oldData,
-            memories: newMemories,
-            totalTokens,
-            usagePercentage,
-          };
-        });
-
+        void queryClient.invalidateQueries([QueryKeys.memories]);
         options?.onSuccess?.(data, variables, context);
       },
     },

@@ -604,6 +604,9 @@ export default function useEventHandlers({
       queryClient.invalidateQueries({ queryKey: [key], refetchType: 'all' });
     }
   }, [queryClient]);
+  const onMemoryChange = useCallback(() => {
+    void queryClient.invalidateQueries([QueryKeys.memories]);
+  }, [queryClient]);
   const onSubagentIndexChange = useCallback(
     (conversationId: string) => {
       void queryClient.invalidateQueries([QueryKeys.parentSubagents, conversationId]);
@@ -626,6 +629,7 @@ export default function useEventHandlers({
     setIsSubmitting,
     lastAnnouncementTimeRef,
     onSkillAuthoringComplete,
+    onMemoryChange,
     onSubagentIndexChange,
   });
   const attachmentHandler = useAttachmentHandler(queryClient);

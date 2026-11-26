@@ -26,6 +26,7 @@ export const TOOL_FRIENDLY_NAME_KEYS: Record<string, TranslationKeys> = {
   ask_user_question: 'com_ui_tool_name_ask_user_question',
   create_file: 'com_ui_tool_name_create_file',
   set_memory: 'com_ui_tool_name_set_memory',
+  find_memory: 'com_ui_search',
   edit_file: 'com_ui_tool_name_edit_file',
   delete_memory: 'com_ui_tool_name_delete_memory',
   skill: 'com_ui_skill',

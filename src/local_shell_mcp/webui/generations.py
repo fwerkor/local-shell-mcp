@@ -206,6 +206,7 @@ class GenerationStore:
             "generationCreatedAt": stamp_ms,
             "clientRequestId": client_request_id,
             "generationProtocolVersion": protocol_version,
+            "memoryScope": "agent" if (agent or {}).get("memory_scope") == "agent" else "shared",
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),

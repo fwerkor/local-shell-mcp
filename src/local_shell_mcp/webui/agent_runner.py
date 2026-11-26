@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import logging
+import sqlite3
 import time
 
 from .agent_execution import execute_tool_batch, replay_key
@@ -35,7 +36,7 @@ from .handoff import (
     is_transfer_tool,
 )
 from .memory import (
-    MEMORY_TOOL_USAGE_GUARD,
+    MEMORY_TOOL_INSTRUCTIONS,
     MemoryRepository,
     agent_partition,
     execute_memory_tool,
@@ -156,7 +157,7 @@ class AgentRunner:
             assert_event_lease(self.database, self.owner, self.generation.run_id,
                                self.event_delivery_lease)
 
-    def _memory_context(self, agent: dict | None) -> str:
+    def _memory_context(self, agent: dict | None, query: str | None = None) -> str:
         from .misc_routes import effective_features
         from .storage import WorkspaceRepository
 
@@ -170,11 +171,24 @@ class AgentRunner:
         # the memory capability receives keys and a mutation-tool prompt.
         has_tools = ((agent is None or 'memory' in ((agent or {}).get('tools') or []))
                      and memory_enabled(settings, self.owner, tools=True))
-        formatted = MemoryRepository(self.database).formatted(
-            self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
+        filters = configured_filters(settings, self.owner)
+        memory = MemoryRepository(self.database)
+        if query is not None:
+            from .memory_retrieval import recall_context
+
+            try:
+                recalled = recall_context(memory, self.owner, agent_partition(agent),
+                    query=query, conversation_id=self.authorization_conversation_id,
+                    filters=filters, include_keys=has_tools)
+            except sqlite3.Error:
+                logging.getLogger(__name__).warning('Memory recall failed')
+                recalled = ''
+            context = format_memory_context(recalled) if recalled or has_tools else ''
+            return '\n\n'.join(part for part in (context,
+                MEMORY_TOOL_INSTRUCTIONS if has_tools else '') if part)
+        formatted = memory.formatted(self.owner, agent_partition(agent), filters=filters)
         if formatted.get('readFailed'):
-            # Never lose the mutation consent rule when Memory reads fail.
-            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
+            return MEMORY_TOOL_INSTRUCTIONS if has_tools else ''
         explicit_memory_tool = bool(agent and 'memory' in ((agent or {}).get('tools') or []))
         endpoints = settings.setting(self.owner, 'endpoints', {})
         explicit_memory_config = (
@@ -184,11 +198,11 @@ class AgentRunner:
         if (not explicit_memory_tool and not explicit_memory_config
                 and not (formatted.get('withKeys') or formatted.get('withoutKeys'))):
             # An empty default-enabled store needs no memory-list preamble,
-            # but the mutation consent rule must remain visible to the model
+            # but the memory tool guidance must remain visible to the model
             # whenever its Memory tools are offered.
-            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
+            return MEMORY_TOOL_INSTRUCTIONS if has_tools else ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
-        return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
+        return (context or '') + ('\n\n' + MEMORY_TOOL_INSTRUCTIONS if has_tools else '')
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
@@ -510,7 +524,7 @@ class AgentRunner:
                     },
                 }, actor_lease=self.actor_lease)
             return await invoke_sleep(seconds, self._check_grant)
-        if call.name in {'set_memory', 'delete_memory'}:
+        if call.name in {'set_memory', 'find_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
             from .misc_routes import effective_features
@@ -519,7 +533,8 @@ class AgentRunner:
                     or not memory_enabled(settings, self.owner, tools=True)):
                 raise RuntimeSafetyError('Memory tools are disabled')
             config = {**(memory_config(settings, self.owner) or {}),
-                      'filters': configured_filters(settings, self.owner)}
+                      'filters': configured_filters(settings, self.owner),
+                      'conversation_id': self.authorization_conversation_id}
             result, artifact = execute_memory_tool(MemoryRepository(self.database), self.owner,
                 state.context.agent or {}, call.name, call.arguments, config)
             if artifact is not None:
@@ -1566,7 +1581,15 @@ class AgentRunner:
             skills_text = catalog(self.database, self.owner, self.root_agent)
             # Personal memory remains scoped to the main agent; delegated Agents
             # must independently receive their own selected Skill catalog.
-            memory_text = self._memory_context(self.root_agent) if (
+            user_text = next((message.get('content') for message in reversed(history)
+                              if message.get('role') == 'user'), '')
+            if isinstance(user_text, list):
+                user_text = ' '.join(part.get('text', '') for part in user_text
+                                     if isinstance(part, dict) and part.get('type') in {'text', 'input_text'}
+                                     and isinstance(part.get('text'), str))
+            query = (user_text if isinstance(user_text, str) else '') + '\n' + str(
+                (self.root_agent or {}).get('instructions') or '')
+            memory_text = self._memory_context(self.root_agent, query.strip()) if (
                 not self.namespace or self.graph_node) else ''
             supplementary = []
             if memory_text:
@@ -1797,6 +1820,15 @@ class AgentRunner:
             async for event in self._stream_with_image_fallback(self.stream_text, profile, prepared, **kwargs):
                 yield event
 
+        async def on_model_retry(attempt, maximum, delay, status):
+            self._check_grant()
+            self.store.append(self.owner, self.generation.run_id, {
+                "event": "on_model_retry", "data": {
+                    "attempt": attempt, "maximum": maximum,
+                    "delaySeconds": delay, "httpStatus": status,
+                },
+            }, actor_lease=self.actor_lease)
+
         result = await run_agent_loop(
             state, stream_tools=stream_tools_with_media, stream_text=stream_text_with_media,
             dispatch=self._dispatch, on_text=emit, on_thought=self.on_thought,
@@ -1805,6 +1837,7 @@ class AgentRunner:
             project_messages=self._project_model_messages,
             preflight_calls=self._preflight_model_calls,
             on_boundary=inject_steers, on_stream_chunk=should_seal_stream,
+            on_model_retry=on_model_retry,
             inject_controls=inject if self.task_control_host else None,
             should_preempt=(lambda: self.task_control_host.has_interrupt(self.task_control_id))
             if self.task_control_host and self.task_control_id else None,

@@ -108,7 +108,7 @@ def test_memory_format_definitions_and_tool_artifacts(db):
     assert format_memory_context('')
     assert format_memory_context('known').endswith('known')
     defs = tool_definitions(['style', 'notes'])
-    assert [d['function']['name'] for d in defs] == ['set_memory', 'delete_memory']
+    assert [d['function']['name'] for d in defs] == ['set_memory', 'find_memory']
     assert 'Must be one of' in defs[0]['function']['parameters']['properties']['key']['description']
     assert agent_partition({'id': 'agent_a____1', 'memory_scope': 'agent'}) == 'agent_a'
     agent = {'id': 'agent_a', 'memory_scope': 'agent'}
@@ -118,7 +118,7 @@ def test_memory_format_definitions_and_tool_artifacts(db):
     assert 'Invalid key' in execute_memory_tool(m, 'a', agent, 'set_memory',
                                               {'key': 'other', 'value': 'no'}, {'validKeys': ['style']})[0]
     assert m.list('a', 'agent_a')[0]['key'] == 'style'
-    assert execute_memory_tool(m, 'a', agent, 'delete_memory', {'key': 'style'}, {})[1]['memory']['type'] == 'delete'
+    assert execute_memory_tool(m, 'a', agent, 'set_memory', {'key': 'style', 'value': ''}, {})[1]['memory']['type'] == 'delete'
     assert m.list('a', 'agent_a') == []
 
 
