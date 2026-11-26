@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "Konfigurirano (unesite za zamjenu)",
   "com_lsm_settings_reset": "Vrati na zadano",
   "com_lsm_settings_no_matches": "Nema odgovarajućih postavki",
+  "com_lsm_permission_inherit": "Naslijedi",
+  "com_lsm_permission_reset_all": "Vrati nasljeđivanje za sve",
   "com_lsm_permission_none": "Nema",
   "com_lsm_permission_read": "Samo za čitanje",
   "com_lsm_permission_write": "Čitaj/piši",

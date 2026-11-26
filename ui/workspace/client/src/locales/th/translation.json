@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "กำหนดค่าแล้ว (ป้อนเพื่อแทนที่)",
   "com_lsm_settings_reset": "รีเซ็ต",
   "com_lsm_settings_no_matches": "ไม่มีการตั้งค่าที่ตรงกัน",
+  "com_lsm_permission_inherit": "สืบทอด",
+  "com_lsm_permission_reset_all": "คืนค่าการสืบทอดทั้งหมด",
   "com_lsm_permission_none": "ไม่มี",
   "com_lsm_permission_read": "อ่านอย่างเดียว",
   "com_lsm_permission_write": "อ่าน/เขียน",

@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "Määritetty (korvaa syöttämällä)",
   "com_lsm_settings_reset": "Nollaa",
   "com_lsm_settings_no_matches": "Ei vastaavia asetuksia",
+  "com_lsm_permission_inherit": "Peri",
+  "com_lsm_permission_reset_all": "Palauta kaikkien perintä",
   "com_lsm_permission_none": "Ei mitään",
   "com_lsm_permission_read": "Vain luku",
   "com_lsm_permission_write": "Lue/kirjoita",

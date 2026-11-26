@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "已配置（輸入替換）",
   "com_lsm_settings_reset": "重設",
   "com_lsm_settings_no_matches": "沒有匹配的設置",
+  "com_lsm_permission_inherit": "繼承",
+  "com_lsm_permission_reset_all": "全部恢復繼承",
   "com_lsm_permission_none": "無",
   "com_lsm_permission_read": "只讀",
   "com_lsm_permission_write": "讀/寫",

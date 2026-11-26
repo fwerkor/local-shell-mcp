@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "تەڭشەلدى (ئالماشتۇرۇشقا كىرىڭ)",
   "com_lsm_settings_reset": "ئەسلىگە قايتۇرۇش",
   "com_lsm_settings_no_matches": "ماس كېلىدىغان تەڭشەك يوق",
+  "com_lsm_permission_inherit": "مىراس",
+  "com_lsm_permission_reset_all": "ھەممىسىنى مىراسقا قايتۇرۇش",
   "com_lsm_permission_none": "ياق",
   "com_lsm_permission_read": "پەقەت ئوقۇڭ",
   "com_lsm_permission_write": "ئوقۇش / يېزىش",

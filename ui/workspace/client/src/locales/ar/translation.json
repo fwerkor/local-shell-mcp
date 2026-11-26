@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "تم تكوينه (أدخل للاستبدال)",
   "com_lsm_settings_reset": "إعادة تعيين",
   "com_lsm_settings_no_matches": "لا توجد إعدادات مطابقة",
+  "com_lsm_permission_inherit": "وراثة",
+  "com_lsm_permission_reset_all": "استعادة الوراثة للجميع",
   "com_lsm_permission_none": "لا شيء",
   "com_lsm_permission_read": "اقرأ فقط",
   "com_lsm_permission_write": "القراءة/الكتابة",

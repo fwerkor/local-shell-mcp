@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "Dikonfigurasi (masuk untuk mengganti)",
   "com_lsm_settings_reset": "Setel ulang",
   "com_lsm_settings_no_matches": "Tidak ada pengaturan yang cocok",
+  "com_lsm_permission_inherit": "Warisi",
+  "com_lsm_permission_reset_all": "Pulihkan semua ke warisan",
   "com_lsm_permission_none": "Tidak ada",
   "com_lsm_permission_read": "Hanya baca",
   "com_lsm_permission_write": "Membaca/menulis",

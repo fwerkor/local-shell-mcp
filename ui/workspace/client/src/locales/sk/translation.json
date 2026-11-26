@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "Nakonfigurované (zadajte na nahradenie)",
   "com_lsm_settings_reset": "Resetovať",
   "com_lsm_settings_no_matches": "Žiadne zodpovedajúce nastavenia",
+  "com_lsm_permission_inherit": "Zdediť",
+  "com_lsm_permission_reset_all": "Obnoviť dedenie pre všetky",
   "com_lsm_permission_none": "žiadne",
   "com_lsm_permission_read": "Iba na čítanie",
   "com_lsm_permission_write": "Čítať/písať",

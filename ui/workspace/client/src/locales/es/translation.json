@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "Configurado (ingrese para reemplazar)",
   "com_lsm_settings_reset": "Reiniciar",
   "com_lsm_settings_no_matches": "No hay configuraciones coincidentes",
+  "com_lsm_permission_inherit": "Heredar",
+  "com_lsm_permission_reset_all": "Restaurar herencia para todos",
   "com_lsm_permission_none": "Ninguno",
   "com_lsm_permission_read": "Sólo lectura",
   "com_lsm_permission_write": "Leer/escribir",

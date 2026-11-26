@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "Skonfigurowano (wprowadź, aby zastąpić)",
   "com_lsm_settings_reset": "Resetuj",
   "com_lsm_settings_no_matches": "Brak pasujących ustawień",
+  "com_lsm_permission_inherit": "Dziedzicz",
+  "com_lsm_permission_reset_all": "Przywróć dziedziczenie dla wszystkich",
   "com_lsm_permission_none": "Żadne",
   "com_lsm_permission_read": "Tylko do odczytu",
   "com_lsm_permission_write": "Czytaj/pisz",

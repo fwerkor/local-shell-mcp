@@ -2925,6 +2925,8 @@
   "com_lsm_settings_secret_configured": "구성됨(교체하려면 입력)",
   "com_lsm_settings_reset": "재설정",
   "com_lsm_settings_no_matches": "일치하는 설정이 없습니다.",
+  "com_lsm_permission_inherit": "상속",
+  "com_lsm_permission_reset_all": "모두 상속으로 복원",
   "com_lsm_permission_none": "없음",
   "com_lsm_permission_read": "읽기 전용",
   "com_lsm_permission_write": "읽기/쓰기",
