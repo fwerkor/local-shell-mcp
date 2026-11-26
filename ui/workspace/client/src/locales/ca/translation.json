@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Elimina fitxer",
   "com_ui_attach_warn_endpoint": "Els fitxers que no són d'assistent es poden ignorar si no hi ha una eina compatible",
   "com_ui_attached_image": "Imatge adjunta",
+  "com_ui_attachment_image_fallback": "Aquest model no admet l’entrada directa d’imatges. S’han proporcionat els camins dels fitxers adjunts.",
   "com_ui_attachment": "Adjunt",
   "com_ui_auth_apikey_desc": "Envieu una clau o un testimoni amb cada sol·licitud",
   "com_ui_auth_format_hint": "Normalment comença amb \"{{0}}\"",

@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Dosyayı kaldır",
   "com_ui_attach_warn_endpoint": "Asistan olmayan dosyalar uyumlu bir araç olmadan göz ardı edilebilir",
   "com_ui_attached_image": "Ekli resim",
+  "com_ui_attachment_image_fallback": "Bu model doğrudan görsel girişini desteklemiyor. Bunun yerine ek dosyaların yolları iletildi.",
   "com_ui_attachment": "Ek",
   "com_ui_auth_apikey_desc": "Her istekle birlikte bir anahtar veya belirteç gönderin",
   "com_ui_auth_format_hint": "Bu genellikle \"{{0}}\" ile başlar",

@@ -93,6 +93,27 @@ async def _data_frames(response) -> AsyncIterator[str]:
         yield "\n".join(data)
 
 
+class UnsupportedImageInput(Exception):
+    """Explicit pre-output provider rejection of image input."""
+
+
+def image_input_rejected(problem: str) -> bool:
+    text = problem.lower()
+    return bool(re.search(
+        r"(?:image|vision|multimodal|input_image|image_url).{0,100}(?:not support|unsupported|not allowed|not enabled|only supports text)"
+        r"|(?:not support|unsupported|not allowed|only supports text).{0,100}(?:image|vision|multimodal|input_image|image_url)"
+        r"|(?:text.only model|only text input)", text, re.DOTALL,
+    ))
+
+
+async def check_image_response(response) -> None:
+    if response.status_code in {400, 415, 422}:
+        problem = (await response.aread())[:8192].decode("utf-8", errors="replace")
+        if image_input_rejected(problem):
+            raise UnsupportedImageInput("Provider does not support image input")
+    response.raise_for_status()
+
+
 @asynccontextmanager
 async def _provider_stream(client, url: str, *, body: dict, headers: dict):
     """Request streaming usage where supported; retry only explicit unsupported-option errors.
@@ -106,10 +127,10 @@ async def _provider_stream(client, url: str, *, body: dict, headers: dict):
             if b'stream_options' in problem or b'include_usage' in problem:
                 without_usage = {key: value for key, value in body.items() if key != 'stream_options'}
                 async with client.stream("POST", url, json=without_usage, headers=headers) as retry:
-                    retry.raise_for_status()
+                    await check_image_response(retry)
                     yield retry
                 return
-        response.raise_for_status()
+        await check_image_response(response)
         yield response
 
 
@@ -305,6 +326,8 @@ async def stream_model(
             except json.JSONDecodeError:
                 continue
             if "error" in event:
+                if image_input_rejected(json.dumps(event)):
+                    raise UnsupportedImageInput("Provider does not support image input")
                 raise RuntimeError("Model provider rejected the generation request")
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "openai":
@@ -443,6 +466,8 @@ async def stream_model_with_tools(
             except json.JSONDecodeError:
                 continue
             if "error" in event:
+                if image_input_rejected(json.dumps(event)):
+                    raise UnsupportedImageInput("Provider does not support image input")
                 raise RuntimeError("Model provider rejected the generation request")
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             for choice in event.get("choices", []):

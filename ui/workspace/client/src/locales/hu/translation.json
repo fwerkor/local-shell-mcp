@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Fájl eltávolítása",
   "com_ui_attach_warn_endpoint": "A nem asszisztens fájlokat figyelmen kívül hagyhatják kompatibilis eszköz nélkül",
   "com_ui_attached_image": "Mellékelt kép",
+  "com_ui_attachment_image_fallback": "Ez a modell nem támogatja a közvetlen képbemenetet. Helyette a mellékletek elérési útjai lettek megadva.",
   "com_ui_attachment": "Csatolmány",
   "com_ui_auth_apikey_desc": "Minden kérelemhez küldjön egy kulcsot vagy tokent",
   "com_ui_auth_format_hint": "Ez általában \"{{0}}\"-vel kezdődik",

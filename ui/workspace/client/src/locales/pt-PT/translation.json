@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Remover ficheiro",
   "com_ui_attach_warn_endpoint": "Os ficheiros que não sejam do Assistente podem ser ignorados sem uma ferramenta compatível",
   "com_ui_attached_image": "Imagem anexada",
+  "com_ui_attachment_image_fallback": "Este modelo não aceita imagens diretamente. Foram fornecidos os caminhos dos anexos.",
   "com_ui_attachment": "Anexo",
   "com_ui_auth_apikey_desc": "Enviar uma chave ou token com cada pedido",
   "com_ui_auth_format_hint": "Normalmente começa por \"{{0}}\"",

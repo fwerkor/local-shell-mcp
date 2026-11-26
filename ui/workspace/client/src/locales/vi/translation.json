@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Xóa tập tin",
   "com_ui_attach_warn_endpoint": "Các tệp không có Trợ lý có thể bị bỏ qua nếu không có công cụ tương thích",
   "com_ui_attached_image": "Hình ảnh đính kèm",
+  "com_ui_attachment_image_fallback": "Mô hình này không hỗ trợ đầu vào hình ảnh trực tiếp. Thay vào đó, đường dẫn tệp đính kèm đã được cung cấp.",
   "com_ui_attachment": "Tệp đính kèm",
   "com_ui_auth_apikey_desc": "Gửi khóa hoặc mã thông báo với mỗi yêu cầu",
   "com_ui_auth_format_hint": "Điều này thường bắt đầu bằng \"{{0}}\"",

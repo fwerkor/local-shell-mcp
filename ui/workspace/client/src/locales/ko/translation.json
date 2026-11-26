@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "파일 제거",
   "com_ui_attach_warn_endpoint": "호환되는 도구가 없으면 비어시스턴트 파일이 무시될 수 있습니다.",
   "com_ui_attached_image": "첨부된 이미지",
+  "com_ui_attachment_image_fallback": "이 모델은 이미지 직접 입력을 지원하지 않아 첨부 파일 경로를 대신 제공했습니다.",
   "com_ui_attachment": "첨부 파일",
   "com_ui_auth_apikey_desc": "각 요청마다 키 또는 토큰 보내기",
   "com_ui_auth_format_hint": "일반적으로 \"{{0}}\"로 시작합니다.",
