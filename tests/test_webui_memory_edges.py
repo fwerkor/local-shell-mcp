@@ -96,7 +96,7 @@ def test_memory_quota_error_artifacts_and_transaction_guards(state):
     assert tool('set_memory', {'key': 'new', 'value': None}, {})[1] is None
     assert tool('set_memory', {'key': 'a' * 1001, 'value': 'No.'}, {})[0].startswith('Key exceeds')
     assert tool('set_memory', {'key': 'valid', 'value': 'something long'}, {'charLimit': 2})[0].startswith('Value exceeds')
-    assert tool('delete_memory', {'key': 'unknown'}, {}) == ('Failed to delete memory for key "unknown"', None)
+    assert tool('set_memory', {'key': 'unknown', 'value': ''}, {}) == ('Failed to delete memory for key "unknown"', None)
     message, artifact = tool('set_memory', {'key': 'second', 'value': 'New.'}, {'tokenLimit': count})
     assert 'exceeded' in message and artifact['memory']['type'] == 'error'
     message, artifact = tool('set_memory', {'key': 'second', 'value': 'Two more words.'}, {'tokenLimit': count+1})
@@ -112,7 +112,7 @@ def test_memory_tool_error_paths_do_not_claim_write(state):
                                    {'key': 'style', 'value': 'Hello world'}, {})
 
     def delete_tool():
-        return execute_memory_tool(store, 'local', {}, 'delete_memory', {'key': 'style'}, {})
+        return execute_memory_tool(store, 'local', {}, 'set_memory', {'key': 'style', 'value': ''}, {})
     for exc in (OverflowError(), ValueError(), sqlite3.IntegrityError(), KeyError(), RuntimeError()):
         with patch.object(store, 'write', side_effect=exc):
             message, artifact = set_tool()

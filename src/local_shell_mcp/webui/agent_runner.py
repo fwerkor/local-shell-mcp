@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import logging
+import sqlite3
 import time
 
 from .agent_execution import execute_tool_batch, replay_key
@@ -153,7 +154,7 @@ class AgentRunner:
             assert_event_lease(self.database, self.owner, self.generation.run_id,
                                self.event_delivery_lease)
 
-    def _memory_context(self, agent: dict | None) -> str:
+    def _memory_context(self, agent: dict | None, query: str | None = None) -> str:
         from .misc_routes import effective_features
         from .storage import WorkspaceRepository
 
@@ -167,10 +168,23 @@ class AgentRunner:
         # the memory capability receives keys and a mutation-tool prompt.
         has_tools = ((agent is None or 'memory' in ((agent or {}).get('tools') or []))
                      and memory_enabled(settings, self.owner, tools=True))
-        formatted = MemoryRepository(self.database).formatted(
-            self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
+        filters = configured_filters(settings, self.owner)
+        memory = MemoryRepository(self.database)
+        if query is not None:
+            from .memory_retrieval import recall_context
+
+            try:
+                recalled = recall_context(memory, self.owner, agent_partition(agent),
+                    query=query, conversation_id=self.authorization_conversation_id,
+                    filters=filters, include_keys=has_tools)
+            except sqlite3.Error:
+                logging.getLogger(__name__).warning('Memory recall failed')
+                recalled = ''
+            context = format_memory_context(recalled) if recalled or has_tools else ''
+            return '\n\n'.join(part for part in (context,
+                MEMORY_TOOL_INSTRUCTIONS if has_tools else '') if part)
+        formatted = memory.formatted(self.owner, agent_partition(agent), filters=filters)
         if formatted.get('readFailed'):
-            # Never lose the memory tool guidance when Memory reads fail.
             return MEMORY_TOOL_INSTRUCTIONS if has_tools else ''
         explicit_memory_tool = bool(agent and 'memory' in ((agent or {}).get('tools') or []))
         endpoints = settings.setting(self.owner, 'endpoints', {})
@@ -487,7 +501,7 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
-        if call.name in {'set_memory', 'delete_memory'}:
+        if call.name in {'set_memory', 'find_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
             from .misc_routes import effective_features
@@ -496,7 +510,8 @@ class AgentRunner:
                     or not memory_enabled(settings, self.owner, tools=True)):
                 raise RuntimeSafetyError('Memory tools are disabled')
             config = {**(memory_config(settings, self.owner) or {}),
-                      'filters': configured_filters(settings, self.owner)}
+                      'filters': configured_filters(settings, self.owner),
+                      'conversation_id': self.authorization_conversation_id}
             result, artifact = execute_memory_tool(MemoryRepository(self.database), self.owner,
                 state.context.agent or {}, call.name, call.arguments, config)
             if artifact is not None:
@@ -1387,7 +1402,15 @@ class AgentRunner:
             skills_text = catalog(self.database, self.owner, self.root_agent)
             # Personal memory remains scoped to the main agent; delegated Agents
             # must independently receive their own selected Skill catalog.
-            memory_text = self._memory_context(self.root_agent) if (
+            user_text = next((message.get('content') for message in reversed(history)
+                              if message.get('role') == 'user'), '')
+            if isinstance(user_text, list):
+                user_text = ' '.join(part.get('text', '') for part in user_text
+                                     if isinstance(part, dict) and part.get('type') in {'text', 'input_text'}
+                                     and isinstance(part.get('text'), str))
+            query = (user_text if isinstance(user_text, str) else '') + '\n' + str(
+                (self.root_agent or {}).get('instructions') or '')
+            memory_text = self._memory_context(self.root_agent, query.strip()) if (
                 not self.namespace or self.graph_node) else ''
             supplementary = []
             if memory_text:

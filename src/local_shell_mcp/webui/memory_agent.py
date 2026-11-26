@@ -17,7 +17,6 @@ from .content_filters import (
     validate_tool_arguments,
 )
 from .memory import (
-    MEMORY_TOOL_INSTRUCTIONS,
     MemoryRepository,
     agent_partition,
     execute_memory_tool,
@@ -34,7 +33,7 @@ _log = logging.getLogger(__name__)
 
 def _default_instructions(keys: list[str], token_limit: int | None) -> str:
     """Port packages/api/src/agents/memory.ts:getDefaultInstructions."""
-    instructions = MEMORY_TOOL_INSTRUCTIONS
+    instructions = 'Save useful information proactively with set_memory. Set an empty value to remove obsolete memories.'
     if keys:
         instructions += '\nVALID KEYS: ' + ', '.join(keys) + '\n'
     if token_limit:
@@ -150,11 +149,11 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
         return 0
     writes = 0
     try:
-        async for event in stream_tools(chosen, messages, tools=tool_definitions(allowed_keys),
+        async for event in stream_tools(chosen, messages, tools=tool_definitions(allowed_keys)[:1],
                                         max_tokens=1024, temperature=None):
             if not isinstance(event, ModelToolCall):
                 continue
-            if event.name not in {'set_memory', 'delete_memory'}:
+            if event.name != 'set_memory':
                 continue
             from .generations import GenerationStore
 

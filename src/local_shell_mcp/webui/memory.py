@@ -25,8 +25,8 @@ MEMORY_INSTRUCTIONS = ('Persistent memory is available across conversations with
                        'unavailable. Use memory tools only if provided; claim a memory was saved or deleted only '
                        'after the action is confirmed.')
 MEMORY_TOOL_INSTRUCTIONS = (
-    'Use memory tools proactively to save or update information useful in future conversations, '
-    'without waiting for an explicit request. Remove obsolete memories or forget information when asked.'
+    'Use memory proactively. Find relevant memories or past conversations with find_memory, '
+    'save useful information with set_memory, and set an empty value to remove obsolete memories.'
 )
 _VALID_KEY = re.compile(r'^[a-z_]+$')
 
@@ -92,18 +92,20 @@ def memory_enabled(repo: Any, owner: str, *, tools: bool = False) -> bool:
 def tool_definitions(valid_keys: list[str] | None = None) -> list[dict]:
     suffix = f'Must be one of: {", ".join(valid_keys)}' if valid_keys else None
     key_description = f'The key of the memory value. {suffix}' if suffix else 'The key identifier for this memory'
-    deletion_description = f'The key of the memory to delete. {suffix}' if suffix else 'The key identifier of the memory to delete'
     return [
         {'type': 'function', 'function': {
-            'name': 'set_memory', 'description': 'Saves important information about the user into memory.',
+            'name': 'set_memory', 'description': 'Save or update a memory; an empty string deletes the key.',
             'parameters': {'type': 'object', 'properties': {
                 'key': {'type': 'string', 'description': key_description},
-                'value': {'type': 'string', 'description': 'Value MUST be a complete sentence that fully describes relevant user information.'}},
+                'value': {'type': 'string', 'description': 'Information worth remembering; empty string deletes.'}},
                 'required': ['key', 'value']}}},
         {'type': 'function', 'function': {
-            'name': 'delete_memory', 'description': 'Deletes specific memory data about the user using the provided key. For updating existing memories, use the `set_memory` tool instead',
+            'name': 'find_memory', 'description': 'Find saved memories and optionally text from other conversations. Empty query lists saved memories.',
             'parameters': {'type': 'object', 'properties': {
-                'key': {'type': 'string', 'description': deletion_description}}, 'required': ['key']}}},
+                'query': {'type': 'string', 'description': 'Search terms or exact memory key.'},
+                'include_conversations': {'type': 'boolean', 'description': 'Search other conversations as well (default false).'},
+                'page': {'type': 'integer', 'minimum': 1, 'description': 'Result page, default 1.'},
+                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50, 'description': 'Results per page, default 10.'}}}}},
     ]
 
 
@@ -222,6 +224,26 @@ class MemoryRepository:
 def execute_memory_tool(repo: MemoryRepository, owner: str, agent: dict, name: str,
                         arguments: dict, config: dict) -> tuple[str, dict | None]:
     """ToolNode result and memory artifact; errors never masquerade as writes."""
+    if name == 'find_memory':
+        from .memory_retrieval import retrieve
+
+        query = arguments.get('query', '')
+        include = arguments.get('include_conversations', False)
+        page, limit = arguments.get('page', 1), arguments.get('limit', 10)
+        if (not isinstance(query, str) or not isinstance(include, bool)
+                or type(page) is not int or not 1 <= page <= 10000
+                or type(limit) is not int or not 1 <= limit <= 50):
+            return ('Invalid memory search parameters.', None)
+        try:
+            result = retrieve(repo, owner, agent_partition(agent), query=query,
+                              include_conversations=include,
+                              conversation_id=config.get('conversation_id', ''),
+                              page=page, limit=limit, filters=config.get('filters'))
+        except sqlite3.Error:
+            return ('Memory search unavailable.', None)
+        return (json.dumps(result, ensure_ascii=False), None)
+    if name != 'set_memory':
+        return ('Unknown memory tool.', None)
     key = arguments.get('key')
     if not isinstance(key, str):
         return ('Invalid key', None)
@@ -229,8 +251,9 @@ def execute_memory_tool(repo: MemoryRepository, owner: str, agent: dict, name: s
     if isinstance(keys, list) and keys and key not in keys:
         return (f'Invalid key "{key}". Must be one of: {", ".join(keys)}', None)
     agent_id = agent_partition(agent)
+    deleting = arguments.get('value') == ''
     try:
-        if name == 'delete_memory':
+        if deleting:
             deleted = repo.delete(owner, key=key, agent_id=agent_id)
             if not deleted:
                 return (f'Failed to delete memory for key "{key}"', None)
@@ -260,6 +283,6 @@ def execute_memory_tool(repo: MemoryRepository, owner: str, agent: dict, name: s
     except OverflowError:
         return ('Memory storage would exceed limit. Cannot save this memory.', None)
     except (ValueError, sqlite3.IntegrityError, KeyError):
-        return (f'Failed to set memory for key "{key}"' if name == 'set_memory' else f'Failed to delete memory for key "{key}"', None)
+        return (f'Failed to set memory for key "{key}"' if not deleting else f'Failed to delete memory for key "{key}"', None)
     except Exception:
-        return (f'Error setting memory for key "{key}"' if name == 'set_memory' else f'Error deleting memory for key "{key}"', None)
+        return (f'Error setting memory for key "{key}"' if not deleting else f'Error deleting memory for key "{key}"', None)

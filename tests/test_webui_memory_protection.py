@@ -176,7 +176,7 @@ async def test_runner_model_context_never_leaks_filtered_legacy_memory(memory_st
     prompt = runner._memory_context(agent)
     assert 'PRIVATE-OLDER' not in prompt
     assert 'contentFilterBlocked' not in prompt
-    assert 'Use memory tools proactively' in prompt
+    assert 'Use memory proactively' in prompt
 
 
 @pytest.mark.parametrize('bad_rules', [
