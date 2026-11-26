@@ -125,10 +125,10 @@ function TokenUsageIndicator({
         2: String(Math.round(view.percent)),
       })
     : localize('com_ui_context_usage_label_unknown', { 0: formatTokens(view.usedTokens) });
-  const ariaLabel = compaction.isCompacting
-    ? localize('com_ui_context_compacting')
-    : usageAriaLabel;
-  const showCompactingIndicator = compaction.isCompacting && !popoverOpen;
+  const compactionStatus = view.snapshotActive ? view.snapshot?.compactionStatus : undefined;
+  const isCompacting = compaction.isCompacting || (isSubmitting && compactionStatus === 'running');
+  const ariaLabel = isCompacting ? localize('com_ui_context_compacting') : usageAriaLabel;
+  const showCompactingIndicator = isCompacting && !popoverOpen;
 
   return (
     <>
@@ -142,7 +142,7 @@ function TokenUsageIndicator({
         type="button"
         data-testid="token-usage"
         aria-label={ariaLabel}
-        aria-busy={compaction.isCompacting}
+        aria-busy={isCompacting}
         aria-haspopup="dialog"
         onPointerDown={() => {
           pinAtPointerDownRef.current = pinnedRef.current;
@@ -235,9 +235,16 @@ function TokenUsageIndicator({
           <div className="border-t border-border-light" role="separator" />
           <CompactAction
             compact={compaction.compact}
-            canCompact={compactionAvailable && compaction.canCompact}
-            isCompacting={compaction.isCompacting}
+            canCompact={compactionAvailable && compaction.canCompact && !isCompacting}
+            isCompacting={isCompacting}
           />
+          {!isCompacting && compactionStatus != null && compactionStatus !== 'running' && (
+            <div role="status" className="text-xs text-text-secondary">
+              {compactionStatus === 'failed'
+                ? localize('com_ui_summarize_failed')
+                : localize('com_a11y_summarize_completed')}
+            </div>
+          )}
         </div>
       </Ariakit.Popover>
     </>

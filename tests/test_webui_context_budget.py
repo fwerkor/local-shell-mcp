@@ -194,9 +194,9 @@ async def test_runtime_auto_compacts_with_real_model_callback_and_resume(ctx):
     assert called
     usage = [value['data'] for _, value in store.events('a', next_run.run_id)
              if value.get('event') == 'on_context_usage']
-    assert len(usage) == 1
-    assert usage[0]['breakdown']['summaryTokens'] > 0
-    assert usage[0]['breakdown']['messageCount'] == len(state.messages) - 1
+    assert [item['compactionStatus'] for item in usage] == ['running', 'complete']
+    assert usage[-1]['breakdown']['summaryTokens'] > 0
+    assert usage[-1]['breakdown']['messageCount'] == len(state.messages) - 1
     assert state.messages[0]['content'].startswith('<summary>')
     assert state.messages[-1]['content'] == 'last question'
     assert len(state.messages) < len(original)
@@ -564,3 +564,78 @@ async def test_live_compaction_requested_during_tool_batch_resumes_model(ctx):
     assert len(called) == 2
     assert result[-1]['content'] == 'Continued after compaction.'
     assert store.live_compaction_status('a', run.run_id, receipt['requestId']) == 'complete'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_fragment", [False, True])
+async def test_oversized_tool_result_fragmented_checkpoint_is_atomic(ctx, fail_fragment):
+    db, store, _, profile = ctx
+    run, _ = store.begin('a', {'text': 'Read the entire result'})
+    original = [{'role': 'user', 'content': 'Read the entire result'},
+                *_tool_exchange('huge', 18000), *_tool_exchange('recent', 5)]
+    original[2]['content'] += ' END_OF_TOOL_RESULT'
+    fragments = []
+
+    async def summarize(_profile, messages, **kwargs):
+        if any(message.get('role') == 'tool' for message in messages):
+            raise ValueError('context length exceeded')
+        assert sum(map(message_token_count, messages)) + kwargs['max_tokens'] <= 8192
+        fragments.append(messages[0]['content'])
+        assert not called_summary(store, run.run_id)
+        if fail_fragment and len(fragments) == 2:
+            raise ValueError('provider disconnected')
+        if len(fragments) > 1:
+            assert 'Checkpoint fragment' in messages[-1]['content']
+        yield 'Checkpoint fragment ' + str(len(fragments))
+
+    runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=summarize, on_text=_emit_noop,
+                         profile=profile)
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 8192}), list(original))
+    await runner._before_model(state)
+    assert len(fragments) >= 2
+    snapshots = [value['data'] for _, value in store.events('a', run.run_id)
+                 if value.get('event') == 'on_context_usage']
+    if fail_fragment:
+        assert state.messages == original
+        assert not called_summary(store, run.run_id)
+        assert snapshots[-1]['compactionStatus'] == 'failed'
+    else:
+        assert any('END_OF_TOOL_RESULT' in fragment for fragment in fragments)
+        assert called_summary(store, run.run_id)
+        assert state.messages[-2:] == original[-2:]
+        assert snapshots[-1]['compactionStatus'] == 'complete'
+        assert snapshots[-1]['breakdown']['messageTokens'] < 100
+
+
+@pytest.mark.asyncio
+async def test_auto_compaction_can_recover_after_more_than_three_failures(ctx):
+    db, store, repo, profile = ctx
+    run, _ = store.begin('a', {'text': 'Keep reading'})
+    repo.save_setting('a', 'endpoints', {'summarization': {
+        'trigger': {'type': 'token_ratio', 'value': 0.05},
+        'parameters': {'maxSummaryTokens': 200}}})
+    attempts = []
+
+    async def summarize(_profile, messages, **kwargs):
+        attempts.append(messages)
+        if len(attempts) <= 4:
+            raise ValueError('temporary provider failure')
+        yield 'Recovered summary.'
+
+    runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=summarize, on_text=_emit_noop,
+                         profile=profile)
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 10000}),
+                           [{'role': 'user', 'content': 'Keep reading'},
+                            *_tool_exchange('initial', 600)])
+    for i in range(4):
+        await runner._before_model(state)
+        assert not called_summary(store, run.run_id)
+        await runner._before_model(state)
+        assert len(attempts) == i + 1
+        state.messages.extend(_tool_exchange(str(i), 10))
+    await runner._before_model(state)
+    assert len(attempts) == 5
+    assert called_summary(store, run.run_id)
+    assert state.messages[0]['content'].startswith('<summary>')

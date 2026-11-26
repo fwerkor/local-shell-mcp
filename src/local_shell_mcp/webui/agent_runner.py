@@ -123,7 +123,7 @@ class AgentRunner:
         self.route = HandoffRouting(self.graph_entry_id, self.graph_max_handoffs, self.graph_parallel)
         self.memory_artifacts: dict[str, dict] = {}
         self._last_compaction_attempt_size = -1
-        self._summary_failures = 0
+        self._compaction_status = None
 
     def _check_grant(self):
         if self.webui_cookie is not None:
@@ -969,7 +969,7 @@ class AgentRunner:
 
     async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
                                  prompt=None, update_prompt=None, head_count=0,
-                                 semantic_index=None, retained_tail=None, profile=None, live_request_id=None):
+                                 semantic_index=None, retained_tail=None, profile=None, live_request_id=None, context_limit=None):
         """Request the original checkpoint prompt from the selected model.
 
         A failed/partial summary is never written, and never makes the old
@@ -1027,41 +1027,27 @@ class AgentRunner:
         policy = configured_filters(WorkspaceRepository(self.database), self.owner)
         if inspect_content(model_message_fragments(summary_messages), policy) is not None:
             raise RuntimeSafetyError('Summary context was blocked by content protection')
-        chunks = []
-        finish_reason = None
         limit = max(128, min(int(max_tokens), 16384))
         profile = profile or self.initial_profile or self._context(self.root_agent).profile
-        if profile.provider in {"anthropic", "google"}:
-            from .provider_tool_protocols import stream_native_tools
+        try:
+            summary = await self._request_summary(profile, summary_messages, limit)
+        except RuntimeSafetyError:
+            raise
+        except Exception:
+            if context_limit is None:
+                raise
+            # A huge individual tool response can overflow even a summary-only
+            # request. Never persist a prefix checkpoint: fold the full source
+            # in bounded textual fragments and commit only the final summary.
+            from .context_budget import message_token_count
 
-            response = stream_native_tools(profile, summary_messages, tools=[],
-                                           max_tokens=limit, temperature=None,
-                                           emit_finish_reason=True)
-        else:
-            response = self.stream_text(profile, summary_messages, max_tokens=limit,
-                                        emit_finish_reason=True)
-        async for value in response:
-            if isinstance(value, str):
-                chunks.append(value)
-            elif isinstance(value, (ModelUsage, ModelThought)):
-                # A summarizer's provider metadata must never be inserted into
-                # user-visible checkpoint text or mistaken for a tool call.
-                continue
-            elif isinstance(value, ModelFinish):
-                finish_reason = value.reason.lower()
-            else:
-                raise ValueError('Summary provider returned a tool call instead of text')
-        summary = ''.join(chunks).strip()
-        if not summary:
-            raise ValueError('Summarization produced empty output')
-        if finish_reason in {'length', 'max_tokens', 'max_tokens_reached', 'max_output_tokens',
-                             'max_output_tokens_reached', 'incomplete'}:
-            raise ValueError('Summary response was truncated by the provider output limit')
-        # Some OpenAI-compatible endpoints omit finish_reason entirely. For
-        # them, refuse near-limit output instead of committing a partial
-        # checkpoint whose source conversation would become unreachable.
-        if finish_reason in {None, 'unknown'} and count_tokens(summary, exact=False) >= limit * 0.85:
-            raise ValueError('Summary completion is unverified near output token limit')
+            if sum(map(message_token_count, summary_messages)) < context_limit / 2:
+                raise
+            logging.getLogger(__name__).warning('Full context summary failed; trying bounded fragments')
+            summary = await self._summarize_fragments(
+                profile, summary_messages[:-1], prior=prior, context_limit=context_limit,
+                max_tokens=limit, prompt=prompt or DEFAULT_SUMMARIZATION_PROMPT,
+                update_prompt=update_prompt or DEFAULT_UPDATE_SUMMARIZATION_PROMPT)
         count = count_tokens(build_summary_carrier_text(summary), exact=False)
         covered_calls = set()
         covered_steers = set()
@@ -1099,6 +1085,105 @@ class AgentRunner:
                     }},},
             })
         return summary
+
+    async def _request_summary(self, profile, summary_messages, limit):
+        from .tokenizer import count_tokens
+
+        chunks = []
+        finish_reason = None
+        if profile.provider in {"anthropic", "google"}:
+            from .provider_tool_protocols import stream_native_tools
+
+            response = stream_native_tools(profile, summary_messages, tools=[],
+                                           max_tokens=limit, temperature=None,
+                                           emit_finish_reason=True)
+        else:
+            response = self.stream_text(profile, summary_messages, max_tokens=limit,
+                                        emit_finish_reason=True)
+        async for value in response:
+            if isinstance(value, str):
+                chunks.append(value)
+            elif isinstance(value, (ModelUsage, ModelThought)):
+                # A summarizer's provider metadata must never be inserted into
+                # user-visible checkpoint text or mistaken for a tool call.
+                continue
+            elif isinstance(value, ModelFinish):
+                finish_reason = value.reason.lower()
+            else:
+                raise ValueError('Summary provider returned a tool call instead of text')
+        summary = ''.join(chunks).strip()
+        if not summary:
+            raise ValueError('Summarization produced empty output')
+        if finish_reason in {'length', 'max_tokens', 'max_tokens_reached', 'max_output_tokens',
+                             'max_output_tokens_reached', 'incomplete'}:
+            raise ValueError('Summary response was truncated by the provider output limit')
+        # Some OpenAI-compatible endpoints omit finish_reason entirely. For
+        # them, refuse near-limit output instead of committing a partial
+        # checkpoint whose source conversation would become unreachable.
+        if finish_reason in {None, 'unknown'} and count_tokens(summary, exact=False) >= limit * 0.85:
+            raise ValueError('Summary completion is unverified near output token limit')
+        return summary
+
+    async def _summarize_fragments(self, profile, messages, *, prior, context_limit,
+                                   max_tokens, prompt, update_prompt):
+        from .compaction import build_summarization_instruction
+        from .context_budget import message_token_count
+        from .tokenizer import count_tokens
+
+        # Text-only recovery deliberately refuses media rather than silently
+        # discarding image/attachment data from a checkpoint.
+        records = []
+        for message in messages:
+            content = message.get('content')
+            if isinstance(content, str) and content.startswith('<summary>\n') and message.get('role') == 'system':
+                continue
+            if content is not None and not isinstance(content, str):
+                raise ValueError('Fragmented compaction requires text-only history')
+            records.append(json.dumps(message, ensure_ascii=False, default=str))
+        source = '\n'.join(records)
+        limit = min(max_tokens, max(128, context_limit // 8))
+        # Leave room for provider formatting, tokenizer mismatch and output.
+        capacity = int(context_limit * 0.8) - limit
+        offset = 0
+        rounds = 0
+        while offset < len(source):
+            instruction = build_summarization_instruction(prompt, update_prompt, prior or None)
+            prefix = ('The following is a consecutive fragment of the conversation transcript, '
+                      'including tool calls and results as data. Preserve task state and relevant '
+                      'facts, including unfinished records across fragment boundaries.\n')
+            fixed = [{'role': 'user', 'content': instruction},
+                     {'role': 'user', 'content': prefix}]
+            room = capacity - sum(map(message_token_count, fixed))
+            if room < 128 or rounds >= 64:
+                raise ValueError('Insufficient bounded summary capacity')
+            # Binary search by token count; never drop the remainder of a large
+            # result, including a single record larger than the model window.
+            lo, hi = offset, min(len(source), offset + room * 8)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if count_tokens(source[offset:mid], exact=False) <= room:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            if lo == offset:
+                raise ValueError('Unable to fit a summary fragment')
+            fragment = source[offset:lo]
+            request = [{'role': 'user', 'content': prefix + fragment},
+                       {'role': 'user', 'content': instruction}]
+            # Filtering the original stamped source is mandatory; also filter
+            # each newly composed request, including previous model summaries.
+            from .content_filters import inspect_content, model_message_fragments
+            from .storage import WorkspaceRepository
+
+            policy = configured_filters(WorkspaceRepository(self.database), self.owner)
+            if inspect_content(model_message_fragments(request), policy) is not None:
+                raise RuntimeSafetyError('Summary context was blocked by content protection')
+            prior = await self._request_summary(profile, request, limit)
+            offset = lo
+            rounds += 1
+        if not prior:
+            raise ValueError('No summary fragments')
+        return prior
 
     def _context_limit(self, state: AgentLoopState, settings: dict | None = None) -> int | None:
         """Resolve the explicit agent limit first, then this channel's model limit."""
@@ -1153,6 +1238,8 @@ class AgentRunner:
                 reserve_ratio=ratio, calibration_ratio=calibration.ratio,
                 run_id=self.generation.run_id,
                 agent_id=(state.context.agent or {}).get('id'))
+            if self._compaction_status:
+                snapshot['compactionStatus'] = self._compaction_status
             self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
         except Exception as exc:
             logging.getLogger(__name__).warning('Provider context usage unavailable (%s)', type(exc).__name__)
@@ -1268,7 +1355,7 @@ class AgentRunner:
             if config.get('enabled') is False:
                 return
             if not request_id:
-                if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
+                if len(state.messages) == self._last_compaction_attempt_size:
                     return
                 # The reserve belongs to the model's output, not consumed input.
                 # Use total estimated input, including system and tool schema.
@@ -1304,6 +1391,9 @@ class AgentRunner:
             self._last_compaction_attempt_size = len(state.messages)
             if budget is not None and budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
                 return
+            self._compaction_status = 'running'
+            if budget is not None:
+                self._publish_compaction_usage(state, int(max_raw), config, calibration)
             try:
                 options = config.get('parameters') or {}
                 summary = await self._summarize_history(
@@ -1311,16 +1401,17 @@ class AgentRunner:
                     max_tokens=options.get('maxSummaryTokens', 2048),
                     prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
                     semantic_index=state.context.compaction_semantic_index,
-                    retained_tail=tail, profile=state.context.profile, live_request_id=request_id)
+                    retained_tail=tail, profile=state.context.profile, live_request_id=request_id,
+                    context_limit=int(max_raw) if max_raw is not None else None)
                 # Keep stable instructions and current summary, then the exact
                 # retained recent turns. Original messages stay in SQLite.
                 plain_system = [message for message in system if not (
                     isinstance(message.get('content'), str)
                     and message['content'].startswith('<summary>\n'))]
                 state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
-                self._summary_failures = 0
                 await self._save(state, [])
                 compacted = True
+                self._compaction_status = 'complete'
                 # History length may return to its pre-compaction value after
                 # the next tool batch. Do not suppress that distinct input as
                 # if it were an attempted retry of the old oversized history.
@@ -1340,34 +1431,37 @@ class AgentRunner:
                         state.context.fading_tier)
                 except Exception as error:
                     logging.getLogger(__name__).warning('Fading reset failed (%s)', type(error).__name__)
-            except Exception:
-                self._summary_failures += 1
+            except Exception as error:
+                self._compaction_status = 'failed'
+                logging.getLogger(__name__).warning('Context compaction failed (%s)', type(error).__name__)
                 # The source leaves the state intact on summary failure; never
                 # substitute an empty checkpoint or truncate a tool result.
                 return
 
         except asyncio.CancelledError:
             cancelled = True
+            self._compaction_status = 'failed'
             raise
         finally:
             if request_id and not cancelled:
                 self.store.settle_live_compaction(
                     self.owner, self.generation.run_id, request_id,
                     success=compacted, actor_lease=self.actor_lease)
-            # The pinned frontend consumes this event before the model call and
-            # reads the same last snapshot from response metadata after reload.
-            from .context_budget import context_usage_snapshot
-
-            config = settings.get('summarization') or {}
-            ratio = config.get('reserveRatio', 0.05) if isinstance(config, dict) else 0.05
             if max_raw is not None:
-                snapshot = context_usage_snapshot(
-                    state.messages, state.context.tools, int(max_raw), reserve_ratio=ratio,
-                    run_id=self.generation.run_id,
-                    agent_id=(state.context.agent or {}).get('id'),
-                    calibration_ratio=calibration.ratio,
-                )
-                self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
+                config = settings.get('summarization') or {}
+                self._publish_compaction_usage(state, int(max_raw),
+                                               config if isinstance(config, dict) else {}, calibration)
+
+    def _publish_compaction_usage(self, state, max_context, config, calibration):
+        from .context_budget import context_usage_snapshot
+
+        snapshot = context_usage_snapshot(
+            state.messages, state.context.tools, max_context, reserve_ratio=config.get('reserveRatio', 0.05),
+            run_id=self.generation.run_id, agent_id=(state.context.agent or {}).get('id'),
+            calibration_ratio=calibration.ratio)
+        if self._compaction_status:
+            snapshot['compactionStatus'] = self._compaction_status
+        self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
 
     async def _manual_compact(self, history):
         from .storage import WorkspaceRepository
