@@ -2932,6 +2932,8 @@
   "com_lsm_settings_secret_configured": "Stillt (sláðu inn til að skipta út)",
   "com_lsm_settings_reset": "Núllstilla",
   "com_lsm_settings_no_matches": "Engar samsvarandi stillingar",
+  "com_lsm_permission_inherit": "Erfa",
+  "com_lsm_permission_reset_all": "Endurheimta erfðar stillingar fyrir allt",
   "com_lsm_permission_none": "Engin",
   "com_lsm_permission_read": "Aðeins lesið",
   "com_lsm_permission_write": "Lesa/skrifa",

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, RotateCcw, ShieldCheck, X } from 'lucide-react';
+import { ChevronDown, ShieldCheck, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ApprovalModeSetting from '../approval/ApprovalModeSetting';
 import { request } from 'librechat-data-provider';
@@ -20,12 +20,15 @@ const levels = [
   { value: 'write', label: 'com_lsm_permission_write' },
 ] as const;
 
+const inheritLevel = { value: 'inherit', label: 'com_lsm_permission_inherit' } as const;
+
 function MachineAccessRow({
   machine,
   status,
   explicit,
   inherited,
   canInherit,
+  inheritedSource,
   disabled,
   onChange,
 }: {
@@ -34,21 +37,22 @@ function MachineAccessRow({
   explicit?: Access;
   inherited: Access;
   canInherit: boolean;
+  inheritedSource: string;
   disabled: boolean;
   onChange: (next: Access | 'inherit') => void;
 }) {
   const localize = useLocalize();
-  const effective = explicit ?? inherited;
+  const selected = explicit ?? (canInherit ? 'inherit' : inherited);
   const inheritedLabel = localize(levels.find((level) => level.value === inherited)?.label ?? 'com_lsm_permission_none');
   return (
-    <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg py-2">
-      <div className="min-w-0 flex-1">
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg py-2">
+      <div className="min-w-[5rem] flex-1">
         <div className="truncate text-sm font-medium text-text-primary" title={machine}>
           {machine}
         </div>
         <div className="mt-0.5 text-[11px] text-text-secondary">
           {canInherit && explicit === undefined
-            ? localize('com_lsm_permission_inherited', { access: inheritedLabel })
+            ? `${localize('com_lsm_permission_inherited', { access: inheritedLabel })} · ${inheritedSource}`
             : status === 'offline'
               ? localize('com_lsm_permission_offline')
               : status === 'disabled'
@@ -59,15 +63,15 @@ function MachineAccessRow({
         </div>
       </div>
       <div role="group" aria-label={localize('com_lsm_permission_machine_label', { machine })}
-        className="flex shrink-0 items-center gap-0.5 rounded-lg bg-surface-tertiary p-0.5">
-        {levels.map(({ value, label }) => (
+        className="flex max-w-full shrink-0 flex-wrap items-center gap-0.5 rounded-lg bg-surface-tertiary p-0.5">
+        {(canInherit ? [inheritLevel, ...levels] : levels).map(({ value, label }) => (
           <button type="button" key={value}
             aria-label={localize('com_lsm_permission_access_label', { machine, access: localize(label) })}
-            aria-pressed={effective === value}
+            aria-pressed={selected === value}
             disabled={disabled}
             onClick={() => onChange(value)}
-            className={`min-w-9 rounded-md px-2 py-1.5 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary disabled:opacity-50 ${
-              effective === value
+            className={`min-w-8 rounded-md px-1.5 py-1.5 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary disabled:opacity-50 ${
+              selected === value
                 ? 'bg-surface-primary font-semibold text-text-primary shadow-sm'
                 : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
             }`}>
@@ -75,13 +79,6 @@ function MachineAccessRow({
           </button>
         ))}
       </div>
-      {canInherit && (
-        <button type="button" aria-label={localize('com_lsm_permission_reset_label', { machine })} title={localize('com_lsm_permission_inherit_default')}
-          disabled={disabled || explicit === undefined} onClick={() => onChange('inherit')}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:invisible">
-          <RotateCcw size={14} aria-hidden="true" />
-        </button>
-      )}
     </div>
   );
 }
@@ -229,38 +226,43 @@ export default function LsmChatPermissions({
 
   const mutation = useMutation<Policy | ChatPolicy, Error, { url: string; value: Record<string, unknown> }>({
     mutationFn: ({ url, value }) => request.put(url, value),
-    onSuccess: () => {
-      void client.invalidateQueries(['lsm', 'permission-defaults']);
-      void client.invalidateQueries(['lsm', 'permission-project']);
-      void client.invalidateQueries(['lsm', 'chat-permissions']);
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries(['lsm', 'permission-defaults']),
+        client.invalidateQueries(['lsm', 'permission-project']),
+        client.invalidateQueries(['lsm', 'chat-permissions']),
+      ]);
     },
   });
   const url = active === 'global' ? '/api/lsm/permissions/defaults'
     : active === 'project' ? `/api/lsm/permissions/projects/${encodeURIComponent(currentProject)}`
       : `/api/lsm/preferences/${encodeURIComponent(chatId)}`;
-  const disabled = mutation.isLoading || (isDraft
-    ? !global.data || (!!associatedProject && !project.data) || machines.isFetching
-    : selected.isFetching || !selected.data || (active === 'project' && !currentProject));
+  const parentReady = !!global.data && !global.isFetching &&
+    (active !== 'chat' || !associatedProject || (!!project.data && !project.isFetching));
+  const disabled = mutation.isLoading || machines.isFetching || !parentReady ||
+    (!isDraft && (selected.isFetching || !selected.data)) ||
+    (active === 'project' && !currentProject);
 
-  const saveMachines = (machine: string, access: Access | 'inherit') => {
+  const savePolicy = (next: Record<string, Access>) => {
     if (disabled) return;
-    const next = { ...explicit };
-    if (access === 'inherit') delete next[machine];
-    else next[machine] = access;
     if (isDraft) {
       client.setQueryData(draftKey, next);
       return;
     }
-    const value = active === 'chat'
-      ? { machines: next, web: chat.data?.web ?? true, mcp: chat.data?.mcp ?? true,
-          memory: chat.data?.memory ?? true }
-      : { machines: next };
-    mutation.mutate({ url, value });
+    mutation.mutate({ url, value: { machines: next } });
+  };
+
+  const saveMachines = (machine: string, access: Access | 'inherit') => {
+    if (access === (explicit[machine] ?? (active === 'global' ? inherited[machine] : 'inherit'))) return;
+    const next = { ...explicit };
+    if (access === 'inherit') delete next[machine];
+    else next[machine] = access;
+    savePolicy(next);
   };
 
   const projectName = projects.data?.projects.find((item) => item.id === associatedProject)?.name;
   const isUnavailable = selected.isError || machines.isError ||
-    (isDraft && (global.isError || (!!associatedProject && project.isError))) ||
+    global.isError || (active === 'chat' && !!associatedProject && project.isError) ||
     (active === 'project' && (project.isError || projects.isError));
 
   return (
@@ -330,9 +332,15 @@ export default function LsmChatPermissions({
               <>
                 <div className="mb-1 flex items-center justify-between">
                   <h3 className="text-xs font-semibold text-text-secondary">{localize('com_lsm_permission_machines')}</h3>
-                  <span className="text-[11px] text-text-secondary">
-                    {active === 'global' ? localize('com_lsm_permission_default_write') : localize('com_lsm_permission_inherit_help')}
-                  </span>
+                  {active === 'global' ? (
+                    <span className="text-[11px] text-text-secondary">{localize('com_lsm_permission_default_write')}</span>
+                  ) : (
+                    <button type="button" disabled={disabled || Object.keys(explicit).length === 0}
+                      onClick={() => savePolicy({})}
+                      className="rounded px-1.5 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-50">
+                      {localize('com_lsm_permission_reset_all')}
+                    </button>
+                  )}
                 </div>
                 {machineNames.length === 0 && !machines.isFetching && (
                   <p className="py-4 text-xs text-text-secondary">{localize('com_lsm_permission_empty')}</p>
@@ -343,6 +351,9 @@ export default function LsmChatPermissions({
                       status={machineStatuses.get(machine)}
                       explicit={explicit[machine]} inherited={inherited[machine] ?? 'none'}
                       canInherit={active !== 'global'} disabled={disabled}
+                      inheritedSource={localize(active === 'chat' && associatedProject &&
+                        project.data?.machines[machine] !== undefined
+                        ? 'com_lsm_permission_project' : 'com_lsm_permission_global')}
                       onChange={(next) => saveMachines(machine, next)} />
                   ))}
                 </div>

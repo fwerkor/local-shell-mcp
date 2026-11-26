@@ -2932,6 +2932,8 @@
   "com_lsm_settings_secret_configured": "Konfigurēts (ievadiet, lai aizstātu)",
   "com_lsm_settings_reset": "Attiestatīt",
   "com_lsm_settings_no_matches": "Nav atbilstošu iestatījumu",
+  "com_lsm_permission_inherit": "Mantot",
+  "com_lsm_permission_reset_all": "Atjaunot mantošanu visiem",
   "com_lsm_permission_none": "Nav",
   "com_lsm_permission_read": "Tikai lasāms",
   "com_lsm_permission_write": "Lasīt/rakstīt",

@@ -2932,6 +2932,8 @@
   "com_lsm_settings_secret_configured": "Configurat (entrar per substituir)",
   "com_lsm_settings_reset": "Restableix",
   "com_lsm_settings_no_matches": "No hi ha cap configuració coincident",
+  "com_lsm_permission_inherit": "Hereta",
+  "com_lsm_permission_reset_all": "Restaura tota l’herència",
   "com_lsm_permission_none": "Cap",
   "com_lsm_permission_read": "Només lectura",
   "com_lsm_permission_write": "Llegir/escriure",

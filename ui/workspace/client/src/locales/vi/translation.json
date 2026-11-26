@@ -2932,6 +2932,8 @@
   "com_lsm_settings_secret_configured": "Đã định cấu hình (nhập để thay thế)",
   "com_lsm_settings_reset": "Đặt lại",
   "com_lsm_settings_no_matches": "Không có cài đặt phù hợp",
+  "com_lsm_permission_inherit": "Kế thừa",
+  "com_lsm_permission_reset_all": "Khôi phục kế thừa cho tất cả",
   "com_lsm_permission_none": "không có",
   "com_lsm_permission_read": "Chỉ đọc",
   "com_lsm_permission_write": "Đọc/ghi",

@@ -2932,6 +2932,8 @@
   "com_lsm_settings_secret_configured": "Налаштовано (введіть для заміни)",
   "com_lsm_settings_reset": "Скинути",
   "com_lsm_settings_no_matches": "Немає відповідних налаштувань",
+  "com_lsm_permission_inherit": "Успадкувати",
+  "com_lsm_permission_reset_all": "Відновити успадкування для всіх",
   "com_lsm_permission_none": "Жодного",
   "com_lsm_permission_read": "Тільки для читання",
   "com_lsm_permission_write": "Читати/записувати",
