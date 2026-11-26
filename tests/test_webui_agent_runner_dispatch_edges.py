@@ -98,8 +98,9 @@ async def test_ask_user_background_denial_parallel_constraint_or_pause(runner_pa
     if multiple:
         calls.append(ModelToolCall('plan','plan_manage',{'action':'list'}))
     if detached:
-        outcome=await obj._dispatch(calls,state)
-        assert outcome.messages and 'Ask User requires foreground' in outcome.messages[0]['content']
+        assert 'ask_user_question' not in {tool['function']['name'] for tool in state.context.tools}
+        with pytest.raises(RuntimeSafetyError,match='Tool is not enabled'):
+            await obj._dispatch(calls,state)
     elif multiple:
         with pytest.raises(ValueError,match='cannot run in parallel'):
             await obj._dispatch(calls,state)
