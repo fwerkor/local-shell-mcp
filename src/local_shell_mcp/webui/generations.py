@@ -1028,6 +1028,8 @@ class GenerationStore:
                         content_parts.append({'type': 'think', 'think': part['think']})
             elif event == "on_steer_applied" and isinstance(data.get("part"), dict):
                 content_parts.append(data["part"])
+            elif event == "on_goal_continuation":
+                content_parts.append({"type": "goal_continuation", "id": data["id"]})
             elif event == 'on_content_rewind':
                 _rewind_uncheckpointed_text(content_parts, data.get('preserveText', ''),
                                            preserve_slots=True)
@@ -1834,6 +1836,8 @@ class GenerationStore:
                             content.append({'type': 'think', 'think': delta['think']})
                 elif kind == "on_steer_applied" and isinstance(data.get("part"), dict):
                     content.append(data["part"])
+                elif kind == "on_goal_continuation":
+                    content.append({"type": "goal_continuation", "id": data["id"]})
                 elif kind == 'on_content_rewind':
                     _rewind_uncheckpointed_text(content, data.get('preserveText', ''))
                     # Compacting abandoned text shifts surviving tool cards;
