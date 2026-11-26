@@ -24,9 +24,10 @@ MEMORY_INSTRUCTIONS = ('Persistent memory is available across conversations with
                        'Saved memories, if any, are shown below. No entries shown here does not mean memory is '
                        'unavailable. Use memory tools only if provided; claim a memory was saved or deleted only '
                        'after the action is confirmed.')
-MEMORY_TOOL_USAGE_GUARD = ('Only use the `set_memory` and `delete_memory` tools when the user explicitly asks you '
-                           'to remember, update, or forget something (e.g. "remember that...", "don\'t forget...", '
-                           '"forget..."). Never store information merely because the user mentioned it in conversation.')
+MEMORY_TOOL_INSTRUCTIONS = (
+    'Use memory tools proactively to save or update information useful in future conversations, '
+    'without waiting for an explicit request. Remove obsolete memories or forget information when asked.'
+)
 _VALID_KEY = re.compile(r'^[a-z_]+$')
 
 

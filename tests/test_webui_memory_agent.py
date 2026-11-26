@@ -61,13 +61,14 @@ async def test_automatic_memory_tools_commit_with_persistent_attachment(memory_r
 
     async def stream(config, messages, **kw):
         received.append((config, messages, kw))
-        assert 'ONLY for memory requests' in messages[0]['content']
+        assert 'Use memory tools proactively' in messages[0]['content']
+        assert 'without waiting for an explicit request' in messages[0]['content']
         assert '# Current Chat:' in messages[-1]['content']
         assert len(kw['tools']) == 2
         yield ModelToolCall('memory-1', 'set_memory', {'key': 'style', 'value': 'The user prefers concise replies.'})
         yield 'Complete'
 
-    history = store.history('alice', job.conversation_id)
+    history = [{'role': 'user', 'content': 'I prefer concise replies.'}]
     assert await memory_agent.run_automatic_memory('alice', job, db, history,
         root_agent=None, stream_tools=stream) == 1
     assert len(received) == 1

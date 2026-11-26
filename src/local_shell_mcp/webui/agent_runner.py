@@ -34,7 +34,7 @@ from .handoff import (
     is_transfer_tool,
 )
 from .memory import (
-    MEMORY_TOOL_USAGE_GUARD,
+    MEMORY_TOOL_INSTRUCTIONS,
     MemoryRepository,
     agent_partition,
     execute_memory_tool,
@@ -170,8 +170,8 @@ class AgentRunner:
         formatted = MemoryRepository(self.database).formatted(
             self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
         if formatted.get('readFailed'):
-            # Never lose the mutation consent rule when Memory reads fail.
-            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
+            # Never lose the memory tool guidance when Memory reads fail.
+            return MEMORY_TOOL_INSTRUCTIONS if has_tools else ''
         explicit_memory_tool = bool(agent and 'memory' in ((agent or {}).get('tools') or []))
         endpoints = settings.setting(self.owner, 'endpoints', {})
         explicit_memory_config = (
@@ -181,11 +181,11 @@ class AgentRunner:
         if (not explicit_memory_tool and not explicit_memory_config
                 and not (formatted.get('withKeys') or formatted.get('withoutKeys'))):
             # An empty default-enabled store needs no memory-list preamble,
-            # but the mutation consent rule must remain visible to the model
+            # but the memory tool guidance must remain visible to the model
             # whenever its Memory tools are offered.
-            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
+            return MEMORY_TOOL_INSTRUCTIONS if has_tools else ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
-        return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
+        return (context or '') + ('\n\n' + MEMORY_TOOL_INSTRUCTIONS if has_tools else '')
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
