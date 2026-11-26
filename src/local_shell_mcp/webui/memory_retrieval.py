@@ -13,7 +13,7 @@ from .tokenizer import count_tokens
 
 _CJK = re.compile(r'[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]+')
 _MAX_CANDIDATES = 2000
-_STOP_WORDS = frozenset('a an and are as at be by can could do for from how i in is it me my of on or please should that the this to use was we what when where which who will with would you your 我们 你们 这个 那个 可以 能否 如何 什么 怎么 一下 进行'.split())
+_STOP_WORDS = frozenset(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'can', 'could', 'do', 'for', 'from', 'how', 'i', 'in', 'is', 'it', 'me', 'my', 'of', 'on', 'or', 'please', 'should', 'that', 'the', 'this', 'to', 'use', 'was', 'we', 'what', 'when', 'where', 'which', 'who', 'will', 'with', 'would', 'you', 'your', '我们', '你们', '这个', '那个', '可以', '能否', '如何', '什么', '怎么', '一下', '进行'])
 
 
 def terms(query: str) -> list[str]:
@@ -74,13 +74,32 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
         # The account and project boundary must hold even for untrusted queries.
         params = [owner, conversation_id, current['project_id']]
         where = 'c.owner=? AND c.id<>? AND c.project_id IS ?'
+        # A conversation's selected agent is mutable and can be null even
+        # during an Agent generation. Runs record the actual generating agent.
+        # Do not recall a mixed-agent conversation into a private partition,
+        # or a conversation with any private run into shared memory: later
+        # replies may quote earlier private turns.
         if partition:
-            where += ' AND c.agent_id=?'
-            params.append(partition)
+            where += """ AND (
+                (EXISTS (SELECT 1 FROM runs r WHERE r.conversation_id=c.id AND r.agent_id=?)
+                 AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.conversation_id=c.id AND r.agent_id IS NOT ?))
+                OR (c.agent_id=? AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.conversation_id=c.id))
+            )"""
+            params.extend([partition, partition, partition])
         else:
-            # Private Agent histories never enter the shared personal pool.
-            where += """ AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.id=c.agent_id
-                AND a.owner=c.owner AND json_extract(a.config,'$.memory_scope')='agent')"""
+            # Missing/deleted agents are not evidence that a run was shared.
+            # Keep the original scope when the configuration later changes.
+            where += """ AND NOT EXISTS (
+                SELECT 1 FROM runs r LEFT JOIN agents a ON a.id=r.agent_id AND a.owner=c.owner
+                WHERE r.conversation_id=c.id AND (
+                    json_extract(r.state,'$.memoryScope')='agent'
+                    OR (r.agent_id IS NOT NULL AND (a.id IS NULL
+                        OR json_extract(a.config,'$.memory_scope')='agent'))
+                )
+            ) AND (c.agent_id IS NULL OR EXISTS (
+                SELECT 1 FROM agents a WHERE a.id=c.agent_id AND a.owner=c.owner
+                    AND coalesce(json_extract(a.config,'$.memory_scope'),'')<>'agent'
+            ))"""
         # Use the Controller's existing trigram index when possible. Short
         # CJK queries still work through a literal substring fallback.
         long_terms = [term for term in tokens if len(term) >= 3]

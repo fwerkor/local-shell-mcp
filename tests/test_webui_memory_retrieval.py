@@ -117,3 +117,45 @@ def test_recall_budget_and_live_filters(state):
     assert 'previous conversation' in context
     assert 'PRIVATE-' not in context and 'unrelated detail' not in context
     assert count_tokens(context, exact=False) <= 160
+
+@pytest.mark.parametrize('fts', [True, False])
+def test_run_agent_history_scope_is_not_conversation_selection(state, fts):
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    db, workspace, memory = state
+    if not db.fts_enabled and fts:
+        pytest.skip('SQLite FTS5 unavailable')
+    db.fts_enabled = fts
+    agents = AgentRepository(db)
+    private = agents.create('alice', {
+        'name': 'Private agent', 'provider': 'openAI', 'model': 'mock',
+        'memory_scope': 'agent', 'tools': ['memory']})
+    store = GenerationStore(db)
+    current = chat(workspace)
+    run, _ = store.begin('alice', {'text': 'Confidential project detail'}, private)
+    assert store.finish('alice', run.run_id, status='complete', text='Confidential project response')
+    with db.connect() as connection:
+        assert connection.execute('SELECT agent_id FROM conversations WHERE id=?',
+                                  (run.conversation_id,)).fetchone()[0] is None
+
+    def search(partition=''):
+        return retrieve(memory, 'alice', partition, query='Confidential project',
+                        include_conversations=True, conversation_id=current)['results']
+
+    assert search() == []
+    assert {item['message_id'] for item in search(private['id'])} == {
+        run.user_message_id, run.response_message_id}
+    assert 'Confidential' not in recall_context(memory, 'alice', '', query='Confidential project',
+                                               conversation_id=current, filters=None)
+    # A subsequent public reply can quote private history, so a mixed chat
+    # must not become a shared source, nor a purely private source.
+    public, _ = store.begin('alice', {'conversationId': run.conversation_id,
+                                      'text': 'Confidential project followup'})
+    assert store.finish('alice', public.run_id, status='complete', text='Confidential project followup answer')
+    assert search() == []
+    assert search(private['id']) == []
+    # A change to the current agent config does not declassify earlier turns.
+    with db.connect() as connection:
+        connection.execute("UPDATE agents SET config=json_set(config,'$.memory_scope','personal') WHERE id=?",
+                           (private['id'],))
+    assert search() == []
