@@ -249,6 +249,34 @@ export default function ToolCall({
     hasError,
   });
   const showOAuth = Boolean(auth) && phase === 'running';
+  const sleepSeconds = useMemo(() => {
+    if (name !== 'sleep') {
+      return null;
+    }
+    try {
+      const parsed = typeof _args === 'string' ? JSON.parse(_args) : _args;
+      const seconds = parsed?.seconds ?? 10;
+      return typeof seconds === 'number' && seconds >= 0 && seconds <= 300 ? seconds : null;
+    } catch {
+      return null;
+    }
+  }, [name, _args]);
+  const sleepDeadline =
+    phase === 'running' && sleepSeconds != null && toolDispatchedAt != null
+      ? toolDispatchedAt + sleepSeconds * 1000
+      : null;
+  const [sleepNow, setSleepNow] = useState(Date.now);
+  useEffect(() => {
+    if (sleepDeadline == null) {
+      return;
+    }
+    setSleepNow(Date.now());
+    const timer = window.setInterval(() => setSleepNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [sleepDeadline]);
+  const remainingSleep =
+    sleepDeadline == null ? null : Math.max(0, Math.ceil((sleepDeadline - sleepNow) / 1000));
+
 
   /**
    * Binds when the sign-in prompt appears instead of on tap, so the tap opens the provider
@@ -354,6 +382,10 @@ export default function ToolCall({
     inProgressText = localize('com_ui_tool_calling', { 0: subject });
   } else if (toolPreparationStartedAt != null) {
     inProgressText = localize('com_ui_tool_preparing', { 0: subject });
+  }
+
+  if (remainingSleep != null) {
+    inProgressText = `${displayFunctionName} · ${localize('com_ui_duration_seconds', { 0: remainingSleep })}`;
   }
 
   const getFinishedText = () => {

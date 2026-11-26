@@ -2540,6 +2540,7 @@
   "com_ui_tool_name_read_file": "წაიკითხეთ ფაილი",
   "com_ui_tool_name_image_gen": "გამოსახულების გენერაცია",
   "com_ui_tool_name_set_memory": "მეხსიერების შენახვა",
+  "com_ui_tool_name_sleep": "ლოდინი",
   "com_ui_tool_name_web_search": "ვებ ძიება",
   "com_ui_tool_response_placeholder": "ჩაწერეთ შემცვლელი შედეგი აგენტთან დასაბრუნებლად",
   "com_ui_tools": "ხელსაწყოები",

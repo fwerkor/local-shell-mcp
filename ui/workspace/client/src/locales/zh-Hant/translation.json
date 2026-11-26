@@ -3074,5 +3074,6 @@
   "com_lsm_channel_discover_manual_help": "關閉自動探索即可手動設定模型。",
   "com_lsm_channel_discover_interval": "伺服器每 10 分鐘更新一次。更新失敗時將保留現有資料。",
   "com_lsm_channel_discover_context_help": "留空以使用 API 元資料；輸入一個值來覆寫它或填入未知的限制。",
-  "com_lsm_channel_refreshed": "模型資訊已更新。"
+  "com_lsm_channel_refreshed": "模型資訊已更新。",
+  "com_ui_tool_name_sleep": "等待"
 }

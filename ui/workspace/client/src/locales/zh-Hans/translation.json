@@ -3074,5 +3074,6 @@
   "com_lsm_channel_discover_manual_help": "关闭自动发现即可手动配置模型。",
   "com_lsm_channel_discover_interval": "服务器每 10 分钟刷新一次。刷新失败时将保留现有数据。",
   "com_lsm_channel_discover_context_help": "留空以使用 API 元数据；输入数值可覆盖该值或补充未知的限制。",
-  "com_lsm_channel_refreshed": "模型信息已刷新。"
+  "com_lsm_channel_refreshed": "模型信息已刷新。",
+  "com_ui_tool_name_sleep": "等待"
 }

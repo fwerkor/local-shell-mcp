@@ -3074,5 +3074,6 @@
   "com_lsm_channel_discover_manual_help": "Isključite automatsko otkrivanje da ručno konfigurirate modele.",
   "com_lsm_channel_discover_interval": "Osvježava server svakih 10 minuta. Postojeći podaci se zadržavaju ako osvježavanje ne uspije.",
   "com_lsm_channel_discover_context_help": "Ostavite prazno za korištenje API metapodataka; unesite vrijednost da je nadjačate ili popunite nepoznato ograničenje.",
-  "com_lsm_channel_refreshed": "Informacije o modelu su osvježene."
+  "com_lsm_channel_refreshed": "Informacije o modelu su osvježene.",
+  "com_ui_tool_name_sleep": "Čekanje"
 }

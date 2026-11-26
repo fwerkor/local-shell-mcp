@@ -2540,6 +2540,7 @@
   "com_ui_tool_name_read_file": "ཡིག་ཆ་ཀློག་པ།",
   "com_ui_tool_name_image_gen": "པར་རིས་བཟོ་སྐྲུན།",
   "com_ui_tool_name_set_memory": "དྲན་པ་ཉར་ཚགས།",
+  "com_ui_tool_name_sleep": "སྒུག་པ",
   "com_ui_tool_name_web_search": "དྲ་རྒྱའི་འཚོལ་ཞིབ།",
   "com_ui_tool_response_placeholder": "ལས་བྱེད་ལ་ལོག་པའི་ཚབ་མཚོན་གྲུབ་འབྲས་ཡིག་འཇུག་བྱོས།",
   "com_ui_tools": "ལག་ཆ།",

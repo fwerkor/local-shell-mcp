@@ -2540,6 +2540,7 @@
   "com_ui_tool_name_read_file": "Leggi il file",
   "com_ui_tool_name_image_gen": "Generazione immagine",
   "com_ui_tool_name_set_memory": "Salva memoria",
+  "com_ui_tool_name_sleep": "Attesa",
   "com_ui_tool_name_web_search": "Ricerca Web",
   "com_ui_tool_response_placeholder": "Digita un risultato sostitutivo da restituire all'agente",
   "com_ui_tools": "Strumenti",

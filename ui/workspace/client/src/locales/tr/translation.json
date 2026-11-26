@@ -2540,6 +2540,7 @@
   "com_ui_tool_name_read_file": "Dosyayı Oku",
   "com_ui_tool_name_image_gen": "Resim Oluşturma",
   "com_ui_tool_name_set_memory": "Hafızayı Kaydet",
+  "com_ui_tool_name_sleep": "Bekleme",
   "com_ui_tool_name_web_search": "Web Arama",
   "com_ui_tool_response_placeholder": "Temsilciye dönmek için yedek sonucu yazın",
   "com_ui_tools": "Araçlar",
