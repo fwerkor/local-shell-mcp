@@ -143,3 +143,25 @@ def test_frontend_discovery_without_build_and_with_installed_assets(tmp_path, mo
     assets.mkdir()
     (assets / "index.html").write_text("installed React build", encoding="utf-8")
     assert frontend.bundled_frontend() == assets
+
+
+def test_installed_archive_wins_over_stale_unpacked_assets(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from local_shell_mcp import settings as settings_module
+
+    root = tmp_path / "installed" / "local_shell_mcp" / "webui"
+    assets = root / "assets"
+    assets.mkdir(parents=True)
+    (assets / "index.html").write_text("old frontend", encoding="utf-8")
+    archive = _archive(tmp_path, [("index.html", b"new frontend", "file")])
+    (root / "frontend.tar.gz").write_bytes(archive.read_bytes())
+    state = tmp_path / "state"
+    monkeypatch.setattr(frontend, "__file__", str(root / "frontend.py"))
+    monkeypatch.setattr(settings_module, "get_settings", lambda: SimpleNamespace(state_dir=state))
+
+    found = frontend.bundled_frontend()
+    assert found is not None
+    assert found.is_relative_to(state)
+    assert (found / "index.html").read_bytes() == b"new frontend"
+    assert (assets / "index.html").read_text(encoding="utf-8") == "old frontend"

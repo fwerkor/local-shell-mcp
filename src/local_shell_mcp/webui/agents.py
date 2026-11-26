@@ -20,6 +20,18 @@ from .agent_validation import (
 from .storage import _cursor_decode, _cursor_encode, _json, _now
 
 
+def _normalize_model_config(config: dict) -> dict:
+    """Move the legacy search preference out of sampling and retire transport controls."""
+    params = config.get("model_parameters")
+    if isinstance(params, dict):
+        if "web_search" not in config and type(params.get("web_search")) is bool:
+            config["web_search"] = params["web_search"]
+        for key in ("web_search", "useResponsesApi", "url_context", "resendFiles",
+                    "imageDetail", "fileTokenLimit", "disableStreaming", "region"):
+            params.pop(key, None)
+    return config
+
+
 class AgentRepository:
     def __init__(self, database: Any):
         self.database = database
@@ -41,7 +53,7 @@ class AgentRepository:
                 if ids or isinstance(resource.get("file_ids"), list):
                     resource["file_ids"] = ids
                 resource.pop("files", None)
-        return clean_agent_config(payload, create=create)
+        return _normalize_model_config(clean_agent_config(payload, create=create))
 
     @staticmethod
     def _references(db: Any, owner: str, values: dict, own_id: str) -> None:
@@ -68,7 +80,8 @@ class AgentRepository:
 
     @staticmethod
     def _from_row(row: Any) -> dict:
-        value = json.loads(row["config"])
+        value = _normalize_model_config(json.loads(row["config"]))
+        value.setdefault("web_search", True)
         value.update({
             "id": row["id"], "_id": row["id"], "author": row["owner"],
             "name": row["name"], "description": row["description"],
@@ -87,6 +100,7 @@ class AgentRepository:
         now = _now()
         values = replace_agent_references(values, "", agent_id)
         values.setdefault("model_parameters", {})
+        values.setdefault("web_search", True)
         values.setdefault("edges", [])
         values.setdefault("tool_resources", {})
         values.setdefault("conversation_starters", [])
@@ -159,7 +173,7 @@ class AgentRepository:
             values["model_parameters"] = sanitize_model_parameters(values["model_parameters"])
         if "category" in values:
             values["category"] = values["category"].strip()
-        config = json.loads(row["config"])
+        config = _normalize_model_config(json.loads(row["config"]))
         config.update(values)
         version = int(config.get("_version", 1)) + 1
         config["_version"] = version
@@ -261,7 +275,8 @@ class AgentRepository:
             ).fetchall()
         snapshots = []
         for version in versions:
-            payload = json.loads(version[0])
+            payload = _normalize_model_config(json.loads(version[0]))
+            payload.setdefault("web_search", True)
             payload["id"] = agent_id
             payload["version"] = payload.pop("_version", 1)
             snapshots.append(payload)

@@ -21,16 +21,39 @@ export type AgentParameterConfig = {
 
 export type ResolvedAgentParameterSettings = {
   /**
-   * Every parameter the endpoint schema defines after administrator drops. Pruning reads
-   * this, so a value hidden by the model or role is still recognised and preserved:
-   * dropping it here would delete another user's configuration on an unrelated
-   * save by someone without the permission.
+   * Endpoint parameters after administrator drops and removal of retired fields.
+   * Preserve genuine model parameters that the current native runtime does not yet expose.
    */
   parameters: SettingDefinition[];
-  /** The subset that gets a control. Model-hidden and role-gated parameters are absent. */
+  /** The subset that gets a control. Model-hidden and unsupported parameters are absent. */
   visibleParameters: SettingDefinition[];
   schemaResolved: boolean;
 };
+
+/** Protocol, built-in tools and file delivery are configured outside the model. */
+const RETIRED_AGENT_PARAMETER_KEYS = new Set([
+  'useResponsesApi',
+  'web_search',
+  'url_context',
+  'resendFiles',
+  'imageDetail',
+  'fileTokenLimit',
+  'disableStreaming',
+  'region',
+]);
+
+/** The native transports currently accept these sampling/context controls. */
+const NATIVE_MODEL_PARAMETER_KEYS = new Set([
+  'temperature',
+  'top_p',
+  'topP',
+  'max_tokens',
+  'maxTokens',
+  'maxOutputTokens',
+  'maxContextTokens',
+  'max_context_tokens',
+  'max_output_tokens',
+]);
 
 const NON_CONTROL_PARAMETER_KEYS = new Set<keyof AgentModelParameters>(['model']);
 
@@ -39,14 +62,9 @@ export function resolveAgentParameterSettings({
   model,
   provider,
   startupConfig,
-  webSearchAllowed,
 }: AgentParameterConfig & {
   model: string;
   provider: string;
-  /** `WEB_SEARCH.USE`. `web_search` is a default model parameter for the OpenAI,
-   *  Anthropic and Google column sets, so without this the builder offers a
-   *  switch the server will refuse. Narrows `visibleParameters` only. */
-  webSearchAllowed: boolean;
 }): ResolvedAgentParameterSettings {
   const resolvedEndpointsConfig = endpointsConfig ?? {};
   const endpointType = getEndpointField(resolvedEndpointsConfig, provider, 'type');
@@ -67,10 +85,13 @@ export function resolveAgentParameterSettings({
     agentParamSettings[combinedKey] ?? agentParamSettings[overriddenEndpointKey];
   const overriddenParams = customParams?.paramDefinitions;
   const overriddenParamsMap = keyBy(overriddenParams ?? [], 'key');
-  /** Keep endpoint-recognized keys independent of model visibility. Only explicit
-   * administrator drops remove keys from the schema used by both save paths. */
+  /** Keep endpoint-recognized keys independent of model visibility. Only explicit administrator drops and retired settings
+   * remove keys from the schema used by both save paths. */
   const endpointParams = (defaultParams ?? []).filter(
-    (param) => param != null && !dropParamsSet.has(param.key),
+    (param) =>
+      param != null &&
+      !dropParamsSet.has(param.key) &&
+      !RETIRED_AGENT_PARAMETER_KEYS.has(param.key),
   );
   const applyOverride = (param: SettingDefinition) =>
     (overriddenParamsMap[param.key] as SettingDefinition) ?? param;
@@ -82,7 +103,7 @@ export function resolveAgentParameterSettings({
     resolvedEndpointsConfig[provider]?.responsesApiRouting,
   )
     .map(applyOverride)
-    .filter((param) => param.key !== 'web_search' || webSearchAllowed);
+    .filter((param) => NATIVE_MODEL_PARAMETER_KEYS.has(param.key));
 
   return {
     schemaResolved: defaultParams != null || overriddenParams != null,
@@ -96,16 +117,18 @@ export function pruneAgentModelParameters(
   settings: ResolvedAgentParameterSettings,
 ): AgentModelParameters {
   const normalizedParameters = currentParameters ?? ({} as AgentModelParameters);
-  if (!settings.schemaResolved) {
-    return normalizedParameters;
-  }
-
   const parameterKeys = new Set(settings.parameters.map((setting) => setting.key));
   const currentKeys = Object.keys(normalizedParameters) as Array<keyof AgentModelParameters>;
   let prunedParameters: Partial<AgentModelParameters> | undefined;
 
   for (const key of currentKeys) {
+    if (RETIRED_AGENT_PARAMETER_KEYS.has(key)) {
+      prunedParameters ??= { ...normalizedParameters };
+      delete prunedParameters[key];
+      continue;
+    }
     if (
+      !settings.schemaResolved ||
       NON_CONTROL_PARAMETER_KEYS.has(key) ||
       parameterKeys.has(key) ||
       normalizedParameters[key] == null
