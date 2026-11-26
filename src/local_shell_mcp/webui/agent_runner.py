@@ -1180,6 +1180,13 @@ class AgentRunner:
         from .content_filters import inspect_content, model_message_fragments
         from .storage import WorkspaceRepository
 
+        # Delegated agents receive only their invocation context, not the
+        # parent's title (which can contain the original private prompt).
+        if self.namespace and (not self.graph_node or '/subagent:' in self.namespace):
+            return []
+        if self.authorization_conversation_id != self.generation.conversation_id:
+            return []
+
         with self.database.connect() as db:
             row = db.execute(
                 "SELECT c.title, p.name, p.description FROM conversations c "

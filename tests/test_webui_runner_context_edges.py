@@ -74,6 +74,16 @@ def test_conversation_context_is_live_and_not_persisted(runtime):
     repo.delete_project('a', project['id'])
     assert 'Current project: None' in context()
     assert 'Project description:' not in context()
+    runner.namespace = '/subagent:child'
+    assert runner._conversation_context() == []
+    runner.namespace = '/graph:node'
+    runner.graph_node = True
+    assert runner._conversation_context()
+    runner.namespace = '/subagent:child/graph:node'
+    assert runner._conversation_context() == []
+    runner.namespace = ''
+    runner.authorization_conversation_id = 'different-chat'
+    assert runner._conversation_context() == []
 
 
 def test_conversation_context_rejects_foreign_metadata(runtime):
