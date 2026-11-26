@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "最小尺寸 128 × 128 像素",
   "com_agents_mcp_name_placeholder": "自定义工具",
   "com_agents_mcp_trust_subtext": "自定义连接器未经 LSM 验证",
-  "com_agents_memory_info": "启用此功能后，智能体可在对话过程中使用 set_memory 和 delete_memory 工具保存、更新和删除与用户相关的记忆。",
+  "com_agents_memory_info": "启用后，智能体可以主动保存、更新、删除记忆，并检索已保存的记忆和其他会话文本。",
   "com_agents_memory_scope": "请将此智能体的记忆单独保存",
   "com_agents_memory_scope_info": "启用后，该智能体独立读写自己的记忆，与您的共享记忆及其他智能体的记忆隔离。该智能体无法看到现有共享记忆。",
   "com_agents_missing_name": "请在创建智能体前输入名称。",

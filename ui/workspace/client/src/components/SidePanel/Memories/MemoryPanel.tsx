@@ -18,13 +18,19 @@ const PARTITION_PERSONAL = 'personal';
 
 export default function MemoryPanel() {
   const localize = useLocalize();
-  const { data: memData, isLoading } = useMemoriesQuery();
   const [searchQuery, setSearchQuery] = useState('');
   const [partitionFilter, setPartitionFilter] = useState(PARTITION_ALL);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const hasReadAccess = useHasAccess({
     permissionType: PermissionTypes.MEMORIES,
     permission: Permissions.READ,
+  });
+
+  // The panel may be open while another chat, tab or scheduled agent writes.
+  const { data: memData, isLoading } = useMemoriesQuery({
+    enabled: hasReadAccess,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
   });
 
   const hasUpdateAccess = useHasAccess({

@@ -1,13 +1,8 @@
 import { useSetRecoilState } from 'recoil';
 import { QueryKeys, Tools } from 'librechat-data-provider';
-import type {
-  MemoriesResponse,
-  EventSubmission,
-  TAttachment,
-  TFile,
-} from 'librechat-data-provider';
+import type { EventSubmission, TAttachment, TFile } from 'librechat-data-provider';
 import type { QueryClient } from '@tanstack/react-query';
-import { handleMemoryArtifact } from '~/utils/memory';
+import { isMemoryMutation } from '~/utils/memory';
 import store from '~/store';
 
 /** Identity of a re-emitted web-search snapshot: its tool call, turn, agent,
@@ -94,16 +89,11 @@ export default function useAttachmentHandler(queryClient?: QueryClient) {
       });
     }
 
-    if (queryClient && data.type === Tools.memory && data[Tools.memory]) {
-      const memoryArtifact = data[Tools.memory];
-
-      queryClient.setQueryData([QueryKeys.memories], (oldData: MemoriesResponse | undefined) => {
-        if (!oldData) {
-          return oldData;
-        }
-
-        return handleMemoryArtifact({ memoryArtifact, currentData: oldData }) || oldData;
-      });
+    const memory = data.type === Tools.memory ? data[Tools.memory] : undefined;
+    if (queryClient && isMemoryMutation(memory)) {
+      // Attachments can be replayed out of order. Read the authoritative list
+      // rather than reconstructing records without IDs from old mutations.
+      void queryClient.invalidateQueries([QueryKeys.memories]);
     }
 
     /* Cross-turn filename reuse keeps the same `file_id` across runs.

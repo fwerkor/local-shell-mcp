@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Lágmarksstærð 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Sérsniðið verkfæri",
   "com_agents_mcp_trust_subtext": "Sérsniðin tengi eru ekki staðfest af LSM",
-  "com_agents_memory_info": "Ef virkjað getur fulltrúinn vistað, uppfært og eytt minningum um notandann meðan á samtalinu stendur með verkfærunum set_memory og delete_memory.",
+  "com_agents_memory_info": "Ef virkjað getur fulltrúinn vistað, uppfært og eytt minningum um notandann meðan á samtalinu stendur með verkfærunum set_memory.",
   "com_agents_memory_scope": "Halda minningum aðskildum fyrir þennan fulltrúa",
   "com_agents_memory_scope_info": "Ef virkjað notar fulltrúinn sínar eigin minningar, óháð öðrum fulltrúum og sameiginlegum minningum. Þessi fulltrúi sér ekki núverandi sameiginlegar minningar.",
   "com_agents_missing_name": "Sláðu inn heiti áður en þú vistar fulltrúa.",

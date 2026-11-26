@@ -1037,3 +1037,21 @@ async def test_child_registration_crash_window_recovers_exact_parent_or_rejects_
         if task_id in _TASKS:
             await asyncio.wait_for(_TASKS[task_id], 5)
     await shutdown_subagent_tasks()
+
+@pytest.mark.asyncio
+async def test_fully_compacted_child_returns_current_answer(host_environment, monkeypatch):
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+
+    async def model(profile, history, **kwargs):
+        yield 'New invocation answer'
+
+    async def compact_all(self, state):
+        state.messages[:] = [{'role': 'system', 'content': '<summary>\nAll prior turns\n</summary>'}]
+
+    monkeypatch.setattr(AgentRunner, '_before_model', compact_all)
+    host, handle = await start_task(host_environment, model)
+    await settle(host, handle['background_task_id'])
+    result = json.loads(await host.check({'background_task_id': handle['background_task_id']}))
+    assert result['status'] == 'completed'
+    assert result['result'] == 'New invocation answer'
+    await shutdown_subagent_tasks()

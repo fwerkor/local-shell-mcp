@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "最小サイズ 128 x 128 px",
   "com_agents_mcp_name_placeholder": "カスタムツール",
   "com_agents_mcp_trust_subtext": "カスタムコネクタはLSMによって検証されません。",
-  "com_agents_memory_info": "有効にすると、エージェントは set_memory ツールと delete_memory ツールを使用して、会話中にユーザーに関する記憶を保存、更新、削除できます。",
+  "com_agents_memory_info": "有効にすると、エージェントは set_memory ツールを使用して、会話中にユーザーに関する記憶を保存、更新、削除できます。",
   "com_agents_memory_scope": "このエージェントではメモリを分離保管する",
   "com_agents_memory_scope_info": "この設定を有効にすると、このエージェントは、共有メモリや他のエージェントから隔離された状態で、自身のメモリを読み書きします。既存の共有メモリは、このエージェントには表示されません。",
   "com_agents_missing_name": "エージェントを作成する前に名前を入力してください。",

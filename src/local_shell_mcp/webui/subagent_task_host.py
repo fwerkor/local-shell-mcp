@@ -587,8 +587,28 @@ class SQLiteSubagentTaskHost:
             ), timeout=_TIMEOUT_SECONDS)
             # A continued thread carries previous assistant answers in its
             # input history. Those must never become this invocation's result.
-            new_messages = (result[len(invocation_input):]
-                            if result[:len(invocation_input)] == invocation_input else result)
+            # System instructions (including refreshed memory context) can
+            # be inserted or replaced by AgentRunner without changing the
+            # invocation's user/assistant/tool history.
+            prior_turns = [message for message in invocation_input if message.get("role") != "system"]
+            result_turns = [message for message in result if message.get("role") != "system"]
+            if result_turns[:len(prior_turns)] == prior_turns:
+                new_messages = result_turns[len(prior_turns):]
+            else:
+                # A compacted history may retain only a suffix of the input.
+                # Never return an earlier reply when the prefix changed.
+                boundary = next((index for index in range(len(prior_turns))
+                                 if result_turns[:len(prior_turns)-index] == prior_turns[index:]), None)
+                if boundary is not None:
+                    new_messages = result_turns[len(prior_turns)-boundary:]
+                elif (agent or {}).get("edges"):
+                    new_messages = result_turns
+                else:
+                    # Full compaction can discard every input turn. The
+                    # runner's checkpointed partial_text belongs to this
+                    # invocation only, including across crash recovery.
+                    new_messages = ([{"role": "assistant", "content": runner.partial_text}]
+                                    if runner.partial_text else [])
             final_text = _limited(filter_subagent_result(new_messages), _MAX_RESULT)
             # For graph teams the tool result is deliberately only the designated
             # sink. Their whole thread transcript remains inside graph checkpoint.
