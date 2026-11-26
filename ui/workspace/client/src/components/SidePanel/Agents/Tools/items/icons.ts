@@ -1,6 +1,5 @@
 import {
   Code,
-  MessageCircleQuestion,
   Globe,
   Brain,
   Sparkles,
@@ -45,10 +44,6 @@ const BUILTIN_ICONS: Record<string, ItemIcon> = {
   memory: {
     Icon: Brain,
     colorClass: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300',
-  },
-  ask_user_question: {
-    Icon: MessageCircleQuestion,
-    colorClass: 'bg-teal-500/15 text-teal-600 dark:text-teal-300',
   },
 };
 

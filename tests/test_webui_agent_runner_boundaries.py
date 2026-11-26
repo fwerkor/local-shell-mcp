@@ -65,10 +65,28 @@ async def test_detached_runner_blocks_human_tools_without_side_effects(runner_pa
             yield 'The protected action never executed.'
 
     obj = runner(runner_parts, model, ask=True, detached=True)
-    messages = await obj.run(runner_parts[1].history('local', runner_parts[2].conversation_id))
-    assert messages[-1]['content'] == 'The protected action never executed.'
-    assert len(seen) == 2
+    history = runner_parts[1].history('local', runner_parts[2].conversation_id)
+    if tool_name == 'ask_user_question':
+        assert tool_name not in {t['function']['name'] for t in obj._context(None, profile=obj.initial_profile).tools}
+        with pytest.raises(RuntimeSafetyError, match='not enabled'):
+            await obj.run(history)
+    else:
+        messages = await obj.run(history)
+        assert messages[-1]['content'] == 'The protected action never executed.'
+        assert len(seen) == 2
     assert runner_parts[1].pending_action('local', runner_parts[2].run_id) is None
+
+
+@pytest.mark.parametrize('agent', [None, {'id': 'saved', 'tools': []}])
+def test_foreground_ask_user_ignores_legacy_tool_allowlist(runner_parts, agent):
+    async def model(*args, **kwargs):
+        yield 'unused'
+
+    obj = runner(runner_parts, model, ask=True)
+    obj.mcp_enabled = False
+    obj.web_search_enabled = False
+    names = {t['function']['name'] for t in obj._context(agent, profile=obj.initial_profile).tools}
+    assert 'ask_user_question' in names
 
 
 @pytest.mark.asyncio

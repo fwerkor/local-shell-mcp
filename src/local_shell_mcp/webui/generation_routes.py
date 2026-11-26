@@ -20,7 +20,6 @@ from starlette.routing import Route
 
 from .agents import AgentRepository
 from .artifact_prompts import agent_instructions, artifact_mode
-from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
 from .misc_routes import effective_features
@@ -845,12 +844,10 @@ async def start_generation(request: Request):
     if fresh:
         policy = resolve_access(owner, result.conversation_id)
         requested_tools = any(level in {"read", "write"} for level in policy.values())
-        ask_user_enabled = ask_user_requested(agent, payload)
-
         mcp_enabled = effective_features(owner, result.conversation_id)["mcp"]
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
-                          ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
+                          ask_user_enabled=True, mcp_enabled=mcp_enabled,
                           artifacts_mode=artifact_mode(payload, agent),
                           granted_scopes=frozenset(scopes), grant_expires=grant_expires,
                           webui_cookie=getattr(request.state, "_lsm_webui_grant_cookie", None))
