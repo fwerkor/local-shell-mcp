@@ -5,7 +5,6 @@ import type { TPromptGroup } from 'librechat-data-provider';
 import { useLocalize, useSubmitMessage } from '~/hooks';
 import { useRecordPromptUsage } from '~/data-provider';
 import VariableDialog from '../dialogs/VariableDialog';
-import SharePrompt from '../dialogs/SharePrompt';
 import { detectVariables } from '~/utils';
 
 interface PromptActionsProps {
@@ -45,8 +44,6 @@ const PromptActions = ({ group, mainText, onUsePrompt }: PromptActionsProps) => 
   return (
     <>
       <div className="flex w-full gap-2 sm:justify-end sm:gap-3">
-        <SharePrompt group={group} disabled={false} />
-
         <Button
           variant="submit"
           onClick={handleUsePrompt}

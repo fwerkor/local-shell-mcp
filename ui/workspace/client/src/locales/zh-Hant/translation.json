@@ -231,7 +231,7 @@
   "com_agents_run_code_info": "讓 Agent 在安全的沙箱中撰寫及執行程式碼，以進行計算、資料分析及檔案處理。",
   "com_agents_search_aria": "搜尋 Agents",
   "com_agents_search_empty_heading": "沒有搜尋結果",
-  "com_agents_search_info": "啟用後，允許您的 Agent 搜尋網路以取得最新資訊。需要有效的 API 金鑰。",
+  "com_agents_search_info": "允許代理程式搜尋網路上的最新資訊並引用來源。",
   "com_agents_search_instructions": "輸入名稱或描述來搜尋agents",
   "com_agents_search_name": "依名稱搜尋代理",
   "com_agents_search_no_results": "找不到符合「{{query}}」的 Agent",
@@ -3074,5 +3074,6 @@
   "com_lsm_channel_discover_manual_help": "關閉自動探索即可手動設定模型。",
   "com_lsm_channel_discover_interval": "伺服器每 10 分鐘更新一次。更新失敗時將保留現有資料。",
   "com_lsm_channel_discover_context_help": "留空以使用 API 元資料；輸入一個值來覆寫它或填入未知的限制。",
-  "com_lsm_channel_refreshed": "模型資訊已更新。"
+  "com_lsm_channel_refreshed": "模型資訊已更新。",
+  "com_ui_tool_name_sleep": "等待"
 }

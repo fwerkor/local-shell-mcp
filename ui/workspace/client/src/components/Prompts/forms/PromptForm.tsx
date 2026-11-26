@@ -5,12 +5,7 @@ import { useParams } from 'react-router-dom';
 import { Menu, Rocket, X } from 'lucide-react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { Button, Skeleton, useToastContext, useMediaQuery } from '@librechat/client';
-import {
-  Permissions,
-  ResourceType,
-  PermissionBits,
-  PermissionTypes,
-} from 'librechat-data-provider';
+import { ResourceType, PermissionBits } from 'librechat-data-provider';
 import type { TCreatePrompt, TPrompt, TPromptGroup } from 'librechat-data-provider';
 import {
   useGetPrompts,
@@ -19,7 +14,7 @@ import {
   useUpdatePromptGroup,
   useMakePromptProduction,
 } from '~/data-provider';
-import { useResourcePermissions, useHasAccess, useLocalize, useFocusTrap } from '~/hooks';
+import { useResourcePermissions, useLocalize, useFocusTrap } from '~/hooks';
 import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
 import CategorySelector from '../fields/CategorySelector';
 import PromptVariables from '../display/PromptVariables';
@@ -30,7 +25,6 @@ import DeletePrompt from '../dialogs/DeletePrompt';
 import NoPromptGroup from '../lists/NoPromptGroup';
 import PromptEditor from '../editor/PromptEditor';
 import SkeletonForm from '../utils/SkeletonForm';
-import SharePrompt from '../dialogs/SharePrompt';
 import Description from '../fields/Description';
 import PromptName from '../fields/PromptName';
 import { cn, findPromptGroup } from '~/utils';
@@ -147,11 +141,6 @@ interface HeaderActionsProps {
 
 const HeaderActions = React.memo(
   ({ group, canEdit, canDelete, selectedPromptId, onCategoryChange }: HeaderActionsProps) => {
-    const hasShareAccess = useHasAccess({
-      permissionType: PermissionTypes.PROMPTS,
-      permission: Permissions.SHARE,
-    });
-
     const groupId = group?._id || '';
     const groupCategory = group?.category || '';
     const isLoadingGroup = !group;
@@ -163,7 +152,6 @@ const HeaderActions = React.memo(
           currentCategory={groupCategory}
           onValueChange={canEdit ? onCategoryChange : undefined}
         />
-        {hasShareAccess && <SharePrompt group={group} disabled={isLoadingGroup} />}
         {canDelete && (
           <DeletePrompt
             promptId={selectedPromptId}
