@@ -60,7 +60,7 @@ def test_conversation_context_is_live_and_not_persisted(runtime):
         assert state.messages == history
         return metadata[0]
 
-    assert 'Current project: None' in context()
+    assert 'Current project:' not in context()
     assert 'Current conversation: "initial message"' in context()
     project = repo.create_project('a', '项目 A', 'First description')
     repo.update_conversation('a', cid, {'projectId': project['id'], 'title': '新标题'})
@@ -72,7 +72,7 @@ def test_conversation_context_is_live_and_not_persisted(runtime):
     assert 'Project description: "Updated"' in context()
     assert 'First description' not in context()
     repo.delete_project('a', project['id'])
-    assert 'Current project: None' in context()
+    assert 'Current project:' not in context()
     assert 'Project description:' not in context()
     runner.namespace = '/subagent:child'
     assert runner._conversation_context() == []
@@ -90,7 +90,7 @@ def test_conversation_context_rejects_foreign_metadata(runtime):
     _, _, repo, _, runner = runtime
     foreign = repo.create_project('other', 'Private', 'Secret')
     repo.update_conversation('a', runner.generation.conversation_id, {'projectId': foreign['id']})
-    assert 'Current project: None' in runner._conversation_context()[0]['content']
+    assert 'Current project:' not in runner._conversation_context()[0]['content']
     assert 'Secret' not in runner._conversation_context()[0]['content']
     runner.owner = 'other'
     assert runner._conversation_context() == []
