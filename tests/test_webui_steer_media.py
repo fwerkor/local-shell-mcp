@@ -404,3 +404,22 @@ async def test_explicit_image_rejection_only(status, problem, unsupported):
                               request=httpx.Request('POST', 'https://example.invalid'))
     with pytest.raises(UnsupportedImageInput if unsupported else httpx.HTTPStatusError):
         await check_image_response(response)
+
+@pytest.mark.asyncio
+async def test_generic_steer_image_fallback_uses_owned_provenance(context):
+    from local_shell_mcp.webui.steer_media import stamp_model_messages, without_attachment_images
+
+    db, _, _, root = context
+    image = insert_file(db, root, 'scan.bin', b'\x89PNG\r\n\x1a\nMEDIA',
+                        'application/octet-stream')
+    unrelated = {'role': 'user', 'content': [{'type': 'image_url',
+                                              'image_url': {'url': 'https://example.invalid/a.png'}}]}
+    original = {'role': 'user', 'source': 'steer', 'content': 'Inspect scan', 'files': [image]}
+    prepared = await stamp_model_messages(db, 'local', [original, unrelated], root)
+    assert any(p['type'] == 'image_url' for p in prepared[0]['content'])
+    assert any('[file](' in p.get('text', '') for p in prepared[0]['content'])
+    fallback, changed = without_attachment_images(prepared)
+    assert changed and '[file](' in fallback[0]['content']
+    assert 'Inspect scan' in fallback[0]['content']
+    assert 'base64' not in json.dumps(fallback[0])
+    assert fallback[1] == unrelated

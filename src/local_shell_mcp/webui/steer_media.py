@@ -139,16 +139,20 @@ async def stamp_model_messages(database, owner: str, messages: list[dict], state
     result = []
     for message in messages:
         if message.get("role") == "user" and message.get("source") == "steer":
-            payload = {key: val for key, val in message.items() if key != "files"}
+            payload = {key: val for key, val in message.items() if key not in {"files", "attachmentImageIndices"}}
             files = message.get("files") or []
             if files:
                 payload["content"] = await encode_steer_media(
                     database, owner, {"text": str(message.get("content") or ""), "files": files},
                     state_dir,
                 )
+                payload["attachmentImageIndices"] = [
+                    index for index, part in enumerate(payload["content"])
+                    if part.get("type") == "image_url"
+                ]
             result.append(payload)
         elif message.get("role") == "user" and message.get("source") == "attachment":
-            payload = {key: val for key, val in message.items() if key != "files"}
+            payload = {key: val for key, val in message.items() if key not in {"files", "attachmentImageIndices"}}
             content = message.get("content")
             # Ordinary uploads already carry durable path references. Add
             # native image blocks from owned records, not client MIME/data.
@@ -177,8 +181,10 @@ async def stamp_model_messages(database, owner: str, messages: list[dict], state
                     except (OSError, ValueError, PermissionError, RuntimeError):
                         continue
                 if images:
-                    payload["content"] = ([{"type": "text", "text": content}]
-                                          if isinstance(content, str) else list(content or [])) + images
+                    original = ([{"type": "text", "text": content}]
+                                if isinstance(content, str) else list(content or []))
+                    payload["content"] = original + images
+                    payload["attachmentImageIndices"] = list(range(len(original), len(original) + len(images)))
             result.append(payload)
         else:
             result.append(message)
@@ -191,15 +197,15 @@ def without_attachment_images(messages: list[dict]) -> tuple[list[dict], bool]:
     changed = False
     for message in messages:
         content = message.get("content")
+        indices = set(message.get("attachmentImageIndices") or [])
         if (message.get("role") == "user" and message.get("source") in {"steer", "attachment"}
-                and isinstance(content, list) and any(
-                    part.get("type") == "text" and "[image](" in part.get("text", "")
-                    for part in content
-                )):
-            filtered = [part for part in content if part.get("type") not in {"image", "image_url"}]
+                and isinstance(content, list) and indices):
+            filtered = [part for index, part in enumerate(content)
+                        if index not in indices or part.get("type") not in {"image", "image_url"}]
             if len(filtered) != len(content):
                 changed = True
                 message = {**message, "content": filtered}
+                message.pop("attachmentImageIndices", None)
                 if all(part.get("type") == "text" for part in filtered):
                     message["content"] = "\n".join(part["text"] for part in filtered if part.get("text"))
         result.append(message)

@@ -1625,7 +1625,7 @@ class GenerationStore:
                             from .steer_media import attachment_reference
 
                             links = [attachment_reference(d["path"], d["filename"], item.get("type", ""))
-                                     for d, item in zip(descriptors, files) if "path" in d]
+                                     for d, item in zip(descriptors, files, strict=True) if "path" in d]
                             note = "\n".join([*links, "Controller attachments (use authorized LSM file tools):\n" + _json(descriptors)])
                             if isinstance(value, list):
                                 value = [*value, {"type": "text", "text": note}]
