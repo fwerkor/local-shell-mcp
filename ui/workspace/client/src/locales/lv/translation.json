@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Lasīt failu",
   "com_ui_tool_name_image_gen": "Attēlu ģenerēšana",
   "com_ui_tool_name_set_memory": "Saglabāt atmiņu",
+  "com_ui_tool_name_sleep": "Gaidīšana",
   "com_ui_tool_name_web_search": "Meklēšana tīmeklī",
   "com_ui_tool_response_placeholder": "Ierakstiet aizstājējrezultātu, lai atgrieztos pie aģenta",
   "com_ui_tools": "Rīki",

@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Fájl olvasása",
   "com_ui_tool_name_image_gen": "Képgenerálás",
   "com_ui_tool_name_set_memory": "Memória mentése",
+  "com_ui_tool_name_sleep": "Várakozás",
   "com_ui_tool_name_web_search": "Webes keresés",
   "com_ui_tool_response_placeholder": "Írjon be egy helyettesítő eredményt az ügynökhöz való visszatéréshez",
   "com_ui_tools": "Eszközök",

@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Ler arquivo",
   "com_ui_tool_name_image_gen": "Geração de imagem",
   "com_ui_tool_name_set_memory": "Salvar memória",
+  "com_ui_tool_name_sleep": "Espera",
   "com_ui_tool_name_web_search": "Pesquisa na Web",
   "com_ui_tool_response_placeholder": "Digite um resultado substituto para retornar ao agente",
   "com_ui_tools": "Ferramentas",

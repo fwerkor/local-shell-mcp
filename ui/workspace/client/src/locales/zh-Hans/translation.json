@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "读取文件",
   "com_ui_tool_name_image_gen": "图像生成",
   "com_ui_tool_name_set_memory": "节省内存",
+  "com_ui_tool_name_sleep": "等待",
   "com_ui_tool_name_web_search": "网络搜索",
   "com_ui_tool_response_placeholder": "输入替代结果以返回给代理",
   "com_ui_tools": "工具",

@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Læs fil",
   "com_ui_tool_name_image_gen": "Billedgenerering",
   "com_ui_tool_name_set_memory": "Gem hukommelse",
+  "com_ui_tool_name_sleep": "Venter",
   "com_ui_tool_name_web_search": "Websøgning",
   "com_ui_tool_response_placeholder": "Indtast et erstatningsresultat for at vende tilbage til agenten",
   "com_ui_tools": "Værktøjer",

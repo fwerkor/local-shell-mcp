@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Przeczytaj plik",
   "com_ui_tool_name_image_gen": "Generowanie obrazu",
   "com_ui_tool_name_set_memory": "Oszczędzaj pamięć",
+  "com_ui_tool_name_sleep": "Oczekiwanie",
   "com_ui_tool_name_web_search": "Wyszukiwanie w Internecie",
   "com_ui_tool_response_placeholder": "Wpisz wynik zastępczy, aby wrócić do agenta",
   "com_ui_tools": "Narzędzia",

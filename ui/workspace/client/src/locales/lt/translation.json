@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Skaityti failą",
   "com_ui_tool_name_image_gen": "Vaizdo generavimas",
   "com_ui_tool_name_set_memory": "Išsaugokite atmintį",
+  "com_ui_tool_name_sleep": "Laukimas",
   "com_ui_tool_name_web_search": "Žiniatinklio paieška",
   "com_ui_tool_response_placeholder": "Įveskite pakaitinį rezultatą, kad grįžtumėte į agentą",
   "com_ui_tools": "Įrankiai",

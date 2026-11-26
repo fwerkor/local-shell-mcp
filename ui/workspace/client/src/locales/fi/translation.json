@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Lue tiedosto",
   "com_ui_tool_name_image_gen": "Kuvan luominen",
   "com_ui_tool_name_set_memory": "Tallenna muistia",
+  "com_ui_tool_name_sleep": "Odotus",
   "com_ui_tool_name_web_search": "Verkkohaku",
   "com_ui_tool_response_placeholder": "Kirjoita korvaava tulos palataksesi agenttiin",
   "com_ui_tools": "Työkalut",

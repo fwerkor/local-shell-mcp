@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Přečtěte si soubor",
   "com_ui_tool_name_image_gen": "Generování obrazu",
   "com_ui_tool_name_set_memory": "Uložit paměť",
+  "com_ui_tool_name_sleep": "Čekání",
   "com_ui_tool_name_web_search": "Vyhledávání na webu",
   "com_ui_tool_response_placeholder": "Zadejte náhradní výsledek pro návrat k agentovi",
   "com_ui_tools": "Nástroje",

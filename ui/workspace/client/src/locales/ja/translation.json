@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "ファイルの読み取り",
   "com_ui_tool_name_image_gen": "画像生成",
   "com_ui_tool_name_set_memory": "メモリを節約する",
+  "com_ui_tool_name_sleep": "待機",
   "com_ui_tool_name_web_search": "ウェブ検索",
   "com_ui_tool_response_placeholder": "エージェントに返す代替結果を入力します",
   "com_ui_tools": "ツール",

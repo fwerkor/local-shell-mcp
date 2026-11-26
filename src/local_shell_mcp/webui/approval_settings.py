@@ -33,7 +33,7 @@ def is_dangerous(name, arguments):
     # Never trust model-provided descriptions or readOnlyHint annotations.
     from .lsm_tool_registry import _READ_TOOLS
 
-    if name in _READ_TOOLS or name in {"web_search", "web_fetch", "ask_user_question", "subagent"}:
+    if name in _READ_TOOLS or name in {"web_search", "web_fetch", "ask_user_question", "subagent", "sleep"}:
         return False
     if name == "browser_session":
         return arguments.get("action") != "list"

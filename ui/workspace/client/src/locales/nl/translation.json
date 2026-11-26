@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "Bestand lezen",
   "com_ui_tool_name_image_gen": "Beeldgeneratie",
   "com_ui_tool_name_set_memory": "Geheugen opslaan",
+  "com_ui_tool_name_sleep": "Wachten",
   "com_ui_tool_name_web_search": "Webzoekopdracht",
   "com_ui_tool_response_placeholder": "Typ een vervangend resultaat om terug te keren naar de agent",
   "com_ui_tools": "Gereedschap",

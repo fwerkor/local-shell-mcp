@@ -57,6 +57,7 @@ from .semantic_index import (
     snapshot_compaction_semantic_index,
 )
 from .steering import SteeringStore, merged_text
+from .sleep_tool import SLEEP_TOOLS, invoke_sleep, sleep_seconds
 from .subagents import (
     MAX_SUBAGENT_DEPTH,
     build_subagent_configs,
@@ -231,6 +232,7 @@ class AgentRunner:
         if features["web"] and (self.web_search_enabled or explicit_web):
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
+        tools += SLEEP_TOOLS
         if self.mcp_enabled and (agent or {}).get("mcp_servers") != []:
             mcp_configured = "mcp_servers" in (agent or {})
             mcp_exposed = mcp_configured or (selected_tools is None and not selected)
@@ -487,6 +489,21 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name == "sleep":
+            try:
+                seconds = sleep_seconds(call.arguments)
+            except ValueError as exc:
+                return f"Tool failed (ValueError): {exc}"
+            if self._publishes_tool_steps():
+                step = self._tool_step(call)
+                self.store.append(self.owner, self.generation.run_id, {
+                    "event": "on_tool_calls_dispatched", "data": {
+                        "dispatched_at": int(time.time() * 1000),
+                        "runId": step["runId"],
+                        "toolCalls": [{"id": call.call_id, "name": call.name, "stepId": step["id"]}],
+                    },
+                }, actor_lease=self.actor_lease)
+            return await invoke_sleep(seconds, self._check_grant)
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)

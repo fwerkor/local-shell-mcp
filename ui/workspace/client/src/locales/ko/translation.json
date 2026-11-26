@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "파일 읽기",
   "com_ui_tool_name_image_gen": "이미지 생성",
   "com_ui_tool_name_set_memory": "메모리 절약",
+  "com_ui_tool_name_sleep": "대기",
   "com_ui_tool_name_web_search": "웹 검색",
   "com_ui_tool_response_placeholder": "상담원에게 반환하려면 대체 결과를 입력하세요.",
   "com_ui_tools": "도구",

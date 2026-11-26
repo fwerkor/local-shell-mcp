@@ -2526,6 +2526,7 @@
   "com_ui_tool_name_read_file": "讀取文件",
   "com_ui_tool_name_image_gen": "圖片產生",
   "com_ui_tool_name_set_memory": "節省記憶體",
+  "com_ui_tool_name_sleep": "等待",
   "com_ui_tool_name_web_search": "網頁搜尋",
   "com_ui_tool_response_placeholder": "輸入要傳回給 Agent 的替代結果",
   "com_ui_tools": "工具",
