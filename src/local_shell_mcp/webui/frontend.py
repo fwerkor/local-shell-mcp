@@ -81,16 +81,22 @@ def _extract_frontend(archive: Path, state_dir: Path) -> Path:
 
 def bundled_frontend() -> Path | None:
     root = Path(__file__).resolve().parent
+    # The installed archive belongs to the current package version. Untracked
+    # assets left by older installations must not shadow it after a pip upgrade.
+    package_archive = root / "frontend.tar.gz"
+    if package_archive.is_file():
+        from ..settings import get_settings
+
+        return _extract_frontend(package_archive, get_settings().state_dir)
     candidates = [root / "assets", root.parents[2] / "ui" / "workspace" / "client" / "dist"]
     for candidate in candidates:
         if (candidate / "index.html").is_file():
             return candidate
     source_archive = root.parents[2] / "ui" / "workspace" / "frontend.tar.gz"
-    for archive in (root / "frontend.tar.gz", source_archive):
-        if archive.is_file():
-            from ..settings import get_settings
+    if source_archive.is_file():
+        from ..settings import get_settings
 
-            return _extract_frontend(archive, get_settings().state_dir)
+        return _extract_frontend(source_archive, get_settings().state_dir)
     return None
 
 
