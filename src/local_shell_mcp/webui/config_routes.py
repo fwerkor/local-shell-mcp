@@ -108,7 +108,7 @@ async def startup_config(request: Request):
     try:
         _owner(request)
     except HTTPException:
-        return JSONResponse(settings)
+        return JSONResponse(settings, headers={"Cache-Control": "no-store"})
     from .build_info import about_build_info
     from .memory import memory_config
     has_memory = memory_config(_repo(), _owner(request)) is not None
@@ -138,7 +138,7 @@ async def startup_config(request: Request):
     })
     summarization = (_repo().setting(_owner(request), "endpoints", {}) or {}).get("summarization")
     settings["compactionEnabled"] = not (isinstance(summarization, dict) and summarization.get("enabled") is False)
-    return JSONResponse(settings)
+    return JSONResponse(settings, headers={"Cache-Control": "no-store"})
 
 
 async def endpoint_configs(request: Request):

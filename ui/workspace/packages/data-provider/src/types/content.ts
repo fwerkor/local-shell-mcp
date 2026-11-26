@@ -218,7 +218,7 @@ export type SummaryContentPart = {
   failed?: boolean;
   /** Set when the user compacted the context manually rather than the
    *  automatic detour firing on context pressure. */
-  initiatedBy?: 'user';
+  initiatedBy?: 'user' | 'live';
   summaryVersion?: number;
   model?: string;
   provider?: string;
