@@ -12,6 +12,7 @@ import traceback
 from pathlib import Path
 
 from .agent_runtime import RuntimeSafetyError
+from .provider_responses import ResponsesStreamError
 
 _KNOWN_SAFETY_REASONS = frozenset({
     "Authentication grant expired",
@@ -38,6 +39,9 @@ def generation_failure(exc: Exception, run_id: str) -> str:
             headline = "WebUI authorization expired or was revoked. Sign in again to continue."
         else:
             headline = f"LSM stopped this operation: {reason}."
+    elif isinstance(exc, ResponsesStreamError):
+        reason = str(exc)  # Typed exception contains only classified fields.
+        headline = reason
     elif isinstance(exc, TimeoutError):
         reason = "The operation timed out"
         headline = "The model request or runtime operation timed out."

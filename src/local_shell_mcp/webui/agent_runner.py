@@ -1797,6 +1797,15 @@ class AgentRunner:
             async for event in self._stream_with_image_fallback(self.stream_text, profile, prepared, **kwargs):
                 yield event
 
+        async def on_model_retry(attempt, maximum, delay, status):
+            self._check_grant()
+            self.store.append(self.owner, self.generation.run_id, {
+                "event": "on_model_retry", "data": {
+                    "attempt": attempt, "maximum": maximum,
+                    "delaySeconds": delay, "httpStatus": status,
+                },
+            }, actor_lease=self.actor_lease)
+
         result = await run_agent_loop(
             state, stream_tools=stream_tools_with_media, stream_text=stream_text_with_media,
             dispatch=self._dispatch, on_text=emit, on_thought=self.on_thought,
@@ -1805,6 +1814,7 @@ class AgentRunner:
             project_messages=self._project_model_messages,
             preflight_calls=self._preflight_model_calls,
             on_boundary=inject_steers, on_stream_chunk=should_seal_stream,
+            on_model_retry=on_model_retry,
             inject_controls=inject if self.task_control_host else None,
             should_preempt=(lambda: self.task_control_host.has_interrupt(self.task_control_id))
             if self.task_control_host and self.task_control_id else None,
