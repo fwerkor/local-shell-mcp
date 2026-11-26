@@ -364,3 +364,57 @@ async def test_account_reauthorization_and_expiry_storage(setup_profiles, monkey
     assert profile("Codex")["oauth_error"] == "Sign in again"
     with pytest.raises(model_oauth.ReauthorizationRequired):
         await model_oauth.access_token(db, "Codex", expired["oauth_id"])
+
+
+@pytest.mark.asyncio
+async def test_loopback_rejects_invalid_http_and_missing_code(setup_profiles, exchange):
+    _, app = setup_profiles
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost", headers=_ADMIN) as client:
+        result = (await client.post(PATH + "/start", json={"method": "chatgpt", "name": "Local"})).json()
+        path = PATH + "/status?flow=" + result["flow"]
+        raw = callback(result)
+        async with httpx.AsyncClient(trust_env=False) as browser:
+            assert (await browser.post(raw)).status_code == 400
+            assert (await browser.get(raw.split("&code=")[0])).status_code == 400
+            assert exchange == ([], [])
+            assert (await browser.get(raw)).status_code == 200
+        assert await complete(client, path) == {"status": "complete", "name": "Local"}
+        assert (await client.post(path, json={"callback_url": raw})).status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error,message", [
+    (TimeoutError, "Authorization expired; try again"),
+    (ValueError, "Authorization or model discovery failed; try again"),
+])
+async def test_authorization_failure_is_reported_without_credentials(setup_profiles, monkeypatch, error, message):
+    _, app = setup_profiles
+    async def exchange(self, *args):
+        raise error("private provider detail")
+    monkeypatch.setattr(model_oauth.ChatGPTAuthorization, "exchange", exchange)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        result = (await client.post(PATH + "/start", json={"method": "chatgpt", "name": "Codex"})).json()
+        path = PATH + "/status?flow=" + result["flow"]
+        assert (await client.post(path, json={"callback_url": callback(result)})).status_code == 200
+        assert await complete(client, path) == {"status": "error", "error": message}
+
+
+@pytest.mark.asyncio
+async def test_expired_flow_cannot_be_submitted_and_releases_channel(setup_profiles, exchange):
+    _, app = setup_profiles
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        body = {"method": "chatgpt", "name": "Codex"}
+        result = (await client.post(PATH + "/start", json=body)).json()
+        flow = model_oauth._FLOWS[result["flow"]]
+        flow["expires"] = 0
+        path = PATH + "/status?flow=" + result["flow"]
+        assert (await client.post(path, json={"callback_url": callback(result)})).status_code == 410
+        await asyncio.gather(flow["task"], return_exceptions=True)
+        assert result["flow"] not in model_oauth._FLOWS
+        replacement = await client.post(PATH + "/start", json=body)
+        assert replacement.status_code == 200
+        new_id = replacement.json()["flow"]
+        task = model_oauth._FLOWS[new_id]["task"]
+        assert (await client.delete(PATH + "/status?flow=" + new_id)).status_code == 200
+        await asyncio.gather(task, return_exceptions=True)
+        assert exchange == ([], [])
