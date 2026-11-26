@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Plus } from 'lucide-react';
 import { Button, TooltipAnchor } from '@librechat/client';
-import { PanelContent, PanelFooter } from '~/components/ui';
+import { PanelContent } from '~/components/ui';
 import { useChatProjectNames } from './useScheduleProjects';
 import ScheduleCardSkeleton from './ScheduleCardSkeleton';
 import ScheduleEmptyState from './ScheduleEmptyState';
@@ -26,14 +26,12 @@ export default function SchedulePanel() {
   const projectNames = useChatProjectNames(
     schedules.some((schedule) => schedule.chatProjectId != null),
   );
-  const maxPerUser = data?.limits.maxPerUser;
-  const atLimit = maxPerUser !== undefined && schedules.length >= maxPerUser;
   let panelContent: ReactNode;
 
   if (isError) {
     panelContent = <ScheduleEmptyState isError onRetry={() => refetch()} />;
   } else if (schedules.length === 0) {
-    panelContent = <ScheduleEmptyState canCreate={!atLimit && !isLoading && data != null} />;
+    panelContent = <ScheduleEmptyState canCreate={!isLoading && data != null} />;
   } else {
     panelContent = (
       <div className="space-y-2" role="list" aria-label={localize('com_ui_schedules')}>
@@ -76,7 +74,7 @@ export default function SchedulePanel() {
                   size="icon"
                   className="size-9 shrink-0 bg-transparent"
                   aria-label={localize('com_ui_schedule_new')}
-                  disabled={atLimit || isError || isLoading}
+                  disabled={isError || isLoading}
                   onClick={() => setCreateOpen(true)}
                 >
                   <Plus className="size-4" aria-hidden="true" />
@@ -89,17 +87,9 @@ export default function SchedulePanel() {
 
       <PanelContent isLoading={isLoading} skeleton={<ScheduleCardSkeleton />} className="px-3 pb-3">
         {/* A failed query must not masquerade as an empty list or enable creation
-            against limits that could not be loaded. */}
+            when schedule settings could not be loaded. */}
         {panelContent}
       </PanelContent>
-
-      {!isLoading && !isError && maxPerUser !== undefined && (
-        <PanelFooter className="justify-start">
-          <p className="text-xs text-text-secondary">
-            {localize('com_ui_schedules_used', { used: schedules.length, max: maxPerUser })}
-          </p>
-        </PanelFooter>
-      )}
 
       {createOpen && <ScheduleDialog open={createOpen} onOpenChange={setCreateOpen} />}
     </div>
