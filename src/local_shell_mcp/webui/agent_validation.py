@@ -201,7 +201,7 @@ def clean_agent_config(payload: Any, *, create: bool = False) -> dict:
                         "entryAgentId", "resultAgentId"}
     strings = {"provider", "artifacts", "category", "code_environment_id", "code_workspace_id"}
     arrays = {"tools", "actions", "skills", "agent_ids", "graphAgentIds", "conversation_starters"}
-    booleans = {"skills_enabled", "skill_authoring_enabled", "end_after_tools", "hide_sequential_outputs", "stateful_code_sessions", "run_in_background"}
+    booleans = {"web_search", "skills_enabled", "skill_authoring_enabled", "end_after_tools", "hide_sequential_outputs", "stateful_code_sessions", "run_in_background"}
     enums = {"skills_scope": ("all", "selected", "none"), "memory_scope": ("user", "agent"),
              "stateful_code_environment": ("user", "agent-user", "conversation"),
              "repositoryInstructions": ("prefer", "defer", "off")}

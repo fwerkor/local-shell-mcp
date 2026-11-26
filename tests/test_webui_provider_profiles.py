@@ -684,3 +684,20 @@ async def test_keyless_channel_can_discover_at_changed_endpoint(setup_profiles, 
         assert response.json()['models'] == ['local-chat']
         assert str(requests[0].url) == 'http://127.0.0.1:9000/v1/models'
         assert 'authorization' not in requests[0].headers
+
+
+@pytest.mark.asyncio
+async def test_endpoint_responses_routing_matches_channel_protocol(setup_profiles):
+    _, app = setup_profiles
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        for name, protocol in (("Chat Channel", "openai"), ("Responses Channel", "openai-responses")):
+            response = await client.put("/api/lsm/providers", json={
+                "name": name, "provider": protocol, "base_url": "https://models.invalid/v1",
+                "api_key": "secret", "models": ["same-model"]})
+            assert response.status_code == 200, response.text
+        endpoints = (await client.get("/api/endpoints")).json()
+        for name, responses in (("Chat Channel", False), ("Responses Channel", True)):
+            assert endpoints[name]["responsesApiRouting"]["*"] == {
+                "default": responses, "on": responses, "off": responses}
+            assert provider_config(name).url.endswith("/responses" if responses else "/chat/completions")
