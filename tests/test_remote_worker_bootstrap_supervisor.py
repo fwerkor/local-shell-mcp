@@ -468,3 +468,82 @@ def test_duplicate_windows_supervisor_cannot_mutate_pending_journal(tmp_path):
             assert not second
     with bootstrap._windows_supervisor_lock(tmp_path) as after:
         assert after
+
+
+def test_foreground_runtime_remains_selected_after_failed_trial(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    foreground = tmp_path / "foreground"
+    foreground.mkdir()
+    monkeypatch.setenv(bootstrap._INITIAL_RUNTIME_ENV, str(foreground))
+    paths = []
+
+    def spawn(argv, **kwargs):
+        paths.append(kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
+        assert bootstrap._INITIAL_RUNTIME_ENV not in kwargs["env"]
+        if len(paths) == 1:
+            _pending_trial(tmp_path)
+            return _fake_process(75)
+        if len(paths) == 2:
+            return _fake_process(1)
+        return _fake_process(0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", spawn)
+    assert bootstrap.main() == 0
+    assert paths == [str(foreground), str(tmp_path / "runtime"), str(foreground)]
+
+
+def test_foreground_runtime_switches_to_cache_after_successful_trial(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    foreground = tmp_path / "foreground"
+    foreground.mkdir()
+    monkeypatch.setenv(bootstrap._INITIAL_RUNTIME_ENV, str(foreground))
+    paths = []
+
+    def spawn(argv, **kwargs):
+        paths.append(kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
+        if len(paths) == 1:
+            _pending_trial(tmp_path)
+            return _fake_process(75)
+        if len(paths) == 2:
+            (tmp_path / "runtime.pending.json").unlink()
+            (tmp_path / "runtime.attempted").unlink()
+            return _fake_process(1)
+        return _fake_process(0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", spawn)
+    assert bootstrap.main() == 0
+    assert paths == [str(foreground), str(tmp_path / "runtime"), str(tmp_path / "runtime")]
+
+
+def test_frozen_supervisor_launches_frozen_worker_subcommand(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    monkeypatch.setattr(bootstrap.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(bootstrap.sys, "executable", "local-shell-mcp.exe")
+    calls = []
+    monkeypatch.setattr(bootstrap.subprocess, "Popen",
+                        lambda argv, **kwargs: calls.append(argv) or _fake_process())
+    assert bootstrap.main() == 0
+    assert calls == [["local-shell-mcp.exe", "worker", "run"]]
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_foreground_with_pending_candidate_respects_trial_result(tmp_path, monkeypatch, success):
+    _supervisor(tmp_path, monkeypatch)
+    _pending_trial(tmp_path)
+    foreground = tmp_path / "foreground"
+    foreground.mkdir()
+    monkeypatch.setenv(bootstrap._INITIAL_RUNTIME_ENV, str(foreground))
+    paths = []
+
+    def spawn(argv, **kwargs):
+        paths.append(kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
+        if len(paths) == 1:
+            if success:
+                (tmp_path / "runtime.pending.json").unlink()
+                (tmp_path / "runtime.attempted").unlink()
+            return _fake_process(1)
+        return _fake_process(0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", spawn)
+    assert bootstrap.main() == 0
+    assert paths == [str(tmp_path / "runtime"), str(tmp_path / "runtime" if success else foreground)]

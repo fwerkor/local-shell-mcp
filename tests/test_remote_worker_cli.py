@@ -844,3 +844,20 @@ def test_windows_direct_run_starts_supervisor(monkeypatch):
     with pytest.raises(SystemExit):
         cli._run_command(cli._parser().parse_args(["run"]))
     assert calls == ["launcher", "supervisor"]
+
+
+def test_frozen_windows_bridge_uses_worker_subcommand(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "is_frozen_app", lambda: True)
+    monkeypatch.delenv(cli._RESTART_PROTOCOL_ENV, raising=False)
+    monkeypatch.setattr(cli, "install_launcher", lambda: pytest.fail("frozen launcher"))
+    monkeypatch.setattr(cli.sys, "executable", "local-shell-mcp.exe")
+    calls = []
+    monkeypatch.setattr(cli.subprocess, "run",
+                        lambda argv, **kwargs: calls.append((argv, kwargs)) or cli.subprocess.CompletedProcess(argv, 0))
+    with pytest.raises(SystemExit) as exc:
+        cli._start_windows_foreground()
+    assert exc.value.code == 0
+    assert calls[0][0] == ["local-shell-mcp.exe", "worker", "_supervise"]
+    assert calls[0][1]["env"]["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] == str(state.worker_state_dir().resolve())
+    assert cli._INITIAL_RUNTIME_ENV not in cli.os.environ

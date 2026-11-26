@@ -360,13 +360,19 @@ try {
   $WorkerPythonPath = "$RuntimeRoot"
   if ($env:PYTHONPATH) { $WorkerPythonPath += ";$env:PYTHONPATH" }
   $env:PYTHONPATH = $WorkerPythonPath
+  $CachedDigest = $RemoteDigest
+  $CachedVersion = $RemoteVersion
+  if (-not $Persistent) {
+    $CachedDigest = ""
+    $CachedVersion = ""
+  }
   $EnrollArgs = @($PythonPrefix) + @(
     "-m", "local_shell_mcp.remote_worker", "enroll",
     "--server", $Server,
     "--invite-stdin",
     "--workdir", $Workdir,
-    "--runtime-digest", $RemoteDigest,
-    "--runtime-version", $RemoteVersion
+    "--runtime-digest=$CachedDigest",
+    "--runtime-version=$CachedVersion"
   )
   if ($Name) { $EnrollArgs += @("--name", $Name) }
   $Invite | & $PythonExe @EnrollArgs

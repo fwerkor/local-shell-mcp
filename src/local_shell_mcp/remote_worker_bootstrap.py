@@ -20,6 +20,7 @@ from pathlib import Path
 _REAPER_PID_ENV = "LOCAL_SHELL_MCP_WORKER_REAPER_PID"
 _LOCK_FD_ENV = "LOCAL_SHELL_MCP_WORKER_LOCK_FD"
 _RESTART_PROTOCOL_ENV = "LOCAL_SHELL_MCP_WORKER_RESTART_PROTOCOL"
+_INITIAL_RUNTIME_ENV = "LOCAL_SHELL_MCP_WORKER_INITIAL_RUNTIME"
 _WORKER_RESTART_EXIT = 75
 _WORKER_LOCK_BUSY_EXIT = 73
 
@@ -115,6 +116,8 @@ def _is_windows() -> bool:
 
 
 def _state_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(os.environ["LOCAL_SHELL_MCP_WORKER_STATE_DIR"])
     return Path(__file__).resolve().parent
 
 
@@ -207,6 +210,7 @@ def _rollback_stopped_worker(state: Path) -> bool:
 
 def _run_supervisor() -> int:
     state = _state_dir()
+    state.mkdir(parents=True, exist_ok=True)
     with _windows_supervisor_lock(state) as acquired:
         if not acquired:
             print("Status: another Windows worker supervisor is active", file=sys.stderr, flush=True)
@@ -343,6 +347,12 @@ def main() -> int:
     attempted = state / "runtime.attempted"
     delay = 1.0
     active_process: subprocess.Popen | None = None
+    initial_runtime = os.environ.pop(_INITIAL_RUNTIME_ENV, None)
+    # A foreground invocation may import a freshly downloaded temporary bundle
+    # (or a wheel) rather than the persistent cache. Keep that selection until
+    # an explicitly requested upgrade; use it again if the first trial fails.
+    use_initial_runtime = bool(initial_runtime)
+    trial_from_initial = False
 
     def stop_worker(signum: int, frame: object) -> None:  # noqa: ARG001
         if active_process is not None and active_process.poll() is None:
@@ -361,7 +371,12 @@ def main() -> int:
             if pending.exists():
                 # Survives abrupt termination of this supervisor or the host.
                 attempted.write_text("1\n", encoding="utf-8")
+                if use_initial_runtime:
+                    trial_from_initial = True
+                    use_initial_runtime = False
             runtime = state / "runtime"
+            if use_initial_runtime and not pending.exists():
+                runtime = Path(initial_runtime)
             env = os.environ.copy()
             env["LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED"] = "1"
             env[_RESTART_PROTOCOL_ENV] = "1"
@@ -389,10 +404,11 @@ def main() -> int:
                 kwargs["stdout"] = (state / "worker.log").open("ab")
                 kwargs["stderr"] = subprocess.STDOUT
             try:
-                process = subprocess.Popen(
-                    [worker_python, "-m", "local_shell_mcp.remote_worker", "run"],
-                    env=env, **kwargs,
+                argv = (
+                    [worker_python, "worker", "run"] if getattr(sys, "frozen", False)
+                    else [worker_python, "-m", "local_shell_mcp.remote_worker", "run"]
                 )
+                process = subprocess.Popen(argv, env=env, **kwargs)
             finally:
                 if "stdout" in kwargs:
                     kwargs["stdout"].close()
@@ -411,15 +427,20 @@ def main() -> int:
                 # A contender must never roll back another process's runtime.
                 return exit_code
             if exit_code == _WORKER_RESTART_EXIT and not attempted.exists():
+                trial_from_initial = use_initial_runtime and pending.exists()
+                use_initial_runtime = False
                 delay = 1.0
                 continue
             # Any exit from a trial before controller-acknowledged readiness
             # is a failed trial, including a second restart request.
             if pending.exists():
                 _rollback_stopped_worker(state)
+                use_initial_runtime = use_initial_runtime or trial_from_initial
+                trial_from_initial = False
                 time.sleep(min(delay, 30.0))
                 delay = min(delay * 2, 30.0)
                 continue
+            trial_from_initial = False
             if exit_code in {0, _WORKER_LOCK_BUSY_EXIT}:
                 return exit_code
             print(f"Status: worker exited ({exit_code}); reconnecting", file=sys.stderr, flush=True)
@@ -442,6 +463,8 @@ def main() -> int:
             if pending.exists():
                 try:
                     _rollback_stopped_worker(state)
+                    use_initial_runtime = use_initial_runtime or trial_from_initial
+                    trial_from_initial = False
                 except Exception as rollback_error:  # noqa: BLE001
                     print(f"Status: worker rollback failed: {rollback_error}", file=sys.stderr, flush=True)
             # Never permanently give up if the running runtime cannot start.

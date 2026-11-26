@@ -12,10 +12,12 @@ from typing import Any
 
 from . import remote
 from .remote_worker_bootstrap import (
+    _INITIAL_RUNTIME_ENV,
     _RESTART_PROTOCOL_ENV,
     _WORKER_LOCK_BUSY_EXIT,
     _WORKER_RESTART_EXIT,
     WorkerRestartRequested,
+    _run_supervisor,
     needs_worker_reaper,
     supervise_worker,
 )
@@ -199,8 +201,19 @@ async def _connect(args: argparse.Namespace) -> None:
     if sys.platform == "win32":
         # Initial enrollment is complete. Do not carry a Windows region
         # lock (or invitation arguments) into the new worker process.
+        _start_windows_foreground()
+
+
+def _start_windows_foreground() -> None:
+    if not is_frozen_app():
         install_launcher()
+    # The current imported package is the source selected by the caller,
+    # including a temporary PowerShell join bundle. Do not prefer stale cache.
+    os.environ[_INITIAL_RUNTIME_ENV] = str(Path(__file__).resolve().parents[1])
+    try:
         _restart_windows_worker()
+    finally:
+        os.environ.pop(_INITIAL_RUNTIME_ENV, None)
 
 
 def _restart_windows_worker() -> None:
@@ -212,7 +225,13 @@ def _restart_windows_worker() -> None:
     # Wait for it so the original venv/task process remains tracked.
     env = os.environ.copy()
     env.pop("LOCAL_SHELL_MCP_WORKER_LOCK_FD", None)
-    result = subprocess.run([sys.executable, str(worker_bootstrap_path())], env=env, check=False)
+    if is_frozen_app():
+        env["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] = str(worker_state_dir().resolve())
+        # PyInstaller executables cannot interpret an arbitrary .py file.
+        argv = [sys.executable, "worker", "_supervise"]
+    else:
+        argv = [sys.executable, str(worker_bootstrap_path())]
+    result = subprocess.run(argv, env=env, check=False)
     raise SystemExit(result.returncode)
 
 
@@ -256,6 +275,7 @@ def _parser() -> argparse.ArgumentParser:
         subparsers.add_parser("connect", help="register if needed and run in the foreground")
     )
     subparsers.add_parser("run", help="run using the stored worker identity")
+    subparsers.add_parser("_supervise", help=argparse.SUPPRESS)
     subparsers.add_parser("start", help="start the installed worker")
     subparsers.add_parser("stop", help="stop the installed worker")
     subparsers.add_parser("restart", help="restart the installed worker")
@@ -288,10 +308,13 @@ def _run_command(args: argparse.Namespace) -> None:
         _print_result(result)
     elif args.command == "connect":
         asyncio.run(_connect(args))
+    elif args.command == "_supervise":
+        if sys.platform != "win32" or not is_frozen_app():
+            raise ValueError("internal supervisor command requires a Windows standalone executable")
+        raise SystemExit(_run_supervisor())
     elif args.command == "run":
         if sys.platform == "win32" and not os.environ.get("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED"):
-            install_launcher()
-            _restart_windows_worker()
+            _start_windows_foreground()
         prepare_worker_service_environment()
         asyncio.run(run_enrolled_worker())
     elif args.command == "start":
