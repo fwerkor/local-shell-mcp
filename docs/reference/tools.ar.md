@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # مرجع الأدوات
 
 تُبنى هذه الصفحة من MCP tool schemas الفعلية. شغّل `python scripts/generate-tools-reference.py` بعد تغيير public tool surface لتحديث English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-أدر Logical Session دائمة واحدة. ينشئ start مهمة جديدة ويعيد session_id الخاص بها. يتابع resume فقط session_id الصريح الذي قدّمه المستخدم أو الموجود بالفعل في هذه المحادثة. تتطلب كل الإجراءات عدا start قيمة session_id. الإجراءات: start, resume, get, report, finish, cancel, delete. يقبل report الحقول summary/findings/next/blockers/objective/label، ويتطلب delete Session نهائية. تصبح الجلسات النشطة الخاملة لمدة 24 ساعة stale عند الوصول أو العرض أو البدء، ما لم يكن هناك استدعاء أداة قيد التنفيذ. يمكن استئناف الجلسات stale وتنظيفها من السجل بدءًا بالأقدم.
+أدر Logical Session دائمة واحدة. ينشئ start مهمة جديدة ويعيد session_id الخاص بها. يتابع resume فقط session_id الصريح الذي قدّمه المستخدم أو الموجود بالفعل في هذه المحادثة. تتطلب كل الإجراءات عدا start قيمة session_id. الإجراءات: start, resume, get, report, finish, cancel, delete. يقبل report الحقول summary/findings/next/blockers/objective/label، ويتطلب delete Session نهائية. تصبح الجلسات النشطة الخاملة لمدة 24 ساعة stale عند الوصول أو العرض أو البدء، ما لم يكن هناك استدعاء أداة قيد التنفيذ. يمكن استئناف الجلسات stale وتنظيفها من السجل بدءًا بالأقدم. استخدم verbose=true لتضمين النشاط الأخير بالكامل.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -112,6 +112,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-يشغّل command shell واحدة غير تفاعلية محليًا أو على machine بعيدة. استخدمه لـ build وtest وpackage-manager وGit وinspection التي ينبغي أن تنتهي سريعًا. للعمليات الطويلة أو التفاعلية أو streaming استخدم `shell_start` أو `job_start`. تسمح حقول purpose/explanation الاختيارية بذكر سبب التشغيل.
+يشغّل command shell واحدة غير تفاعلية محليًا أو على machine بعيدة. استخدمه لـ build وtest وpackage-manager وGit وinspection التي ينبغي أن تنتهي سريعًا. للعمليات الطويلة أو التفاعلية أو streaming استخدم `shell_start` أو `job_start`. تسمح حقول purpose/explanation الاختيارية بذكر سبب التشغيل. غياب timed_out أو truncated أو persisted يعني false، وغياب stderr يعني أنه فارغ. يشير الخروج الناجح exit_code=0 إلى data.ok=true.
 
 عند ضبط `persist_on_timeout=true` (الافتراضي false)، تستمر المهمة نفسها بعد انتهاء المهلة وتعيد `job_id`. استخدم `job_tail` لقراءة النتائج؛ يتم دمج stdout وstderr.
 
@@ -161,6 +162,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_python`
 
-يكتب ويشغّل script Python قصيرة محليًا أو على machine بعيدة.
+يكتب ويشغّل script Python قصيرة محليًا أو على machine بعيدة. غياب timed_out أو truncated أو persisted يعني false، وغياب stderr يعني أنه فارغ. يشير الخروج الناجح exit_code=0 إلى data.ok=true.
 
 عند ضبط `persist_on_timeout=true` (الافتراضي false)، تستمر المهمة نفسها بعد انتهاء المهلة وتعيد `job_id`. استخدم `job_tail` لقراءة النتائج؛ يتم دمج stdout وstderr.
 
@@ -182,6 +184,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_tail`
 
-يقرأ output الحديث لـ tracked local/remote job.
+يقرأ المخرجات الأخيرة وحالة المهمة المتتبعة. استخدم verbose=true أو job_get للحصول على البيانات الوصفية الكاملة؛ غياب log_truncated يعني false.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-يعيد full cached schema لأداة MCP ديناميكية باسم `<server>:<tool>`. اعمل refresh للـ server بـ `mcp_manage` إذا كان cache stale.
+يعيد المخطط الكامل المخزن مؤقتًا لأداة MCP الديناميكية `<server>:<tool>`. يحدّث Controller ذاكرة التخزين المؤقت تلقائيًا، ويمكن لـ mcp_manage فرض التحديث.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -784,7 +789,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_manage`
 
-يدير remote workers عبر action=invite أو list أو reset أو revoke أو rename. invite يقبل name/workdir/ttl_s/max_uses؛ revoke يحتاج machine؛ rename يحتاج machine وnew_name. القيمة الافتراضية لـ max_uses هي 1. يتطلب reset المعامل machine، ويمسح طلبات التحكم المنتظرة والقابلة للإلغاء بأمان دون فصل العامل؛ وتبقى العمليات المحمية التي بدأت بالفعل كما هي.
+يدير remote workers عبر action=invite أو list أو reset أو revoke أو rename. invite يقبل name/workdir/ttl_s/max_uses؛ revoke يحتاج machine؛ rename يحتاج machine وnew_name. القيمة الافتراضية لـ max_uses هي 1. يتطلب reset المعامل machine، ويمسح طلبات التحكم المنتظرة والقابلة للإلغاء بأمان دون فصل العامل؛ وتبقى العمليات المحمية التي بدأت بالفعل كما هي. في list، يتضمن verbose=true بيانات القياس عن بعد للتشخيص.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -795,6 +800,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

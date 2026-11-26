@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # Referensi tools
 
 Page ini dibangun dari MCP tool schemas yang sebenarnya. Jalankan `python scripts/generate-tools-reference.py` setelah mengubah public tool surface untuk memperbarui English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Kelola satu Logical Session durable. start membuat task baru dan mengembalikan session_id-nya. resume hanya melanjutkan session_id eksplisit yang diberikan pengguna atau yang sudah ada dalam percakapan ini. Semua action selain start memerlukan session_id. Action: start, resume, get, report, finish, cancel, delete. report menerima summary/findings/next/blockers/objective/label; delete memerlukan Session terminal. Setelah 24 jam tidak aktif, Sessions aktif menjadi stale saat diakses, dicantumkan, atau dimulai, kecuali jika panggilan tool masih berlangsung. Sessions stale dapat dilanjutkan atau dihapus dari riwayat mulai dari yang terlama.
+Kelola satu Logical Session durable. start membuat task baru dan mengembalikan session_id-nya. resume hanya melanjutkan session_id eksplisit yang diberikan pengguna atau yang sudah ada dalam percakapan ini. Semua action selain start memerlukan session_id. Action: start, resume, get, report, finish, cancel, delete. report menerima summary/findings/next/blockers/objective/label; delete memerlukan Session terminal. Setelah 24 jam tidak aktif, Sessions aktif menjadi stale saat diakses, dicantumkan, atau dimulai, kecuali jika panggilan tool masih berlangsung. Sessions stale dapat dilanjutkan atau dihapus dari riwayat mulai dari yang terlama. Gunakan verbose=true untuk menyertakan semua aktivitas terbaru.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -112,6 +112,7 @@ Kelola satu Logical Session durable. start membuat task baru dan mengembalikan s
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Menjalankan satu non-interactive shell command secara lokal atau pada remote machine. Gunakan untuk build, test, package-manager, Git, dan inspection commands yang harus selesai segera. Untuk process long-running, interactive, atau streaming gunakan `shell_start` atau `job_start`. Optional purpose/explanation fields dapat menjelaskan alasan command dijalankan.
+Menjalankan satu non-interactive shell command secara lokal atau pada remote machine. Gunakan untuk build, test, package-manager, Git, dan inspection commands yang harus selesai segera. Untuk process long-running, interactive, atau streaming gunakan `shell_start` atau `job_start`. Optional purpose/explanation fields dapat menjelaskan alasan command dijalankan. Jika timed_out, truncated, atau persisted tidak ada, nilainya false; jika stderr tidak ada, nilainya kosong. exit_code=0 yang berhasil berarti data.ok=true.
 
 Dengan `persist_on_timeout=true` (bawaan false), pekerjaan yang sama tetap berjalan setelah batas waktu dan mengembalikan `job_id`. Gunakan `job_tail`; stdout dan stderr digabung.
 
@@ -161,6 +162,7 @@ Dengan `persist_on_timeout=true` (bawaan false), pekerjaan yang sama tetap berja
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `run_python`
 
-Menulis dan menjalankan short Python script secara lokal atau pada remote machine.
+Menulis dan menjalankan short Python script secara lokal atau pada remote machine. Jika timed_out, truncated, atau persisted tidak ada, nilainya false; jika stderr tidak ada, nilainya kosong. exit_code=0 yang berhasil berarti data.ok=true.
 
 Dengan `persist_on_timeout=true` (bawaan false), pekerjaan yang sama tetap berjalan setelah batas waktu dan mengembalikan `job_id`. Gunakan `job_tail`; stdout dan stderr digabung.
 
@@ -182,6 +184,7 @@ Dengan `persist_on_timeout=true` (bawaan false), pekerjaan yang sama tetap berja
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `job_tail`
 
-Membaca recent output dari tracked local/remote job.
+Membaca keluaran terbaru dan status pekerjaan yang dilacak. Gunakan verbose=true atau job_get untuk metadata lengkap; log_truncated yang tidak ada berarti false.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ Memulai job terlacak yang menyalin file atau directory antara controller dan rem
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-Mengembalikan full cached schema dari dynamic MCP tool bernama `<server>:<tool>`. Refresh server dengan `mcp_manage` jika cache stale.
+Mengembalikan skema lengkap dalam cache untuk alat MCP dinamis `<server>:<tool>`. Controller menyegarkan cache secara otomatis; mcp_manage dapat memaksa penyegaran.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -785,7 +790,7 @@ Ketika `machine` diberikan, panggilan tersebut juga memerlukan `remote:use` dan 
 
 ### `remote_manage`
 
-Mengelola remote workers dengan action=invite, list, reset, revoke, atau rename. invite menerima name/workdir/ttl_s/max_uses; revoke memerlukan machine; rename memerlukan machine dan new_name. max_uses memiliki nilai default 1. reset memerlukan machine dan menghapus permintaan kontrol dalam antrean atau yang aktif namun aman dibatalkan tanpa memutus worker; operasi terlindungi yang telah dimulai tetap dipertahankan.
+Mengelola remote workers dengan action=invite, list, reset, revoke, atau rename. invite menerima name/workdir/ttl_s/max_uses; revoke memerlukan machine; rename memerlukan machine dan new_name. max_uses memiliki nilai default 1. reset memerlukan machine dan menghapus permintaan kontrol dalam antrean atau yang aktif namun aman dibatalkan tanpa memutus worker; operasi terlindungi yang telah dimulai tetap dipertahankan. Untuk list, verbose=true menyertakan telemetri diagnostik.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -796,6 +801,7 @@ Mengelola remote workers dengan action=invite, list, reset, revoke, atau rename.
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

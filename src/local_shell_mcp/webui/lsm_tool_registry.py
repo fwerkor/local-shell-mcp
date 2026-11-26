@@ -395,7 +395,7 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
                     for row in data["machines"]:
                         if isinstance(row, dict):
                             row["effective_access"] = access.get(row.get("name"), "none")
-                    return json.dumps(payload, ensure_ascii=False)
+                    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         return result
     except PermissionError:
         audit("webui_agent_lsm_tool_revoked", owner=owner, conversation_id=conversation_id,
@@ -507,5 +507,5 @@ def _encode_result(value: Any) -> str:
         value = value.model_dump(mode="json", by_alias=True)
     # Keep the native structured result intact for audit/checkpoint replay.
     # Model-facing clipping belongs to the source ToolNode ingestion boundary.
-    return json.dumps(value, ensure_ascii=False,
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"),
                       default=lambda item: item.model_dump(mode="json", by_alias=True) if hasattr(item, "model_dump") else str(item))

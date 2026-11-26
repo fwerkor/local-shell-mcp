@@ -8,7 +8,7 @@ def ok_result(data: Any = None, message: str = "") -> dict[str, Any]:
 
 
 try:
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, Field, model_serializer
 except Exception:  # pragma: no cover - exercised in dependency-light worker bootstraps.
     from dataclasses import asdict, dataclass, field
     class _ModelMixin:
@@ -71,6 +71,13 @@ else:
         ok: bool = True
         message: str = ""
         data: dict | list | str | int | float | bool | None = None
+
+        @model_serializer(mode="wrap")
+        def _serialize(self, handler):
+            result = handler(self)
+            if self.ok and not self.message:
+                result.pop("message", None)
+            return result
 
 
     class CommandResult(BaseModel):

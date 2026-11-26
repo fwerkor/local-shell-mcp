@@ -89,7 +89,10 @@ async def test_run_shell_tool_accepts_one_hour_timeout(tmp_path, monkeypatch):
     response = await build_mcp().call_tool(
         "run_shell", {"command": python_shell_command("print('ok')"), "timeout_s": 3600}
     )
-    assert response[1]["data"]["ok"] is True
+    assert response[1]["ok"] is True
+    assert response[1]["data"]["exit_code"] == 0
+    assert response[1]["data"]["stdout"].strip() == "ok"
+    assert "ok" not in response[1]["data"]
 
 
 @pytest.mark.asyncio
@@ -100,7 +103,10 @@ async def test_run_python_tool_accepts_one_hour_timeout(tmp_path, monkeypatch):
     response = await build_mcp().call_tool(
         "run_python", {"code": "print('ok')", "timeout_s": 3600}
     )
-    assert response[1]["data"]["ok"] is True
+    assert response[1]["ok"] is True
+    assert response[1]["data"]["exit_code"] == 0
+    assert response[1]["data"]["stdout"].strip() == "ok"
+    assert "ok" not in response[1]["data"]
 
 
 @pytest.mark.asyncio
