@@ -504,6 +504,7 @@ async def test_run_enrolled_worker_rejects_missing_identity(tmp_path, monkeypatc
 
 
 def test_cli_lifecycle_dispatch(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli.sys, "platform", "linux")
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(cli, "service_status", lambda: {"running": True})
     cli.run_worker_cli(["status"])
@@ -519,6 +520,7 @@ def test_cli_lifecycle_dispatch(tmp_path, monkeypatch, capsys):
 
 
 def test_cli_run_prepares_managed_service_environment(monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED", "1")
     calls = []
     monkeypatch.setattr(
         cli, "prepare_worker_service_environment", lambda: calls.append("prepare")
@@ -803,3 +805,42 @@ def test_windows_restart_recovers_interrupted_trial_before_install(tmp_path, mon
     monkeypatch.setattr(cli, "start_service", lambda: calls.append("start"))
     cli._run_command(cli._parser().parse_args(["restart"]))
     assert calls == ["stop", "unlock", "rollback", "launcher", "install", "launcher", "start"]
+
+
+@pytest.mark.asyncio
+async def test_windows_connect_starts_supervisor_after_unlock(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+
+    async def enroll(**kwargs):
+        return {}
+
+    monkeypatch.setattr(cli, "enroll_worker", enroll)
+    monkeypatch.setattr(cli, "install_launcher", lambda: None)
+    monkeypatch.setattr(cli, "_reexec_worker_run", lambda: pytest.fail("Windows reexec"))
+    calls = []
+
+    def restart():
+        with cli.worker_run_lock():
+            calls.append("restart")
+
+    monkeypatch.setattr(cli, "_restart_windows_worker", restart)
+    args = cli._parser().parse_args(["connect", "--server", "https://s", "--invite", "i"])
+    await cli._connect(args)
+    assert calls == ["restart"]
+
+
+def test_windows_direct_run_starts_supervisor(monkeypatch):
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED", raising=False)
+    calls = []
+    monkeypatch.setattr(cli, "install_launcher", lambda: calls.append("launcher"))
+
+    def restart():
+        calls.append("supervisor")
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "_restart_windows_worker", restart)
+    with pytest.raises(SystemExit):
+        cli._run_command(cli._parser().parse_args(["run"]))
+    assert calls == ["launcher", "supervisor"]

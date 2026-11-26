@@ -199,7 +199,8 @@ async def _connect(args: argparse.Namespace) -> None:
     if sys.platform == "win32":
         # Initial enrollment is complete. Do not carry a Windows region
         # lock (or invitation arguments) into the new worker process.
-        _reexec_worker_run()
+        install_launcher()
+        _restart_windows_worker()
 
 
 def _restart_windows_worker() -> None:
@@ -288,6 +289,9 @@ def _run_command(args: argparse.Namespace) -> None:
     elif args.command == "connect":
         asyncio.run(_connect(args))
     elif args.command == "run":
+        if sys.platform == "win32" and not os.environ.get("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED"):
+            install_launcher()
+            _restart_windows_worker()
         prepare_worker_service_environment()
         asyncio.run(run_enrolled_worker())
     elif args.command == "start":

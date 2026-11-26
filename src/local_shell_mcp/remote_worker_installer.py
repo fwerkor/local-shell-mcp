@@ -467,6 +467,12 @@ def confirm_runtime_healthy() -> None:
     pending.unlink()
     (state / "runtime.attempted").unlink(missing_ok=True)
     shutil.rmtree(state / "runtime.previous", ignore_errors=True)
+    if sys.platform == "win32":
+        from .remote_worker_state import refresh_worker_bootstrap
+
+        # The old runtime prepared its own bootstrap before the upgrade.
+        # Publish the now-proven supervisor for the next service restart.
+        refresh_worker_bootstrap()
 
 
 def install_or_update_runtime(server: str, *, force: bool = False) -> dict[str, Any]:

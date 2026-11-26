@@ -435,3 +435,36 @@ def test_windows_trial_terminates_venv_process_tree(tmp_path, monkeypatch):
     bootstrap._terminate_worker(process)
     assert calls[0][-4:] == ["/PID", "123", "/T", "/F"]
     assert process.terminated
+
+
+def test_windows_supervisor_does_not_time_out_old_runtime_staging(tmp_path, monkeypatch):
+    pending = tmp_path / "runtime.pending.json"
+    pending.write_text("{}")
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: True)
+    monkeypatch.setattr(bootstrap, "_TRIAL_START_TIMEOUT_S", 0)
+    process = _fake_process()
+    ticks = []
+    process.poll = lambda: None if len(ticks) < 3 else 0
+    process.wait = lambda timeout=None: ticks.append(1)
+    monkeypatch.setattr(bootstrap, "_terminate_worker", lambda p: pytest.fail("killed old worker"))
+    assert bootstrap._wait_for_worker(process, pending) == 0
+
+
+def test_windows_duplicate_worker_does_not_rollback_trial(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    _pending_trial(tmp_path)
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: True)
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", lambda *args, **kwargs: _fake_process(73))
+    monkeypatch.setattr(bootstrap, "_rollback", lambda *args: pytest.fail("rolled back another worker"))
+    assert bootstrap.main() == 73
+    assert (tmp_path / "runtime.pending.json").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows region locks")
+def test_duplicate_windows_supervisor_cannot_mutate_pending_journal(tmp_path):
+    with bootstrap._windows_supervisor_lock(tmp_path) as first:
+        assert first
+        with bootstrap._windows_supervisor_lock(tmp_path) as second:
+            assert not second
+    with bootstrap._windows_supervisor_lock(tmp_path) as after:
+        assert after

@@ -7,6 +7,7 @@ back and the worker can reconnect without external access to the machine.
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import shutil
@@ -166,7 +167,59 @@ def _rollback(state: Path) -> bool:
 _TRIAL_START_TIMEOUT_S = 120.0
 
 
-def _bind_windows_supervisor_lifetime() -> None:
+@contextlib.contextmanager
+def _windows_region_lock(path: Path):
+    """Acquire a process-owned byte range without waiting or inheriting it."""
+    if not _is_windows():
+        yield True
+        return
+    import msvcrt
+
+    with path.open("a+b", buffering=0) as handle:
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            if exc.errno not in {errno.EACCES, errno.EAGAIN} and getattr(exc, "winerror", None) not in {32, 33}:
+                raise
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def _windows_supervisor_lock(state: Path):
+    """Serialize Windows supervisors before they can mutate upgrade journals."""
+    return _windows_region_lock(state / "worker-supervisor.lock")
+
+
+def _rollback_stopped_worker(state: Path) -> bool:
+    # On Windows an old venv redirector can exit while a descendant still
+    # owns worker.lock. Never swap its runtime while that process is alive.
+    with _windows_region_lock(state / "worker.lock") as acquired:
+        if not acquired:
+            raise RuntimeError("cannot roll back while another Windows worker holds its lock")
+        return _rollback(state)
+
+
+def _run_supervisor() -> int:
+    state = _state_dir()
+    with _windows_supervisor_lock(state) as acquired:
+        if not acquired:
+            print("Status: another Windows worker supervisor is active", file=sys.stderr, flush=True)
+            return _WORKER_LOCK_BUSY_EXIT
+        with _windows_region_lock(state / "worker.lock") as worker_free:
+            if not worker_free:
+                print("Status: another Windows worker still holds its lock", file=sys.stderr, flush=True)
+                return _WORKER_LOCK_BUSY_EXIT
+        _bind_windows_supervisor_lifetime()
+        return main()
+
+
+def _bind_windows_supervisor_lifetime() -> bool:
     """Make managed descendants die if the actual supervisor is terminated.
 
     Assign the supervisor before spawning any children, avoiding the race
@@ -174,7 +227,7 @@ def _bind_windows_supervisor_lifetime() -> None:
     The non-inheritable job handle intentionally lives until process exit.
     """
     if not _is_windows() or os.environ.get("LOCAL_SHELL_MCP_WORKER_MANAGED") != "1":
-        return
+        return False
     import ctypes
     from ctypes import wintypes
 
@@ -229,7 +282,7 @@ def _bind_windows_supervisor_lifetime() -> None:
         and kernel.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits))
         and kernel.AssignProcessToJobObject(job, kernel.GetCurrentProcess())
     ):
-        return
+        return True
     error = ctypes.get_last_error()
     if job:
         kernel.CloseHandle(job)
@@ -237,6 +290,7 @@ def _bind_windows_supervisor_lifetime() -> None:
     # explicitly cleans its verified process tree and checks the worker lock.
     print(f"Warning: could not contain Windows worker process tree (error {error})",
           file=sys.stderr, flush=True)
+    return False
 
 
 def _terminate_worker(process: subprocess.Popen) -> None:
@@ -265,7 +319,9 @@ def _wait_for_worker(process: subprocess.Popen[bytes], pending: Path) -> int:
     """Bound startup time even when a bad worker hangs instead of exiting."""
     trial_started: float | None = None
     while process.poll() is None:
-        if pending.exists():
+        if pending.exists() and (
+            not _is_windows() or pending.with_name("runtime.attempted").exists()
+        ):
             if trial_started is None:
                 trial_started = time.monotonic()
             if time.monotonic() - trial_started >= _TRIAL_START_TIMEOUT_S:
@@ -297,7 +353,7 @@ def main() -> int:
     while True:
         try:
             if pending.exists() and attempted.exists():
-                _rollback(state)
+                _rollback_stopped_worker(state)
             if not pending.exists():
                 # A crash between confirming a healthy runtime and removing
                 # the attempt marker must not poison the next upgrade.
@@ -350,13 +406,17 @@ def main() -> int:
             active_process = None
             # A healthy old worker creates the pending journal before
             # requesting a restart. Only the next child is a trial.
-            if exit_code == _WORKER_RESTART_EXIT and pending.exists() and not attempted.exists():
+            if exit_code == _WORKER_LOCK_BUSY_EXIT and _is_windows():
+                # Another live worker may own the candidate and its journal.
+                # A contender must never roll back another process's runtime.
+                return exit_code
+            if exit_code == _WORKER_RESTART_EXIT and not attempted.exists():
                 delay = 1.0
                 continue
             # Any exit from a trial before controller-acknowledged readiness
             # is a failed trial, including a second restart request.
             if pending.exists():
-                _rollback(state)
+                _rollback_stopped_worker(state)
                 time.sleep(min(delay, 30.0))
                 delay = min(delay * 2, 30.0)
                 continue
@@ -371,9 +431,17 @@ def main() -> int:
             return 130
         except Exception as exc:  # noqa: BLE001
             print(f"Status: worker supervisor recovery failed: {exc}", file=sys.stderr, flush=True)
+            if active_process is not None:
+                try:
+                    if active_process.poll() is None:
+                        _terminate_worker(active_process)
+                except (OSError, subprocess.TimeoutExpired) as stop_error:
+                    print(f"Status: could not stop worker: {stop_error}", file=sys.stderr, flush=True)
+                    return 1
+                active_process = None
             if pending.exists():
                 try:
-                    _rollback(state)
+                    _rollback_stopped_worker(state)
                 except Exception as rollback_error:  # noqa: BLE001
                     print(f"Status: worker rollback failed: {rollback_error}", file=sys.stderr, flush=True)
             # Never permanently give up if the running runtime cannot start.
@@ -382,5 +450,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    _bind_windows_supervisor_lifetime()
-    raise SystemExit(main())
+    raise SystemExit(_run_supervisor())

@@ -51,21 +51,3 @@ A joined worker gives the MCP client control over its configured environment. Us
 ## Troubleshooting
 
 Check outbound HTTPS access, public base URL reachability, invite expiry, system time, and control-server logs when a worker does not appear.
-
-
-### Windows worker lock contention
-
-A managed worker waits at most 30 seconds for the state directory's exclusive
-worker lock. When available, its error reports the last recorded holder PID;
-this is diagnostic metadata, not proof that the PID still belongs to a worker.
-Do not delete the lock file while a worker is running or terminate unrelated
-Python processes.
-
-For a worker already stuck on an older release, stop the scheduled task and
-use the updated wheel's management CLI, for example
-`python -m local_shell_mcp.remote_worker restart` (or `install-service`). The Windows service manager cleans up the verified
-service-launcher process tree and refuses to launch a duplicate if the lock
-remains held. If an older orphan no longer belongs to that tree, inspect its
-command line and creation time, then stop that specific worker, or reboot
-before retrying. A disconnected worker cannot receive a controller-driven
-upgrade until it reconnects.
