@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Hetente",
   "com_ui_schedules": "Ütemezett csevegések",
   "com_ui_schedules_error": "Nem sikerült betölteni az ütemezett csevegéseket",
-  "com_ui_schedules_used": "{{used}}/{{max}} ütemezés használt",
   "com_ui_schema": "Séma",
   "com_ui_scope": "Hatókör",
   "com_ui_scroll_left": "Görgessen balra",

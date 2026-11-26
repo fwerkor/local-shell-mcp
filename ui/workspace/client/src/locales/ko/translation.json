@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "주간",
   "com_ui_schedules": "예약된 채팅",
   "com_ui_schedules_error": "예약된 채팅을 로드할 수 없습니다.",
-  "com_ui_schedules_used": "{{max}} 일정 중 {{used}}가 사용됨",
   "com_ui_schema": "스키마",
   "com_ui_scope": "범위",
   "com_ui_scroll_left": "왼쪽으로 스크롤",

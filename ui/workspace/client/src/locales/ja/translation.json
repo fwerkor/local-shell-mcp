@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "毎週",
   "com_ui_schedules": "スケジュールされたチャット",
   "com_ui_schedules_error": "スケジュールされたチャットを読み込めませんでした",
-  "com_ui_schedules_used": "{{max}} スケジュール中 {{used}} が使用されました",
   "com_ui_schema": "スキーマ",
   "com_ui_scope": "範囲",
   "com_ui_scroll_left": "左にスクロール",

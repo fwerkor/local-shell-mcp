@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Ugentligt",
   "com_ui_schedules": "Planlagte chats",
   "com_ui_schedules_error": "Dine planlagte chats kunne ikke indlæses",
-  "com_ui_schedules_used": "{{used}} af {{max}} skemaer brugt",
   "com_ui_schema": "Skema",
   "com_ui_scope": "Omfang",
   "com_ui_scroll_left": "Rul til venstre",

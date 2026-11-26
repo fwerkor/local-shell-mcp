@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Co tydzień",
   "com_ui_schedules": "Zaplanowane czaty",
   "com_ui_schedules_error": "Nie udało się wczytać zaplanowanych czatów",
-  "com_ui_schedules_used": "Wykorzystano harmonogramy {{used}} z {{max}}",
   "com_ui_schema": "Schemat",
   "com_ui_scope": "Zakres",
   "com_ui_scroll_left": "Przewiń w lewo",

@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Semanal",
   "com_ui_schedules": "Chats programados",
   "com_ui_schedules_error": "No se pudieron cargar tus chats programados",
-  "com_ui_schedules_used": "{{used}} de los horarios {{max}} utilizados",
   "com_ui_schema": "Esquema",
   "com_ui_scope": "Alcance",
   "com_ui_scroll_left": "Desplazarse hacia la izquierda",

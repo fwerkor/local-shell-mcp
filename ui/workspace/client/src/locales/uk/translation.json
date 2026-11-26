@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Щотижня",
   "com_ui_schedules": "Заплановані чати",
   "com_ui_schedules_error": "Не вдалося завантажити заплановані чати",
-  "com_ui_schedules_used": "Використано {{used}} з {{max}} графіків",
   "com_ui_schema": "Схема",
   "com_ui_scope": "Область видимості",
   "com_ui_scroll_left": "Прокрутіть вліво",

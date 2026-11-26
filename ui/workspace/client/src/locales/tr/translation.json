@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Haftalık",
   "com_ui_schedules": "Planlanmış sohbetler",
   "com_ui_schedules_error": "Planlanmış sohbetleriniz yüklenemedi",
-  "com_ui_schedules_used": "Kullanılan {{max}} programlarından {{used}}",
   "com_ui_schema": "Şema",
   "com_ui_scope": "Kapsam (Scope)",
   "com_ui_scroll_left": "Sola kaydır",

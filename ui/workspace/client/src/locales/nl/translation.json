@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Wekelijks",
   "com_ui_schedules": "Geplande chats",
   "com_ui_schedules_error": "Kan je geplande chats niet laden",
-  "com_ui_schedules_used": "{{used}} van {{max}}-schema's gebruikt",
   "com_ui_schema": "Schema",
   "com_ui_scope": "Reikwijdte",
   "com_ui_scroll_left": "Scroll naar links",

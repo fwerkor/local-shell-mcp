@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Kas savaitę",
   "com_ui_schedules": "Suplanuoti pokalbiai",
   "com_ui_schedules_error": "Nepavyko įkelti suplanuotų pokalbių",
-  "com_ui_schedules_used": "Naudojami {{used}} iš {{max}} tvarkaraščiai",
   "com_ui_schema": "Schema",
   "com_ui_scope": "Apimtis",
   "com_ui_scroll_left": "Slinkite kairėn",

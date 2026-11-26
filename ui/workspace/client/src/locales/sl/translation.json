@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Tedensko",
   "com_ui_schedules": "Načrtovani klepeti",
   "com_ui_schedules_error": "Vaših načrtovanih klepetov ni bilo mogoče naložiti",
-  "com_ui_schedules_used": "Uporabljeni urniki {{used}} od {{max}}",
   "com_ui_schema": "Shema",
   "com_ui_scope": "Obseg",
   "com_ui_scroll_left": "Pomaknite se levo",

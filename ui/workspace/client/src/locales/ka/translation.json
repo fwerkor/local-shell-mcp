@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "ყოველკვირეული",
   "com_ui_schedules": "დაგეგმილი ჩეთები",
   "com_ui_schedules_error": "თქვენი დაგეგმილი ჩეთების ჩატვირთვა ვერ მოხერხდა",
-  "com_ui_schedules_used": "გამოყენებულია {{used}} {{max}} განრიგებიდან",
   "com_ui_schema": "სქემა",
   "com_ui_scope": "ფარგლები",
   "com_ui_scroll_left": "გადაახვიეთ მარცხნივ",

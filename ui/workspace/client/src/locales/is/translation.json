@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Vikulega",
   "com_ui_schedules": "Áætlað spjall",
   "com_ui_schedules_error": "Ekki tókst að hlaða áætluðum spjallum þínum",
-  "com_ui_schedules_used": "{{used}} af {{max}} tímaáætlunum notuð",
   "com_ui_schema": "Skema",
   "com_ui_scope": "Umfang",
   "com_ui_scroll_left": "Skrunaðu til vinstri",

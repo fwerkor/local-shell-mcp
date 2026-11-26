@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Varje vecka",
   "com_ui_schedules": "Schemalagda chattar",
   "com_ui_schedules_error": "Det gick inte att ladda dina schemalagda chattar",
-  "com_ui_schedules_used": "{{used}} av {{max}} scheman som används",
   "com_ui_schema": "Schema",
   "com_ui_scope": "Omfattning",
   "com_ui_scroll_left": "Bläddra åt vänster",

@@ -2084,7 +2084,6 @@
   "com_ui_schedule_weekly": "Ukentlig",
   "com_ui_schedules": "Planlagte chattar",
   "com_ui_schedules_error": "Kunne ikkje lasta dei planlagde chattane dine",
-  "com_ui_schedules_used": "{{used}} av {{max}} tidsplanar brukte",
   "com_ui_schema": "Skjema",
   "com_ui_scope": "Omfang",
   "com_ui_scroll_left": "Rull til ",
