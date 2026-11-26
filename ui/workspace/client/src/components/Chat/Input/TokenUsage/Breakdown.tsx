@@ -156,27 +156,38 @@ export default function Breakdown({
   const systemTokens =
     normalizeTokenCount(breakdown?.systemMessageTokens) +
     normalizeTokenCount(breakdown?.dynamicInstructionTokens);
-  /** Summary and tool calls have their own rows, so exclude both (they're part
-   *  of `usedTokens`) to avoid double-counting them inside the Messages row.
-   *  `toolMessageTokens` is absent on older SDK snapshots, keeping the row
-   *  unsplit. */
+  // The provider's last request is exact; the pre-invoke categories describe
+  // the estimated sent prompt independently of any output or retained results.
   const summaryTokens = normalizeTokenCount(breakdown?.summaryTokens);
-  const retainedToolTokens = normalizeTokenCount(snapshot?.retainedToolTokens);
-  const messageBudget = Math.max(0, usedTokens - instructionTokens - summaryTokens);
-  /** `toolMessageTokens` is a subset of pre-invoke messages, while retained
-   *  tool results sit outside that total. Widen both sides of the split by the
-   *  retained count, then bound the share by the current used-token remainder. */
+  const retainedToolTokens = providerReported
+    ? 0
+    : normalizeTokenCount(snapshot?.retainedToolTokens);
+  const compositionInput =
+    normalizeTokenCount(breakdown?.messageTokens) +
+    instructionTokens +
+    summaryTokens +
+    retainedToolTokens;
+  const estimatedInput =
+    breakdown != null
+      ? Math.min(
+          usedTokens,
+          Math.max(
+            compositionInput,
+            usedTokens -
+              normalizeTokenCount(snapshot?.completedOutputTokens) -
+              normalizeTokenCount(snapshot?.resumedOutputTokens) -
+              normalizeTokenCount(view.liveTokens),
+          ),
+        )
+      : Math.max(0, usedTokens - normalizeTokenCount(view.liveTokens));
+  const messageBudget = Math.max(0, compositionInput - instructionTokens - summaryTokens);
   const rawToolCallTokens =
     breakdown?.toolMessageTokens != null
       ? normalizeTokenCount(breakdown.toolMessageTokens)
       : undefined;
   const toolCallTokens =
     rawToolCallTokens != null
-      ? Math.min(
-          rawToolCallTokens + retainedToolTokens,
-          normalizeTokenCount(breakdown?.messageTokens) + retainedToolTokens,
-          messageBudget,
-        )
+      ? Math.min(rawToolCallTokens + retainedToolTokens, messageBudget)
       : undefined;
   const messageTokens = Math.max(0, messageBudget - (toolCallTokens ?? 0));
   const freeTokens = maxTokens != null ? Math.max(0, maxTokens - usedTokens) : null;
@@ -256,16 +267,58 @@ export default function Breakdown({
    *  swatch if and only if it is a segment, so the two can never disagree.
    *  Deferred tools keep their family's slot and are hatched — same identity,
    *  held out of the active set. */
+  const overviewSegments: Array<MeterSegment & { label: string }> = providerReported
+    ? [
+        {
+          id: 'provider-input',
+          label: localize('com_ui_input'),
+          value: view.providerInputTokens ?? 0,
+          slot: 1,
+        },
+        {
+          id: 'provider-output',
+          label: localize('com_ui_output'),
+          value: view.providerOutputTokens ?? 0,
+          slot: 2,
+        },
+      ]
+    : [
+        { id: 'provider-input', label: localize('com_ui_input'), value: estimatedInput, slot: 1 },
+        {
+          id: 'provider-output',
+          label: localize('com_ui_output'),
+          value: Math.max(0, usedTokens - estimatedInput),
+          slot: 2,
+        },
+      ];
   const segments: Array<MeterSegment & { label: string }> =
-    providerReported
+    breakdown == null
       ? [
-          { id: 'provider-input', label: localize('com_ui_input'),
-            value: view.providerInputTokens ?? 0, slot: 1 },
-          { id: 'provider-output', label: localize('com_ui_output'),
-            value: view.providerOutputTokens ?? 0, slot: 2 },
+          {
+            id: 'messages',
+            label: localize('com_ui_context_messages'),
+            value: Math.max(0, view.messageTokens - normalizeTokenCount(view.toolCallTokens)),
+            slot: 1,
+          },
+          {
+            id: 'tool-calls',
+            label: localize('com_ui_context_tool_calls'),
+            value: Math.min(view.messageTokens, normalizeTokenCount(view.toolCallTokens)),
+            slot: 2,
+          },
+          {
+            id: 'system',
+            label: localize('com_ui_context_system'),
+            value: normalizeTokenCount(view.overheadTokens),
+            slot: 3,
+          },
+          {
+            id: 'summary',
+            label: localize('com_ui_context_summary'),
+            value: normalizeTokenCount(view.branchTotals.summaryBaseline),
+            slot: 8,
+          },
         ]
-      : breakdown == null
-      ? []
       : [
           {
             id: 'messages',
@@ -331,10 +384,15 @@ export default function Breakdown({
             slot: 8,
           },
         ];
-  /** The estimate path knows the total but not the composition, so it keeps a
-   *  single unsegmented fill and its rows carry no swatches. */
-  const meterSegments: MeterSegment[] =
-    segments.length > 0 ? segments : [{ id: 'used', value: usedTokens, slot: 1 }];
+  const meterSegments: MeterSegment[] = overviewSegments;
+  // Category counts are estimates of the prompt, not exact API counts.
+  // Keep their own denominator rather than inventing the API's attribution.
+  const categoryTotal = segments.reduce((sum, segment) => sum + segment.value, 0);
+  const hasComposition = categoryTotal > 0;
+  const cacheHitRate =
+    providerReported && view.cacheRead != null && view.providerInputTokens! > 0
+      ? Math.min(100, (view.cacheRead / view.providerInputTokens!) * 100)
+      : undefined;
 
   /** A hovered row can vanish mid-hover (live snapshot update, or the view
    *  falling back to the estimate path, whose rows carry no hover pairing);
@@ -343,9 +401,7 @@ export default function Breakdown({
    *  row reappears with the pointer elsewhere. Render-phase reset: React
    *  re-renders immediately and never commits the stale highlight. */
   const hoverIsValid = (id: string): boolean =>
-    id === 'free'
-      ? breakdown != null && freeTokens != null
-      : meterSegments.some((segment) => segment.id === id && segment.value > 0);
+    [...meterSegments, ...segments].some((segment) => segment.id === id && segment.value > 0);
   if (hoveredSegment != null && !hoverIsValid(hoveredSegment)) {
     setHoveredSegment(null);
   }
@@ -354,37 +410,67 @@ export default function Breakdown({
 
   return (
     <div className="w-72" role="region" aria-label={localize('com_ui_context_usage')}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 text-sm font-medium text-text-primary">
+          {localize('com_ui_context_window')}
+        </span>
+        <span className="shrink-0 text-right text-xs font-medium text-text-secondary">
+          {maxTokens != null
+            ? `${formatTokens(usedTokens)} / ${formatTokens(maxTokens)} (${Math.round(percent)}%)`
+            : formatTokens(usedTokens)}
+          {view.isEstimate && <span className="block">{localize('com_ui_estimated')}</span>}
+        </span>
+      </div>
+      <SegmentedMeter
+        className="mt-3"
+        segments={maxTokens != null ? meterSegments : []}
+        max={maxTokens ?? 1}
+        highlightId={activeSegment?.startsWith('provider-') ? activeSegment : null}
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={maxTokens != null ? Math.round(percent) : undefined}
+        aria-label={localize('com_ui_context_usage')}
+      />
+      <div className="mt-3 space-y-1.5" data-testid="context-overview">
+        {overviewSegments.map(({ id, label, value, ...segment }) => (
+          <Row
+            key={id}
+            id={id}
+            label={label}
+            value={value}
+            max={maxTokens}
+            segment={segment}
+            onHoverChange={setHoveredSegment}
+          />
+        ))}
+        {freeTokens != null && (
+          <Row label={localize('com_ui_context_free')} value={freeTokens} max={maxTokens} track />
+        )}
+        <div className="flex items-center justify-between gap-4 text-sm">
+          <span className="text-text-secondary">{localize('com_ui_context_cache_hit_rate')}</span>
+          <span className="font-medium tabular-nums text-text-primary">
+            {cacheHitRate == null ? '—' : `${Number(cacheHitRate.toFixed(1))}%`}
+          </span>
+        </div>
+      </div>
+      {maxTokens == null && (
+        <p className="mt-2 text-xs text-text-secondary">{localize('com_ui_context_unknown')}</p>
+      )}
       <Collapsible open={expanded} onOpenChange={setExpanded}>
         <CollapsibleTrigger
-          className="group flex w-full items-center justify-between gap-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
+          className="group mt-3 flex w-full items-center justify-between gap-2 border-t border-border-light pt-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
           data-testid="context-breakdown-toggle"
         >
-          <span className="whitespace-nowrap text-sm font-medium text-text-primary">
-            {localize('com_ui_context_window')}
-          </span>
-          <span className="flex items-center gap-1 whitespace-nowrap text-xs font-medium text-text-secondary">
-            {maxTokens != null
-              ? `${formatTokens(usedTokens)} / ${formatTokens(maxTokens)} (${Math.round(percent)}%)`
-              : formatTokens(usedTokens)}
+          <span>{localize('com_ui_context_input_composition')}</span>
+          <span className="flex items-center gap-1 text-xs text-text-secondary">
+            {localize('com_ui_estimated')}
             <ChevronDown
               aria-hidden="true"
-              className="size-3.5 shrink-0 text-text-tertiary transition-transform duration-300 ease-out group-data-[state=open]:rotate-180 motion-reduce:transition-none"
+              className="size-3.5 transition-transform group-data-[state=open]:rotate-180"
             />
           </span>
         </CollapsibleTrigger>
-
-        <SegmentedMeter
-          className="mt-3"
-          segments={maxTokens != null ? meterSegments : []}
-          max={maxTokens ?? 1}
-          highlightId={activeSegment}
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={maxTokens != null ? Math.round(percent) : undefined}
-          aria-label={localize('com_ui_context_usage')}
-        />
-
         {/* The gap to the meter lives INSIDE the animated element (mt-3 below),
             so it collapses with the height. On the parent it would be a margin
             outside the animation, and unmounting the content would drop it in a
@@ -453,26 +539,16 @@ export default function Breakdown({
               className="space-y-1.5"
               data-testid={breakdown ? 'context-breakdown' : 'context-estimate'}
             >
-              {providerReported ? (
+              {hasComposition ? (
                 <>
-                  {segments.map(({ id, label, value, ...segment }) => (
-                    <Row key={id} id={id} label={label} value={value}
-                      max={maxTokens} segment={segment} onHoverChange={setHoveredSegment} />
-                  ))}
-                  {freeTokens != null && <Row label={localize('com_ui_context_free')}
-                    value={freeTokens} max={maxTokens} track />}
-                  {maxTokens == null && <p className="text-xs text-text-secondary">
-                    {localize('com_ui_context_unknown')}
-                  </p>}
-                  <p className="text-xs text-text-secondary">
-                    {localize('com_ui_context_provider_reported')}
-                  </p>
-                </>
-              ) : breakdown ? (
-                <>
+                  <SegmentedMeter
+                    segments={segments}
+                    max={categoryTotal}
+                    highlightId={activeSegment?.startsWith('provider-') ? null : activeSegment}
+                    aria-label={localize('com_ui_context_input_composition')}
+                  />
                   {segments.map(({ id, label, value, ...segment }) => {
-                    const shouldRender =
-                      value > 0 || (id === 'tool-calls' && toolCallTokens != null);
+                    const shouldRender = value > 0;
                     if (!shouldRender) {
                       return null;
                     }
@@ -482,7 +558,7 @@ export default function Breakdown({
                           <Row
                             label={label}
                             value={value}
-                            max={maxTokens}
+                            max={categoryTotal}
                             segment={segment}
                             id={id}
                             onHoverChange={setHoveredSegment}
@@ -494,7 +570,7 @@ export default function Breakdown({
                           <Row
                             label={label}
                             value={value}
-                            max={maxTokens}
+                            max={categoryTotal}
                             segment={segment}
                             id={id}
                             onHoverChange={setHoveredSegment}
@@ -521,100 +597,9 @@ export default function Breakdown({
                       </Fragment>
                     );
                   })}
-                  {/** The reconciling call's cached prompt share is already inside
-                   *  the segments above (reconciliation counted it in `usedTokens`),
-                   *  so it renders indented, like the estimate path's tool-call
-                   *  share — as peer rows a fully cached prompt would show its
-                   *  tokens twice and the visible rows would sum past the meter. */}
-                  {(normalizeTokenCount(view.cacheRead) > 0 ||
-                    normalizeTokenCount(view.cacheWrite) > 0) && (
-                    <div className="space-y-1.5 pl-6">
-                      {normalizeTokenCount(view.cacheRead) > 0 && (
-                        <Row
-                          label={localize('com_ui_context_cached')}
-                          value={normalizeTokenCount(view.cacheRead)}
-                          max={maxTokens}
-                        />
-                      )}
-                      {normalizeTokenCount(view.cacheWrite) > 0 && (
-                        <Row
-                          label={localize('com_ui_context_cache_write')}
-                          value={normalizeTokenCount(view.cacheWrite)}
-                          max={maxTokens}
-                        />
-                      )}
-                    </div>
-                  )}
-                  {freeTokens != null && (
-                    <Row
-                      label={localize('com_ui_context_free')}
-                      value={freeTokens}
-                      max={maxTokens}
-                      track
-                      id="free"
-                      onHoverChange={setHoveredSegment}
-                    />
-                  )}
                 </>
               ) : (
-                <>
-                  {normalizeTokenCount(view.branchTotals.summaryBaseline) > 0 && (
-                    <Row
-                      label={localize('com_ui_context_summary')}
-                      value={view.branchTotals.summaryBaseline}
-                      max={maxTokens}
-                    />
-                  )}
-                  {view.messagesPruned ? (
-                    /** Over-window: the per-category split no longer describes what's
-                     *  sent, so show the pruned message total (incl. in-flight). */
-                    <Row
-                      label={localize('com_ui_context_messages')}
-                      value={view.messageTokens + view.liveTokens}
-                      max={maxTokens}
-                    />
-                  ) : (
-                    <>
-                      <Row label={localize('com_ui_input')} value={view.branchTotals.input} />
-                      <Row
-                        label={localize('com_ui_output')}
-                        value={view.branchTotals.output + view.liveTokens}
-                      />
-                      {normalizeTokenCount(view.estimatedTokens) > 0 && (
-                        <Row
-                          label={localize('com_ui_context_estimated')}
-                          value={view.estimatedTokens}
-                        />
-                      )}
-                    </>
-                  )}
-                  {/** Retained tool traffic is already inside the message rows above
-                   *  (their clamped tool-content share), so it renders as an indented
-                   *  subtotal — as a peer row the visible rows would sum past
-                   *  `usedTokens`. The snapshot path instead subtracts it from
-                   *  Messages, which is exact there; here the counted Input/Output
-                   *  rows are provider counts and this share is a char estimate, so
-                   *  subtracting it would corrupt them. */}
-                  {normalizeTokenCount(view.toolCallTokens) > 0 && (
-                    <div className="pl-6">
-                      <Row
-                        label={localize('com_ui_context_tool_calls')}
-                        value={normalizeTokenCount(view.toolCallTokens)}
-                      />
-                    </div>
-                  )}
-                  {view.overheadTokens > 0 && (
-                    <Row label={localize('com_ui_context_system')} value={view.overheadTokens} />
-                  )}
-                  {maxTokens == null && (
-                    <p className="text-xs text-text-secondary">
-                      {localize('com_ui_context_unknown')}
-                    </p>
-                  )}
-                  <p className="text-xs italic text-text-secondary">
-                    {localize('com_ui_estimated')}
-                  </p>
-                </>
+                <p className="text-xs text-text-secondary">—</p>
               )}
             </div>
 
@@ -627,12 +612,6 @@ export default function Breakdown({
                   </h3>
                   <Row label={localize('com_ui_input')} value={branchUsage.input} />
                   <Row label={localize('com_ui_output')} value={branchUsage.output} />
-                  {normalizeTokenCount(branchUsage.cacheRead) > 0 && (
-                    <Row label={localize('com_ui_cache_read')} value={branchUsage.cacheRead} />
-                  )}
-                  {normalizeTokenCount(branchUsage.cacheWrite) > 0 && (
-                    <Row label={localize('com_ui_cache_write')} value={branchUsage.cacheWrite} />
-                  )}
                   {/** Subagent calls are accumulated per conversation for the session
                    *  and are not attributed to a response, so they cannot be scoped to
                    *  the viewed branch like the rows above; label them all-branches
@@ -671,7 +650,6 @@ export default function Breakdown({
                 </div>
               </>
             )}
-
           </div>
         </CollapsibleContent>
       </Collapsible>

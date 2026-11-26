@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Settings } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Label, OGDialog, OGDialogTemplate, useToastContext } from '@librechat/client';
 import {
@@ -33,6 +34,8 @@ import { isEphemeralAgent } from '~/common';
 import SkillsSection from './SkillsSection';
 import SkillsDialog from './SkillsDialog';
 import ToolRow from './ToolRow';
+import { useSelectedExternalMcpServers } from './LsmExternalMcpServers';
+import { MachineAccessSummary, ExternalMcpSummary, useMachineAccessSummary } from './LsmToolSummary';
 
 interface Props {
   agentId: string;
@@ -41,7 +44,7 @@ interface Props {
 export default function ToolsSection({ agentId }: Props) {
   const localize = useLocalize();
   const { showToast } = useToastContext();
-  const [open, setOpen] = useState(false);
+  const [manageKind, setManageKind] = useState<'all' | 'mcp' | 'tool' | null>(null);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [dialogItem, setDialogItem] = useState<AgentItem | null>(null);
   const [pendingActionRemoval, setPendingActionRemoval] = useState<string | null>(null);
@@ -242,17 +245,34 @@ export default function ToolsSection({ agentId }: Props) {
       );
     return [...withCounts, ...orphanedMcpItems];
   }, [selected, orphanedMcpItems, tools]);
+  const externalServers = useSelectedExternalMcpServers();
+  const machineSummary = useMachineAccessSummary();
   const skillItems = useMemo(() => selected.filter((item) => item.kind === 'skill'), [selected]);
 
   return (
     <>
       <SelectedSection
         title={localize('com_ui_tools_section_title')}
-        addLabel={localize('com_ui_add_tools')}
+        addLabel={localize('com_ui_manage')}
         emptyLabel={localize('com_ui_tools_empty')}
         emptyHint={localize('com_ui_tools_empty_hint')}
         items={toolItems}
-        onAdd={() => setOpen(true)}
+        onAdd={() => setManageKind('all')}
+        additionalCount={externalServers.length + Number(machineSummary != null)}
+        additionalRows={
+          <>
+            {externalServers.map((server) => (
+              <ExternalMcpSummary
+                key={server.name}
+                server={server}
+                onManage={() => setManageKind('mcp')}
+              />
+            ))}
+            {machineSummary && (
+              <MachineAccessSummary summary={machineSummary} onManage={() => setManageKind('tool')} />
+            )}
+          </>
+        }
         onInfo={setDialogItem}
         onRemove={handleQuickRemove}
       />
@@ -264,7 +284,14 @@ export default function ToolsSection({ agentId }: Props) {
           onRemove={handleQuickRemove}
         />
       )}
-      {open && <ToolsMarketplaceDialog open={open} onOpenChange={setOpen} agentId={agentId} />}
+      {manageKind != null && (
+        <ToolsMarketplaceDialog
+          open
+          onOpenChange={(value) => { if (!value) setManageKind(null); }}
+          agentId={agentId}
+          initialKind={manageKind}
+        />
+      )}
       {skillsOpen && (
         <SkillsDialog open={skillsOpen} onOpenChange={setSkillsOpen} agentId={agentId} />
       )}
@@ -329,6 +356,8 @@ interface SelectedSectionProps {
   emptyLabel: string;
   emptyHint: string;
   items: AgentItem[];
+  additionalCount: number;
+  additionalRows: ReactNode;
   onAdd: () => void;
   onInfo: (item: AgentItem) => void;
   onRemove: (item: AgentItem) => void;
@@ -340,12 +369,14 @@ function SelectedSection({
   emptyLabel,
   emptyHint,
   items,
+  additionalCount,
+  additionalRows,
   onAdd,
   onInfo,
   onRemove,
 }: SelectedSectionProps) {
-  const localize = useLocalize();
-  const badge = items.length > 0 ? String(items.length) : undefined;
+  const count = items.length + additionalCount;
+  const badge = count > 0 ? String(count) : undefined;
   return (
     <div className="mb-3 flex flex-col">
       <div className="mb-1 flex items-center justify-between">
@@ -363,11 +394,11 @@ function SelectedSection({
           aria-label={addLabel}
           className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary transition hover:bg-surface-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-ring-primary"
         >
-          <Plus className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
-          {localize('com_ui_add')}
+          <Settings className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+          {addLabel}
         </button>
       </div>
-      {items.length === 0 ? (
+      {count === 0 ? (
         <button
           type="button"
           onClick={onAdd}
@@ -384,6 +415,7 @@ function SelectedSection({
               <ToolRow item={item} onInfo={onInfo} onRemove={onRemove} />
             </li>
           ))}
+          {additionalRows}
         </ul>
       )}
     </div>

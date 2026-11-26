@@ -497,3 +497,22 @@ async def test_skill_import_error_paths_and_plain_markdown(app, monkeypatch):
         large_entry = compressed({'root/SKILL.md': 'Hello', 'root/docs/large.md': 'x' * 100})
         assert (await c.post('/api/skills/import',
                              files={'file': ('large.zip', large_entry)})).status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_tag_order_is_atomic_and_owner_scoped(app):
+    server, _ = app
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server),
+                                 base_url='http://example.test') as c:
+        for name in ('first', 'second', 'third'):
+            assert (await c.post('/api/tags', json={'tag': name})).status_code == 201
+        await c.post('/api/tags', headers={'x-owner': 'bob'}, json={'tag': 'private'})
+        assert (await c.put('/api/tag-order', json={'tags': ['third', 'first', 'second']})).status_code == 200
+        tags = (await c.get('/api/tags')).json()
+        assert [item['tag'] for item in tags] == ['third', 'first', 'second']
+        assert [item['position'] for item in tags] == [0, 1, 2]
+        assert (await c.put('/api/tag-order', json={'tags': ['first', 'first']})).status_code == 400
+        assert (await c.put('/api/tag-order', json={'tags': ['first', 'third']})).status_code == 409
+        assert (await c.put('/api/tag-order', json={'tags': ['first', 'third', 'private']})).status_code == 409
+        assert (await c.get('/api/tags')).json() == tags
+        assert (await c.get('/api/tags', headers={'x-owner': 'bob'})).json()[0]['tag'] == 'private'

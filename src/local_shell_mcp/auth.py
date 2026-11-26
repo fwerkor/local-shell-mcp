@@ -477,12 +477,33 @@ class AuthMiddleware:
         path = scope.get("path", "")
         from .webui.frontend import is_public_frontend
 
+        # Startup config is public for the login screen, but a valid bearer
+        # must receive the owner-specific feature flags after login.
+        if path == "/api/config" and scope.get("method") in {"GET", "HEAD"}:
+            request = Request(scope, receive)
+            if _extract_token(request):
+                try:
+                    request.state.principal = _verify_oauth(request, get_settings())
+                except HTTPException:
+                    # Expired or invalid credentials still get the anonymous
+                    # config; no private feature flags are exposed.
+                    pass
+                else:
+                    token = _CURRENT_PRINCIPAL.set(request.state.principal)
+                    try:
+                        await self.app(scope, receive, send)
+                    finally:
+                        _CURRENT_PRINCIPAL.reset(token)
+                    return
+            await self.app(scope, receive, send)
+            return
+
         if (_is_public_path(path)
             # An IdP browser redirect has no bearer header. The Action callback
             # separately verifies the one-use state and HttpOnly CSRF binding;
             # POST /oauth/bind remains bearer-authenticated.
             or (scope.get("method") == "GET" and _ACTION_OAUTH_CALLBACK_PATH.fullmatch(path) is not None)
-            or (path in {"/api/config", "/health"} and scope.get("method") in {"GET", "HEAD"})
+            or (path == "/health" and scope.get("method") in {"GET", "HEAD"})
             or (path in {"/api/auth/lsm", "/api/auth/refresh", "/api/auth/logout"}
                 and scope.get("method") == "POST")
             or is_public_frontend(path, scope.get("method", ""))):

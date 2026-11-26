@@ -7,12 +7,16 @@ interface BookmarkListProps {
   bookmarks: TConversationTag[];
   moveRow: (dragIndex: number, hoverIndex: number) => void;
   isFiltered?: boolean;
+  finishReorder: (dropped: boolean) => void;
+  reorderDisabled: boolean;
 }
 
 export default function BookmarkList({
   bookmarks,
   moveRow,
   isFiltered = false,
+  finishReorder,
+  reorderDisabled,
 }: BookmarkListProps) {
   const localize = useLocalize();
 
@@ -22,9 +26,15 @@ export default function BookmarkList({
 
   return (
     <div className="space-y-2" role="list" aria-label={localize('com_ui_bookmarks')}>
-      {bookmarks.map((bookmark) => (
+      {bookmarks.map((bookmark, index) => (
         <div key={bookmark._id} role="listitem">
-          <BookmarkCard bookmark={bookmark} position={bookmark.position} moveRow={moveRow} />
+          <BookmarkCard
+            bookmark={bookmark}
+            position={index}
+            moveRow={moveRow}
+            finishReorder={finishReorder}
+            reorderDisabled={reorderDisabled}
+          />
         </div>
       ))}
     </div>

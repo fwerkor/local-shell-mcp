@@ -2,7 +2,7 @@ import { memo, useCallback, useId, useMemo, useState } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { PermissionTypes, Permissions } from 'librechat-data-provider';
-import { BookmarkFilledIcon, BookmarkIcon } from '@radix-ui/react-icons';
+import { Tag } from 'lucide-react';
 import { TooltipAnchor, buttonVariants, usePopoverZIndex } from '@librechat/client';
 import {
   Archive,
@@ -124,9 +124,9 @@ const BookmarkChoices = memo(() => {
           >
             <span className="shrink-0 text-text-secondary" aria-hidden="true">
               {checked ? (
-                <BookmarkFilledIcon className="size-4" />
+                <Tag fill="currentColor" className="size-4" />
               ) : (
-                <BookmarkIcon className="size-4" />
+                <Tag className="size-4" />
               )}
             </span>
             <span className="truncate">{bookmark.tag}</span>

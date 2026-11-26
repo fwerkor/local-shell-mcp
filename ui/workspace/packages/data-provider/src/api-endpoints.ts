@@ -326,6 +326,9 @@ export const agents = ({ path = '', options }: { path?: string; options?: object
 };
 
 export const activeJobs = () => `${BASE_URL}/api/agents/chat/active`;
+export const liveCompaction = () => `${BASE_URL}/api/agents/chat/compact`;
+export const liveCompactionStatus = (runId: string, requestId: string) =>
+  `${liveCompaction()}/${encodeURIComponent(runId)}/${encodeURIComponent(requestId)}`;
 
 const agentQueuedTurnsRoot = `${BASE_URL}/api/agents/chat/queued-turns`;
 export const agentQueuedTurns = (protocolVersion?: 2) =>

@@ -87,11 +87,11 @@ def test_agent_runner_automatically_exposes_machine_scoped_tools(machine_agent):
     # native capabilities merely because the parent has a machine ACL.
     restricted = runner._context(agent, profile=profile, selected_tools=[])
     assert {item["function"]["name"] for item in restricted.tools} == {
-        "session_manage", "plan_manage", "web_search", "web_fetch",
+        "session_manage", "plan_manage", "web_search", "web_fetch", "sleep",
     }
     runner.web_search_enabled = False
     restricted = runner._context(agent, profile=profile, selected_tools=[])
-    assert {item["function"]["name"] for item in restricted.tools} == {"session_manage", "plan_manage"}
+    assert {item["function"]["name"] for item in restricted.tools} == {"session_manage", "plan_manage", "sleep"}
 
 
 @pytest.mark.asyncio
@@ -312,7 +312,7 @@ async def test_agent_default_machine_permission_inheritance(machine_agent, monke
         "machine_default_permission": "none",
     })
     assert agent_access_policy(updated) == ({"local": "write"}, "none")
-    for invalid in ("inherit", "*", None, []):
+    for invalid in ("global", "*", None, []):
         with pytest.raises(ValueError):
             agents.update("local", agent["id"], {"machine_default_permission": invalid})
     monkeypatch.setattr(
@@ -443,3 +443,71 @@ async def test_remote_discovery_reports_effective_machine_access(machine_agent, 
     assert json.loads(result)["data"]["machines"] == [
         {"name": "worker1", "effective_access": "read"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_agent_inherits_global_ceiling_live(machine_agent, monkeypatch):
+    from local_shell_mcp.webui import durable_tasks as durable
+    from local_shell_mcp.webui.machine_permissions import (
+        agent_access_policy,
+        effective_machine_access,
+        machine_access_context,
+    )
+
+    repo, cid, agents, agent = machine_agent
+    key = "agent.machine_policy.global"
+    repo.save_setting("local", key, {"local": "read", "worker1": "none"})
+    agent = agents.update("local", agent["id"], {
+        "machine_permissions": {}, "machine_default_permission": "inherit",
+    })
+    assert agent_access_policy(agent) == ({}, "inherit")
+    assert agents.get("local", agent["id"])["machine_default_permission"] == "inherit"
+
+    def exposed():
+        return {t["function"]["name"] for t in registry.available_tools(
+            "local", cid, scopes=SCOPES, agent_permissions={},
+            agent_default_permission="inherit",
+        )}
+
+    assert "file_read" in exposed()
+    assert "file_write" not in exposed()
+    assert effective_machine_access("local", cid, agent=agent, scopes=SCOPES, repo=repo) == (
+        {"local": "read", "worker1": "none"}, "inherit",
+    )
+    assert "inherit global machine permissions" in machine_access_context(
+        "local", cid, agent=agent, scopes=SCOPES, repo=repo,
+    )
+
+    async def invoke(*args, **kwargs):
+        return '{"ok":true}'
+
+    monkeypatch.setattr(registry, "_invoke_registered", invoke)
+
+    async def call(name, machine, **kwargs):
+        return await registry.call_tool(
+            "local", cid, ModelToolCall("inherit-test", name, {"machine": machine, **kwargs}),
+            granted_scopes=SCOPES, agent_id=agent["id"],
+        )
+
+    with pytest.raises(PermissionError, match="read-only"):
+        await call("file_write", "local", path="file.txt", content="x")
+    with pytest.raises(PermissionError, match="Agent has no read"):
+        await call("file_read", "worker1", path="file.txt")
+    agents.update("local", agent["id"], {"machine_permissions": {"worker1": "write"}})
+    assert await call("file_read", "worker1", path="file.txt") == '{"ok":true}'
+    with pytest.raises(PermissionError, match="read-only"):
+        await call("file_write", "worker1", path="file.txt", content="x")
+
+    repo.save_setting("local", key, {"local": "write", "worker1": "none"})
+    assert "file_write" in exposed()
+    assert await call("file_write", "local", path="file.txt", content="x") == '{"ok":true}'
+    with repo.database.connect() as db:
+        db.execute("INSERT INTO runs(id,conversation_id,status,state,created_at,updated_at) "
+                   "VALUES('inherit-run',?,'running','{}',1,1)", (cid,))
+    intent = durable.reserve("local", cid, "inherit-run", "inherit-lease", "job_start",
+                            {"command": "echo ok"}, SCOPES, None, agent_id=agent["id"])
+    assert durable.mark_revoked("local") == 0
+    repo.save_setting("local", key, {"local": "read", "worker1": "none"})
+    assert durable.mark_revoked("local") == 1
+    with pytest.raises(PermissionError, match="revoked"):
+        durable.check_intent(intent)

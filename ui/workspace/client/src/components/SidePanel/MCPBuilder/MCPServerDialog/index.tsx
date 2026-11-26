@@ -1,13 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Copy, CopyCheck } from 'lucide';
 import {
-  SystemRoles,
-  Permissions,
-  ResourceType,
-  PermissionBits,
-  PermissionTypes,
-} from 'librechat-data-provider';
-import {
   Label,
   Input,
   Button,
@@ -22,8 +15,7 @@ import {
   OGDialogContent,
   OGDialogTemplate,
 } from '@librechat/client';
-import { useAuthContext, useHasAccess, useResourcePermissions, MCPServerDefinition } from '~/hooks';
-import { GenericGrantAccessDialog } from '~/components/Sharing';
+import type { MCPServerDefinition } from '~/hooks';
 import { useMCPServerForm } from './hooks/useMCPServerForm';
 import { useLocalize, useCopyToClipboard } from '~/hooks';
 import MCPServerForm from './MCPServerForm';
@@ -44,7 +36,6 @@ export default function MCPServerDialog({
   server,
 }: MCPServerDialogProps) {
   const localize = useLocalize();
-  const { user } = useAuthContext();
   const { showToast } = useToastContext();
 
   // State for dialogs
@@ -83,25 +74,6 @@ export default function MCPServerDialog({
       resetForm();
     }
   }, [open, resetForm]);
-
-  // Permissions
-  const hasAccessToShareMcpServers = useHasAccess({
-    permissionType: PermissionTypes.MCP_SERVERS,
-    permission: Permissions.SHARE,
-  });
-
-  const { hasPermission, isLoading: permissionsLoading } = useResourcePermissions(
-    ResourceType.MCPSERVER,
-    server?.dbId || '',
-  );
-
-  const canShareThisServer = hasPermission(PermissionBits.SHARE);
-
-  const shouldShowShareButton =
-    server &&
-    (user?.role === SystemRoles.ADMIN || canShareThisServer) &&
-    hasAccessToShareMcpServers &&
-    !permissionsLoading;
 
   const redirectUri = createdServerId
     ? `${window.location.origin}/api/mcp/${createdServerId}/oauth/callback`
@@ -224,13 +196,6 @@ export default function MCPServerDialog({
                 >
                   <TrashIcon aria-hidden="true" />
                 </Button>
-                {shouldShowShareButton && server && (
-                  <GenericGrantAccessDialog
-                    resourceDbId={server.dbId}
-                    resourceName={server.config.title || ''}
-                    resourceType={ResourceType.MCPSERVER}
-                  />
-                )}
               </div>
             ) : null
           }

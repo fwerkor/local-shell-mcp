@@ -76,6 +76,7 @@ async def test_text_only_provider_path_when_no_native_tools(runner_parts, monkey
     from local_shell_mcp.webui import lsm_tool_registry
 
     monkeypatch.setattr(lsm_tool_registry, 'available_tools', lambda *a, **kw: [])
+    monkeypatch.setattr('local_shell_mcp.webui.agent_runner.SLEEP_TOOLS', [])
     # Memory is enabled by default, so opt out for the explicit no-tools path.
     _repo().save_setting('local', 'user.memories', False)
     streams = []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -57,6 +58,7 @@ from .semantic_index import (
     render_compaction_semantic_index,
     snapshot_compaction_semantic_index,
 )
+from .sleep_tool import SLEEP_TOOLS, invoke_sleep, sleep_seconds
 from .steering import SteeringStore, merged_text
 from .subagents import (
     MAX_SUBAGENT_DEPTH,
@@ -117,13 +119,14 @@ class AgentRunner:
         self.config = self.saver.config(generation.conversation_id, generation.run_id,
                                        checkpoint_ns=namespace, event_actor=True)
         self.active_config = self.config
+        self.image_disabled = set()
         self.cache = {}
         self.configs = {}
         self._injected_background_names: dict[str, frozenset[str]] = {}
         self.route = HandoffRouting(self.graph_entry_id, self.graph_max_handoffs, self.graph_parallel)
         self.memory_artifacts: dict[str, dict] = {}
         self._last_compaction_attempt_size = -1
-        self._summary_failures = 0
+        self._compaction_status = None
 
     def _check_grant(self):
         if self.webui_cookie is not None:
@@ -245,6 +248,7 @@ class AgentRunner:
         if features["web"] and (self.web_search_enabled or explicit_web):
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
+        tools += SLEEP_TOOLS
         if self.mcp_enabled and (agent or {}).get("mcp_servers") != []:
             mcp_configured = "mcp_servers" in (agent or {})
             mcp_exposed = mcp_configured or (selected_tools is None and not selected)
@@ -412,13 +416,17 @@ class AgentRunner:
                 await publish_native_file_write(self.owner, self.generation, call, output,
                                                 database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
+        from .mcp_projection import NATIVE_MEDIA_TOOLS, mcp_tool_history_message
+
+        if call.name in NATIVE_MEDIA_TOOLS and isinstance(output, str):
+            preview = mcp_tool_history_message(
+                call, output, self.initial_profile.provider if self.initial_profile else "openai",
+            )["content"]
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
         # A UI resource marker is only resolvable after the original client
         # receives a canonical attachment. Derive it from the same native MCP
         # envelope retained in the checkpoint; never infer from display JSON.
         if call.name == "mcp_tool_call" and isinstance(output, str):
-            from .mcp_projection import mcp_tool_history_message
-
             artifact = mcp_tool_history_message(call, output, self.initial_profile.provider if self.initial_profile else "openai").get("artifact")
             ui = artifact.get("ui_resources") if isinstance(artifact, dict) else None
             if isinstance(ui, dict) and isinstance(ui.get("data"), list) and ui["data"]:
@@ -501,6 +509,21 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name == "sleep":
+            try:
+                seconds = sleep_seconds(call.arguments)
+            except ValueError as exc:
+                return f"Tool failed (ValueError): {exc}"
+            if self._publishes_tool_steps():
+                step = self._tool_step(call)
+                self.store.append(self.owner, self.generation.run_id, {
+                    "event": "on_tool_calls_dispatched", "data": {
+                        "dispatched_at": int(time.time() * 1000),
+                        "runId": step["runId"],
+                        "toolCalls": [{"id": call.call_id, "name": call.name, "stepId": step["id"]}],
+                    },
+                }, actor_lease=self.actor_lease)
+            return await invoke_sleep(seconds, self._check_grant)
         if call.name in {'set_memory', 'find_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
@@ -981,9 +1004,33 @@ class AgentRunner:
             if missing:
                 state.completed = False
 
+    async def _stream_with_image_fallback(self, stream, profile, prepared, **kwargs):
+        """Retry only an explicit vision rejection before any provider output."""
+        from .providers import UnsupportedImageInput
+        from .steer_media import without_attachment_images
+
+        key = (profile.provider, profile.url, profile.model, profile.account_id)
+        fallback, changed = without_attachment_images(prepared)
+        if key in self.image_disabled:
+            prepared = fallback
+        emitted = False
+        try:
+            async for event in stream(profile, prepared, **kwargs):
+                emitted = True
+                yield event
+        except UnsupportedImageInput:
+            if emitted or not changed or key in self.image_disabled:
+                raise
+            self.image_disabled.add(key)
+            self.store.append(self.owner, self.generation.run_id, {
+                "event": "on_attachment_image_fallback", "data": {},
+            }, actor_lease=self.actor_lease)
+            async for event in stream(profile, fallback, **kwargs):
+                yield event
+
     async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
                                  prompt=None, update_prompt=None, head_count=0,
-                                 semantic_index=None, retained_tail=None, profile=None):
+                                 semantic_index=None, retained_tail=None, profile=None, live_request_id=None, context_limit=None):
         """Request the original checkpoint prompt from the selected model.
 
         A failed/partial summary is never written, and never makes the old
@@ -1041,18 +1088,78 @@ class AgentRunner:
         policy = configured_filters(WorkspaceRepository(self.database), self.owner)
         if inspect_content(model_message_fragments(summary_messages), policy) is not None:
             raise RuntimeSafetyError('Summary context was blocked by content protection')
-        chunks = []
-        finish_reason = None
         limit = max(128, min(int(max_tokens), 16384))
         profile = profile or self.initial_profile or self._context(self.root_agent).profile
+        try:
+            summary = await self._request_summary(profile, summary_messages, limit)
+        except RuntimeSafetyError:
+            raise
+        except Exception:
+            if context_limit is None:
+                raise
+            # A huge individual tool response can overflow even a summary-only
+            # request. Never persist a prefix checkpoint: fold the full source
+            # in bounded textual fragments and commit only the final summary.
+            from .context_budget import message_token_count
+
+            if sum(map(message_token_count, summary_messages)) < context_limit / 2:
+                raise
+            logging.getLogger(__name__).warning('Full context summary failed; trying bounded fragments')
+            summary = await self._summarize_fragments(
+                profile, summary_messages[:-1], prior=prior, context_limit=context_limit,
+                max_tokens=limit, prompt=prompt or DEFAULT_SUMMARIZATION_PROMPT,
+                update_prompt=update_prompt or DEFAULT_UPDATE_SUMMARIZATION_PROMPT)
+        count = count_tokens(build_summary_carrier_text(summary), exact=False)
+        covered_calls = set()
+        covered_steers = set()
+        for message in messages:
+            if message.get('role') == 'user' and message.get('source') == 'steer':
+                ident = message.get('steerId')
+                if isinstance(ident, str):
+                    covered_steers.add(ident)
+            if message.get('role') == 'assistant':
+                covered_calls.update(call['id'] for call in message.get('tool_calls') or []
+                                     if isinstance(call, dict) and isinstance(call.get('id'), str))
+            elif message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
+                covered_calls.add(message['tool_call_id'])
+        self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
+                                 boundary=head_count, manual=manual, live=bool(live_request_id),
+                                 retained_tail=retained_tail,
+                                 covered_tool_call_ids=sorted(covered_calls),
+                                 covered_steer_ids=sorted(covered_steers),
+                                 visible_text_boundary=len(self.partial_text),
+                                 model_history_start=(
+                                     sum(1 for message in messages if message.get('role') == 'system'
+                                         and not (isinstance(message.get('content'), str)
+                                                  and message['content'].startswith('<summary>\n')))
+                                     + 1 + len(retained_tail))
+                                 if retained_tail is not None and not manual and not self.namespace else None)
+        if not self.namespace:
+            import secrets
+            identity = 'summary_' + secrets.token_hex(8)
+            self.store.append(self.owner, self.generation.run_id, {
+                'event': 'on_run_step_completed', 'data': {'result': {
+                    'id': identity, 'type': 'summary', 'summary': {
+                        'type': 'summary', 'content': [{'type': 'text', 'text': summary}],
+                        'boundary': {'messageIndex': head_count}, 'tokenCount': count,
+                        **({'initiatedBy': 'user'} if manual else {'initiatedBy': 'live'} if live_request_id else {}),
+                    }},},
+            })
+        return summary
+
+    async def _request_summary(self, profile, summary_messages, limit):
+        from .tokenizer import count_tokens
+
+        chunks = []
+        finish_reason = None
         if profile.provider in {"anthropic", "google"}:
             from .provider_tool_protocols import stream_native_tools
 
-            response = stream_native_tools(profile, summary_messages, tools=[],
+            response = self._stream_with_image_fallback(stream_native_tools, profile, summary_messages, tools=[],
                                            max_tokens=limit, temperature=None,
                                            emit_finish_reason=True)
         else:
-            response = self.stream_text(profile, summary_messages, max_tokens=limit,
+            response = self._stream_with_image_fallback(self.stream_text, profile, summary_messages, max_tokens=limit,
                                         emit_finish_reason=True)
         async for value in response:
             if isinstance(value, str):
@@ -1076,43 +1183,68 @@ class AgentRunner:
         # checkpoint whose source conversation would become unreachable.
         if finish_reason in {None, 'unknown'} and count_tokens(summary, exact=False) >= limit * 0.85:
             raise ValueError('Summary completion is unverified near output token limit')
-        count = count_tokens(build_summary_carrier_text(summary), exact=False)
-        covered_calls = set()
-        covered_steers = set()
-        for message in messages:
-            if message.get('role') == 'user' and message.get('source') == 'steer':
-                ident = message.get('steerId')
-                if isinstance(ident, str):
-                    covered_steers.add(ident)
-            if message.get('role') == 'assistant':
-                covered_calls.update(call['id'] for call in message.get('tool_calls') or []
-                                     if isinstance(call, dict) and isinstance(call.get('id'), str))
-            elif message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
-                covered_calls.add(message['tool_call_id'])
-        self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
-                                 boundary=head_count, manual=manual,
-                                 retained_tail=retained_tail,
-                                 covered_tool_call_ids=sorted(covered_calls),
-                                 covered_steer_ids=sorted(covered_steers),
-                                 visible_text_boundary=len(self.partial_text),
-                                 model_history_start=(
-                                     sum(1 for message in messages if message.get('role') == 'system'
-                                         and not (isinstance(message.get('content'), str)
-                                                  and message['content'].startswith('<summary>\n')))
-                                     + 1 + len(retained_tail))
-                                 if retained_tail is not None and not manual and not self.namespace else None)
-        if not self.namespace:
-            import secrets
-            identity = 'summary_' + secrets.token_hex(8)
-            self.store.append(self.owner, self.generation.run_id, {
-                'event': 'on_run_step_completed', 'data': {'result': {
-                    'id': identity, 'type': 'summary', 'summary': {
-                        'type': 'summary', 'content': [{'type': 'text', 'text': summary}],
-                        'boundary': {'messageIndex': head_count}, 'tokenCount': count,
-                        **({'initiatedBy': 'user'} if manual else {}),
-                    }},},
-            })
         return summary
+
+    async def _summarize_fragments(self, profile, messages, *, prior, context_limit,
+                                   max_tokens, prompt, update_prompt):
+        from .compaction import build_summarization_instruction
+        from .context_budget import message_token_count
+        from .tokenizer import count_tokens
+
+        # Text-only recovery deliberately refuses media rather than silently
+        # discarding image/attachment data from a checkpoint.
+        records = []
+        for message in messages:
+            content = message.get('content')
+            if isinstance(content, str) and content.startswith('<summary>\n') and message.get('role') == 'system':
+                continue
+            if content is not None and not isinstance(content, str):
+                raise ValueError('Fragmented compaction requires text-only history')
+            records.append(json.dumps(message, ensure_ascii=False, default=str))
+        source = '\n'.join(records)
+        limit = min(max_tokens, max(128, context_limit // 8))
+        # Leave room for provider formatting, tokenizer mismatch and output.
+        capacity = int(context_limit * 0.8) - limit
+        offset = 0
+        rounds = 0
+        while offset < len(source):
+            instruction = build_summarization_instruction(prompt, update_prompt, prior or None)
+            prefix = ('The following is a consecutive fragment of the conversation transcript, '
+                      'including tool calls and results as data. Preserve task state and relevant '
+                      'facts, including unfinished records across fragment boundaries.\n')
+            fixed = [{'role': 'user', 'content': instruction},
+                     {'role': 'user', 'content': prefix}]
+            room = capacity - sum(map(message_token_count, fixed))
+            if room < 128 or rounds >= 64:
+                raise ValueError('Insufficient bounded summary capacity')
+            # Binary search by token count; never drop the remainder of a large
+            # result, including a single record larger than the model window.
+            lo, hi = offset, min(len(source), offset + room * 8)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if count_tokens(source[offset:mid], exact=False) <= room:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            if lo == offset:
+                raise ValueError('Unable to fit a summary fragment')
+            fragment = source[offset:lo]
+            request = [{'role': 'user', 'content': prefix + fragment},
+                       {'role': 'user', 'content': instruction}]
+            # Filtering the original stamped source is mandatory; also filter
+            # each newly composed request, including previous model summaries.
+            from .content_filters import inspect_content, model_message_fragments
+            from .storage import WorkspaceRepository
+
+            policy = configured_filters(WorkspaceRepository(self.database), self.owner)
+            if inspect_content(model_message_fragments(request), policy) is not None:
+                raise RuntimeSafetyError('Summary context was blocked by content protection')
+            prior = await self._request_summary(profile, request, limit)
+            offset = lo
+            rounds += 1
+        if not prior:
+            raise ValueError('No summary fragments')
+        return prior
 
     def _context_limit(self, state: AgentLoopState, settings: dict | None = None) -> int | None:
         """Resolve the explicit agent limit first, then this channel's model limit."""
@@ -1161,12 +1293,15 @@ class AgentRunner:
                 state.context.profile.provider, state.context.profile.model)
             snapshot = provider_usage_snapshot(
                 input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
+                cache_read=usage.cache_read, cache_write=usage.cache_write,
                 provider=usage.provider, model=state.context.profile.model,
                 messages=state.provider_projection or state.messages, tools=state.context.tools,
                 max_context_tokens=self._context_limit(state, settings),
                 reserve_ratio=ratio, calibration_ratio=calibration.ratio,
                 run_id=self.generation.run_id,
                 agent_id=(state.context.agent or {}).get('id'))
+            if self._compaction_status:
+                snapshot['compactionStatus'] = self._compaction_status
             self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
         except Exception as exc:
             logging.getLogger(__name__).warning('Provider context usage unavailable (%s)', type(exc).__name__)
@@ -1245,9 +1380,10 @@ class AgentRunner:
         from .compaction import build_summary_carrier_text
         from .content_filters import inspect_content, model_message_fragments
         from .context_budget import (
+            DEFAULT_COMPACTION_RATIO,
             calculate_budget,
             should_trigger_summarization,
-            split_recent_turns,
+            split_compaction_history,
         )
         from .storage import WorkspaceRepository
 
@@ -1261,7 +1397,10 @@ class AgentRunner:
             return
         settings = repository.setting(self.owner, 'endpoints', {}) or {}
         max_raw = self._context_limit(state, settings)
-        if max_raw is None:
+        request_id = self.store.live_compaction_request(self.owner, self.generation.run_id)
+        compacted = False
+        cancelled = False
+        if max_raw is None and not request_id:
             return
         calibration = self.store.token_calibration(
             self.owner, self.generation.run_id,
@@ -1272,26 +1411,51 @@ class AgentRunner:
                 config = {}
             budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
                                       reserve_ratio=config.get('reserveRatio', 0.05),
-                                      calibration_ratio=calibration.ratio)
-            self._update_fading_tier(state, budget, calibration, config, int(max_raw))
-            if config.get('enabled') is False or (budget.remaining_context_tokens > 0 and not isinstance(config.get('trigger'), dict)):
+                                      calibration_ratio=calibration.ratio) if max_raw is not None else None
+            if budget is not None:
+                self._update_fading_tier(state, budget, calibration, config, int(max_raw))
+            if config.get('enabled') is False:
                 return
-            if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
-                return
+            if not request_id:
+                if len(state.messages) == self._last_compaction_attempt_size:
+                    return
+                # The reserve belongs to the model's output, not consumed input.
+                # Use total estimated input, including system and tool schema.
+                used = budget.instruction_tokens + budget.tool_schema_tokens + budget.message_tokens
+                trigger = config.get('trigger')
+                if not isinstance(trigger, dict):
+                    trigger = {'type': 'token_ratio', 'value': DEFAULT_COMPACTION_RATIO}
+                if not should_trigger_summarization(
+                    messages_to_refine_count=len(state.messages), trigger=trigger,
+                    max_context_tokens=budget.max_context_tokens,
+                    pre_prune_context_tokens=used,
+                    remaining_context_tokens=budget.remaining_context_tokens,
+                ):
+                    return
             system = [message for message in state.messages if message.get('role') == 'system']
             messages = [message for message in state.messages if message.get('role') != 'system']
             retain = config.get('retainRecent') or {}
-            head, tail = split_recent_turns(messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'))
-            if not should_trigger_summarization(
-                messages_to_refine_count=len(head), trigger=config.get('trigger'),
+            # Keep the last two turns when they fit; a long single user turn
+            # needs an exchange-aligned boundary within that turn.
+            head, tail = split_compaction_history(
+                messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'),
+                tail_budget=max(1, int(budget.available_for_messages * 0.35 / calibration.ratio))
+                if budget is not None else None)
+            if not head:
+                return
+            if not request_id and not should_trigger_summarization(
+                messages_to_refine_count=len(head), trigger=trigger,
                 max_context_tokens=budget.max_context_tokens,
-                pre_prune_context_tokens=budget.max_context_tokens - budget.remaining_context_tokens,
+                pre_prune_context_tokens=used,
                 remaining_context_tokens=budget.remaining_context_tokens,
             ):
                 return
             self._last_compaction_attempt_size = len(state.messages)
-            if budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
+            if budget is not None and budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
                 return
+            self._compaction_status = 'running'
+            if budget is not None:
+                self._publish_compaction_usage(state, int(max_raw), config, calibration)
             try:
                 options = config.get('parameters') or {}
                 summary = await self._summarize_history(
@@ -1299,15 +1463,17 @@ class AgentRunner:
                     max_tokens=options.get('maxSummaryTokens', 2048),
                     prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
                     semantic_index=state.context.compaction_semantic_index,
-                    retained_tail=tail, profile=state.context.profile)
+                    retained_tail=tail, profile=state.context.profile, live_request_id=request_id,
+                    context_limit=int(max_raw) if max_raw is not None else None)
                 # Keep stable instructions and current summary, then the exact
                 # retained recent turns. Original messages stay in SQLite.
                 plain_system = [message for message in system if not (
                     isinstance(message.get('content'), str)
                     and message['content'].startswith('<summary>\n'))]
                 state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
-                self._summary_failures = 0
                 await self._save(state, [])
+                compacted = True
+                self._compaction_status = 'complete'
                 # History length may return to its pre-compaction value after
                 # the next tool batch. Do not suppress that distinct input as
                 # if it were an attempted retry of the old oversized history.
@@ -1316,6 +1482,8 @@ class AgentRunner:
                 # fresh v2 fading tier so past masking doesn't pin this run.
                 from .fading import create_fading_tier
 
+                if max_raw is None:
+                    return
                 state.context.fading_tier = create_fading_tier(int(max_raw))
                 try:
                     self.store.record_fading_tier(
@@ -1325,26 +1493,37 @@ class AgentRunner:
                         state.context.fading_tier)
                 except Exception as error:
                     logging.getLogger(__name__).warning('Fading reset failed (%s)', type(error).__name__)
-            except Exception:
-                self._summary_failures += 1
+            except Exception as error:
+                self._compaction_status = 'failed'
+                logging.getLogger(__name__).warning('Context compaction failed (%s)', type(error).__name__)
                 # The source leaves the state intact on summary failure; never
                 # substitute an empty checkpoint or truncate a tool result.
                 return
 
+        except asyncio.CancelledError:
+            cancelled = True
+            self._compaction_status = 'failed'
+            raise
         finally:
-            # The pinned frontend consumes this event before the model call and
-            # reads the same last snapshot from response metadata after reload.
-            from .context_budget import context_usage_snapshot
+            if request_id and not cancelled:
+                self.store.settle_live_compaction(
+                    self.owner, self.generation.run_id, request_id,
+                    success=compacted, actor_lease=self.actor_lease)
+            if max_raw is not None:
+                config = settings.get('summarization') or {}
+                self._publish_compaction_usage(state, int(max_raw),
+                                               config if isinstance(config, dict) else {}, calibration)
 
-            config = settings.get('summarization') or {}
-            ratio = config.get('reserveRatio', 0.05) if isinstance(config, dict) else 0.05
-            snapshot = context_usage_snapshot(
-                state.messages, state.context.tools, int(max_raw), reserve_ratio=ratio,
-                run_id=self.generation.run_id,
-                agent_id=(state.context.agent or {}).get('id'),
-                calibration_ratio=calibration.ratio,
-            )
-            self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
+    def _publish_compaction_usage(self, state, max_context, config, calibration):
+        from .context_budget import context_usage_snapshot
+
+        snapshot = context_usage_snapshot(
+            state.messages, state.context.tools, max_context, reserve_ratio=config.get('reserveRatio', 0.05),
+            run_id=self.generation.run_id, agent_id=(state.context.agent or {}).get('id'),
+            calibration_ratio=calibration.ratio)
+        if self._compaction_status:
+            snapshot['compactionStatus'] = self._compaction_status
+        self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
 
     async def _manual_compact(self, history):
         from .storage import WorkspaceRepository
@@ -1601,6 +1780,9 @@ class AgentRunner:
                                          "source": "steer", "steerId": item["steerId"],
                                          "id": "steer:" + item["steerId"],
                                          "files": item.get("files", [])})
+            if (boundary == "terminal" and not self.namespace and not (recovered or applied)
+                    and self.store.live_compaction_request(self.owner, self.generation.run_id)):
+                await self._before_model(current)
             return bool(recovered or applied)
 
         async def should_seal_stream():
@@ -1612,17 +1794,16 @@ class AgentRunner:
             return owns_user_queue and self.steers.has_preempt(self.owner, self.generation.run_id)
 
         async def prepared_provider_messages(messages):
-            from ..settings import get_settings
             from .content_filters import inspect_content, model_message_fragments
             from .steer_media import stamp_model_messages
             from .storage import WorkspaceRepository
 
             prepared = await stamp_model_messages(self.database, self.owner, messages,
-                                                  get_settings().state_dir)
+                                                  self.database.root)
             # Before-model inspection covers canonical checkpoint messages, but
             # steer_media can add text from an owned file only at provider time.
             # Check the exact expanded request before either provider stream.
-            if any(message.get('role') == 'user' and message.get('source') == 'steer'
+            if any(message.get('role') == 'user' and message.get('source') in {'steer', 'attachment'}
                    and message.get('files') for message in messages):
                 policy = configured_filters(WorkspaceRepository(self.database), self.owner)
                 if inspect_content(model_message_fragments(prepared), policy) is not None:
@@ -1631,12 +1812,12 @@ class AgentRunner:
 
         async def stream_tools_with_media(profile, messages, **kwargs):
             prepared = await prepared_provider_messages(messages)
-            async for event in self.stream_tools(profile, prepared, **kwargs):
+            async for event in self._stream_with_image_fallback(self.stream_tools, profile, prepared, **kwargs):
                 yield event
 
         async def stream_text_with_media(profile, messages, **kwargs):
             prepared = await prepared_provider_messages(messages)
-            async for event in self.stream_text(profile, prepared, **kwargs):
+            async for event in self._stream_with_image_fallback(self.stream_text, profile, prepared, **kwargs):
                 yield event
 
         result = await run_agent_loop(

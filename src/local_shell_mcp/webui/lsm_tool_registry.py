@@ -19,6 +19,7 @@ from .machine_permissions import (
     agent_access_policy,
     authorize_machine_action,
     resolve_access,
+    resolve_agent_ceiling,
 )
 from .providers import ModelToolCall
 
@@ -153,9 +154,11 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
         # An Agent is an additional ceiling; it cannot expand its chat grant.
         from .machine_permissions import validate_access_map
 
-        agent_policy = validate_access_map(agent_permissions)
+        agent_policy, fallback = resolve_agent_ceiling(
+            owner, validate_access_map(agent_permissions), agent_default_permission,
+        )
         rank = {"none": 0, "read": 1, "write": 2}
-        policy = {name: min(level, agent_policy.get(name, agent_default_permission), key=rank.get)
+        policy = {name: min(level, agent_policy.get(name, fallback), key=rank.get)
                   for name, level in policy.items()}
     definitions: list[dict] = []
     for tool in _registry()._tool_manager.list_tools():
@@ -289,7 +292,7 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
                 raise PermissionError("Agent no longer exists")
             policy = agent_access_policy(agent)
             if policy is not None:
-                agent_policy, default = policy
+                agent_policy, default = resolve_agent_ceiling(owner, *policy)
                 if tool.name == "remote_transfer":
                     requirements = [
                         (arguments.get("source_machine") or "local", "read"),

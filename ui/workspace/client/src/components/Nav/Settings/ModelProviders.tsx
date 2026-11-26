@@ -31,9 +31,9 @@ type Draft = { name: string; provider: Kind; base: string; models: string;
   autoDiscover: boolean; reportedContexts: Record<string, number>;
   contexts: Record<string, string>; sampling: Record<string, SamplingDraft>; apiKey: string };
 type Editor = { original: Profile | null };
-type AccountMethod = { id: string; label: string; defaultName: string };
+type AccountMethod = { id: string; label: TranslationKeys; defaultName: string };
 const accountMethods: AccountMethod[] = [
-  { id: 'chatgpt', label: 'Continue with ChatGPT', defaultName: 'Codex' },
+  { id: 'chatgpt', label: 'com_lsm_channel_oauth_chatgpt', defaultName: 'Codex' },
 ];
 type Authorization = { method: AccountMethod; name: string; reauthorize: boolean; manual: boolean;
   flow?: string; authorizationUrl?: string };
@@ -222,13 +222,13 @@ export default function ModelProviders() {
           if (connected) beginEdit(connected);
           setAuthorization(null);
           setCallback('');
-          setSuccess('Account connected.');
+          setSuccess(localize('com_lsm_channel_oauth_connected'));
           await Promise.all([QueryKeys.models, QueryKeys.endpoints, QueryKeys.tokenConfig].map((name) =>
             client.invalidateQueries({ queryKey: [name], refetchType: 'all' })));
           return;
         }
         if (result.status !== 'pending') {
-          setOauthError(result.error ?? 'Authorization ended. Start again.');
+          setOauthError(result.error ?? localize('com_lsm_channel_oauth_ended'));
           setAuthorization((current) => current ? { ...current, flow: undefined, authorizationUrl: undefined } : null);
           setCallbackSent(false);
           return;
@@ -322,7 +322,7 @@ export default function ModelProviders() {
       await refresh();
       const current = updated.providers.find((item) => channelId(item) === channelId(profile));
       if (current?.model_sync_error) setError(current.model_sync_error);
-      else setSuccess('Model information refreshed.');
+      else setSuccess(localize('com_lsm_channel_refreshed'));
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -399,13 +399,13 @@ export default function ModelProviders() {
     }
   };
   const callbackFields = <>
-    <label className="block space-y-1"><span>Full callback URL</span>
+    <label className="block space-y-1"><span>{localize('com_lsm_channel_oauth_callback_url')}</span>
       <textarea className={input} autoComplete="off" spellCheck={false} rows={3}
         value={callback} onChange={(event) => setCallback(event.target.value)}
         disabled={callbackSent} placeholder="http://127.0.0.1:…/auth/callback?…" />
     </label>
     <button type="button" className={button} disabled={oauthBusy || callbackSent || !callback.trim()}
-      onClick={() => void submitCallback()}>{callbackSent ? 'Completing authorization…' : 'Complete authorization'}</button>
+      onClick={() => void submitCallback()}>{callbackSent ? localize('com_lsm_channel_oauth_completing') : localize('com_lsm_channel_oauth_complete')}</button>
   </>;
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -417,9 +417,9 @@ export default function ModelProviders() {
         <button type="button" disabled={busy || authorization != null} onClick={() => setAddMenu((value) => !value)}
           aria-label={localize('com_lsm_channel_add')} aria-expanded={addMenu} aria-haspopup="menu" className={button}>{localize('com_lsm_channel_add')} ▾</button>
         {addMenu && <div role="menu" className="absolute right-0 z-20 mt-1 min-w-52 rounded-lg border border-border-medium bg-surface-primary p-1 shadow-lg">
-          <button role="menuitem" type="button" onClick={beginAdd} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">Manual configuration</button>
+          <button role="menuitem" type="button" onClick={beginAdd} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize('com_lsm_channel_manual_config')}</button>
           {accountMethods.map((method) => <button role="menuitem" type="button" key={method.id}
-            onClick={() => selectAccount(method)} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{method.label}</button>)}
+            onClick={() => selectAccount(method)} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize(method.label)}</button>)}
         </div>}
       </div>
     </div>
@@ -431,22 +431,22 @@ export default function ModelProviders() {
           <div className="min-w-0 flex-1">
             <p className="break-words font-medium text-text-primary">{channelLabel(profile)}</p>
             <p className="text-xs text-text-secondary">{protocolLabel(profile.provider)} · {localize('com_lsm_channel_model_count', { count: profile.models.length })}
-              {profile.auth_method && ' · ' + (accountMethods.find((method) => method.id === profile.auth_method)?.defaultName ?? profile.auth_method) + ' account'}
+              {profile.auth_method && ' · ' + localize('com_lsm_channel_oauth_account', { name: accountMethods.find((method) => method.id === profile.auth_method)?.defaultName ?? profile.auth_method })}
               {profile.source === 'environment'  ? localize('com_lsm_channel_environment') : ''}
               {profile.source === 'saved' ? localize('com_lsm_channel_legacy') : ''}
             </p>
-            {profile.oauth_error && <p className="text-xs text-status-error">Account authorization expired · sign in again</p>}
+            {profile.oauth_error && <p className="text-xs text-status-error">{localize('com_lsm_channel_oauth_expired')}</p>}
             {profile.auto_discover && <p className="text-xs text-text-secondary">
-              {profile.model_sync_error ? 'Sync failed · using saved models' :
-                profile.model_sync_at ? 'Synced ' + new Date(profile.model_sync_at * 1000).toLocaleString() : 'Automatic discovery'}
+              {profile.model_sync_error ? localize('com_lsm_channel_sync_failed') :
+                profile.model_sync_at ? localize('com_lsm_channel_synced', { date: new Date(profile.model_sync_at * 1000).toLocaleString() }) : localize('com_lsm_channel_auto_discovery')}
             </p>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {profile.auto_discover && <button type="button" className={button} disabled={busy || editor != null}
-              onClick={() => void refreshSaved(profile)} aria-label={'Refresh ' + channelLabel(profile)}>{localize('com_ui_refresh')}</button>}
+              onClick={() => void refreshSaved(profile)} aria-label={localize('com_lsm_channel_refresh_name', { name: channelLabel(profile) })}>{localize('com_ui_refresh')}</button>}
             {accountMethods.filter((method) => method.id === profile.auth_method).map((method) =>
               <button type="button" key={method.id} className={button} disabled={busy || authorization != null}
-                onClick={() => selectAccount(method, profile)}>Reauthorize</button>)}
+                onClick={() => selectAccount(method, profile)}>{localize('com_lsm_channel_oauth_reauthorize')}</button>)}
             <button type="button" className={button} disabled={busy || authorization != null} onClick={() => beginEdit(profile)} aria-label={localize('com_lsm_channel_edit_name', { name: channelLabel(profile) })}>{localize('com_ui_edit')}</button>
             {profile.source !== 'environment' && (
               confirmDelete === channelId(profile) ? <>
@@ -467,32 +467,32 @@ export default function ModelProviders() {
       </ul> : <p className="rounded-lg border border-dashed border-border-medium p-5 text-sm text-text-secondary">{localize('com_lsm_channel_empty')}</p>
     )}
     {authorization && (authorization.manual ?
-      <div role="dialog" aria-modal="true" aria-label="Connect account" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div role="dialog" aria-modal="true" aria-label={localize('com_lsm_channel_oauth_connect')} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
         <section className="max-h-full w-full max-w-md space-y-4 overflow-y-auto rounded-xl border border-border-medium bg-surface-primary p-5 text-sm text-text-primary shadow-lg">
-          <h3 className="text-lg font-semibold">{authorization.method.label}</h3>
-          <p>This LSM instance is not being accessed through a loopback address. Complete the OAuth callback manually.</p>
+          <h3 className="text-lg font-semibold">{localize(authorization.method.label)}</h3>
+          <p>{localize('com_lsm_channel_oauth_manual_intro')}</p>
           <ol className="list-decimal space-y-2 pl-5">
-            <li>Click Start authorization and sign in on the new official authorization page.</li>
-            <li>After approving access, the browser redirects to 127.0.0.1. A connection error is expected.</li>
-            <li>Copy the entire callback URL from the address bar and paste it here. Do not share it elsewhere.</li>
+            <li>{localize('com_lsm_channel_oauth_manual_step1')}</li>
+            <li>{localize('com_lsm_channel_oauth_manual_step2')}</li>
+            <li>{localize('com_lsm_channel_oauth_manual_step3')}</li>
           </ol>
-          {!authorization.flow ? <button type="button" className={button} disabled={oauthBusy} onClick={() => void beginOAuth(authorization)}>Start authorization</button> :
+          {!authorization.flow ? <button type="button" className={button} disabled={oauthBusy} onClick={() => void beginOAuth(authorization)}>{localize('com_lsm_channel_oauth_start')}</button> :
             <>
               {callbackFields}
-              {authorization.authorizationUrl && <a className="block underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">Reopen authorization page</a>}
+              {authorization.authorizationUrl && <a className="block underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">{localize('com_lsm_channel_oauth_reopen')}</a>}
             </>}
           {oauthError && <p role="alert" className="text-status-error">{oauthError}</p>}
           <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>{localize('com_ui_cancel')}</button>
         </section>
       </div> :
       <div className="space-y-2 rounded-lg border border-border-medium p-3 text-sm text-text-primary">
-        <p role="status">{authorization.flow ? 'Waiting for account authorization…' : oauthBusy ? 'Opening authorization page…' : 'Account authorization'}</p>
-        {authorization.authorizationUrl && <a className="underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">Reopen authorization page</a>}
+        <p role="status">{authorization.flow ? localize('com_lsm_channel_oauth_waiting') : oauthBusy ? localize('com_lsm_channel_oauth_opening') : localize('com_lsm_channel_oauth_authorization')}</p>
+        {authorization.authorizationUrl && <a className="underline" href={authorization.authorizationUrl} target="_blank" rel="noreferrer">{localize('com_lsm_channel_oauth_reopen')}</a>}
         {oauthError && <p role="alert" className="text-status-error">{oauthError}</p>}
-        {!authorization.flow && !oauthBusy && <button type="button" className={button} onClick={() => void beginOAuth(authorization)}>Start authorization</button>}
+        {!authorization.flow && !oauthBusy && <button type="button" className={button} onClick={() => void beginOAuth(authorization)}>{localize('com_lsm_channel_oauth_start')}</button>}
         {authorization.flow && <details className="space-y-2">
-          <summary className="cursor-pointer">Callback not received?</summary>
-          <p>If the browser cannot reach the local callback listener (for example, when the Controller runs in a container), copy the full callback URL from the address bar and paste it here. Do not share it elsewhere.</p>
+          <summary className="cursor-pointer">{localize('com_lsm_channel_oauth_missing_callback')}</summary>
+          <p>{localize('com_lsm_channel_oauth_local_help')}</p>
           {callbackFields}
         </details>}
         <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>{localize('com_ui_cancel')}</button>
@@ -515,30 +515,30 @@ export default function ModelProviders() {
           <input aria-label={localize('com_lsm_channel_model_base_url')} className={input} value={draft.base} disabled={Boolean(original?.auth_method)} onChange={(event) => setDraft({ ...draft, base: event.target.value })} required />
         </label>
         {original?.auth_method ? <div className="space-y-1 text-sm text-text-primary">
-          <span>Account authorization</span>
-          <p className="text-text-secondary">{original.oauth_error ? 'Reauthorization required' : 'Connected · credentials refresh automatically'}</p>
+          <span>{localize('com_lsm_channel_oauth_authorization')}</span>
+          <p className="text-text-secondary">{original.oauth_error ? localize('com_lsm_channel_oauth_required') : localize('com_lsm_channel_oauth_auto_refresh')}</p>
         </div> : <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_key')}</span>
           <input type="password" autoComplete="new-password" aria-label={localize('com_lsm_channel_model_key')} className={input} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={editor.original?.configured ? localize('com_lsm_channel_keep_key') : localize('com_lsm_channel_optional_key')} />
         </label>}
         <div className="space-y-3 sm:col-span-2">
           <label className="flex items-center justify-between gap-3 text-sm font-medium text-text-primary">
-            <span>Automatically discover model information</span>
-            <input type="checkbox" role="switch" aria-label="Automatically discover model information"
+            <span>{localize('com_lsm_channel_discover_toggle')}</span>
+            <input type="checkbox" role="switch" aria-label={localize('com_lsm_channel_discover_toggle')}
               checked={draft.autoDiscover} onChange={(event) => toggleDiscovery(event.target.checked)} />
           </label>
           {draft.autoDiscover ? <>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-text-secondary" role="status">
-                {preview === 'loading' ? 'Discovering models…' : preview === 'ready' ?
-                  `Discovered ${draftModels.length} models` : preview === 'error' ?
-                  'Discovery failed · keeping current models' : `${draftModels.length} models · automatic sync`}
+                {preview === 'loading' ? localize('com_lsm_channel_discover_loading') : preview === 'ready' ?
+                  localize('com_lsm_channel_discover_ready', { count: draftModels.length }) : preview === 'error' ?
+                  localize('com_lsm_channel_discover_failed') : localize('com_lsm_channel_discover_count', { count: draftModels.length })}
               </p>
               <button type="button" disabled={busy || preview === 'loading' || !base}
                 onClick={() => setPreviewRevision((value) => value + 1)} className={button}
-                aria-label="Refresh model information">{localize('com_ui_refresh')}</button>
+                aria-label={localize('com_lsm_channel_discover_refresh')}>{localize('com_ui_refresh')}</button>
             </div>
-            {previewError && <p role="alert" className="text-xs text-status-error">{previewError} Turn off automatic discovery to configure models manually.</p>}
-            <p className="text-xs text-text-tertiary">Refreshed by the server every 10 minutes. Existing data is retained if a refresh fails.</p>
+            {previewError && <p role="alert" className="text-xs text-status-error">{previewError} {localize('com_lsm_channel_discover_manual_help')}</p>}
+            <p className="text-xs text-text-tertiary">{localize('com_lsm_channel_discover_interval')}</p>
           </> : <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_models')}</span>
             <textarea aria-label={localize('com_lsm_channel_identifiers')} className={input} value={draft.models}
               onChange={(event) => setDraft({ ...draft, models: event.target.value })} rows={3} required />
@@ -557,7 +557,7 @@ export default function ModelProviders() {
                 onChange={(event) => setDraft({ ...draft,
                   contexts: { ...draft.contexts, [model]: event.target.value } })} />
             </label>)}
-            {draft.autoDiscover && <p className="text-xs text-text-tertiary">Leave blank to use API metadata; enter a value to override it or fill in an unknown limit.</p>}
+            {draft.autoDiscover && <p className="text-xs text-text-tertiary">{localize('com_lsm_channel_discover_context_help')}</p>}
           </div>}
         </div>
         {draftModels.length > 0 && <details className="space-y-3 rounded-lg border border-border-light p-3 sm:col-span-2">

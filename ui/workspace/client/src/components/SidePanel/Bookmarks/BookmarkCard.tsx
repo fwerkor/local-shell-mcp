@@ -1,10 +1,11 @@
 import React, { useRef } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
 import { GripVertical } from 'lucide-react';
+import { useSetAtom } from 'jotai';
+import { chatFilterTagsAtom } from '~/components/Conversations/chatFilters';
+import { useActivePanel, DEFAULT_PANEL } from '~/Providers';
 import type { TConversationTag } from 'librechat-data-provider';
-import { TooltipAnchor, useToastContext } from '@librechat/client';
-import { useConversationTagMutation } from '~/data-provider';
-import { NotificationSeverity } from '~/common';
+import { TooltipAnchor } from '@librechat/client';
 import BookmarkCardActions from './BookmarkCardActions';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
@@ -13,49 +14,32 @@ interface BookmarkCardProps {
   bookmark: TConversationTag;
   position: number;
   moveRow: (dragIndex: number, hoverIndex: number) => void;
+  finishReorder: (dropped: boolean) => void;
+  reorderDisabled: boolean;
 }
 
 interface DragItem {
   index: number;
-  id: string;
-  type: string;
 }
 
-export default function BookmarkCard({ bookmark, position, moveRow }: BookmarkCardProps) {
+export default function BookmarkCard({
+  bookmark,
+  position,
+  moveRow,
+  finishReorder,
+  reorderDisabled,
+}: BookmarkCardProps) {
   const ref = useRef<HTMLDivElement>(null);
   const localize = useLocalize();
-  const { showToast } = useToastContext();
-
-  const mutation = useConversationTagMutation({
-    context: 'BookmarkCard',
-    tag: bookmark.tag,
-  });
-
-  const handleDrop = (item: DragItem) => {
-    mutation.mutate(
-      { ...bookmark, position: item.index },
-      {
-        onSuccess: () => {
-          showToast({
-            message: localize('com_ui_bookmarks_update_success'),
-            severity: NotificationSeverity.SUCCESS,
-          });
-        },
-        onError: () => {
-          showToast({
-            message: localize('com_ui_bookmarks_update_error'),
-            severity: NotificationSeverity.ERROR,
-          });
-        },
-      },
-    );
-  };
+  const setTags = useSetAtom(chatFilterTagsAtom);
+  const { setActive } = useActivePanel();
 
   const [, drop] = useDrop({
     accept: 'bookmark',
-    drop: handleDrop,
+    canDrop: () => !reorderDisabled,
+    drop: () => ({ accepted: true }),
     hover(item: DragItem) {
-      if (!ref.current || item.index === position) {
+      if (reorderDisabled || !ref.current || item.index === position) {
         return;
       }
       moveRow(item.index, position);
@@ -65,31 +49,49 @@ export default function BookmarkCard({ bookmark, position, moveRow }: BookmarkCa
 
   const [{ isDragging }, drag] = useDrag({
     type: 'bookmark',
+    canDrag: () => !reorderDisabled,
     item: { index: position },
+    end: (_item, monitor) => finishReorder(monitor.didDrop()),
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
     }),
   });
 
-  drag(drop(ref));
+  drop(ref);
+  const handleRef = useRef<HTMLSpanElement>(null);
+  drag(handleRef);
 
   return (
     <div
       ref={ref}
       className={cn(
-        'flex cursor-move items-center gap-2 rounded-lg px-3 py-2.5',
+        'flex items-center gap-2 rounded-lg px-3 py-2.5',
         'border border-border-light bg-transparent',
         'hover:bg-surface-secondary',
         isDragging && 'opacity-50',
       )}
     >
       {/* Drag handle */}
-      <GripVertical className="size-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+      <span ref={handleRef} className={cn('shrink-0', !reorderDisabled && 'cursor-move')}>
+        <GripVertical className="size-4 text-text-tertiary" aria-hidden="true" />
+      </span>
 
       {/* Tag name */}
-      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">
-        {bookmark.tag}
-      </span>
+      <button
+        type="button"
+        className="min-w-0 flex-1 rounded text-left text-sm font-semibold text-text-primary hover:underline"
+        onClick={() => {
+          setTags([bookmark.tag]);
+          setActive(DEFAULT_PANEL);
+        }}
+      >
+        <span className="block truncate">{bookmark.tag}</span>
+        {bookmark.description && (
+          <span className="block truncate text-xs font-normal text-text-secondary">
+            {bookmark.description}
+          </span>
+        )}
+      </button>
 
       {/* Count badge */}
       <TooltipAnchor

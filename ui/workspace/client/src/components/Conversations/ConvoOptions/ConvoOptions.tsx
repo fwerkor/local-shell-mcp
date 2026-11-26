@@ -23,6 +23,7 @@ import {
   Pen,
   Pin,
   Trash,
+  Tag,
 } from 'lucide-react';
 import type { TMessage } from 'librechat-data-provider';
 import type { MouseEvent } from 'react';
@@ -33,8 +34,16 @@ import {
   useGetStartupConfig,
   useArchiveConvoMutation,
   usePinConversationMutation,
+  useConversationTagsQuery,
+  useTagConversationMutation,
 } from '~/data-provider';
-import { useHasAccess, useLocalize, useNavigateToConvo, useNewConvo } from '~/hooks';
+import {
+  useHasAccess,
+  useLocalize,
+  useNavigateToConvo,
+  useNewConvo,
+  useBookmarkSuccess,
+} from '~/hooks';
 import { useChatContext, useLiveAnnouncer } from '~/Providers';
 import { NotificationSeverity } from '~/common';
 import ProjectButton from './ProjectButton';
@@ -58,6 +67,7 @@ function ConvoOptions({
   conversationId,
   chatProjectId,
   title,
+  tags,
   isPinned = false,
   isArchived = false,
   retainView,
@@ -71,6 +81,7 @@ function ConvoOptions({
   conversationId: string | null;
   chatProjectId?: string | null;
   title: string | null;
+  tags?: string[];
   isPinned?: boolean;
   /** This row's own archive state, which the sidebar filter does not stand in for. */
   isArchived?: boolean;
@@ -117,6 +128,20 @@ function ConvoOptions({
     permission: Permissions.CREATE,
   });
 
+  const canUseTags = useHasAccess({
+    permissionType: PermissionTypes.BOOKMARKS,
+    permission: Permissions.USE,
+  });
+  const tagQuery = useConversationTagsQuery({ enabled: canUseTags === true });
+  const updateTags = useBookmarkSuccess(conversationId ?? '');
+  const tagMutation = useTagConversationMutation(conversationId ?? '', {
+    onSuccess: updateTags,
+    onError: () =>
+      showToast({
+        message: localize('com_ui_bookmarks_update_error'),
+        severity: NotificationSeverity.ERROR,
+      }),
+  });
   const archiveConvoMutation = useArchiveConvoMutation();
   const assignConversationToProject = useAssignConversationToProjectMutation();
   const pinConvoMutation = usePinConversationMutation();
@@ -355,6 +380,37 @@ function ConvoOptions({
           <Circle className="icon-sm mr-2 text-blue-500" />
         ),
       },
+      ...(canUseTags && conversationId && tagQuery.data?.length
+        ? [
+            {
+              id: 'conversation-tags',
+              label: localize('com_ui_bookmarks'),
+              icon: <Tag className="icon-sm mr-2" />,
+              subItems: tagQuery.data.map((tag) => {
+                const selected = tags?.includes(tag.tag) === true;
+                return {
+                  id: tag.tag,
+                  label: tag.tag,
+                  ariaChecked: selected,
+                  icon: selected ? <Check className="size-4" /> : <Tag className="size-4" />,
+                  disabled: tagMutation.isLoading,
+                  hideOnClick: false,
+                  onClick: () => {
+                    const known = (tags ?? []).filter((name) =>
+                      tagQuery.data?.some((item) => item.tag === name),
+                    );
+                    tagMutation.mutate({
+                      tag: tag.tag,
+                      tags: selected
+                        ? known.filter((name) => name !== tag.tag)
+                        : [...known, tag.tag],
+                    });
+                  },
+                };
+              }),
+            },
+          ]
+        : []),
       {
         label: localize('com_ui_rename'),
         onClick: renameHandler,
@@ -411,6 +467,11 @@ function ConvoOptions({
     ],
     [
       localize,
+      canUseTags,
+      conversationId,
+      tagQuery.data,
+      tagMutation,
+      tags,
       isPinned,
       isPinLoading,
       shareHandler,

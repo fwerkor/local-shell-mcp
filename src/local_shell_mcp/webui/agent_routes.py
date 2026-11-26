@@ -115,21 +115,15 @@ async def revert(request: Request):
 async def tool_catalog(request: Request):
     _owner(request)
     from .ask_user_tools import ASK_USER_MANIFEST
-    from .web_research import WEB_TOOLS
-
-    # The original manifest and PluginController authentication shape are
-    # reused. Availability does not enable a saved or ephemeral Agent's tool.
-    web = [{"name": item["function"]["name"], "pluginKey": item["function"]["name"],
-            "description": item["function"]["description"], "agentsOnly": True,
-            "authConfig": [], "authenticated": True} for item in WEB_TOOLS]
-    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}, *web])
+    # Web research is exposed through the built-in capability, not as plugins.
+    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}])
 
 
 async def tool_auth(request: Request):
     _owner(request)
     from .ask_user_tools import ASK_USER_QUESTION_TOOL_NAME
 
-    if request.path_params["tool_id"] not in {ASK_USER_QUESTION_TOOL_NAME, "web_search", "web_fetch"}:
+    if request.path_params["tool_id"] != ASK_USER_QUESTION_TOOL_NAME:
         _not_found()
     return JSONResponse({"authenticated": True})
 
