@@ -398,13 +398,17 @@ class AgentRunner:
                 await publish_native_file_write(self.owner, self.generation, call, output,
                                                 database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
+        from .mcp_projection import NATIVE_MEDIA_TOOLS, mcp_tool_history_message
+
+        if call.name in NATIVE_MEDIA_TOOLS and isinstance(output, str):
+            preview = mcp_tool_history_message(
+                call, output, self.initial_profile.provider if self.initial_profile else "openai",
+            )["content"]
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
         # A UI resource marker is only resolvable after the original client
         # receives a canonical attachment. Derive it from the same native MCP
         # envelope retained in the checkpoint; never infer from display JSON.
         if call.name == "mcp_tool_call" and isinstance(output, str):
-            from .mcp_projection import mcp_tool_history_message
-
             artifact = mcp_tool_history_message(call, output, self.initial_profile.provider if self.initial_profile else "openai").get("artifact")
             ui = artifact.get("ui_resources") if isinstance(artifact, dict) else None
             if isinstance(ui, dict) and isinstance(ui.get("data"), list) and ui["data"]:

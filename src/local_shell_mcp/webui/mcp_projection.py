@@ -8,15 +8,21 @@ and non-MCP artifact families belong to their separate Graph/Artifacts ports.
 """
 from __future__ import annotations
 
+import base64
 import copy
 import json
 import math
 import re
+from io import BytesIO
 
 from .approval_runtime import truncate_approval_result
-from .mcp_content import format_tool_content, mcp_result_envelope
+from .mcp_content import _limit, format_tool_content, mcp_result_envelope
 
 HARD_MAX_TOOL_RESULT_CHARS = 400000
+# Only registered native tools with a CallToolResult media contract.
+NATIVE_MEDIA_TOOLS = frozenset({"image_view", "gui_state"})
+# Stay below common per-image provider limits without resampling normal images.
+_NATIVE_IMAGE_MAX_BYTES = 4 * 1024 * 1024
 _ARTIFACT_PLACEHOLDER = "Tool response is included in the next message as a Human message"
 
 
@@ -62,16 +68,32 @@ class _Accumulator:
     def __init__(self, max_chars):
         self.blocks = []
         self.has_content = False
+        self.media_remaining = _limit() * 2  # independent encoded-media budget per batch
         self.remaining = max(0, math.floor(max_chars)) if math.isfinite(max_chars) else 9007199254740991
 
     def append(self, value):
         if isinstance(value, list):
             for block in value:
-                self._segment([block])
-                if self.remaining <= int(self.has_content):
-                    break
+                if block.get("type") == "image_url":
+                    self._image(block)
+                else:
+                    self._segment([block])
         else:
             self._segment(value)
+
+    def _image(self, block):
+        # Images are atomic; their encoded length is not a text-token budget.
+        image = block.get("image_url")
+        url = image.get("url") if isinstance(image, dict) else image
+        if not isinstance(url, str) or len(url) > self.media_remaining:
+            # Explicit notice even if the text budget was already consumed.
+            if not any(b.get("text") == "[Tool image omitted: media size limit]" for b in self.blocks):
+                self.blocks.append({"type": "text", "text": "[Tool image omitted: media size limit]"})
+                self.has_content = True
+            return
+        self.blocks.append(copy.deepcopy(block))
+        self.has_content = True
+        self.media_remaining -= len(url)
 
     def _segment(self, value):
         separator = int(self.has_content)
@@ -104,10 +126,18 @@ def project_artifact_messages(messages: list[dict], provider: str, max_chars=HAR
         index += 1
         if message.get("role") != "assistant" or not message.get("tool_calls"):
             continue
-        call_ids = {call.get("id") for call in message["tool_calls"]}
+        call_names = {call.get("id"): (call.get("function") or {}).get("name") for call in message["tool_calls"]}
+        call_ids = set(call_names)
         batch = []
         while index < len(messages) and messages[index].get("role") == "tool" and messages[index].get("tool_call_id") in call_ids:
-            batch.append(messages[index])
+            item = messages[index]
+            name = call_names.get(item.get("tool_call_id"))
+            if name in NATIVE_MEDIA_TOOLS and "raw_result" not in item and not item.get("artifact") and isinstance(item.get("content"), str):
+                parsed = _native_history_message(item, item["content"], provider)
+                if parsed is not item:
+                    changed = True
+                    item = parsed
+            batch.append(item)
             index += 1
         with_artifacts = [msg for msg in batch if isinstance(msg.get("artifact"), dict) and msg["artifact"].get("content")]
         if not with_artifacts:
@@ -147,13 +177,75 @@ def _mcp_envelope(value, name):
     return mcp_result_envelope(value, name)
 
 
+def _bounded_native_image(block):
+    data = base64.b64decode(block["data"], validate=True)
+    limit = min(_limit(), _NATIVE_IMAGE_MAX_BYTES)
+    if len(data) <= limit:
+        return block
+    from PIL import Image, ImageOps
+    from ..image_ops import MAX_PREVIEW_SOURCE_PIXELS
+
+    with Image.open(BytesIO(data)) as opened:
+        if opened.width * opened.height > MAX_PREVIEW_SOURCE_PIXELS:
+            raise ValueError("Tool image exceeds safe decode dimensions")
+        frame = ImageOps.exif_transpose(opened).convert("RGB")
+        frame.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+        while True:
+            out = BytesIO()
+            frame.save(out, format="JPEG", quality=90, optimize=True)
+            if out.tell() <= limit:
+                return {"type": "image", "mimeType": "image/jpeg",
+                        "data": base64.b64encode(out.getvalue()).decode("ascii")}
+            if max(frame.size) <= 64:
+                raise ValueError("Tool image cannot fit media budget")
+            frame.thumbnail(tuple(max(1, int(dim * 0.7)) for dim in frame.size), Image.Resampling.LANCZOS)
+
+
+def _native_history_message(message, raw, provider):
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return message
+    # FastMCP can return a list of content blocks or a CallToolResult.
+    if isinstance(value, list):
+        value = {"content": value}
+    if not isinstance(value, dict) or not isinstance(value.get("content"), list):
+        return message
+    if not all(isinstance(block, dict) and block.get("type") in {"text", "image"}
+               for block in value["content"]):
+        return message
+    # Keep the metadata (machine, path, GUI state ID and TTL), but never
+    # serialize image bytes as model-facing JSON.
+    blocks = []
+    for block in value["content"]:
+        if block["type"] != "image":
+            blocks.append(block)
+            continue
+        try:
+            bounded = _bounded_native_image(block)
+        except (ValueError, TypeError, KeyError, OSError):
+            blocks.append({"type": "text", "text": "[Tool image unavailable: invalid or oversized image data]"})
+            continue
+        blocks.append(bounded)
+        if bounded is not block:
+            blocks.append({"type": "text", "text": "[Tool image resized/compressed to fit media limit; original file retained]"})
+    text, artifact = format_tool_content({**value, "content": blocks}, provider)
+    metadata = value.get("structuredContent")
+    if isinstance(metadata, dict):
+        text = "\n".join(filter(None, (text, _compact_json(metadata))))
+    result = {**message, "content": text, "raw_result": raw,
+              "is_error": bool(value.get("isError", value.get("is_error", False)))}
+    if artifact is not None:
+        result["artifact"] = artifact
+    return result
+
+
 def mcp_tool_history_message(call, raw: str, provider: str, max_chars=HARD_MAX_TOOL_RESULT_CHARS) -> dict:
     """Split a real native MCP envelope before any text-only context clipping."""
-    # Raw tool output is retained for audit, restart and model projections.
     message = {"role": "tool", "tool_call_id": call.call_id, "content": raw}
-    # Only the nested MCP dispatch supplies a CallToolResult envelope. Other
-    # LSM tools can legitimately return JSON with a `content` field; interpreting
-    # that as MCP UI/media would invent artifacts from ordinary tool output.
+    if call.name in NATIVE_MEDIA_TOOLS:
+        return _native_history_message(message, raw, provider)
+    # Do not interpret arbitrary file_read/shell JSON as trusted media.
     if call.name != "mcp_tool_call":
         return message
     message["raw_result"] = raw
