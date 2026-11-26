@@ -469,3 +469,87 @@ async def test_reasoning_signature_and_redaction_are_kept_out_of_answer_text():
     assert first["content"] == "final answer"
     assert output == ["final answer", "completed"]
     assert state.messages[-1]["content"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_default_eight_retries_keep_one_model_turn_and_emit_status(monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    assert agent_runtime._MODEL_RETRY_DELAYS == (1, 2, 4, 8, 16, 30, 30, 30)
+    monkeypatch.setattr(agent_runtime, '_MODEL_RETRY_DELAYS', (0,) * 8)
+    state = AgentLoopState(AgentContext(profile(), []), [])
+    attempts = 0
+    notices = []
+
+    async def stream(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 8:
+            request = httpx.Request('POST', 'https://example.invalid/chat')
+            raise httpx.HTTPStatusError('gateway timeout', request=request,
+                                        response=httpx.Response(504, request=request))
+        yield 'ok'
+
+    async def notice(*args):
+        notices.append(args)
+
+    await run_agent_loop(state, stream_tools=forbidden, stream_text=stream,
+                         dispatch=forbidden, on_text=lambda _: asyncio.sleep(0),
+                         on_model_retry=notice)
+    assert attempts == 9 and state.model_turn == 1
+    assert notices == [(i, 8, 0, 504) for i in range(1, 9)]
+    assert state.messages[-1]['content'] == 'ok'
+
+
+@pytest.mark.parametrize('value,expected', [('45', 45), ('999', 120),
+                                          ('0', 1), ('invalid', 1)])
+def test_model_retry_after_is_bounded(value, expected):
+    from local_shell_mcp.webui.agent_runtime import _model_retry_delay
+
+    request = httpx.Request('POST', 'https://example.invalid/chat')
+    error = httpx.HTTPStatusError('rate limit', request=request,
+                                  response=httpx.Response(429, request=request,
+                                                          headers={'Retry-After': value}))
+    assert _model_retry_delay(error, 0) == expected
+
+
+@pytest.mark.asyncio
+async def test_backoff_honors_steer_before_next_request(monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, '_MODEL_RETRY_DELAYS', (30,))
+    sleeps = []
+    interrupt = False
+    attempts = 0
+    state = AgentLoopState(AgentContext(profile(), []), [])
+
+    async def sleep(delay):
+        nonlocal interrupt
+        sleeps.append(delay)
+        interrupt = True
+
+    async def stream(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.RemoteProtocolError('gateway disconnected')
+        yield 'continued'
+
+    async def inject(current, boundary):
+        nonlocal interrupt
+        if boundary == 'preempt':
+            interrupt = False
+            current.messages.append({'role': 'user', 'content': 'steer'})
+            return True
+        return False
+
+    async def on_text(_):
+        pass
+
+    monkeypatch.setattr(agent_runtime.asyncio, 'sleep', sleep)
+    await run_agent_loop(state, stream_tools=forbidden, stream_text=stream,
+                         dispatch=forbidden, on_text=on_text,
+                         should_preempt=lambda: interrupt, inject_controls=inject)
+    assert sleeps == [1]
+    assert attempts == 2
+    assert state.messages[-1]['content'] == 'continued'

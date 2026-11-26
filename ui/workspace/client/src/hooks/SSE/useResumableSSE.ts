@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { v4 } from 'uuid';
+import { useToastContext } from '@librechat/client';
+import { modelRetryNotice } from './modelRetry';
 import { SSE } from 'sse.js';
 import { useStore } from 'jotai';
 import { useQueryClient } from '@tanstack/react-query';
@@ -831,6 +833,9 @@ export default function useResumableSSE(
 ) {
   const jotaiStore = useStore();
   const localize = useLocalize();
+  const { showToast } = useToastContext();
+  const retryToastRef = useRef({ showToast, localize });
+  retryToastRef.current = { showToast, localize };
   const queryClient = useQueryClient();
   const setActiveRunId = useSetRecoilState(store.activeRunFamily(runIndex));
 
@@ -2224,6 +2229,15 @@ export default function useResumableSSE(
             return;
           }
 
+          if (data.event === 'on_model_retry') {
+            const toast = retryToastRef.current;
+            const message = modelRetryNotice(data.data, toast.localize('com_ui_retry'));
+            if (message) {
+              toast.showToast({ message, status: 'info' });
+            }
+            return;
+          }
+
           if (data.event === UsageEvents.ON_CONTEXT_USAGE) {
             contextHandler(data.data, { ...currentSubmission, userMessage });
             return;
@@ -2539,6 +2553,8 @@ export default function useResumableSSE(
                   applyReasoningLabelToMessages(replayEvent.data as TReasoningLabelEvent);
                 } else if (replayEvent.event === ReasoningLabelEvents.ON_REASONING_LABEL_ATTEMPT) {
                   // Durable provider-call budget reservations never render.
+                } else if (replayEvent.event === 'on_model_retry') {
+                  // Historical retry notices are not message content.
                 } else if (replayEvent.event != null) {
                   if (
                     replayEvent.event === StepEvents.ON_MESSAGE_DELTA ||
@@ -2576,6 +2592,8 @@ export default function useResumableSSE(
                   applyReasoningLabelToMessages(pendingEvent.data as TReasoningLabelEvent);
                 } else if (pendingEvent.event === ReasoningLabelEvents.ON_REASONING_LABEL_ATTEMPT) {
                   // Durable provider-call budget reservations never render.
+                } else if (pendingEvent.event === 'on_model_retry') {
+                  // Historical retry notices are not message content.
                 } else if (pendingEvent.event != null) {
                   if (
                     pendingEvent.event === StepEvents.ON_MESSAGE_DELTA ||

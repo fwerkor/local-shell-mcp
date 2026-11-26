@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { v4 } from 'uuid';
+import { useToastContext } from '@librechat/client';
+import useLocalize from '~/hooks/useLocalize';
+import { modelRetryNotice } from './modelRetry';
 import { SSE } from 'sse.js';
 import { useStore } from 'jotai';
 import { useSetRecoilState } from 'recoil';
@@ -41,6 +44,8 @@ export default function useSSE(
   runIndex = 0,
 ) {
   const jotaiStore = useStore();
+  const { showToast } = useToastContext();
+  const localize = useLocalize();
   const setActiveRunId = useSetRecoilState(store.activeRunFamily(runIndex));
 
   const { token, isAuthenticated } = useAuthContext();
@@ -152,6 +157,11 @@ export default function useSSE(
         createdHandler(data, { ...submission, userMessage } as EventSubmission);
       } else if (data.event === 'title') {
         titleHandler(data);
+      } else if (data.event === 'on_model_retry') {
+        const message = modelRetryNotice(data.data, localize('com_ui_retry'));
+        if (message) {
+          showToast({ message, status: 'info' });
+        }
       } else if (data.event === UsageEvents.ON_CONTEXT_USAGE) {
         contextHandler(data.data, { ...submission, userMessage });
       } else if (data.event === UsageEvents.ON_TOKEN_USAGE) {
