@@ -3,7 +3,6 @@ import {
   isAgentsEndpoint,
   resolveEffectiveUseResponsesApi,
   resolveEndpointType,
-  resolveUseResponsesApi,
 } from 'librechat-data-provider';
 import type { EModelEndpoint, TConversation } from 'librechat-data-provider';
 import { useGetEndpointsQuery, useGetAgentByIdQuery } from '~/data-provider';
@@ -57,14 +56,7 @@ export default function useAgentUploadTarget(
 
   const useResponsesApi = useMemo(() => {
     const mappedAgent = agentId ? agentsMap?.[agentId] : undefined;
-    const savedValue =
-      isAgents && agentId != null && agentId !== ''
-        ? resolveUseResponsesApi(
-            agentData?.model_parameters?.useResponsesApi ??
-              mappedAgent?.model_parameters?.useResponsesApi,
-            conversation?.useResponsesApi,
-          )
-        : conversation?.useResponsesApi;
+    const savedValue = isAgents ? undefined : conversation?.useResponsesApi;
     const model = isAgents
       ? (agentData?.model_parameters?.model ??
         mappedAgent?.model_parameters?.model ??
@@ -75,9 +67,7 @@ export default function useAgentUploadTarget(
       value: savedValue,
       endpoint: endpointType,
       model,
-      webSearch: isAgents
-        ? (agentData?.model_parameters?.web_search ?? mappedAgent?.model_parameters?.web_search)
-        : conversation?.web_search,
+      webSearch: isAgents ? undefined : conversation?.web_search,
       routing: endpointsConfig?.[agentProvider ?? endpoint ?? '']?.responsesApiRouting,
     });
   }, [

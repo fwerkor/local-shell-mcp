@@ -1025,6 +1025,7 @@ export type Agent = {
   provider: AgentProvider;
   model: string | null;
   model_parameters: AgentModelParameters;
+  web_search?: boolean;
   conversation_starters?: string[];
   tool_resources?: AgentToolResources;
   /** @deprecated Use edges instead */
@@ -1133,6 +1134,7 @@ export type AgentUpdateParams = {
   provider?: AgentProvider;
   model?: string | null;
   model_parameters?: AgentModelParameters;
+  web_search?: boolean;
 } & Pick<
   Agent,
   | 'agent_ids'
