@@ -144,6 +144,8 @@ class GenerationStore:
                 raise ValueError("Internal completion idempotency key cannot be submitted")
             if client_request_id.startswith("subagent:") and trusted_new_conversation_id is None:
                 raise ValueError("Internal child idempotency key cannot be submitted")
+            if client_request_id.startswith("schedule:") and _connection is None:
+                raise ValueError("Internal schedule idempotency key cannot be submitted")
             if client_request_id.startswith("trigger_") and _connection is None:
                 raise ValueError("Internal Agent Trigger idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")
@@ -1858,8 +1860,8 @@ class GenerationStore:
             if status != "interrupted":
                 run_state.pop("resumeClaim", None)
                 run_state.pop("approvedToolBatch", None)
-            db.execute("UPDATE runs SET status=?,state=?,updated_at=? WHERE id=?",
-                       (status, _json(run_state), now, run_id))
+            db.execute("UPDATE runs SET status=?,state=?,updated_at=?,terminal_at=? WHERE id=?",
+                       (status, _json(run_state), now, now, run_id))
             unread = db.execute(
                 "UPDATE conversations SET updated_at=?,unread_marker="
                 "CASE WHEN unread_marker LIKE 'manual:%' THEN ? ELSE ? END "

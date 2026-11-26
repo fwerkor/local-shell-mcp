@@ -313,3 +313,204 @@ async def test_schedule_worker_start_stop_and_dispatch_rejection(state, monkeypa
         }, 0), repo.database,
     )
     assert schedule_routes._WORKER is None
+
+
+@pytest.mark.parametrize('delay', [-1, 1.5, True, None, 525601])
+def test_continuous_rejects_invalid_delay(delay):
+    with pytest.raises(HTTPException):
+        schedule_routes._validate_cadence_interval(
+            {'frequency': 'continuous', 'delayMinutes': delay})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('delay', [0, 3])
+async def test_continuous_rearms_from_persisted_completion(state, monkeypatch, delay):
+    from local_shell_mcp.webui import generation_routes, providers
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    app, repo, agent = state
+    store = GenerationStore(repo.database)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(providers, 'provider_config',
+                        lambda *args, **kwargs: ProviderConfig('openai', 'mock-model', 'http://mock', ''))
+    dispatched = []
+
+    async def fake_start(owner, generation, *args, **kwargs):
+        dispatched.append(generation)
+        return True
+
+    monkeypatch.setattr(generation_routes, '_start_task', fake_start)
+    payload = {
+        'name': 'Continuous', 'prompt': 'Continue', 'agent_id': agent['id'],
+        'cadence': {'frequency': 'continuous', 'delayMinutes': delay},
+        'timezone': 'UTC', 'clientRequestId': 'continuous',
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as c:
+        created = await c.post('/api/schedules', json=payload)
+        assert created.status_code == 201, created.text
+        sid = created.json()['id']
+        claims = schedule_routes._claim_due(repo.database)
+        assert len(claims) == 1
+        await schedule_routes._dispatch(claims[0], repo.database)
+        assert schedule_routes._claim_due(repo.database) == []
+        assert (await c.get('/api/schedules/' + sid)).json()['nextRunAt'] is None
+        generation = dispatched[0]
+        store.finish('alice', generation.run_id, status='complete', text='Done')
+        with repo.database.connect() as db:
+            finished = db.execute('SELECT terminal_at FROM runs WHERE id=?',
+                                  (generation.run_id,)).fetchone()[0] // 1000
+            # Artifact edits update the run without changing model completion.
+            db.execute('UPDATE runs SET updated_at=updated_at+300000000 WHERE id=?',
+                       (generation.run_id,))
+        # A fresh database instance simulates the scheduler observing completion
+        # after a restart, long after the model actually finished.
+        reopened = SQLiteDatabase(repo.database.root)
+        schedule_routes._refresh(reopened)
+        schedule_routes._refresh(reopened)
+        expected = finished + delay * 60_000
+        row = schedule_routes._find('alice', sid, reopened)
+        assert row['next_run'] == expected and row['run_count'] == 1
+        monkeypatch.setattr(schedule_routes.time, 'time', lambda: (expected - 1) / 1000)
+        assert schedule_routes._claim_due(reopened) == []
+        monkeypatch.setattr(schedule_routes.time, 'time', lambda: (expected + 1) / 1000)
+        second = schedule_routes._claim_due(reopened)
+        assert len(second) == 1 and second[0][0] != claims[0][0]
+        assert schedule_routes._claim_due(reopened) == []
+
+        # An active occurrence adopts a delay edit only upon completion.
+        edited = await c.patch('/api/schedules/' + sid, json={
+            'cadence': {'frequency': 'continuous', 'delayMinutes': 7},
+        })
+        assert edited.status_code == 200 and edited.json()['nextRunAt'] is None
+        schedule_routes._settle(reopened, second[0][0], 'success')
+        row = schedule_routes._find('alice', sid, reopened)
+        assert row['next_run'] >= schedule_routes._now() // 1000 + 419_900
+
+        # Editing a waiting schedule anchors its new delay to the same completion.
+        edited = await c.patch('/api/schedules/' + sid, json={
+            'cadence': {'frequency': 'continuous', 'delayMinutes': 9},
+        })
+        assert edited.status_code == 200
+        assert schedule_routes._find('alice', sid, reopened)['next_run'] == row['next_run'] + 120_000
+
+        # Pausing an active task prevents it from rearming on completion.
+        # Manual requests have an independent one-minute duplicate guard.
+        with reopened.connect() as db:
+            db.execute('UPDATE webui_schedule_runs SET created_at=0 WHERE schedule_id=?', (sid,))
+        third = schedule_routes._claim_due(reopened, owner='alice', sid=sid, manual=True)
+        assert len(third) == 1
+        paused = await c.patch('/api/schedules/' + sid, json={'enabled': False})
+        assert paused.status_code == 200
+        schedule_routes._settle(reopened, third[0][0], 'success')
+        assert schedule_routes._find('alice', sid, reopened)['next_run'] is None
+        assert schedule_routes._claim_due(reopened) == []
+        enabled = await c.patch('/api/schedules/' + sid, json={'enabled': True})
+        assert enabled.status_code == 200
+        assert len(schedule_routes._claim_due(reopened)) == 1
+
+
+@pytest.mark.asyncio
+async def test_continuous_failure_has_retry_floor(state):
+    app, repo, agent = state
+    payload = {
+        'name': 'Continuous', 'prompt': 'Continue', 'agent_id': agent['id'],
+        'cadence': {'frequency': 'continuous', 'delayMinutes': 0},
+        'timezone': 'UTC', 'clientRequestId': 'continuous-failure',
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as c:
+        created = await c.post('/api/schedules', json=payload)
+        sid = created.json()['id']
+        claim, = schedule_routes._claim_due(repo.database)
+        before = schedule_routes._now() // 1000
+        schedule_routes._settle(repo.database, claim[0], 'error', error='test failure')
+        row = schedule_routes._find('alice', sid, repo.database)
+        assert row['failure_count'] == 1
+        assert row['next_run'] >= before + 300_000
+        assert schedule_routes._claim_due(repo.database) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('target', ['new', 'reuse', 'existing'])
+async def test_schedule_conversation_targets(state, monkeypatch, target):
+    import time
+
+    from local_shell_mcp.webui import generation_routes, providers
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    app, repo, agent = state
+    store = GenerationStore(repo.database)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(providers, 'provider_config',
+                        lambda *args, **kwargs: ProviderConfig('openai', 'mock-model', 'http://mock', ''))
+    started = []
+
+    async def start(owner, generation, *args, **kwargs):
+        assert not kwargs['granted_scopes']
+        started.append(generation)
+        return True
+
+    monkeypatch.setattr(generation_routes, '_start_task', start)
+    existing = repo.create_conversation('alice', {'title': 'Existing'})['conversationId']
+    other = repo.create_conversation('bob', {'title': 'Private'})['conversationId']
+    payload = {
+        'name': 'Recurring', 'prompt': 'Continue', 'agent_id': agent['id'],
+        'cadence': {'frequency': 'continuous', 'delayMinutes': 0},
+        'timezone': 'UTC', 'target': target, 'clientRequestId': 'targets',
+    }
+    if target == 'existing':
+        payload['targetConversationId'] = existing
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as client:
+        if target == 'existing':
+            denied = await client.post('/api/schedules', json={**payload, 'targetConversationId': other})
+            assert denied.status_code == 404
+            missing = await client.post('/api/schedules', json={**payload, 'targetConversationId': None})
+            assert missing.status_code == 400
+        created = await client.post('/api/schedules', json=payload)
+        assert created.status_code == 201, created.text
+        sid = created.json()['id']
+        occurrence = schedule_routes._claim_due(repo.database)[0]
+        await schedule_routes._dispatch(occurrence, repo.database)
+        first = started[0]
+        if target == 'existing':
+            assert first.conversation_id == existing
+        if target == 'reuse':
+            bound = (await client.get('/api/schedules/' + sid)).json()
+            assert bound['reuseConversationId'] == first.conversation_id
+        assert not schedule_routes._claim_due(repo.database)
+        store.finish('alice', first.run_id, status='complete', text='Done')
+        schedule_routes._refresh(repo.database)
+        # Restart the repository and edit unrelated fields. Binding must survive.
+        db = SQLiteDatabase(repo.database.root)
+        patched = await client.patch('/api/schedules/' + sid, json={'name': 'Renamed'})
+        assert patched.status_code == 200
+        if target != 'new':
+            manual, _ = store.begin('alice', {'text': 'Human turn',
+                                             'conversationId': first.conversation_id}, agent)
+            assert not schedule_routes._claim_due(db)
+            store.finish('alice', manual.run_id, status='complete', text='Human response')
+        with db.connect() as conn:
+            conn.execute('UPDATE webui_schedules SET next_run=? WHERE id=?',
+                         (int(time.time() * 1000) - 1, sid))
+        second = schedule_routes._claim_due(db)[0]
+        await schedule_routes._dispatch(second, db)
+        assert len(started) == 2
+        if target == 'new':
+            assert started[1].conversation_id != first.conversation_id
+        else:
+            assert started[1].conversation_id == first.conversation_id
+            messages = repo.messages('alice', first.conversation_id)['messages']
+            assert [m['text'] for m in messages] == [
+                'Continue', 'Done', 'Human turn', 'Human response', 'Continue']
+            assert messages[-1]['parentMessageId'] == messages[-2]['messageId']
+        store.finish('alice', started[1].run_id, status='complete', text='Done again')
+        schedule_routes._refresh(db)
+        final = (await client.get('/api/schedules/' + sid)).json()
+        assert final['runCount'] == 2 and final['failureCount'] == 0
+        assert (await client.delete('/api/schedules/' + sid)).status_code == 200
+        assert repo.conversation('alice', first.conversation_id) is not None
