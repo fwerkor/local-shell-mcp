@@ -5,7 +5,7 @@ import { User, Pencil, Calendar, EarthIcon } from 'lucide-react';
 import type { TSkill } from 'librechat-data-provider';
 import { useLocalize, useAuthContext, useSkillPermissions, useSkillActiveState } from '~/hooks';
 import SkillMarkdownRenderer from './SkillMarkdownRenderer';
-import { ShareSkill, SkillToggle } from '../buttons';
+import { SkillToggle } from '../buttons';
 import DeleteSkill from '../dialogs/DeleteSkill';
 import { parseFrontmatter } from '../utils';
 import ViewToggle from './ViewToggle';
@@ -80,7 +80,6 @@ export default function SkillDetail({ skill, onEdit, onDelete }: SkillDetailProp
         {/* Actions */}
         <div className="flex shrink-0 flex-wrap items-center gap-2 sm:pt-1">
           <SkillToggle enabled={skillEnabled} onChange={() => toggle(skill)} />
-          <ShareSkill skill={skill} />
           {permissions.canEdit && onEdit && (
             <TooltipAnchor
               description={localize('com_ui_edit')}
