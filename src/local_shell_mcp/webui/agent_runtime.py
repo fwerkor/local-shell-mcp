@@ -86,7 +86,6 @@ class AgentContext:
     tool_end: bool = False
     agent: dict | None = None
     compaction_semantic_index: SemanticSnapshot | None = None
-    fading_tier: dict | None = None
 
 
 @dataclass

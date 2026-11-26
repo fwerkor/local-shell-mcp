@@ -1312,7 +1312,6 @@ class AgentRunner:
 
     def _project_model_messages(self, state: AgentLoopState) -> list[dict]:
         from .agents import AgentRepository
-        from .fading_projection import project_faded_provider_messages
         from .machine_permissions import machine_access_context
         from .storage import WorkspaceRepository
 
@@ -1326,39 +1325,9 @@ class AgentRunner:
             scopes=set(self.scopes), expires=self.grant_expires,
             repo=WorkspaceRepository(self.database),
         )
-        projected = project_faded_provider_messages(state.messages, state.context.fading_tier)
         if restrictions:
-            return [{"role": "system", "content": restrictions}, *projected]
-        return projected
-
-    def _update_fading_tier(self, state: AgentLoopState, budget, calibration, config, window: int) -> None:
-        from .fading import (
-            resolve_fading_tier,
-            seed_fading_tier,
-        )
-
-        profile = state.context.profile
-        agent_id = (state.context.agent or {}).get('id') or 'default'
-        current = state.context.fading_tier or self.store.fading_tier(
-            self.owner, self.generation.run_id, agent_id, profile.provider, profile.model)
-        seeded = seed_fading_tier(window, current)
-        current_turn = []
-        for message in reversed(state.messages):
-            if message.get('role') == 'user':
-                break
-            current_turn.append(message)
-        width = max((len(message.get('tool_calls') or []) for message in current_turn), default=1)
-        effective = max(0, budget.available_for_messages / calibration.ratio)
-        window_available = max(1, window - budget.reserve_tokens)
-        pressure = (window - budget.reserve_tokens - budget.remaining_context_tokens) / window_available
-        signals = {'contextPressure': pressure, 'effectiveRawTokens': effective,
-                   'summarizationEnabled': config.get('enabled') is not False,
-                   'toolExchangeWidth': max(1, width)}
-        resolved = resolve_fading_tier(seeded, window, signals)
-        state.context.fading_tier = resolved
-        if resolved != current:
-            self.store.record_fading_tier(self.owner, self.generation.run_id,
-                                          agent_id, profile.provider, profile.model, resolved)
+            return [{"role": "system", "content": restrictions}, *state.messages]
+        return state.messages
 
     async def _before_model(self, state):
         """SDK-style recency + trigger, using the shared SQLite checkpoint."""
@@ -1397,8 +1366,6 @@ class AgentRunner:
             budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
                                       reserve_ratio=config.get('reserveRatio', 0.05),
                                       calibration_ratio=calibration.ratio) if max_raw is not None else None
-            if budget is not None:
-                self._update_fading_tier(state, budget, calibration, config, int(max_raw))
             if config.get('enabled') is False:
                 return
             if not request_id:
@@ -1463,21 +1430,6 @@ class AgentRunner:
                 # the next tool batch. Do not suppress that distinct input as
                 # if it were an attempted retry of the old oversized history.
                 self._last_compaction_attempt_size = None
-                # A committed summary replaces the old prefix; restore a
-                # fresh v2 fading tier so past masking doesn't pin this run.
-                from .fading import create_fading_tier
-
-                if max_raw is None:
-                    return
-                state.context.fading_tier = create_fading_tier(int(max_raw))
-                try:
-                    self.store.record_fading_tier(
-                        self.owner, self.generation.run_id,
-                        (state.context.agent or {}).get('id') or 'default',
-                        state.context.profile.provider, state.context.profile.model,
-                        state.context.fading_tier)
-                except Exception as error:
-                    logging.getLogger(__name__).warning('Fading reset failed (%s)', type(error).__name__)
             except Exception as error:
                 self._compaction_status = 'failed'
                 logging.getLogger(__name__).warning('Context compaction failed (%s)', type(error).__name__)
@@ -1529,21 +1481,6 @@ class AgentRunner:
             max_tokens=(config.get('parameters') or {}).get('maxSummaryTokens', 2048),
             prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
             semantic_index=self.compaction_semantic_index)
-        # Explicit compaction, like its automatic counterpart, resets the
-        # hysteresis ladder after the checkpoint was safely staged.
-        params = self.initial_parameters or {}
-        raw = params.get('max_context_tokens') or params.get('maxContextTokens') or (settings.get('agents') or {}).get('maxContextTokens')
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and 0 < raw <= 2_000_000:
-            from .fading import create_fading_tier
-
-            try:
-                self.store.record_fading_tier(
-                    self.owner, self.generation.run_id,
-                    (self.root_agent or {}).get('id') or 'default',
-                    self.initial_profile.provider, self.initial_profile.model,
-                    create_fading_tier(int(raw)))
-            except Exception as exc:
-                logging.getLogger(__name__).warning('Manual fading reset failed (%s)', type(exc).__name__)
         return history
 
     async def run(self, history, *, recursion_limit=None):

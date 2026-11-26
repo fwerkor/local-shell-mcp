@@ -883,13 +883,6 @@ export const tExampleSchema = z.object({
 
 export type TExample = z.infer<typeof tExampleSchema>;
 
-/** Compact context-fading tier persisted beside a message's calibration ratio. */
-const agentFadingTierSchema = z.object({
-  v: z.union([z.literal(1), z.literal(2)]),
-  budgetTokens: z.number().positive(),
-  masked: z.boolean(),
-});
-
 export const tMessageSchema = z.object({
   messageId: z.string(),
   endpoint: z.string().optional(),
@@ -950,15 +943,6 @@ export const tMessageSchema = z.object({
         .describe(
           'Tokenizer encoding used when this ratio was computed (e.g. "claude", "o200k_base")',
         ),
-      fading: agentFadingTierSchema
-        .optional()
-        .describe(
-          'Latched context-fading tier of the default agent; seeds the next run so the provider projection of history keeps the same bytes',
-        ),
-      fadingTiers: z
-        .array(agentFadingTierSchema.extend({ agentId: z.string().min(1) }))
-        .optional()
-        .describe('Latched context-fading tiers keyed by agent ID, stored as entries'),
     })
     .optional(),
   /**
