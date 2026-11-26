@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimālais izmērs 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Pielāgotais rīks",
   "com_agents_mcp_trust_subtext": "LSM nav validējis neoficiālus savienotājus",
-  "com_agents_memory_info": "Ja šī funkcija ir ieslēgta, aģents sarunas laikā var saglabāt, atjaunināt un dzēst atmiņas par lietotāju, izmantojot rīkus „set_memory“ un „delete_memory“.",
+  "com_agents_memory_info": "Ja šī funkcija ir ieslēgta, aģents sarunas laikā var saglabāt, atjaunināt un dzēst atmiņas par lietotāju, izmantojot rīkus „set_memory“.",
   "com_agents_memory_scope": "Turēt atmiņas atsevišķi šim aģentam",
   "com_agents_memory_scope_info": "Ja šī funkcija ir ieslēgta, šis aģents lasa un raksta savas atmiņas, kas ir izolētas no jūsu kopīgajām atmiņām un citiem aģentiem. Šim aģentam netiek parādītas esošās kopīgās atmiņas.",
   "com_agents_missing_name": "Pirms aģenta izveidošanas ievadiet aģenta nosaukumu.",

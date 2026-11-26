@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "最小尺寸 128 x 128 px",
   "com_agents_mcp_name_placeholder": "自定義工具",
   "com_agents_mcp_trust_subtext": "自訂連接器未經 LSM 驗證",
-  "com_agents_memory_info": "啟用後，Agent 可在對話期間使用 set_memory 與 delete_memory 工具儲存、更新及刪除與使用者相關的記憶。",
+  "com_agents_memory_info": "啟用後，Agent 可以主動儲存、更新、刪除記憶，並搜尋已儲存的記憶及其他對話文字。",
   "com_agents_memory_scope": "為此 Agent 個別儲存記憶",
   "com_agents_memory_scope_info": "啟用後，此 Agent 會讀寫自己的獨立記憶，與你的共用記憶及其他 Agent 隔離。此 Agent 不會看到現有的共用記憶。",
   "com_agents_missing_name": "在建立agent之前，請先輸入名稱",

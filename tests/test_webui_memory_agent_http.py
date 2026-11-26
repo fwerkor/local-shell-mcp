@@ -33,7 +33,7 @@ async def test_auto_memory_uses_real_sse_provider_and_replays_attachment(tmp_pat
         assert body['model'] == 'memory-test'
         assert body['tool_choice'] == 'auto'
         assert {item['function']['name'] for item in body['tools']} == {
-            'set_memory', 'delete_memory'}
+            'set_memory'}
         assert '# Current Chat:' in body['messages'][-1]['content']
         arguments = json.dumps({'key': 'style', 'value': 'The user prefers short replies.'})
 

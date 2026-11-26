@@ -50,10 +50,10 @@ def test_context_read_failure_fails_closed_not_empty_memory(runner_state, monkey
     settings.save_setting('local', 'endpoints', {'memory': {}, 'agents': {'capabilities': ['memory']}})
     MemoryRepository(db).write('local', 'private_note', 'A private memory.')
     monkeypatch.setattr(MemoryRepository, 'formatted', lambda *_args, **kwargs: {'readFailed': True})
-    from local_shell_mcp.webui.memory import MEMORY_TOOL_USAGE_GUARD
+    from local_shell_mcp.webui.memory import MEMORY_TOOL_INSTRUCTIONS
 
-    assert runner._memory_context({'tools': ['memory']}) == MEMORY_TOOL_USAGE_GUARD
-    assert runner._memory_context(None) == MEMORY_TOOL_USAGE_GUARD
+    assert runner._memory_context({'tools': ['memory']}) == MEMORY_TOOL_INSTRUCTIONS
+    assert runner._memory_context(None) == MEMORY_TOOL_INSTRUCTIONS
     with pytest.raises(RuntimeSafetyError, match='expired'):
         runner.grant_expires = int(time.time()) - 1
         runner._check_grant()

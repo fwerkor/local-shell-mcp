@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimum boyut 128 x 128 piksel",
   "com_agents_mcp_name_placeholder": "Özel Araç",
   "com_agents_mcp_trust_subtext": "Özel bağlayıcılar LSM tarafından doğrulanmamıştır",
-  "com_agents_memory_info": "Etkinleştirildiğinde, aracı, set_memory ve delete_memory araçlarını kullanarak konuşma sırasında kullanıcı hakkındaki anıları kaydedebilir, güncelleyebilir ve silebilir.",
+  "com_agents_memory_info": "Etkinleştirildiğinde, aracı, set_memory araçlarını kullanarak konuşma sırasında kullanıcı hakkındaki anıları kaydedebilir, güncelleyebilir ve silebilir.",
   "com_agents_memory_scope": "Bu temsilci için anıları ayrı tutun",
   "com_agents_memory_scope_info": "Etkinleştirildiğinde, bu aracı, paylaşılan anılarınızdan ve diğer aracılardan izole edilmiş olarak kendi anılarını okur ve yazar. Mevcut paylaşılan anılar bu temsilciye gösterilmez.",
   "com_agents_missing_name": "Lütfen bir ajan oluşturmadan önce bir ad girin.",

@@ -1,7 +1,8 @@
-import { useToastContext } from '@librechat/client';
-import useLocalize from '~/hooks/useLocalize';
 import { useEffect, useState } from 'react';
 import { v4 } from 'uuid';
+import { useToastContext } from '@librechat/client';
+import useLocalize from '~/hooks/useLocalize';
+import { modelRetryNotice } from './modelRetry';
 import { SSE } from 'sse.js';
 import { useStore } from 'jotai';
 import { useSetRecoilState } from 'recoil';
@@ -158,6 +159,11 @@ export default function useSSE(
         showToast({ message: localize('com_ui_attachment_image_fallback'), status: 'info' });
       } else if (data.event === 'title') {
         titleHandler(data);
+      } else if (data.event === 'on_model_retry') {
+        const message = modelRetryNotice(data.data, localize('com_ui_retry'));
+        if (message) {
+          showToast({ message, status: 'info' });
+        }
       } else if (data.event === UsageEvents.ON_CONTEXT_USAGE) {
         contextHandler(data.data, { ...submission, userMessage });
       } else if (data.event === UsageEvents.ON_TOKEN_USAGE) {
