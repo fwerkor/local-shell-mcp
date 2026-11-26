@@ -1062,7 +1062,7 @@ class AgentRunner:
             elif message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
                 covered_calls.add(message['tool_call_id'])
         self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
-                                 boundary=head_count, manual=manual or bool(live_request_id),
+                                 boundary=head_count, manual=manual, live=bool(live_request_id),
                                  retained_tail=retained_tail,
                                  covered_tool_call_ids=sorted(covered_calls),
                                  covered_steer_ids=sorted(covered_steers),
@@ -1081,7 +1081,7 @@ class AgentRunner:
                     'id': identity, 'type': 'summary', 'summary': {
                         'type': 'summary', 'content': [{'type': 'text', 'text': summary}],
                         'boundary': {'messageIndex': head_count}, 'tokenCount': count,
-                        **({'initiatedBy': 'user'} if manual or live_request_id else {}),
+                        **({'initiatedBy': 'user'} if manual else {'initiatedBy': 'live'} if live_request_id else {}),
                     }},},
             })
         return summary

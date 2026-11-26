@@ -1250,7 +1250,7 @@ class GenerationStore:
             return int(event_row.lastrowid)
 
     def stage_summary(self, owner: str, run_id: str, summary_text: str, token_count: int,
-                      *, boundary: int = 0, manual: bool = False,
+                      *, boundary: int = 0, manual: bool = False, live: bool = False,
                       retained_tail: list[dict] | None = None,
                       covered_tool_call_ids: list[str] | None = None,
                       covered_steer_ids: list[str] | None = None,
@@ -1294,7 +1294,7 @@ class GenerationStore:
                 })
             state['summaryCheckpoint'] = {'type': 'summary', 'content': [{'type': 'text', 'text': summary_text}],
                 'boundary': {'messageIndex': boundary}, 'tokenCount': token_count,
-                **({'initiatedBy': 'user'} if manual else {}),
+                **({'initiatedBy': 'user'} if manual else {'initiatedBy': 'live'} if live else {}),
                 **({'retainedTail': retained_tail} if retained_tail is not None else {}),
                 **({'coveredToolCallIds': covered_tool_call_ids} if covered_tool_call_ids is not None else {}),
                 **({'coveredSteerIds': covered_steer_ids} if covered_steer_ids is not None else {}),

@@ -499,7 +499,7 @@ async def test_live_compaction_is_owner_scoped_durable_and_bypasses_threshold(ct
     summaries = [value['data']['result']['summary'] for _, value in reopened.events('a', run.run_id)
                  if value.get('event') == 'on_run_step_completed'
                  and 'summary' in value.get('data', {}).get('result', {})]
-    assert summaries[-1]['initiatedBy'] == 'user'
+    assert summaries[-1]['initiatedBy'] == 'live'
 
 
 @pytest.mark.asyncio

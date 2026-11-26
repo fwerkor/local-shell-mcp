@@ -262,7 +262,7 @@ const Summary = memo(
       if (failed) {
         return localize('com_ui_summarize_failed');
       }
-      return initiatedBy === 'user'
+      return initiatedBy === 'user' || initiatedBy === 'live'
         ? localize('com_ui_context_compacted_by_you')
         : localize('com_ui_conversation_summarized');
     }, [isActivelyStreaming, failed, initiatedBy, localize]);
