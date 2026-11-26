@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Eski araç erişimi",
   "com_lsm_agent_machine_default": "Varsayılan makine erişimi",
   "com_lsm_agent_machine_default_help": "Yeni kaydedilen makineler de dahil olmak üzere, açık bir geçersiz kılma işlemi yapılmayan tüm makineler için geçerlidir.",
+  "com_lsm_agent_machine_inherit_global": "Genel ayarları devral",
   "com_lsm_agent_machine_inherit": "Varsayılanı devral",
   "com_lsm_agent_machine_access": "Makine izinleri",
   "com_lsm_agent_machine_help": "Alet başına değil, makine başına erişimi seçin. Sohbetin Genel → Proje → Sohbet izinleri bu Temsilciyi daha da kısıtlayabilir. Değişiklikleri uygulamak için Aracıyı kaydedin.",

@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Akses alat lama",
   "com_lsm_agent_machine_default": "Akses mesin default",
   "com_lsm_agent_machine_default_help": "Berlaku untuk semua mesin tanpa override eksplisit, termasuk mesin yang baru didaftarkan.",
+  "com_lsm_agent_machine_inherit_global": "Warisi pengaturan global",
   "com_lsm_agent_machine_inherit": "Mewarisi default",
   "com_lsm_agent_machine_access": "Izin mesin",
   "com_lsm_agent_machine_help": "Pilih akses per mesin, bukan per alat. Izin Global → Proyek → Obrolan dapat lebih membatasi Agen ini. Simpan Agen untuk menerapkan perubahan.",

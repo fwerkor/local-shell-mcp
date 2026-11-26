@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "舊版工具訪問",
   "com_lsm_agent_machine_default": "預設機器訪問",
   "com_lsm_agent_machine_default_help": "適用於沒有明確覆蓋的所有計算機，包括新註冊的計算機。",
+  "com_lsm_agent_machine_inherit_global": "繼承全域",
   "com_lsm_agent_machine_inherit": "繼承預設設定",
   "com_lsm_agent_machine_access": "機器權限",
   "com_lsm_agent_machine_help": "選擇每台機器的存取權限，而不是每個工具的存取權限。聊天的全域→項目→聊天權限可以進一步限制該Agent。儲存代理以套用變更。",

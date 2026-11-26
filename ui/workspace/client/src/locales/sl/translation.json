@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Dostop do starega orodja",
   "com_lsm_agent_machine_default": "Privzeti dostop do stroja",
   "com_lsm_agent_machine_default_help": "Velja za vse naprave brez izrecne preglasitve, vključno z novo registriranimi napravami.",
+  "com_lsm_agent_machine_inherit_global": "Deduj globalne nastavitve",
   "com_lsm_agent_machine_inherit": "Podeduj privzeto",
   "com_lsm_agent_machine_access": "Dovoljenja stroja",
   "com_lsm_agent_machine_help": "Izberite dostop na stroj, ne na orodje. Globalno → Projekt → Dovoljenja za klepet lahko dodatno omejijo tega agenta. Shranite agenta, da uveljavite spremembe.",

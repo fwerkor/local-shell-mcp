@@ -6,6 +6,7 @@ import type { AgentForm } from '~/common';
 import { useLocalize } from '~/hooks';
 
 type Access = 'none' | 'read' | 'write';
+type DefaultAccess = Access | 'inherit';
 type Machine = { name: string; status: string };
 type MachineResponse = { machines: Machine[] };
 
@@ -29,7 +30,7 @@ export default function LsmAgentMachineAccess() {
   const defaultPermission = useWatch({ control, name: 'machine_default_permission' });
   const legacy = selected === undefined && defaultPermission === undefined;
   const inherited = defaultPermission ?? 'write';
-  const options = ['none', 'read', 'write'] as const;
+  const options = ['inherit', 'none', 'read', 'write'] as const;
   const { data, isLoading, isError } = useLsmMachines();
   const names = useMemo(
     () => [...new Set([
@@ -95,12 +96,12 @@ export default function LsmAgentMachineAccess() {
           <select
             aria-label={localize('com_lsm_agent_machine_default')}
             value={inherited}
-            onChange={(event) => setValue('machine_default_permission', event.target.value as Access,
+            onChange={(event) => setValue('machine_default_permission', event.target.value as DefaultAccess,
               { shouldDirty: true, shouldValidate: true })}
             className="max-w-44 rounded-md border border-border-medium bg-surface-primary p-2 text-sm text-text-primary"
           >
             {options.map((level) => (
-              <option key={level} value={level}>{localize(`com_lsm_agent_machine_${level}`)}</option>
+              <option key={level} value={level}>{localize(level === 'inherit' ? 'com_lsm_agent_machine_inherit_global' : `com_lsm_agent_machine_${level}`)}</option>
             ))}
           </select>
         </label>
@@ -130,7 +131,9 @@ export default function LsmAgentMachineAccess() {
             {legacy && <option value="legacy">{localize('com_lsm_agent_machine_legacy_choice')}</option>}
             {!legacy && (
               <option value="inherit">
-                {localize('com_lsm_agent_machine_inherit')} ({localize(`com_lsm_agent_machine_${inherited}`)})
+                {inherited === 'inherit'
+                  ? localize('com_lsm_agent_machine_inherit_global')
+                  : `${localize('com_lsm_agent_machine_inherit')} (${localize(`com_lsm_agent_machine_${inherited}`)})`}
               </option>
             )}
             <option value="none">{localize('com_lsm_agent_machine_none')}</option>

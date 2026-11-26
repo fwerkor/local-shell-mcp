@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "従来のツールへのアクセス",
   "com_lsm_agent_machine_default": "デフォルトのマシンアクセス",
   "com_lsm_agent_machine_default_help": "明示的にオーバーライドすることなく、新しく登録されたマシンを含むすべてのマシンに適用されます。",
+  "com_lsm_agent_machine_inherit_global": "グローバル設定を継承",
   "com_lsm_agent_machine_inherit": "デフォルトを継承",
   "com_lsm_agent_machine_access": "マシンの権限",
   "com_lsm_agent_machine_help": "ツールごとではなく、マシンごとのアクセスを選択します。チャットの「グローバル」→「プロジェクト」→「チャット」権限により、このエージェントをさらに制限できます。エージェントを保存して変更を適用します。",

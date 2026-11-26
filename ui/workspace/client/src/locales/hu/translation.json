@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Hozzáférés a régebbi eszközökhöz",
   "com_lsm_agent_machine_default": "Alapértelmezett géphozzáférés",
   "com_lsm_agent_machine_default_help": "Minden gépre vonatkozik kifejezett felülírás nélkül, beleértve az újonnan regisztrált gépeket is.",
+  "com_lsm_agent_machine_inherit_global": "Globális beállítások öröklése",
   "com_lsm_agent_machine_inherit": "Alapértelmezés öröklése",
   "com_lsm_agent_machine_access": "Gépengedélyek",
   "com_lsm_agent_machine_help": "Válassza ki a hozzáférést gépenként, ne szerszámonként. A csevegés Globális → Projekt → Csevegési engedélyei tovább korlátozhatják ezt az ügynököt. A módosítások alkalmazásához mentse az ügynököt.",

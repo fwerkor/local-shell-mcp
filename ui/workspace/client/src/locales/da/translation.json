@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Adgang til ældre værktøj",
   "com_lsm_agent_machine_default": "Standard maskinadgang",
   "com_lsm_agent_machine_default_help": "Gælder alle maskiner uden eksplicit tilsidesættelse, herunder nyregistrerede maskiner.",
+  "com_lsm_agent_machine_inherit_global": "Nedarv globale indstillinger",
   "com_lsm_agent_machine_inherit": "Nedarv standard",
   "com_lsm_agent_machine_access": "Maskintilladelser",
   "com_lsm_agent_machine_help": "Vælg adgang pr. maskine, ikke pr. værktøj. Chatens Globale → Projekt → Chattilladelser kan yderligere begrænse denne agent. Gem agenten for at anvende ændringer.",

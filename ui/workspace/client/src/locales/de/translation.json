@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Zugriff auf ältere Tools",
   "com_lsm_agent_machine_default": "Standardmaschinenzugriff",
   "com_lsm_agent_machine_default_help": "Gilt für alle Maschinen ohne explizite Überschreibung, einschließlich neu registrierter Maschinen.",
+  "com_lsm_agent_machine_inherit_global": "Globale Einstellungen übernehmen",
   "com_lsm_agent_machine_inherit": "Standard erben",
   "com_lsm_agent_machine_access": "Maschinenberechtigungen",
   "com_lsm_agent_machine_help": "Wählen Sie den Zugriff pro Maschine, nicht pro Werkzeug. Die Berechtigungen „Global“ → „Projekt“ → „Chat“ des Chats können diesen Agenten weiter einschränken. Speichern Sie den Agenten, um die Änderungen zu übernehmen.",

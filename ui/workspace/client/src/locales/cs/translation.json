@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Starší přístup k nástroji",
   "com_lsm_agent_machine_default": "Výchozí přístup ke stroji",
   "com_lsm_agent_machine_default_help": "Platí pro všechny počítače bez výslovného přepsání, včetně nově registrovaných počítačů.",
+  "com_lsm_agent_machine_inherit_global": "Zdědit globální nastavení",
   "com_lsm_agent_machine_inherit": "Zdědit výchozí",
   "com_lsm_agent_machine_access": "Oprávnění stroje",
   "com_lsm_agent_machine_help": "Zvolte přístup pro každý stroj, ne pro nástroj. Oprávnění chatu Globální → Projekt → Chat mohou tohoto agenta dále omezit. Chcete-li použít změny, uložte agenta.",

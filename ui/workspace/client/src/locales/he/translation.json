@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "גישה לכלי מדור קודם",
   "com_lsm_agent_machine_default": "גישה למכונה כברירת מחדל",
   "com_lsm_agent_machine_default_help": "חל על כל המכונות ללא עקיפה מפורשת, כולל מכונות שנרשמו לאחרונה.",
+  "com_lsm_agent_machine_inherit_global": "ירושה מהגדרות כלליות",
   "com_lsm_agent_machine_inherit": "יורש ברירת מחדל",
   "com_lsm_agent_machine_access": "הרשאות מכונה",
   "com_lsm_agent_machine_help": "בחר גישה לכל מכונה, לא לכל כלי. הרשאות הצ'אט הגלובלי → פרויקט → צ'אט יכולות להגביל עוד יותר את הסוכן הזה. שמור את הסוכן כדי להחיל שינויים.",

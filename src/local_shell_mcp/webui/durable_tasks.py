@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..audit import audit
-from .machine_permissions import agent_access_policy, authorize_machine_action
+from .machine_permissions import agent_access_policy, authorize_machine_action, resolve_agent_ceiling
 
 log = logging.getLogger(__name__)
 _STARTS = frozenset({"job_start", "shell_start", "job_retry", "remote_transfer"})
@@ -290,7 +290,7 @@ def _revoked(row: Any) -> bool:
                 return True
             policy = agent_access_policy(agent)
             if policy is not None:
-                agent_policy, default = policy
+                agent_policy, default = resolve_agent_ceiling(row["owner"], *policy)
             elif "tools" in agent and row["tool"] not in agent["tools"]:
                 # Agents predating machine ACLs retain their explicit tool list.
                 return True

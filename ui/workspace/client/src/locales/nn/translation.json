@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Tilgang til eldre verktøy",
   "com_lsm_agent_machine_default": "Standard maskintilgang",
   "com_lsm_agent_machine_default_help": "Gjelder alle maskiner utan eksplisitt overstyring, inkludert nyregistrerte maskiner",
+  "com_lsm_agent_machine_inherit_global": "Arv globale innstillingar",
   "com_lsm_agent_machine_inherit": "Arv standard",
   "com_lsm_agent_machine_access": "Maskintillatelser",
   "com_lsm_agent_machine_help": "Vel tilgang per maskin, ikkje per verktøy. Chateins globale → Prosjekt → Chat-løyve kan avgrensa denne agenten ytterlegare. Lagre agenten for å bruka endringar",

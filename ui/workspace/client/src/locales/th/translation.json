@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "การเข้าถึงเครื่องมือแบบเดิม",
   "com_lsm_agent_machine_default": "การเข้าถึงเครื่องเริ่มต้น",
   "com_lsm_agent_machine_default_help": "ใช้กับเครื่องทั้งหมดโดยไม่มีการแทนที่อย่างชัดเจน รวมถึงเครื่องที่ลงทะเบียนใหม่ด้วย",
+  "com_lsm_agent_machine_inherit_global": "สืบทอดการตั้งค่าส่วนกลาง",
   "com_lsm_agent_machine_inherit": "สืบทอดค่าเริ่มต้น",
   "com_lsm_agent_machine_access": "สิทธิ์ของเครื่อง",
   "com_lsm_agent_machine_help": "เลือกการเข้าถึงต่อเครื่อง ไม่ใช่ต่อเครื่องมือ สิทธิ์ทั่วโลก → โครงการ → การแชทสามารถจำกัดตัวแทนนี้เพิ่มเติมได้ บันทึกตัวแทนเพื่อใช้การเปลี่ยนแปลง",

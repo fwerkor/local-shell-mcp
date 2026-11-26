@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Acesso à ferramenta legada",
   "com_lsm_agent_machine_default": "Acesso padrão à máquina",
   "com_lsm_agent_machine_default_help": "Aplica-se a todas as máquinas sem substituição explícita, incluindo as máquinas recentemente registadas.",
+  "com_lsm_agent_machine_inherit_global": "Herdar definições globais",
   "com_lsm_agent_machine_inherit": "Herdar padrão",
   "com_lsm_agent_machine_access": "Permissões de máquina",
   "com_lsm_agent_machine_help": "Escolha o acesso por máquina e não por ferramenta. As permissões Global → Project → Chat do chat podem restringir ainda mais este Agente. Guarde o Agente para aplicar as alterações.",

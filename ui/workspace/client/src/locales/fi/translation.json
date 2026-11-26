@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Vanhojen työkalujen käyttöoikeus",
   "com_lsm_agent_machine_default": "Oletusarvoinen koneen käyttöoikeus",
   "com_lsm_agent_machine_default_help": "Koskee kaikkia koneita ilman nimenomaista ohitusta, mukaan lukien äskettäin rekisteröidyt koneet.",
+  "com_lsm_agent_machine_inherit_global": "Peri yleiset asetukset",
   "com_lsm_agent_machine_inherit": "Peri oletusarvo",
   "com_lsm_agent_machine_access": "Koneen käyttöoikeudet",
   "com_lsm_agent_machine_help": "Valitse käyttöoikeus konekohtaisesti, älä työkalukohtaisesti. Chatin Globaali → Projekti → Chat-oikeudet voivat rajoittaa tätä agenttia entisestään. Tallenna agentti ottaaksesi muutokset käyttöön.",

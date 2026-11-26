@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Quyền truy cập vào công cụ kế thừa",
   "com_lsm_agent_machine_default": "Truy cập máy mặc định",
   "com_lsm_agent_machine_default_help": "Áp dụng cho tất cả các máy không có ghi đè rõ ràng, kể cả các máy mới đăng ký.",
+  "com_lsm_agent_machine_inherit_global": "Kế thừa cài đặt toàn cục",
   "com_lsm_agent_machine_inherit": "Kế thừa mặc định",
   "com_lsm_agent_machine_access": "Quyền của máy",
   "com_lsm_agent_machine_help": "Chọn quyền truy cập trên mỗi máy, không phải trên mỗi công cụ. Các quyền Toàn cầu → Dự án → Trò chuyện của cuộc trò chuyện có thể hạn chế hơn nữa Tác nhân này. Lưu Tác nhân để áp dụng các thay đổi.",

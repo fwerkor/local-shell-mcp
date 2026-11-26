@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Legacy tool access",
   "com_lsm_agent_machine_default": "Default machine access",
   "com_lsm_agent_machine_default_help": "Applies to all machines without an explicit override, including newly registered machines.",
+  "com_lsm_agent_machine_inherit_global": "Inherit global",
   "com_lsm_agent_machine_inherit": "Inherit default",
   "com_lsm_agent_machine_access": "Machine permissions",
   "com_lsm_agent_machine_help": "Choose access per machine, not per tool. The chat's Global → Project → Chat permissions can further restrict this Agent. Save the Agent to apply changes.",

@@ -66,3 +66,18 @@ test('local is present and first even if an older server omits it', async () => 
   fireEvent.change(pickers[0], { target: { value: 'none' } });
   expect(screen.getByTestId('policy')).toHaveTextContent('{"local":"none"}');
 });
+
+test('inherits global permissions without replacing explicit machine overrides', async () => {
+  mount(false);
+  const picker = await screen.findByLabelText('local machine access');
+  const defaults = screen.getByLabelText('com_lsm_agent_machine_default');
+  fireEvent.change(picker, { target: { value: 'read' } });
+  fireEvent.change(defaults, { target: { value: 'inherit' } });
+  expect(defaults).toHaveValue('inherit');
+  expect(picker).toHaveValue('read');
+  expect(screen.getByTestId('policy')).toHaveTextContent('{"local":"read"}');
+  fireEvent.change(picker, { target: { value: 'inherit' } });
+  expect(picker).toHaveValue('inherit');
+  expect(screen.getByTestId('policy')).toHaveTextContent('{}');
+  expect(screen.getAllByText('com_lsm_agent_machine_inherit_global')).toHaveLength(2);
+});

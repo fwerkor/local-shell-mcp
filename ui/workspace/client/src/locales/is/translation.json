@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Aðgangur að eldri verkfærum",
   "com_lsm_agent_machine_default": "Sjálfgefinn vélaaðgangur",
   "com_lsm_agent_machine_default_help": "Gildir um allar vélar án skýrrar yfirfærslu, þar með talið nýskráðar vélar.",
+  "com_lsm_agent_machine_inherit_global": "Erfa almennar stillingar",
   "com_lsm_agent_machine_inherit": "Erfa sjálfgefið",
   "com_lsm_agent_machine_access": "Vélarheimildir",
   "com_lsm_agent_machine_help": "Veldu aðgang fyrir hverja vél, ekki fyrir hvert tæki. Alheims → Verkefni → Spjallheimildir spjallsins geta takmarkað þennan umboðsmann enn frekar. Vistaðu umboðsmanninn til að beita breytingum.",
