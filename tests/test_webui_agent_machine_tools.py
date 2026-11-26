@@ -395,14 +395,15 @@ def test_live_machine_context_is_provider_only(machine_agent):
     assert projected[0]["role"] == "system"
     assert "Read-only: local" in projected[0]["content"]
     assert "No access: worker1" in projected[0]["content"]
-    assert projected[1:] == history
+    assert projected[1] == runner._conversation_context()[0]
+    assert projected[2:] == history
     assert len(history) == 2
 
     # Edits to both ceilings must take effect even with the original Agent
     # object and canonical history still held by the running graph.
     agents.update("local", agent["id"], {"machine_permissions": {}})
     repo.save_setting("local", "agent.machine_policy.conversation." + cid, {})
-    assert runner._project_model_messages(state) == history
+    assert runner._project_model_messages(state) == [*runner._conversation_context(), *history]
 
     agents.update("local", agent["id"], {"machine_default_permission": "read"})
     projected = runner._project_model_messages(state)
