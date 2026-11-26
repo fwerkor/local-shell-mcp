@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Eemalda fail",
   "com_ui_attach_warn_endpoint": "Sobiva tööriista puudumisel võidakse mitte-assistendi faile ignoreerida",
   "com_ui_attached_image": "Lisatud pilt",
+  "com_ui_attachment_image_fallback": "See mudel ei toeta piltide otsesisendit. Selle asemel edastati manuste failiteed.",
   "com_ui_attachment": "Manus",
   "com_ui_auth_apikey_desc": "Saatke iga päringuga võti või märk",
   "com_ui_auth_format_hint": "See algab tavaliselt tähega \"{{0}}\"",

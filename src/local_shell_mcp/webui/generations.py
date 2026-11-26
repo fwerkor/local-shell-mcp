@@ -184,8 +184,10 @@ class GenerationStore:
         prompt = payload.get("text")
         if manual_compaction:
             prompt = ''
-        if not manual_compaction and (not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
-            raise ValueError("A non-empty text message is required (max 128 KiB)")
+        if prompt is None and payload.get("files"):
+            prompt = ""
+        if not manual_compaction and (not isinstance(prompt, str) or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
+            raise ValueError("Invalid text message (max 128 KiB)")
         manual_skill_ids = payload.get('manualSkills')
         if manual_skill_ids is not None:
             from .skill_runtime import resolve_manual_skills
@@ -290,6 +292,8 @@ class GenerationStore:
             from .attachments import resolve_files
 
             files = resolve_files(db, owner, payload.get("files", []))
+            if not manual_compaction and not prompt.strip() and not files:
+                raise ValueError("A non-empty text message or attachment is required (max 128 KiB)")
             user_metadata = {
                 "sender": "User", "isCreatedByUser": True,
                 "endpoint": str(payload.get("endpoint") or "agents"),
@@ -1613,17 +1617,22 @@ class GenerationStore:
                         if files:
                             descriptors = []
                             for item in files:
-                                attachment = db.execute("SELECT id,name,path FROM attachments WHERE id=? AND owner=?",
+                                attachment = db.execute("SELECT id,name,path,content_type FROM attachments WHERE id=? AND owner=?",
                                                         (item["file_id"], owner)).fetchone()
                                 descriptors.append({"file_id": item["file_id"], "machine": "local",
                                     **({"filename": attachment["name"], "path": attachment["path"]}
                                        if attachment else {"unavailable": True})})
-                            note = "Controller attachments (use authorized LSM file tools):\n" + _json(descriptors)
+                            from .steer_media import attachment_reference
+
+                            links = [attachment_reference(d["path"], d["filename"], item.get("type", ""))
+                                     for d, item in zip(descriptors, files, strict=True) if "path" in d]
+                            note = "\n".join([*links, "Controller attachments (use authorized LSM file tools):\n" + _json(descriptors)])
                             if isinstance(value, list):
                                 value = [*value, {"type": "text", "text": note}]
                             else:
                                 value += "\n\n" + note
-                        groups.append([{"role": "user", "content": value}])
+                        groups.append([{"role": "user", "content": value,
+                                        **({"source": "attachment", "files": files} if files else {})}])
                 if max_messages is not None and len(groups) >= max(1, max_messages):
                     break
                 message_id = row["parent_id"]

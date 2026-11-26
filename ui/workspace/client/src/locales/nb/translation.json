@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Fjern fil",
   "com_ui_attach_warn_endpoint": "Filer som ikke er for assistenter, kan bli ignorert uten et kompatibelt verktøy.",
   "com_ui_attached_image": "Vedlagt bilde",
+  "com_ui_attachment_image_fallback": "Denne modellen støtter ikke direkte bildeinndata. Vedleggenes filstier ble oppgitt i stedet.",
   "com_ui_attachment": "Vedlegg",
   "com_ui_auth_apikey_desc": "Send en nøkkel eller token med hver forespørsel",
   "com_ui_auth_format_hint": "Dette starter vanligvis med \"{{0}}\"",

@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Remove file",
   "com_ui_attach_warn_endpoint": "Non-Assistant files may be ignored without a compatible tool",
   "com_ui_attached_image": "Attached image",
+  "com_ui_attachment_image_fallback": "This model does not support direct image input. Attachment paths were provided instead.",
   "com_ui_attachment": "Attachment",
   "com_ui_auth_apikey_desc": "Send a key or token with each request",
   "com_ui_auth_format_hint": "This usually starts with \"{{0}}\"",

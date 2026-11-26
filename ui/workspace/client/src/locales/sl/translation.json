@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Odstrani datoteko",
   "com_ui_attach_warn_endpoint": "Datoteke, ki niso pomočnik, bodo morda prezrte brez združljivega orodja",
   "com_ui_attached_image": "Priložena slika",
+  "com_ui_attachment_image_fallback": "Ta model ne podpira neposrednega vnosa slik. Namesto tega so bile posredovane poti do prilog.",
   "com_ui_attachment": "Priloga",
   "com_ui_auth_apikey_desc": "Z vsako zahtevo pošljite ključ ali žeton",
   "com_ui_auth_format_hint": "Običajno se začne z \"{{0}}\"",

@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "ลบไฟล์",
   "com_ui_attach_warn_endpoint": "ไฟล์ที่ไม่ใช่ผู้ช่วยอาจถูกละเว้นหากไม่มีเครื่องมือที่เข้ากันได้",
   "com_ui_attached_image": "รูปภาพที่แนบมา",
+  "com_ui_attachment_image_fallback": "โมเดลนี้ไม่รองรับการป้อนรูปภาพโดยตรง จึงส่งพาธของไฟล์แนบแทน",
   "com_ui_attachment": "ไฟล์แนบ",
   "com_ui_auth_apikey_desc": "ส่งคีย์หรือโทเค็นพร้อมกับคำขอแต่ละรายการ",
   "com_ui_auth_format_hint": "ซึ่งมักจะเริ่มต้นด้วย \"{{0}}\"",

@@ -116,6 +116,7 @@ class AgentRunner:
         self.config = self.saver.config(generation.conversation_id, generation.run_id,
                                        checkpoint_ns=namespace, event_actor=True)
         self.active_config = self.config
+        self.image_disabled = set()
         self.cache = {}
         self.configs = {}
         self._injected_background_names: dict[str, frozenset[str]] = {}
@@ -966,6 +967,30 @@ class AgentRunner:
             if missing:
                 state.completed = False
 
+    async def _stream_with_image_fallback(self, stream, profile, prepared, **kwargs):
+        """Retry only an explicit vision rejection before any provider output."""
+        from .providers import UnsupportedImageInput
+        from .steer_media import without_attachment_images
+
+        key = (profile.provider, profile.url, profile.model, profile.account_id)
+        fallback, changed = without_attachment_images(prepared)
+        if key in self.image_disabled:
+            prepared = fallback
+        emitted = False
+        try:
+            async for event in stream(profile, prepared, **kwargs):
+                emitted = True
+                yield event
+        except UnsupportedImageInput:
+            if emitted or not changed or key in self.image_disabled:
+                raise
+            self.image_disabled.add(key)
+            self.store.append(self.owner, self.generation.run_id, {
+                "event": "on_attachment_image_fallback", "data": {},
+            }, actor_lease=self.actor_lease)
+            async for event in stream(profile, fallback, **kwargs):
+                yield event
+
     async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
                                  prompt=None, update_prompt=None, head_count=0,
                                  semantic_index=None, retained_tail=None, profile=None):
@@ -1033,11 +1058,11 @@ class AgentRunner:
         if profile.provider in {"anthropic", "google"}:
             from .provider_tool_protocols import stream_native_tools
 
-            response = stream_native_tools(profile, summary_messages, tools=[],
+            response = self._stream_with_image_fallback(stream_native_tools, profile, summary_messages, tools=[],
                                            max_tokens=limit, temperature=None,
                                            emit_finish_reason=True)
         else:
-            response = self.stream_text(profile, summary_messages, max_tokens=limit,
+            response = self._stream_with_image_fallback(self.stream_text, profile, summary_messages, max_tokens=limit,
                                         emit_finish_reason=True)
         async for value in response:
             if isinstance(value, str):
@@ -1589,17 +1614,16 @@ class AgentRunner:
             return owns_user_queue and self.steers.has_preempt(self.owner, self.generation.run_id)
 
         async def prepared_provider_messages(messages):
-            from ..settings import get_settings
             from .content_filters import inspect_content, model_message_fragments
             from .steer_media import stamp_model_messages
             from .storage import WorkspaceRepository
 
             prepared = await stamp_model_messages(self.database, self.owner, messages,
-                                                  get_settings().state_dir)
+                                                  self.database.root)
             # Before-model inspection covers canonical checkpoint messages, but
             # steer_media can add text from an owned file only at provider time.
             # Check the exact expanded request before either provider stream.
-            if any(message.get('role') == 'user' and message.get('source') == 'steer'
+            if any(message.get('role') == 'user' and message.get('source') in {'steer', 'attachment'}
                    and message.get('files') for message in messages):
                 policy = configured_filters(WorkspaceRepository(self.database), self.owner)
                 if inspect_content(model_message_fragments(prepared), policy) is not None:
@@ -1608,12 +1632,12 @@ class AgentRunner:
 
         async def stream_tools_with_media(profile, messages, **kwargs):
             prepared = await prepared_provider_messages(messages)
-            async for event in self.stream_tools(profile, prepared, **kwargs):
+            async for event in self._stream_with_image_fallback(self.stream_tools, profile, prepared, **kwargs):
                 yield event
 
         async def stream_text_with_media(profile, messages, **kwargs):
             prepared = await prepared_provider_messages(messages)
-            async for event in self.stream_text(profile, prepared, **kwargs):
+            async for event in self._stream_with_image_fallback(self.stream_text, profile, prepared, **kwargs):
                 yield event
 
         result = await run_agent_loop(

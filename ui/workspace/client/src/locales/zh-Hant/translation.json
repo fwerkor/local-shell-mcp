@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "移除檔案",
   "com_ui_attach_warn_endpoint": "非相容工具的非助理檔案可能會被忽略",
   "com_ui_attached_image": "附加的圖片",
+  "com_ui_attachment_image_fallback": "目前的模型不支援原生圖片輸入，已改為提供附件路徑。",
   "com_ui_attachment": "附件",
   "com_ui_auth_apikey_desc": "每次請求都傳送金鑰或 Token",
   "com_ui_auth_format_hint": "通常以「{{0}}」開頭",

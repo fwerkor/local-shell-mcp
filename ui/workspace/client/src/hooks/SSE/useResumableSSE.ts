@@ -1,3 +1,4 @@
+import { useToastContext } from '@librechat/client';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { v4 } from 'uuid';
 import { SSE } from 'sse.js';
@@ -831,6 +832,7 @@ export default function useResumableSSE(
 ) {
   const jotaiStore = useStore();
   const localize = useLocalize();
+  const { showToast } = useToastContext();
   const queryClient = useQueryClient();
   const setActiveRunId = useSetRecoilState(store.activeRunFamily(runIndex));
 
@@ -2216,6 +2218,11 @@ export default function useResumableSSE(
               data: data.data,
               submission: currentSubmission as EventSubmission,
             });
+            return;
+          }
+
+          if (data.event === 'on_attachment_image_fallback') {
+            showToast({ message: localize('com_ui_attachment_image_fallback'), status: 'info' });
             return;
           }
 
@@ -3905,6 +3912,8 @@ export default function useResumableSSE(
     },
     [
       isAddedRequest,
+      localize,
+      showToast,
       setConversation,
       runIndex,
       token,

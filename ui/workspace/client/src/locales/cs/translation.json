@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Odebrat soubor",
   "com_ui_attach_warn_endpoint": "Nepodporované soubory mohou být ignorovány",
   "com_ui_attached_image": "Přiložený obrázek",
+  "com_ui_attachment_image_fallback": "Tento model nepodporuje přímý vstup obrázků. Místo toho byly předány cesty k přílohám.",
   "com_ui_attachment": "Příloha",
   "com_ui_auth_apikey_desc": "S každou žádostí odešlete klíč nebo token",
   "com_ui_auth_format_hint": "Obvykle to začíná \"{{0}}\"",

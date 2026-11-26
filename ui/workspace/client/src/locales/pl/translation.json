@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Usuń plik",
   "com_ui_attach_warn_endpoint": "Pliki inne niż asystenta mogą być ignorowane bez kompatybilnego narzędzia",
   "com_ui_attached_image": "Załączony obraz",
+  "com_ui_attachment_image_fallback": "Ten model nie obsługuje bezpośredniego wprowadzania obrazów. Zamiast tego przekazano ścieżki załączników.",
   "com_ui_attachment": "Załącznik",
   "com_ui_auth_apikey_desc": "Do każdego żądania wyślij klucz lub token",
   "com_ui_auth_format_hint": "Zwykle zaczyna się od „{{0}}”",

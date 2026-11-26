@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Fjarlægja skrá",
   "com_ui_attach_warn_endpoint": "Skrár gætu verið hunsaðar ef viðeigandi verkfæri vantar",
   "com_ui_attached_image": "Meðfylgjandi mynd",
+  "com_ui_attachment_image_fallback": "Þetta líkan styður ekki beint myndainntak. Skráarslóðir viðhengja voru gefnar í staðinn.",
   "com_ui_attachment": "Viðhengi",
   "com_ui_auth_apikey_desc": "Senda lykil eða tóka með hverri beiðni",
   "com_ui_auth_format_hint": "Þetta byrjar yfirleitt á „{{0}}“",

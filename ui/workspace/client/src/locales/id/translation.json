@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Hapus berkas",
   "com_ui_attach_warn_endpoint": "File non-Asisten dapat diabaikan tanpa alat yang kompatibel",
   "com_ui_attached_image": "Gambar terlampir",
+  "com_ui_attachment_image_fallback": "Model ini tidak mendukung input gambar langsung. Jalur lampiran diberikan sebagai gantinya.",
   "com_ui_attachment": "Lampiran",
   "com_ui_auth_apikey_desc": "Kirim kunci atau token dengan setiap permintaan",
   "com_ui_auth_format_hint": "Ini biasanya dimulai dengan \"{{0}}\"",

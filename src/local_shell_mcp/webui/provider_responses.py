@@ -14,8 +14,11 @@ from .providers import (
     ModelToolCall,
     ModelUsage,
     ProviderConfig,
+    UnsupportedImageInput,
     _data_frames,
     _usage_frame,
+    check_image_response,
+    image_input_rejected,
 )
 
 PROTOCOL = "openai-responses"
@@ -232,7 +235,7 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
         httpx.AsyncClient(timeout=timeout) as client,
         _response_stream(client, config, body, headers) as response,
     ):
-        response.raise_for_status()
+        await check_image_response(response)
         async for frame in _data_frames(response):
             if frame == "[DONE]":
                 break
@@ -244,6 +247,8 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
                 raise ValueError("Invalid Responses SSE event")
             kind = event.get("type")
             if kind in {"error", "response.failed", "response.cancelled"}:
+                if image_input_rejected(json.dumps(event)):
+                    raise UnsupportedImageInput("Provider does not support image input")
                 raise RuntimeError("Responses provider rejected or cancelled generation")
             if kind in {"response.output_text.delta", "response.refusal.delta"}:
                 delta, index = event.get("delta"), event.get("output_index")

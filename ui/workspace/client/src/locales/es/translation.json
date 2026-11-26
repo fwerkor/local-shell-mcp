@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Eliminar archivo",
   "com_ui_attach_warn_endpoint": "Los archivos sin herramienta compatible podrían ser ignorados",
   "com_ui_attached_image": "Imagen adjunta",
+  "com_ui_attachment_image_fallback": "Este modelo no admite la entrada directa de imágenes. Se han proporcionado las rutas de los archivos adjuntos.",
   "com_ui_attachment": "Adjunto",
   "com_ui_auth_apikey_desc": "Enviar una clave o token con cada solicitud",
   "com_ui_auth_format_hint": "Generalmente comienza con \"{{0}}\".",

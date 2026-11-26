@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "ファイルを削除",
   "com_ui_attach_warn_endpoint": "互換性のあるツールがない場合、非アシスタントのファイルは無視される可能性があります",
   "com_ui_attached_image": "添付画像",
+  "com_ui_attachment_image_fallback": "このモデルは画像の直接入力に対応していないため、添付ファイルのパスを渡しました。",
   "com_ui_attachment": "添付ファイル",
   "com_ui_auth_apikey_desc": "各リクエストでキーまたはトークンを送信します",
   "com_ui_auth_format_hint": "通常、これは「{{0}}」で始まります。",

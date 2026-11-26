@@ -1083,6 +1083,7 @@
   "com_ui_attach_remove": "Poista tiedosto",
   "com_ui_attach_warn_endpoint": "Ilman yhteensopivaa työkalua muut kuin Avustajan tiedostot voidaan jättää huomiotta.",
   "com_ui_attached_image": "Liitteenä kuva",
+  "com_ui_attachment_image_fallback": "Tämä malli ei tue kuvien suoraa syöttöä. Liitteiden tiedostopolut annettiin sen sijaan.",
   "com_ui_attachment": "Liitetiedosto",
   "com_ui_auth_apikey_desc": "Lähetä avain tai tunnus jokaisen pyynnön yhteydessä",
   "com_ui_auth_format_hint": "Tämä alkaa yleensä \"{{0}}\"",
