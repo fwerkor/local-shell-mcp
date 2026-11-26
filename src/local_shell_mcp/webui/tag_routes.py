@@ -159,9 +159,31 @@ async def tags_in_conversation(request: Request):
         return JSONResponse(tags_list)
 
 
+async def reorder_tags(request: Request):
+    _same_origin(request)
+    owner = _owner(request)
+    payload = await _body(request)
+    order = payload.get('tags')
+    if (not isinstance(order, list) or len(order) > 100_000
+            or any(not isinstance(tag, str) or len(tag) > 128 for tag in order)
+            or len(set(order)) != len(order)):
+        raise HTTPException(400, detail='Invalid tag order')
+    with _repo().database.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        known = {row['tag'] for row in db.execute(
+            'SELECT tag FROM webui_tags WHERE owner=?', (owner,)
+        )}
+        if set(order) != known:
+            raise HTTPException(409, detail='Tag list changed')
+        db.executemany('UPDATE webui_tags SET position=?,updated_at=? WHERE owner=? AND tag=?',
+                       [(index, _now(), owner, tag) for index, tag in enumerate(order)])
+    return JSONResponse(order)
+
+
 def tag_routes() -> list[Route]:
     return [
         Route('/api/tags', tags, methods=['GET', 'POST']),
+        Route('/api/tag-order', reorder_tags, methods=['PUT']),
         Route('/api/tags/list', tags, methods=['GET']),
         Route('/api/tags/convo/{conversation_id}', tags_in_conversation, methods=['PUT']),
         Route('/api/tags/{tag:path}', tag, methods=['PUT', 'DELETE']),

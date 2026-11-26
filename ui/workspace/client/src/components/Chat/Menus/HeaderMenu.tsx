@@ -2,7 +2,7 @@ import { useState, useId } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { PermissionTypes, Permissions } from 'librechat-data-provider';
 import { DropdownPopup, TooltipAnchor, Button } from '@librechat/client';
-import { BookmarkFilledIcon, BookmarkIcon } from '@radix-ui/react-icons';
+import { Tag } from 'lucide-react';
 import { Ellipsis, PlusCircle, HatGlasses, Check } from 'lucide-react';
 import type { TStartupConfig } from 'librechat-data-provider';
 import type * as t from '~/common';
@@ -70,9 +70,9 @@ export default function HeaderMenu({
       id: 'header-bookmarks',
       label: localize('com_ui_bookmarks'),
       icon: bookmarks.hasBookmarks ? (
-        <BookmarkFilledIcon className="size-4 text-text-secondary" />
+        <Tag className="size-4 text-text-secondary" fill="currentColor" />
       ) : (
-        <BookmarkIcon className="size-4 text-text-secondary" />
+        <Tag className="size-4 text-text-secondary" />
       ),
       subItems: bookmarks.items,
     });

@@ -1,7 +1,7 @@
 import { useState, useId } from 'react';
 import { useRecoilValue } from 'recoil';
 import * as Ariakit from '@ariakit/react';
-import { BookmarkFilledIcon, BookmarkIcon } from '@radix-ui/react-icons';
+import { Tag } from 'lucide-react';
 import { DropdownPopup, TooltipAnchor, Spinner } from '@librechat/client';
 import type { FC } from 'react';
 import { BookmarkContext } from '~/Providers/BookmarkContext';
@@ -27,9 +27,9 @@ const BookmarkMenu: FC = () => {
       return <Spinner aria-label="Spinner" />;
     }
     if (hasBookmarks) {
-      return <BookmarkFilledIcon className="icon-md" aria-hidden="true" />;
+      return <Tag className="icon-md" fill="currentColor" aria-hidden="true" />;
     }
-    return <BookmarkIcon className="icon-md" aria-hidden="true" />;
+    return <Tag className="icon-md" aria-hidden="true" />;
   };
 
   return (

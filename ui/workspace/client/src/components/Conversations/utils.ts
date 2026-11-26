@@ -33,6 +33,7 @@ export function areConversationListItemFieldsEqual(
     areConversationIconFieldsEqual(prevConversation, nextConversation) &&
     prevConversation.conversationId === nextConversation.conversationId &&
     prevConversation.title === nextConversation.title &&
+    (prevConversation.tags ?? []).join('\u0000') === (nextConversation.tags ?? []).join('\u0000') &&
     prevConversation.chatProjectId === nextConversation.chatProjectId &&
     prevConversation.pinned === nextConversation.pinned &&
     prevConversation.isArchived === nextConversation.isArchived &&

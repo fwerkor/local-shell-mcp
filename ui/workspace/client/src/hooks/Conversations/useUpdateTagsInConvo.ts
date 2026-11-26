@@ -14,15 +14,9 @@ const useUpdateTagsInConvo = () => {
       QueryKeys.conversation,
       conversationId,
     ]);
-    if (!currentConvo) {
-      return;
+    if (currentConvo) {
+      queryClient.setQueryData([QueryKeys.conversation, conversationId], { ...currentConvo, tags });
     }
-
-    const updatedConvo = {
-      ...currentConvo,
-      tags,
-    } as t.TConversation;
-    queryClient.setQueryData([QueryKeys.conversation, conversationId], updatedConvo);
 
     for (const listKey of [QueryKeys.allConversations, QueryKeys.archivedConversations]) {
       const queries = queryClient.getQueryCache().findAll([listKey], { exact: false });
@@ -39,7 +33,7 @@ const useUpdateTagsInConvo = () => {
                 ...page,
                 conversations: page.conversations.map((conversation) =>
                   conversation.conversationId === conversationId
-                    ? { ...conversation, tags: updatedConvo.tags }
+                    ? { ...conversation, tags }
                     : conversation,
                 ),
               })),

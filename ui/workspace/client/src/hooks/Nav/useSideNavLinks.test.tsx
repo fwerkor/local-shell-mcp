@@ -15,6 +15,7 @@ jest.mock('@librechat/client', () => ({ MCPIcon: () => null, AttachmentIcon: () 
 jest.mock('~/components/SidePanel/MCPBuilder/LsmNestedMcpPanel', () => () => null);
 jest.mock('~/components/SidePanel/Agents/AgentPanelSwitch', () => () => null);
 jest.mock('~/components/SidePanel/Bookmarks/BookmarkPanel', () => () => null);
+jest.mock('~/components/SidePanel/MessageBookmarks/MessageBookmarkPanel', () => () => null);
 jest.mock('~/components/SidePanel/Builder/PanelSwitch', () => () => null);
 jest.mock('~/components/SidePanel/Schedules', () => ({ SchedulePanel: () => null }));
 jest.mock('~/components/SidePanel/Memories', () => ({ MemoryPanel: () => null }));
@@ -32,6 +33,7 @@ describe('native scheduled chat navigation', () => {
     );
     const { result } = renderHook(() => useSideNavLinks(options), { wrapper });
     expect(result.current.some((link) => link.id === 'schedules')).toBe(isAuthenticated);
+    expect(result.current.some((link) => link.id === 'message-bookmarks')).toBe(isAuthenticated);
     expect(result.current.some((link) => link.id === 'parameters')).toBe(false);
     if (isAuthenticated) {
       expect(result.current[0].id).toBe('schedules');
