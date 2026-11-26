@@ -823,7 +823,7 @@ async def start_generation(request: Request):
         if isinstance(existing_cid, str) and existing_cid not in {"", "new", "new_conversation"}:
             resolve_access(owner, existing_cid)
         else:
-            project_id = payload.get("projectId")
+            project_id = payload.get("projectId", payload.get("chatProjectId"))
             if project_id is not None and not isinstance(project_id, str):
                 raise HTTPException(400, detail="Invalid project id")
             resolve_access(owner, project_id=project_id)
