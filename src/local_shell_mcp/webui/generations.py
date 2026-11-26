@@ -1325,7 +1325,7 @@ class GenerationStore:
             rows = db.execute(
                 "SELECT r.id,r.state,a.config AS agent_config FROM runs r "
                 "JOIN conversations c ON c.id=r.conversation_id "
-                "LEFT JOIN agents a ON a.id=c.agent_id AND a.owner=c.owner "
+                "LEFT JOIN agents a ON a.id=r.agent_id AND a.owner=c.owner "
                 "WHERE c.owner=? AND c.id=? AND r.status IN ('running','requires_action')",
                 (owner, conversation_id)).fetchall()
             if len(rows) != 1:

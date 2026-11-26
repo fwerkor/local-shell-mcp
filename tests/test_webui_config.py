@@ -104,7 +104,9 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
 @pytest.mark.asyncio
 async def test_startup_config_real_auth_middleware_preserves_optional_identity(tmp_path, monkeypatch):
     from fastapi import HTTPException
-    from local_shell_mcp import auth, settings as settings_module
+
+    from local_shell_mcp import auth
+    from local_shell_mcp import settings as settings_module
 
     settings = SimpleNamespace(auth_mode="oauth", public_base_url="https://lsm.example.invalid",
                                state_dir=tmp_path)

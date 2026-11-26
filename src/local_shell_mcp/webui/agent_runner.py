@@ -1710,9 +1710,9 @@ class AgentRunner:
                                          "source": "steer", "steerId": item["steerId"],
                                          "id": "steer:" + item["steerId"],
                                          "files": item.get("files", [])})
-            if boundary == "terminal" and not self.namespace and not (recovered or applied):
-                if self.store.live_compaction_request(self.owner, self.generation.run_id):
-                    await self._before_model(current)
+            if (boundary == "terminal" and not self.namespace and not (recovered or applied)
+                    and self.store.live_compaction_request(self.owner, self.generation.run_id)):
+                await self._before_model(current)
             return bool(recovered or applied)
 
         async def should_seal_stream():

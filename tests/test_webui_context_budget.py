@@ -639,3 +639,28 @@ async def test_auto_compaction_can_recover_after_more_than_three_failures(ctx):
     assert len(attempts) == 5
     assert called_summary(store, run.run_id)
     assert state.messages[0]['content'].startswith('<summary>')
+
+
+def test_live_compaction_rejects_active_graph_agent(ctx):
+    from local_shell_mcp.webui.agents import AgentRepository
+
+    db, store, _, _ = ctx
+    agents = AgentRepository(db)
+    root = agents.create('a', {'name': 'Root', 'provider': 'openAI', 'model': 'test'})
+    child = agents.create('a', {'name': 'Child', 'provider': 'openAI', 'model': 'test'})
+    graph = agents.update('a', root['id'], {'edges': [
+        {'from': root['id'], 'to': child['id'], 'edgeType': 'direct'},
+    ]})
+    run, _ = store.begin('a', {'text': 'Run graph'}, graph)
+    with db.connect() as conn:
+        assert conn.execute('SELECT agent_id FROM conversations WHERE id=?',
+                            (run.conversation_id,)).fetchone()[0] is None
+        assert conn.execute('SELECT agent_id FROM runs WHERE id=?',
+                            (run.run_id,)).fetchone()[0] == graph['id']
+    with pytest.raises(ValueError, match='multi-agent graphs'):
+        store.request_live_compaction('a', run.conversation_id)
+    assert store.live_compaction_request('a', run.run_id) is None
+
+    single, _ = store.begin('a', {'text': 'Run single agent'}, child)
+    receipt = store.request_live_compaction('a', single.conversation_id)
+    assert receipt['runId'] == single.run_id
