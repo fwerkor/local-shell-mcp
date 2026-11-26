@@ -46,7 +46,7 @@ async def test_disconnect_before_first_event_retries_same_model_turn(monkeypatch
 
     result = await run_agent_loop(state, stream_tools=forbidden, stream_text=stream,
                                   dispatch=forbidden, on_text=display)
-    assert attempts == 3 and delays == [0.4, 1.2000000000000002]
+    assert attempts == 3 and delays == [1, 1, 1]
     assert state.model_turn == 1 and state.step == 1
     assert rendered == ["success"]
     assert result[-1] == {"role": "assistant", "content": "success"}

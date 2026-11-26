@@ -106,7 +106,7 @@ export function getToolIconType(name: string): ToolIconType {
   if (name === 'ask_user_question') {
     return 'ask_user_question';
   }
-  if (name === 'set_memory' || name === 'delete_memory') {
+  if (name === 'set_memory' || name === 'delete_memory' || name === 'find_memory') {
     return 'memory';
   }
   if (name.startsWith(Constants.LC_TRANSFER_TO_)) {

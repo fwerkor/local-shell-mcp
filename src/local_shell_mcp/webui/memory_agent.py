@@ -33,33 +33,12 @@ _log = logging.getLogger(__name__)
 
 def _default_instructions(keys: list[str], token_limit: int | None) -> str:
     """Port packages/api/src/agents/memory.ts:getDefaultInstructions."""
-    instructions = """Use the `set_memory` tool to save important information about the user, but ONLY when the user has requested you to remember something.
-
-The `delete_memory` tool should only be used in two scenarios:
-  1. When the user explicitly asks to forget or remove specific information
-  2. When updating existing memories, use the `set_memory` tool instead of deleting and re-adding the memory.
-
-1. ONLY use memory tools when the user requests memory actions with phrases like:
-   - "Remember [that] [I]..."
-   - "Don't forget [that] [I]..."
-   - "Please remember..."
-   - "Store this..."
-   - "Forget [that] [I]..."
-   - "Delete the memory about..."
-
-2. NEVER store information just because the user mentioned it in conversation.
-
-3. NEVER use memory tools when the user asks you to use other tools or invoke tools in general.
-
-4. Memory tools are ONLY for memory requests, not for general tool usage.
-
-5. If the user doesn't ask you to remember or forget something, DO NOT use any memory tools.
-"""
+    instructions = 'Save useful information proactively with set_memory. Set an empty value to remove obsolete memories.'
     if keys:
         instructions += '\nVALID KEYS: ' + ', '.join(keys) + '\n'
     if token_limit:
         instructions += f'\nTOKEN LIMIT: Maximum {token_limit} tokens across all memory values.\n'
-    return instructions + "\nWhen in doubt, and the user hasn't asked to remember or forget anything, END THE TURN IMMEDIATELY."
+    return instructions
 
 
 def _automatic_agent(config: dict, owner: str, database) -> dict | None:
@@ -170,11 +149,11 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
         return 0
     writes = 0
     try:
-        async for event in stream_tools(chosen, messages, tools=tool_definitions(allowed_keys),
+        async for event in stream_tools(chosen, messages, tools=tool_definitions(allowed_keys)[:1],
                                         max_tokens=1024, temperature=None):
             if not isinstance(event, ModelToolCall):
                 continue
-            if event.name not in {'set_memory', 'delete_memory'}:
+            if event.name != 'set_memory':
                 continue
             from .generations import GenerationStore
 

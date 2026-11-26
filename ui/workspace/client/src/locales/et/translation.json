@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimaalne suurus 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Kohandatud tööriist",
   "com_agents_mcp_trust_subtext": "LSM ei kinnita kohandatud pistikuid",
-  "com_agents_memory_info": "Kui see on lubatud, saab agent vestluse ajal salvestada, värskendada ja kustutada kasutajaga seotud mälestusi, kasutades tööriistu set_memory ja delete_memory.",
+  "com_agents_memory_info": "Kui see on lubatud, saab agent vestluse ajal salvestada, värskendada ja kustutada kasutajaga seotud mälestusi, kasutades tööriistu set_memory.",
   "com_agents_memory_scope": "Hoidke selle agendi mälestused eraldi",
   "com_agents_memory_scope_info": "Kui see on lubatud, loeb ja kirjutab see agent oma mälestusi, mis on eraldatud teie ühismäludest ja teistest agentidest. Olemasolevaid jagatud mälestusi sellele agendile ei kuvata.",
   "com_agents_missing_name": "Enne agendi loomist sisestage nimi.",

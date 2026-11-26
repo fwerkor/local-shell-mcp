@@ -13,27 +13,14 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
+from .provider_responses import ResponsesStreamError
 from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
 from .semantic_index import SemanticSnapshot
 
 log = logging.getLogger(__name__)
-
-
-def _retryable_provider_disconnect(error: Exception) -> bool:
-    """Retry transient HTTP transport failures only before any model event.
-
-    A model response may already contain executed tool calls, visible text or
-    signed reasoning. Retrying after the first event would duplicate content or
-    invalidate provider state; HTTP status errors are never transient here.
-    """
-    import httpx
-
-    return isinstance(error, (
-        httpx.RemoteProtocolError, httpx.ConnectError, httpx.ConnectTimeout,
-        httpx.ReadError, httpx.ReadTimeout,
-    ))
 
 
 class RuntimeSafetyError(PermissionError):
@@ -44,7 +31,38 @@ class AgentSuspended(Exception):
     """A durable human interrupt has been saved; leave the generation parked."""
 
 
-_MODEL_RETRY_DELAYS = (0.4, 0.4 * 3)
+_MODEL_RETRY_DELAYS = (1, 2, 4, 8, 16, 30, 30, 30)
+_MAX_RETRY_AFTER = 120
+
+
+def _model_retry_delay(error: Exception, attempt: int) -> float:
+    from datetime import datetime
+    from email.utils import parsedate_to_datetime
+
+    import httpx
+
+    delay = _MODEL_RETRY_DELAYS[attempt]
+    if isinstance(error, ResponsesStreamError):
+        # Parallel children should not all reconnect on the same boundary.
+        import random
+
+        return delay * random.uniform(1.0, 1.25)
+    if isinstance(error, httpx.HTTPStatusError):
+        value = error.response.headers.get("Retry-After")
+        if value:
+            try:
+                seconds = int(value)
+            except ValueError:
+                try:
+                    date = parsedate_to_datetime(value)
+                    if date.tzinfo is None:
+                        date = date.replace(tzinfo=UTC)
+                    seconds = (date - datetime.now(UTC)).total_seconds()
+                except (ValueError, TypeError, OverflowError):
+                    return delay
+            delay = max(delay, min(_MAX_RETRY_AFTER, seconds))
+    return delay
+
 
 # A model that keeps re-issuing the same call and receiving the same result is
 # making no progress. Stop the run instead of streaming one durable event per
@@ -66,14 +84,18 @@ def _tool_batch_signature(calls: list[ModelToolCall], results: list[dict]) -> st
 
 
 def _retryable_model_error(error: Exception) -> bool:
-    """Only retry transient transport failures and explicitly temporary HTTP statuses."""
+    """Retry transient transport failures and classified provider-side failures."""
     import httpx
+
+    if isinstance(error, ResponsesStreamError):
+        return error.retryable
 
     if isinstance(error, httpx.HTTPStatusError):
         return error.response.status_code in {408, 429, 500, 502, 503, 504}
     return isinstance(error, (
         httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError,
         httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.PoolTimeout,
+        httpx.WriteError, httpx.WriteTimeout,
     ))
 
 
@@ -128,6 +150,7 @@ async def run_agent_loop(
     should_preempt: Callable[[], bool] | None = None,
     on_boundary: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
     on_stream_chunk: Callable[[], Awaitable[bool]] | None = None,
+    on_model_retry: Callable[[int, int, float, int | None], Awaitable[None]] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -211,6 +234,7 @@ async def run_agent_loop(
         # A new model attempt keeps the graph turn and completed tool results.
         for attempt in range(len(_MODEL_RETRY_DELAYS) + 1):
             received_event = False
+            retry_delay = None
             source = stream_tools(context.profile, projected, tools=context.tools,
                                   **sampling) if context.tools else \
                 stream_text(context.profile, projected, **sampling)
@@ -255,15 +279,35 @@ async def run_agent_loop(
                     (on_stream_chunk is not None and await on_stream_chunk())):
                     preempted = True
                     break
-                log.warning("Model transport %s before first event; retry %d/2 (model=%s)",
-                            type(error).__name__, attempt + 1, context.profile.model)
-                await asyncio.sleep(_MODEL_RETRY_DELAYS[attempt])
-                continue
+                import httpx
+
+                retry_delay = _model_retry_delay(error, attempt)
+                status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+                diagnostic = str(error) if isinstance(error, ResponsesStreamError) else type(error).__name__
+                log.warning("Model transport %s (HTTP %s) before first event; retry %d/%d in %.1fs (model=%s)",
+                            diagnostic, status, attempt + 1, len(_MODEL_RETRY_DELAYS),
+                            retry_delay, context.profile.model)
             finally:
                 close = getattr(source, "aclose", None)
                 if close is not None:
                     await close()
-            break
+            if retry_delay is None:
+                break
+            if on_model_retry is not None:
+                await on_model_retry(attempt + 1, len(_MODEL_RETRY_DELAYS), retry_delay, status)
+            # Release the failed stream before waiting, and keep user steering
+            # and permission revocation responsive throughout the backoff.
+            remaining = retry_delay
+            while remaining > 0:
+                interval = min(remaining, 1)
+                await asyncio.sleep(interval)
+                remaining -= interval
+                if ((should_preempt is not None and should_preempt()) or
+                    (on_stream_chunk is not None and await on_stream_chunk())):
+                    preempted = True
+                    break
+            if preempted:
+                break
         # A steer can arrive between final SSE chunk and tool dispatch.
         if not preempted and ((should_preempt is not None and should_preempt()) or
                               (on_stream_chunk is not None and await on_stream_chunk())):
