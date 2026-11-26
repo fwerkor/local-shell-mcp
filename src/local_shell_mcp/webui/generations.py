@@ -142,6 +142,8 @@ class GenerationStore:
                 raise ValueError("Internal completion idempotency key cannot be submitted")
             if client_request_id.startswith("subagent:") and trusted_new_conversation_id is None:
                 raise ValueError("Internal child idempotency key cannot be submitted")
+            if client_request_id.startswith("schedule:") and _connection is None:
+                raise ValueError("Internal schedule idempotency key cannot be submitted")
             if client_request_id.startswith("trigger_") and _connection is None:
                 raise ValueError("Internal Agent Trigger idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")

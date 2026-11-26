@@ -265,10 +265,12 @@ async def test_committed_but_unstarted_generation_is_recovered_once(state, monke
                     int(time.time() * 1000) - 60_000, now, now))
     occurrence = schedule_routes._claim_due(repo.database)[0]
     store = GenerationStore(repo.database)
-    generation, fresh = store.begin('alice', {
-        'text': config['prompt'], 'agent_id': agent['id'],
-        'clientRequestId': 'schedule:' + occurrence[0],
-    }, agent)
+    with repo.database.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        generation, fresh = store.begin('alice', {
+            'text': config['prompt'], 'agent_id': agent['id'],
+            'clientRequestId': 'schedule:' + occurrence[0],
+        }, agent, _connection=db)
     assert fresh
     preserved = schedule_routes.unstarted_schedule_generations(repo.database)
     assert generation.run_id in preserved
@@ -314,10 +316,12 @@ async def test_prior_execution_lease_prevents_schedule_replay(state, monkeypatch
                     int(time.time() * 1000) - 60_000, now, now))
     occurrence = schedule_routes._claim_due(repo.database)[0]
     store = GenerationStore(repo.database)
-    generation, _ = store.begin('alice', {
-        'text': config['prompt'], 'agent_id': agent['id'],
-        'clientRequestId': 'schedule:' + occurrence[0],
-    }, agent)
+    with repo.database.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        generation, _ = store.begin('alice', {
+            'text': config['prompt'], 'agent_id': agent['id'],
+            'clientRequestId': 'schedule:' + occurrence[0],
+        }, agent, _connection=db)
     lease = ActorLease.claim(repo.database, 'alice', generation.run_id)
     assert lease is not None
     assert generation.run_id not in schedule_routes.unstarted_schedule_generations(repo.database)
