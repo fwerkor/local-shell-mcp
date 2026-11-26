@@ -1146,6 +1146,7 @@ class AgentRunner:
                 state.context.profile.provider, state.context.profile.model)
             snapshot = provider_usage_snapshot(
                 input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
+                cache_read=usage.cache_read, cache_write=usage.cache_write,
                 provider=usage.provider, model=state.context.profile.model,
                 messages=state.provider_projection or state.messages, tools=state.context.tools,
                 max_context_tokens=self._context_limit(state, settings),

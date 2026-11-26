@@ -165,36 +165,55 @@ class ModelUsage:
     provider: str
     input_tokens: int
     output_tokens: int
+    cache_read: int | None = None
+    cache_write: int | None = None
+
+
+def _usage_count(value: object) -> int | None:
+    return value if type(value) is int and 0 <= value <= 10**12 else None
 
 
 def _usage_frame(provider: str, event: dict, previous: ModelUsage | None = None) -> ModelUsage | None:
+    cached_read = None
+    cached_write = None
     if provider == 'openai':
         usage = event.get('usage')
         if not isinstance(usage, dict):
             return previous
         raw_input = usage.get('prompt_tokens', usage.get('input_tokens'))
         raw_output = usage.get('completion_tokens', usage.get('output_tokens'))
+        details = usage.get('prompt_tokens_details', usage.get('input_tokens_details'))
+        if isinstance(details, dict):
+            cached_read = _usage_count(details.get('cached_tokens'))
+        if cached_read is None:
+            cached_read = _usage_count(usage.get('prompt_cache_hit_tokens'))
     elif provider == 'anthropic':
         kind = event.get('type')
         if kind == 'message_start':
             metadata = event.get('message')
             usage = metadata.get('usage') if isinstance(metadata, dict) else None
+            previous = None
         elif kind == 'message_delta':
             usage = event.get('usage')
         else:
             return previous
         if not isinstance(usage, dict):
             return previous
-        raw_input = usage.get('input_tokens', previous.input_tokens if previous else None)
-        if 'input_tokens' in usage and kind == 'message_start' and type(raw_input) is int:
-            # Anthropic reports cache reads/writes separately from ordinary
-            # input_tokens. Counts include all provider-confirmed input, while
-            # cache billing remains an independent accounting problem.
-            cached_read = usage.get('cache_read_input_tokens', 0)
-            cached_write = usage.get('cache_creation_input_tokens', 0)
-            if type(cached_read) is not int or type(cached_write) is not int:
-                return previous
-            raw_input += cached_read + cached_write
+        cached_read = _usage_count(usage.get('cache_read_input_tokens',
+                                             previous.cache_read if previous else None))
+        cached_write = _usage_count(usage.get('cache_creation_input_tokens',
+                                              previous.cache_write if previous else None))
+        if any(key in usage and _usage_count(usage[key]) is None
+               for key in ('cache_read_input_tokens', 'cache_creation_input_tokens')):
+            return previous
+        # Anthropic input_tokens excludes both cache portions, including in
+        # cumulative message_delta usage frames.
+        ordinary = _usage_count(usage.get('input_tokens'))
+        if 'input_tokens' in usage and ordinary is None:
+            return previous
+        if ordinary is None and previous is not None:
+            ordinary = previous.input_tokens - (previous.cache_read or 0) - (previous.cache_write or 0)
+        raw_input = ordinary + (cached_read or 0) + (cached_write or 0) if ordinary is not None else None
         raw_output = usage.get('output_tokens', previous.output_tokens if previous else None)
     else:
         usage = event.get('usageMetadata')
@@ -202,10 +221,12 @@ def _usage_frame(provider: str, event: dict, previous: ModelUsage | None = None)
             return previous
         raw_input = usage.get('promptTokenCount')
         raw_output = usage.get('candidatesTokenCount')
-    if (type(raw_input) is not int or raw_input < 0 or raw_input > 10**12
-            or type(raw_output) is not int or raw_output < 0 or raw_output > 10**12):
+        cached_read = _usage_count(usage.get('cachedContentTokenCount'))
+    if _usage_count(raw_input) is None or _usage_count(raw_output) is None:
         return previous
-    return ModelUsage(provider, raw_input, raw_output)
+    if (cached_read or 0) + (cached_write or 0) > raw_input:
+        cached_read = cached_write = None
+    return ModelUsage(provider, raw_input, raw_output, cached_read, cached_write)
 
 
 def _openai_reasoning_fragments(delta: dict) -> list[str]:

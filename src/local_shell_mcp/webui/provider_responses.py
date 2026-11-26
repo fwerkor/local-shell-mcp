@@ -324,7 +324,8 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
     # calls are released until the complete response is validated.
     usage = _usage_frame("openai", response)
     if usage is not None:
-        yield ModelUsage(PROTOCOL, usage.input_tokens, usage.output_tokens)
+        yield ModelUsage(PROTOCOL, usage.input_tokens, usage.output_tokens,
+                         usage.cache_read, usage.cache_write)
     if incomplete and not emit_finish_reason:
         raise RuntimeError("Responses generation was incomplete")
     for item in replay:

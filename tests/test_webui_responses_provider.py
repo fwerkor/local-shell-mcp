@@ -151,6 +151,18 @@ async def test_text_summary_and_terminal_fallback(transport):
                       ModelFinish("openai-responses", "max_output_tokens")]
 
 
+@pytest.mark.asyncio
+async def test_responses_provider_preserves_cache_hit_count(transport):
+    batches, _ = transport
+    frame = complete([MESSAGE])
+    frame["response"]["usage"]["input_tokens_details"] = {"cached_tokens": 80}
+    batches.append([frame])
+    events = [event async for event in stream_model(PROFILE, [USER])]
+    assert [event for event in events if isinstance(event, ModelUsage)] == [
+        ModelUsage("openai-responses", 100, 20, 80)
+    ]
+
+
 @pytest.mark.parametrize("events,error", [
     ([{"type": "response.output_item.done", "output_index": 0, "item": CALL}], RuntimeError),
     ([{"type": "response.output_item.done", "output_index": 0, "item": CALL}, "[DONE]"], RuntimeError),
