@@ -1408,6 +1408,21 @@ class SessionRuntimeManager:
             elif normalized_action == "resume":
                 if plan.status != "blocked":
                     raise ValueError("Only a blocked plan can be resumed")
+                if actor == "human" and plan.chat_run_id:
+                    # An externally resumed goal must not remain bound to a
+                    # terminal Chat actor. Preserve a live or human-paused run
+                    # so the legacy timer cannot compete with its owner.
+                    from .sqlite_store import shared_database
+
+                    database = shared_database(self._state_dir_override or get_settings().state_dir)
+                    with database.connect() as db:
+                        live = db.execute(
+                            "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                            "WHERE r.id=? AND c.owner=? AND r.status IN ('running','requires_action')",
+                            (plan.chat_run_id, logical.subject),
+                        ).fetchone()
+                    if live is None:
+                        plan.chat_run_id = None
                 plan.status = "active"
                 plan.note = None
                 plan.revision += 1

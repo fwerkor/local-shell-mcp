@@ -108,3 +108,20 @@ def test_goal_binding_owner_and_terminal_run_fences(goal_context):
     chat_goal.pause(database, "local", generation.run_id, "Stopped by user.")
     assert manager.plan_state(sid, subject="local")["status"] == "blocked"
     assert chat_goal.continuation(database, "local", generation.run_id, []) is None
+
+def test_external_resume_releases_only_terminal_chat_owner(goal_context):
+    database, store, generation, _ = goal_context
+    manager = get_session_runtime_manager()
+    sid = manager.manage("local", action="start", label="Goal")["session_id"]
+    plan = manager.manage_plan(sid, subject="local", action="start",
+                               objective="Goal", steps=[{"text": "Work"}])
+    assert chat_goal.bind(database, "local", generation.run_id, sid, plan["plan"]["plan_id"])
+    manager.manage_plan(sid, subject="local", action="block", actor="human", note="Paused")
+    resumed = manager.manage_plan(sid, subject="local", action="resume", actor="human")
+    assert resumed["plan"]["continuation_driver"] == "chat"
+    manager.manage_plan(sid, subject="local", action="block", actor="human", note="Paused again")
+    assert store.finish("local", generation.run_id, status="aborted")
+    resumed = manager.manage_plan(sid, subject="local", action="resume", actor="human")
+    assert resumed["plan"]["status"] == "active"
+    assert "continuation_driver" not in resumed["plan"]
+    assert chat_goal.active_plan(database, "local", generation.run_id) is None
