@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import type { TSkillSummary } from 'librechat-data-provider';
 import SkillListItem from './SkillListItem';
 import { Collapse } from '~/components/ui';
-import { useLocalize } from '~/hooks';
+import { useLocalize, useSkillActiveState } from '~/hooks';
 import { cn } from '~/utils';
 
 interface SkillListProps {
@@ -22,6 +22,7 @@ export default function SkillList({
   onSectionOpenChange,
 }: SkillListProps) {
   const localize = useLocalize();
+  const { isActive, isLoading, isError } = useSkillActiveState();
   const [searchParams] = useSearchParams();
   const activeFile = searchParams.get('file');
   const [expandedSkillId, setExpandedSkillId] = useState<string | null>(activeSkillId ?? null);
@@ -60,6 +61,7 @@ export default function SkillList({
                 key={skill._id}
                 skill={skill}
                 isActive={skill._id === activeSkillId}
+                isEnabled={isLoading || isError ? undefined : isActive(skill)}
                 isExpanded={skill._id === expandedSkillId}
                 activeFile={skill._id === activeSkillId ? activeFile : null}
                 onToggleExpand={(id) => setExpandedSkillId((prev) => (prev === id ? null : id))}

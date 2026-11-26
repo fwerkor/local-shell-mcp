@@ -57,6 +57,7 @@ from .semantic_index import (
     render_compaction_semantic_index,
     snapshot_compaction_semantic_index,
 )
+from .sleep_tool import SLEEP_TOOLS, invoke_sleep, sleep_seconds
 from .steering import SteeringStore, merged_text
 from .subagents import (
     MAX_SUBAGENT_DEPTH,
@@ -233,6 +234,7 @@ class AgentRunner:
         if features["web"] and (self.web_search_enabled or explicit_web):
             tools += WEB_TOOLS
         native_names = frozenset(tool["function"]["name"] for tool in tools)
+        tools += SLEEP_TOOLS
         if self.mcp_enabled and (agent or {}).get("mcp_servers") != []:
             mcp_configured = "mcp_servers" in (agent or {})
             mcp_exposed = mcp_configured or (selected_tools is None and not selected)
@@ -400,13 +402,17 @@ class AgentRunner:
                 await publish_native_file_write(self.owner, self.generation, call, output,
                                                 database=self.database, state_dir=get_settings().state_dir)
         preview = output if isinstance(output, str) else "Agent control transferred"
+        from .mcp_projection import NATIVE_MEDIA_TOOLS, mcp_tool_history_message
+
+        if call.name in NATIVE_MEDIA_TOOLS and isinstance(output, str):
+            preview = mcp_tool_history_message(
+                call, output, self.initial_profile.provider if self.initial_profile else "openai",
+            )["content"]
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
         # A UI resource marker is only resolvable after the original client
         # receives a canonical attachment. Derive it from the same native MCP
         # envelope retained in the checkpoint; never infer from display JSON.
         if call.name == "mcp_tool_call" and isinstance(output, str):
-            from .mcp_projection import mcp_tool_history_message
-
             artifact = mcp_tool_history_message(call, output, self.initial_profile.provider if self.initial_profile else "openai").get("artifact")
             ui = artifact.get("ui_resources") if isinstance(artifact, dict) else None
             if isinstance(ui, dict) and isinstance(ui.get("data"), list) and ui["data"]:
@@ -489,6 +495,21 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name == "sleep":
+            try:
+                seconds = sleep_seconds(call.arguments)
+            except ValueError as exc:
+                return f"Tool failed (ValueError): {exc}"
+            if self._publishes_tool_steps():
+                step = self._tool_step(call)
+                self.store.append(self.owner, self.generation.run_id, {
+                    "event": "on_tool_calls_dispatched", "data": {
+                        "dispatched_at": int(time.time() * 1000),
+                        "runId": step["runId"],
+                        "toolCalls": [{"id": call.call_id, "name": call.name, "stepId": step["id"]}],
+                    },
+                }, actor_lease=self.actor_lease)
+            return await invoke_sleep(seconds, self._check_grant)
         if call.name in {'set_memory', 'delete_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)

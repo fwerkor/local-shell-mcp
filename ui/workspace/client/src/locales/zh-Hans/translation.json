@@ -231,7 +231,7 @@
   "com_agents_run_code_info": "允许智能体在安全的沙箱环境中编写和运行代码，以处理计算、数据分析和文件处理。",
   "com_agents_search_aria": "搜索智能体",
   "com_agents_search_empty_heading": "无搜索结果",
-  "com_agents_search_info": "允许智能体在网络上搜索最新信息并注明来源。需要配置一个搜索提供商。",
+  "com_agents_search_info": "允许智能体搜索网络上的最新信息并引用来源。",
   "com_agents_search_instructions": "输入名称或描述以搜索智能体",
   "com_agents_search_name": "根据名称搜索智能体",
   "com_agents_search_no_results": "未找到 \"{{query}}\" 智能体",
@@ -3074,5 +3074,6 @@
   "com_lsm_channel_discover_manual_help": "关闭自动发现即可手动配置模型。",
   "com_lsm_channel_discover_interval": "服务器每 10 分钟刷新一次。刷新失败时将保留现有数据。",
   "com_lsm_channel_discover_context_help": "留空以使用 API 元数据；输入数值可覆盖该值或补充未知的限制。",
-  "com_lsm_channel_refreshed": "模型信息已刷新。"
+  "com_lsm_channel_refreshed": "模型信息已刷新。",
+  "com_ui_tool_name_sleep": "等待"
 }

@@ -192,6 +192,14 @@ This is intended for:
 
 See the [remote workers guide](https://fwerkor.github.io/local-shell-mcp/guides/remote-workers/).
 
+## Agent waiting
+
+WebUI Agents have a controller-local `sleep` tool for retry backoff and polling. Call
+`sleep(seconds=10)` to wait without a Worker or a model request; the default is
+10 seconds and the maximum is 300 seconds per call. Stopping a generation cancels
+the wait. Explicit tool approval policies still apply. For long-running periodic
+work, prefer scheduled conversations.
+
 ## Agent Skills
 
 Skills are discovered from three ordered sources: project-level `/workspace/.agents/skills`, the LSM-managed `/workspace/.local-shell-mcp/agent_config/skills`, and global `~/.config/agents/skills`. Higher-priority sources override lower-priority Skills with the same name, and symlinked Skill directories and files are supported.

@@ -88,7 +88,7 @@ async def test_ask_user_halts_and_resumes_same_sqlite_generation(tmp_path, monke
             assert status["status"] == "complete", status
             assert "pendingAction" not in status
             assert calls == [[
-                "session_manage", "plan_manage", "web_search", "web_fetch", "ask_user_question",
+                "session_manage", "plan_manage", "web_search", "web_fetch", "sleep", "ask_user_question",
             ]] * 2
             latest = repo.latest("local", cid)
             assert latest.run_id == generation.run_id

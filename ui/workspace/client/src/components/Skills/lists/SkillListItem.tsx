@@ -12,6 +12,7 @@ import { cn } from '~/utils';
 interface SkillListItemProps {
   skill: TSkillSummary;
   isActive: boolean;
+  isEnabled?: boolean;
   isExpanded: boolean;
   activeFile: string | null;
   onToggleExpand: (skillId: string) => void;
@@ -258,6 +259,7 @@ function InlineFileTree({
 function SkillListItem({
   skill,
   isActive,
+  isEnabled,
   isExpanded,
   activeFile,
   onToggleExpand,
@@ -310,7 +312,8 @@ function SkillListItem({
           }
         }}
         className={cn(
-          'flex w-full cursor-pointer select-none items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm text-text-primary transition-colors',
+          'flex w-full cursor-pointer select-none items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm transition-colors',
+          isEnabled === false ? 'text-text-secondary' : 'text-text-primary',
           isActive && !activeFile && 'bg-surface-active',
           !isActive && 'hover:bg-surface-hover',
         )}
@@ -324,8 +327,13 @@ function SkillListItem({
         </span>
 
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="truncate">{skill.name}</span>
-          {skill.alwaysApply === true && (
+          <span className={cn('truncate', isEnabled === false && 'opacity-70')}>{skill.name}</span>
+          {isEnabled === false && (
+            <span className="shrink-0 rounded border border-border-light px-1 text-xs text-text-secondary">
+              {localize('com_ui_disabled')}
+            </span>
+          )}
+          {skill.alwaysApply === true && isEnabled === true && (
             <Pin
               className="size-3 shrink-0 text-status-info"
               aria-label={localize('com_ui_skills_always_apply_pin_title')}
