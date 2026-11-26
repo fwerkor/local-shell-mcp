@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Åtkomst till äldre verktyg",
   "com_lsm_agent_machine_default": "Standardmaskinåtkomst",
   "com_lsm_agent_machine_default_help": "Gäller alla maskiner utan uttrycklig åsidosättning, inklusive nyregistrerade maskiner.",
+  "com_lsm_agent_machine_inherit_global": "Ärv globala inställningar",
   "com_lsm_agent_machine_inherit": "Ärv standard",
   "com_lsm_agent_machine_access": "Maskinbehörigheter",
   "com_lsm_agent_machine_help": "Välj åtkomst per maskin, inte per verktyg. Chattens globala → projekt → chattbehörigheter kan ytterligare begränsa denna agent. Spara agenten för att tillämpa ändringar.",

@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Accesso agli strumenti legacy",
   "com_lsm_agent_machine_default": "Accesso macchina predefinito",
   "com_lsm_agent_machine_default_help": "Si applica a tutte le macchine senza override esplicito, comprese le macchine appena registrate.",
+  "com_lsm_agent_machine_inherit_global": "Eredita impostazioni globali",
   "com_lsm_agent_machine_inherit": "Eredita l'impostazione predefinita",
   "com_lsm_agent_machine_access": "Autorizzazioni macchina",
   "com_lsm_agent_machine_help": "Scegli l'accesso per macchina, non per strumento. Le autorizzazioni Globali → Progetto → Chat della chat possono limitare ulteriormente questo agente. Salva l'agente per applicare le modifiche.",

@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "الوصول إلى الأداة القديمة",
   "com_lsm_agent_machine_default": "الوصول إلى الجهاز الافتراضي",
   "com_lsm_agent_machine_default_help": "ينطبق على جميع الأجهزة دون تجاوز صريح، بما في ذلك الأجهزة المسجلة حديثًا.",
+  "com_lsm_agent_machine_inherit_global": "وراثة الإعدادات العامة",
   "com_lsm_agent_machine_inherit": "ترث الافتراضي",
   "com_lsm_agent_machine_access": "أذونات الآلة",
   "com_lsm_agent_machine_help": "اختر الوصول لكل جهاز، وليس لكل أداة. يمكن لأذونات الدردشة العالمية → المشروع → الدردشة تقييد هذا الوكيل بشكل أكبر. احفظ الوكيل لتطبيق التغييرات.",

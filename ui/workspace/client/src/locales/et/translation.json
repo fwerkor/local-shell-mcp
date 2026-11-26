@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Juurdepääs pärandtööriistadele",
   "com_lsm_agent_machine_default": "Masina vaikejuurdepääs",
   "com_lsm_agent_machine_default_help": "Kehtib kõikidele masinatele ilma selgesõnalise alistamiseta, sealhulgas äsja registreeritud masinatele.",
+  "com_lsm_agent_machine_inherit_global": "Päri üldsätted",
   "com_lsm_agent_machine_inherit": "Päri vaikimisi",
   "com_lsm_agent_machine_access": "Masina load",
   "com_lsm_agent_machine_help": "Valige juurdepääs masinale, mitte tööriistale. Vestluse Globaalne → Projekt → Vestluse õigused võivad seda agenti veelgi piirata. Muudatuste rakendamiseks salvestage agent.",

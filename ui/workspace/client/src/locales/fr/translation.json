@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Accès aux outils existants",
   "com_lsm_agent_machine_default": "Accès machine par défaut",
   "com_lsm_agent_machine_default_help": "S'applique à toutes les machines sans remplacement explicite, y compris les machines nouvellement enregistrées.",
+  "com_lsm_agent_machine_inherit_global": "Hériter des paramètres globaux",
   "com_lsm_agent_machine_inherit": "Hériter par défaut",
   "com_lsm_agent_machine_access": "Autorisations des machines",
   "com_lsm_agent_machine_help": "Choisissez l’accès par machine et non par outil. Les autorisations Global → Projet → Chat du chat peuvent restreindre davantage cet agent. Enregistrez l'agent pour appliquer les modifications.",

@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Piekļuve mantotajam rīkam",
   "com_lsm_agent_machine_default": "Noklusējuma piekļuve mašīnai",
   "com_lsm_agent_machine_default_help": "Attiecas uz visām iekārtām bez nepārprotamas ignorēšanas, tostarp tikko reģistrētām mašīnām.",
+  "com_lsm_agent_machine_inherit_global": "Mantot globālos iestatījumus",
   "com_lsm_agent_machine_inherit": "Pārmantot noklusējumu",
   "com_lsm_agent_machine_access": "Mašīnas atļaujas",
   "com_lsm_agent_machine_help": "Izvēlieties piekļuvi katrai mašīnai, nevis instrumentam. Tērzēšanas Globālais → Projekts → Tērzēšanas atļaujas var vēl vairāk ierobežot šo aģentu. Saglabājiet aģentu, lai piemērotu izmaiņas.",

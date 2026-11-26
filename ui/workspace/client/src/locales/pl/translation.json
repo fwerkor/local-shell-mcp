@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Dostęp do starszych narzędzi",
   "com_lsm_agent_machine_default": "Domyślny dostęp do komputera",
   "com_lsm_agent_machine_default_help": "Dotyczy wszystkich maszyn bez wyraźnego zastąpienia, w tym nowo zarejestrowanych maszyn.",
+  "com_lsm_agent_machine_inherit_global": "Dziedzicz ustawienia globalne",
   "com_lsm_agent_machine_inherit": "Dziedzicz wartość domyślną",
   "com_lsm_agent_machine_access": "Uprawnienia maszyny",
   "com_lsm_agent_machine_help": "Wybierz dostęp na maszynę, a nie na narzędzie. Uprawnienia globalne → projektu → czatu mogą dodatkowo ograniczyć tego agenta. Zapisz agenta, aby zastosować zmiany.",

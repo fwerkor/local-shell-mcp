@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Prieiga prie pasenusių įrankių",
   "com_lsm_agent_machine_default": "Numatytoji prieiga prie mašinos",
   "com_lsm_agent_machine_default_help": "Taikoma visoms mašinoms be aiškaus nepaisymo, įskaitant naujai registruotas mašinas.",
+  "com_lsm_agent_machine_inherit_global": "Paveldėti visuotinius nustatymus",
   "com_lsm_agent_machine_inherit": "Paveldėti numatytuosius nustatymus",
   "com_lsm_agent_machine_access": "Mašinos leidimai",
   "com_lsm_agent_machine_help": "Pasirinkite prieigą kiekvienai mašinai, o ne įrankiui. Pokalbio pasaulinis → projektas → pokalbių leidimai gali dar labiau apriboti šį agentą. Išsaugokite agentą, kad pritaikytumėte pakeitimus.",

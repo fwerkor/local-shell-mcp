@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Pristup starim alatima",
   "com_lsm_agent_machine_default": "Zadani pristup mašini",
   "com_lsm_agent_machine_default_help": "Primjenjuje se na sve strojeve bez eksplicitnog nadjačavanja, uključujući novoregistrirane strojeve.",
+  "com_lsm_agent_machine_inherit_global": "Naslijedi globalne postavke",
   "com_lsm_agent_machine_inherit": "Naslijediti default",
   "com_lsm_agent_machine_access": "Dozvole mašine",
   "com_lsm_agent_machine_help": "Odaberite pristup po mašini, a ne po alatu. Globalno → Projekat → Dozvole za ćaskanje mogu dodatno ograničiti ovog agenta. Sačuvajte agenta da primijenite promjene.",

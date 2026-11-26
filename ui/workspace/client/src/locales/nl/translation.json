@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Toegang tot verouderde tools",
   "com_lsm_agent_machine_default": "Standaard machinetoegang",
   "com_lsm_agent_machine_default_help": "Geldt voor alle machines zonder expliciete overschrijving, inclusief nieuw geregistreerde machines.",
+  "com_lsm_agent_machine_inherit_global": "Globale instellingen overnemen",
   "com_lsm_agent_machine_inherit": "Standaard overnemen",
   "com_lsm_agent_machine_access": "Machinerechten",
   "com_lsm_agent_machine_help": "Kies toegang per machine, niet per tool. De machtigingen Globaal → Project → Chat van de chat kunnen deze agent verder beperken. Sla de agent op om wijzigingen toe te passen.",

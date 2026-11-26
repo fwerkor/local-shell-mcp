@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "دسترسی به ابزار قدیمی",
   "com_lsm_agent_machine_default": "دسترسی پیش فرض دستگاه",
   "com_lsm_agent_machine_default_help": "برای همه ماشین‌ها بدون لغو صریح، از جمله ماشین‌های تازه ثبت‌شده، اعمال می‌شود.",
+  "com_lsm_agent_machine_inherit_global": "ارث‌بری از تنظیمات سراسری",
   "com_lsm_agent_machine_inherit": "به ارث بردن پیش فرض",
   "com_lsm_agent_machine_access": "مجوزهای ماشین",
   "com_lsm_agent_machine_help": "دسترسی به هر ماشین را انتخاب کنید، نه برای هر ابزار. مجوزهای جهانی → پروژه → چت می تواند این نماینده را بیشتر محدود کند. برای اعمال تغییرات، Agent را ذخیره کنید.",

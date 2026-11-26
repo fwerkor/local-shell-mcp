@@ -2855,6 +2855,7 @@
   "com_lsm_agent_machine_legacy_choice": "Accés a eines heretades",
   "com_lsm_agent_machine_default": "Accés per defecte a la màquina",
   "com_lsm_agent_machine_default_help": "S'aplica a totes les màquines sense una substitució explícita, incloses les màquines recentment registrades.",
+  "com_lsm_agent_machine_inherit_global": "Hereta els valors globals",
   "com_lsm_agent_machine_inherit": "Hereta per defecte",
   "com_lsm_agent_machine_access": "Permisos de màquina",
   "com_lsm_agent_machine_help": "Trieu l'accés per màquina, no per eina. Els permisos Global → Project → Chat del xat poden restringir encara més aquest agent. Deseu l'agent per aplicar els canvis.",
