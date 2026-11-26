@@ -26,6 +26,7 @@ import {
   isValidCronExpression,
   cadenceIntervalMinutes,
   SCHEDULE_CRON_MAX_LENGTH,
+  SCHEDULE_CONTINUOUS_MAX_DELAY,
 } from 'librechat-data-provider';
 import type {
   TSchedule,
@@ -78,6 +79,7 @@ type ScheduleFormValues = {
   /** Only read when `frequency` is `cron`; held across a switch away and back so a
    *  user who tries a preset does not lose the expression they typed. */
   expression: string;
+  delayMinutes: number;
   timezone: string;
 };
 
@@ -87,6 +89,7 @@ const FREQUENCY_LABELS: Record<ScheduleFrequency, TranslationKeys> = {
   weekdays: 'com_ui_schedule_weekdays',
   weekly: 'com_ui_schedule_weekly',
   cron: 'com_ui_schedule_cron',
+  continuous: 'com_ui_schedule_continuous',
 };
 
 /** Every weekday at 09:00: a recognisable starting point to edit rather than an
@@ -117,6 +120,7 @@ const getDefaultValues = (schedule?: TSchedule): ScheduleFormValues => {
       minute: 0,
       daysOfWeek: DEFAULT_WEEKLY_DAYS,
       expression: DEFAULT_CRON,
+      delayMinutes: 0,
       timezone: localTimezone,
     };
   }
@@ -130,6 +134,17 @@ const getDefaultValues = (schedule?: TSchedule): ScheduleFormValues => {
     timezone: schedule.timezone || localTimezone,
   };
   const cadence = schedule.cadence;
+  if (cadence.frequency === 'continuous') {
+    return {
+      ...identity,
+      frequency: 'continuous',
+      hour: 9,
+      minute: 0,
+      daysOfWeek: DEFAULT_WEEKLY_DAYS,
+      expression: DEFAULT_CRON,
+      delayMinutes: cadence.delayMinutes,
+    };
+  }
   if (isCronCadence(cadence)) {
     // A cron row carries no hour or minute of its own, so the structured pickers keep
     // their defaults: switching away from Custom then lands on a sensible time rather
@@ -141,6 +156,7 @@ const getDefaultValues = (schedule?: TSchedule): ScheduleFormValues => {
       minute: 0,
       daysOfWeek: DEFAULT_WEEKLY_DAYS,
       expression: cadence.expression,
+      delayMinutes: 0,
     };
   }
   return {
@@ -152,15 +168,19 @@ const getDefaultValues = (schedule?: TSchedule): ScheduleFormValues => {
       ? [...cadence.daysOfWeek].sort((a, b) => a - b)
       : DEFAULT_WEEKLY_DAYS,
     expression: DEFAULT_CRON,
+    delayMinutes: 0,
   };
 };
 
 type CadenceFormValues = Pick<
   ScheduleFormValues,
-  'frequency' | 'hour' | 'minute' | 'daysOfWeek' | 'expression'
+  'frequency' | 'hour' | 'minute' | 'daysOfWeek' | 'expression' | 'delayMinutes'
 >;
 
 const buildCadence = (values: CadenceFormValues): TScheduleCadence => {
+  if (values.frequency === 'continuous') {
+    return { frequency: 'continuous', delayMinutes: values.delayMinutes };
+  }
   if (values.frequency === 'cron') {
     return { frequency: 'cron', expression: values.expression.trim() };
   }
@@ -217,6 +237,7 @@ export default function ScheduleDialog({
   const minute = watch('minute');
   const daysOfWeek = watch('daysOfWeek');
   const expression = watch('expression');
+  const delayMinutes = watch('delayMinutes');
   const timezone = watch('timezone');
   const selectedAgentId = watch('agent_id');
   /** Not named `hour12`: that is already the form's own 12-hour clock VALUE (1-12).
@@ -374,7 +395,8 @@ export default function ScheduleDialog({
     dirtyFields.hour === true ||
     dirtyFields.minute === true ||
     dirtyFields.daysOfWeek != null ||
-    dirtyFields.expression === true;
+    dirtyFields.expression === true ||
+    dirtyFields.delayMinutes === true;
   /** Whether this submit changes the schedule's TIMING. The zone alone re-times
    *  every occurrence (the server recomputes the next run and re-measures the
    *  interval floor against the effective cadence/zone pair), so the floor below
@@ -463,9 +485,9 @@ export default function ScheduleDialog({
   /** Read by the summary, the preview and the interval floor, each of which walks
    *  croner. Memoized so a name or prompt keystroke does not re-derive all three. */
   const previewCadence = useMemo(
-    () => buildCadence({ frequency, hour, minute, daysOfWeek, expression }),
+    () => buildCadence({ frequency, hour, minute, daysOfWeek, expression, delayMinutes }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `daysKey` IS `daysOfWeek`
-    [frequency, hour, minute, daysKey, expression],
+    [frequency, hour, minute, daysKey, expression, delayMinutes],
   );
 
   /** Weekly with nothing selected is expressible in the form but not on the wire (the
@@ -503,6 +525,7 @@ export default function ScheduleDialog({
    *  branch walks 32 occurrences to find its tightest gap. */
   const belowFloor = useMemo(
     () =>
+      previewCadence.frequency !== 'continuous' &&
       floorApplies &&
       cronIsValid &&
       daysAreValid &&
@@ -514,7 +537,15 @@ export default function ScheduleDialog({
     [floorApplies, cronIsValid, daysAreValid, minIntervalMinutes, previewCadence, timezone],
   );
 
+  const delayIsValid =
+    frequency !== 'continuous' ||
+    (Number.isInteger(delayMinutes) &&
+      delayMinutes >= 0 &&
+      delayMinutes <= SCHEDULE_CONTINUOUS_MAX_DELAY);
   const resolveCadenceError = (): string | null => {
+    if (!delayIsValid) {
+      return localize('com_ui_schedule_delay_invalid', { max: SCHEDULE_CONTINUOUS_MAX_DELAY });
+    }
     if (!daysAreValid) {
       return localize('com_ui_schedule_days_required');
     }
@@ -524,15 +555,23 @@ export default function ScheduleDialog({
     return null;
   };
   const cadenceError = resolveCadenceError();
-  const canSubmit = cronIsValid && daysAreValid && !belowFloor && !isLoading;
+  const canSubmit = cronIsValid && daysAreValid && delayIsValid && !belowFloor && !isLoading;
 
   /** The offset disambiguates two similar names, which matters now that the zone is
    *  something the user picks rather than the browser's own. Memoized because it
    *  builds an Intl formatter and the dialog re-renders per keystroke. */
   const timezoneOffset = useMemo(() => formatTimezoneOffset(timezone, locale), [timezone, locale]);
-  const summary = `${describeCadence(previewCadence, localize, locale, prefersMeridiem, weekStartsOn)} · ${
-    timezoneOffset ? `${timezone} (${timezoneOffset})` : timezone
-  }`;
+  const cadenceSummary = describeCadence(
+    previewCadence,
+    localize,
+    locale,
+    prefersMeridiem,
+    weekStartsOn,
+  );
+  const summary =
+    frequency === 'continuous'
+      ? cadenceSummary
+      : `${cadenceSummary} · ${timezoneOffset ? `${timezone} (${timezoneOffset})` : timezone}`;
 
   /** Both labels for every pill, in week order, built once per locale and week start:
    *  inline they cost fourteen `Intl.DateTimeFormat` constructions on every keystroke
@@ -800,7 +839,23 @@ export default function ScheduleDialog({
               />
             </fieldset>
 
-            {frequency === 'cron' ? (
+            {frequency === 'continuous' ? (
+              <div className="space-y-2">
+                <Label htmlFor="schedule-delay" className="text-sm font-medium text-text-primary">
+                  {localize('com_ui_schedule_delay_minutes')}
+                </Label>
+                <Input
+                  id="schedule-delay"
+                  type="number"
+                  min={0}
+                  max={SCHEDULE_CONTINUOUS_MAX_DELAY}
+                  step={1}
+                  aria-invalid={!delayIsValid}
+                  aria-describedby="schedule-cadence-message"
+                  {...register('delayMinutes', { valueAsNumber: true })}
+                />
+              </div>
+            ) : frequency === 'cron' ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="schedule-cron" className="text-sm font-medium text-text-primary">
@@ -957,7 +1012,7 @@ export default function ScheduleDialog({
               {/* With no day selected, `buildCadence` substitutes Monday so the maths
                   downstream stays defined — but describing that substitution would
                   contradict the "pick at least one day" message right below it. */}
-              {daysAreValid && (
+              {daysAreValid && delayIsValid && (
                 <p
                   className="break-words rounded-lg bg-surface-secondary px-3 py-2 text-sm text-text-secondary"
                   data-testid="schedule-summary"

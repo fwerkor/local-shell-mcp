@@ -29,6 +29,7 @@ _WORKER: asyncio.Task | None = None
 _ACTIVE: set[asyncio.Task] = set()
 _LIMITS = {'maxPerUser': 25, 'minIntervalMinutes': 5, 'requireProject': False}
 _DAY_MS = 86_400_000
+_MAX_CONTINUOUS_DELAY_MINUTES = 525_600
 
 
 def _iso(ms: int | None):
@@ -76,6 +77,11 @@ def _parse_cadence(value):
     if not isinstance(value, dict):
         raise HTTPException(400, detail='Invalid schedule cadence')
     frequency = value.get('frequency')
+    if frequency == 'continuous':
+        delay = value.get('delayMinutes')
+        if type(delay) is not int or not 0 <= delay <= _MAX_CONTINUOUS_DELAY_MINUTES:
+            raise HTTPException(400, detail='Invalid continuous schedule delay')
+        return frequency, delay
     if frequency == 'cron':
         expression = value.get('expression')
         if not isinstance(expression, str) or len(expression) > 256:
@@ -133,6 +139,8 @@ def next_run(cadence, timezone, *, after_ms, min_interval_minutes=5):
     """UTC minute scan avoids nonexistent DST times and disambiguates repeated times."""
     parsed = _parse_cadence(cadence)
     zone = _zone(timezone)
+    if parsed[0] == 'continuous':
+        return after_ms + parsed[1] * 60_000
     initial = (after_ms // 60_000 + 1) * 60_000
     earliest = after_ms + min_interval_minutes * 60_000
     for timestamp in range(initial, initial + 370 * _DAY_MS, 60_000):
@@ -149,6 +157,27 @@ def next_run(cadence, timezone, *, after_ms, min_interval_minutes=5):
         if found is not None:
             return found
     raise HTTPException(400, detail='Schedule has no occurrence within one Gregorian cycle')
+
+
+def _initial_run(config, now):
+    if config['cadence']['frequency'] == 'continuous':
+        return now
+    return next_run(config['cadence'], config['timezone'], after_ms=now)
+
+
+def _continuous_next_run(db, cadence, occurrence):
+    # Prefer the generation's persisted terminal timestamp over the time the
+    # polling worker observed it. Admission failures have no generation.
+    terminal = db.execute(
+        "SELECT updated_at FROM runs WHERE id=? "
+        "AND status IN ('complete','error','aborted','interrupted')",
+        (occurrence['run_id'],),
+    ).fetchone()
+    finished_ms = (terminal['updated_at'] if terminal else occurrence['updated_at']) // 1000
+    delay = cadence['delayMinutes']
+    if occurrence['status'] != 'success':
+        delay = max(delay, _LIMITS['minIntervalMinutes'])
+    return finished_ms + delay * 60_000
 
 
 def _next_sparse_cron(parsed, zone, after_ms, earliest):
@@ -304,7 +333,7 @@ async def schedules(request: Request):
     config.setdefault('target', 'new')
     now = int(time.time() * 1000)
     enabled = data.get('enabled', True)
-    next_at = next_run(config['cadence'], config['timezone'], after_ms=now) if enabled else None
+    next_at = _initial_run(config, now) if enabled else None
     sid = str(uuid.uuid4())
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
@@ -357,8 +386,20 @@ async def schedule(request: Request):
         if latest['revision'] != row['revision']:
             raise HTTPException(409, detail='Schedule configuration changed')
         if enabled and (timing_changed or not latest['enabled']):
-            next_at = next_run(config['cadence'], config['timezone'],
-                               after_ms=int(time.time() * 1000))
+            active = config['cadence']['frequency'] == 'continuous' and db.execute(
+                "SELECT 1 FROM webui_schedule_runs WHERE schedule_id=? "
+                "AND status IN ('claimed','started')", (sid,),
+            ).fetchone()
+            next_at = None if active else _initial_run(config, int(time.time() * 1000))
+            if (not active and latest['enabled'] and config['cadence']['frequency'] == 'continuous'
+                    and json.loads(row['config'])['cadence']['frequency'] == 'continuous'):
+                last = db.execute(
+                    "SELECT * FROM webui_schedule_runs WHERE schedule_id=? "
+                    "AND status IN ('success','error','interrupted') ORDER BY updated_at DESC LIMIT 1",
+                    (sid,),
+                ).fetchone()
+                if last is not None:
+                    next_at = _continuous_next_run(db, config['cadence'], last)
         else:
             # The scheduler may claim the due occurrence after the first read.
             # Preserve the latest next_run under the same SQLite write lease.
@@ -405,7 +446,17 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
                     continue
             # Anchor recurrence to the scheduled due minute, never to polling
             # latency. The creation/edit path already enforces the initial delay.
-            if manual:
+            if config['cadence']['frequency'] == 'continuous':
+                # Arm the next occurrence only when this one settles. A fast
+                # completion or disable/re-enable can reuse a millisecond; the
+                # occurrence identity must still be unique under this write lock.
+                while db.execute(
+                    'SELECT 1 FROM webui_schedule_runs WHERE schedule_id=? AND due_at=?',
+                    (row['id'], due),
+                ).fetchone():
+                    due += 1
+                next_at = None
+            elif manual:
                 next_at = row['next_run']
             else:
                 try:
@@ -496,6 +547,15 @@ def _settle(database, occurrence_id, status, *, conversation_id=None, run_id=Non
             db.execute('UPDATE webui_schedules SET run_count=run_count+1,'
                        'failure_count=failure_count+?,last_run=?,updated_at=? WHERE id=?',
                        (int(status != 'success'), _json(data), _now(), row['schedule_id']))
+            schedule = db.execute('SELECT config,enabled FROM webui_schedules WHERE id=?',
+                                  (row['schedule_id'],)).fetchone()
+            if schedule is not None and schedule['enabled']:
+                cadence = json.loads(schedule['config'])['cadence']
+                if cadence['frequency'] == 'continuous':
+                    settled = db.execute('SELECT * FROM webui_schedule_runs WHERE id=?',
+                                         (occurrence_id,)).fetchone()
+                    db.execute('UPDATE webui_schedules SET next_run=? WHERE id=?',
+                               (_continuous_next_run(db, cadence, settled), row['schedule_id']))
 
 
 async def _dispatch(occurrence, database):

@@ -48,6 +48,9 @@ const TRANSITION_PROBE_OCCURRENCES = 5;
  * does not keep or accept a cadence the server then rejects.
  */
 export function cadenceToCron(cadence: TScheduleCadence): string {
+  if (cadence.frequency === 'continuous') {
+    throw new Error('Continuous schedules have no cron expression');
+  }
   if (cadence.frequency === 'cron') {
     return cadence.expression;
   }
@@ -321,6 +324,9 @@ function cronIntervalMinutes(expression: string, timezone?: string): number {
  * formulas already carry the worst-case allowance.
  */
 export function cadenceIntervalMinutes(cadence: TScheduleCadence, timezone?: string): number {
+  if (cadence.frequency === 'continuous') {
+    return cadence.delayMinutes;
+  }
   if (isCronCadence(cadence)) {
     return cronIntervalMinutes(cadence.expression, timezone);
   }

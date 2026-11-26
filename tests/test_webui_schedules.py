@@ -313,3 +313,117 @@ async def test_schedule_worker_start_stop_and_dispatch_rejection(state, monkeypa
         }, 0), repo.database,
     )
     assert schedule_routes._WORKER is None
+
+
+@pytest.mark.parametrize('delay', [-1, 1.5, True, None, 525601])
+def test_continuous_rejects_invalid_delay(delay):
+    with pytest.raises(HTTPException):
+        schedule_routes._validate_cadence_interval(
+            {'frequency': 'continuous', 'delayMinutes': delay})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('delay', [0, 3])
+async def test_continuous_rearms_from_persisted_completion(state, monkeypatch, delay):
+    from local_shell_mcp.webui import generation_routes, providers
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    app, repo, agent = state
+    store = GenerationStore(repo.database)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(providers, 'provider_config',
+                        lambda *args, **kwargs: ProviderConfig('openai', 'mock-model', 'http://mock', ''))
+    dispatched = []
+
+    async def fake_start(owner, generation, *args, **kwargs):
+        dispatched.append(generation)
+        return True
+
+    monkeypatch.setattr(generation_routes, '_start_task', fake_start)
+    payload = {
+        'name': 'Continuous', 'prompt': 'Continue', 'agent_id': agent['id'],
+        'cadence': {'frequency': 'continuous', 'delayMinutes': delay},
+        'timezone': 'UTC', 'clientRequestId': 'continuous',
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as c:
+        created = await c.post('/api/schedules', json=payload)
+        assert created.status_code == 201, created.text
+        sid = created.json()['id']
+        claims = schedule_routes._claim_due(repo.database)
+        assert len(claims) == 1
+        await schedule_routes._dispatch(claims[0], repo.database)
+        assert schedule_routes._claim_due(repo.database) == []
+        assert (await c.get('/api/schedules/' + sid)).json()['nextRunAt'] is None
+        generation = dispatched[0]
+        store.finish('alice', generation.run_id, status='complete', text='Done')
+        with repo.database.connect() as db:
+            finished = db.execute('SELECT updated_at FROM runs WHERE id=?',
+                                  (generation.run_id,)).fetchone()[0] // 1000
+        # A fresh database instance simulates the scheduler observing completion
+        # after a restart, long after the model actually finished.
+        reopened = SQLiteDatabase(repo.database.root)
+        schedule_routes._refresh(reopened)
+        schedule_routes._refresh(reopened)
+        expected = finished + delay * 60_000
+        row = schedule_routes._find('alice', sid, reopened)
+        assert row['next_run'] == expected and row['run_count'] == 1
+        monkeypatch.setattr(schedule_routes.time, 'time', lambda: (expected - 1) / 1000)
+        assert schedule_routes._claim_due(reopened) == []
+        monkeypatch.setattr(schedule_routes.time, 'time', lambda: (expected + 1) / 1000)
+        second = schedule_routes._claim_due(reopened)
+        assert len(second) == 1 and second[0][0] != claims[0][0]
+        assert schedule_routes._claim_due(reopened) == []
+
+        # An active occurrence adopts a delay edit only upon completion.
+        edited = await c.patch('/api/schedules/' + sid, json={
+            'cadence': {'frequency': 'continuous', 'delayMinutes': 7},
+        })
+        assert edited.status_code == 200 and edited.json()['nextRunAt'] is None
+        schedule_routes._settle(reopened, second[0][0], 'success')
+        row = schedule_routes._find('alice', sid, reopened)
+        assert row['next_run'] >= schedule_routes._now() // 1000 + 419_900
+
+        # Editing a waiting schedule anchors its new delay to the same completion.
+        edited = await c.patch('/api/schedules/' + sid, json={
+            'cadence': {'frequency': 'continuous', 'delayMinutes': 9},
+        })
+        assert edited.status_code == 200
+        assert schedule_routes._find('alice', sid, reopened)['next_run'] == row['next_run'] + 120_000
+
+        # Pausing an active task prevents it from rearming on completion.
+        # Manual requests have an independent one-minute duplicate guard.
+        with reopened.connect() as db:
+            db.execute('UPDATE webui_schedule_runs SET created_at=0 WHERE schedule_id=?', (sid,))
+        third = schedule_routes._claim_due(reopened, owner='alice', sid=sid, manual=True)
+        assert len(third) == 1
+        paused = await c.patch('/api/schedules/' + sid, json={'enabled': False})
+        assert paused.status_code == 200
+        schedule_routes._settle(reopened, third[0][0], 'success')
+        assert schedule_routes._find('alice', sid, reopened)['next_run'] is None
+        assert schedule_routes._claim_due(reopened) == []
+        enabled = await c.patch('/api/schedules/' + sid, json={'enabled': True})
+        assert enabled.status_code == 200
+        assert len(schedule_routes._claim_due(reopened)) == 1
+
+
+@pytest.mark.asyncio
+async def test_continuous_failure_has_retry_floor(state):
+    app, repo, agent = state
+    payload = {
+        'name': 'Continuous', 'prompt': 'Continue', 'agent_id': agent['id'],
+        'cadence': {'frequency': 'continuous', 'delayMinutes': 0},
+        'timezone': 'UTC', 'clientRequestId': 'continuous-failure',
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as c:
+        created = await c.post('/api/schedules', json=payload)
+        sid = created.json()['id']
+        claim, = schedule_routes._claim_due(repo.database)
+        before = schedule_routes._now() // 1000
+        schedule_routes._settle(repo.database, claim[0], 'error', error='test failure')
+        row = schedule_routes._find('alice', sid, repo.database)
+        assert row['failure_count'] == 1
+        assert row['next_run'] >= before + 300_000
+        assert schedule_routes._claim_due(repo.database) == []

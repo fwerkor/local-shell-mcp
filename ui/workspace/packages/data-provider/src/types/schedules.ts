@@ -4,7 +4,11 @@ import { z } from 'zod';
 export const scheduleStructuredFrequencies = ['hourly', 'daily', 'weekdays', 'weekly'] as const;
 export type ScheduleStructuredFrequency = (typeof scheduleStructuredFrequencies)[number];
 
-export const scheduleFrequencies = [...scheduleStructuredFrequencies, 'cron'] as const;
+export const scheduleFrequencies = [
+  ...scheduleStructuredFrequencies,
+  'continuous',
+  'cron',
+] as const;
 export type ScheduleFrequency = (typeof scheduleFrequencies)[number];
 
 /** Bounds a stored expression. Generous for five fields, because each one can hold a
@@ -60,9 +64,17 @@ export const cronCadenceSchema = z.object({
 });
 export type TCronCadence = z.infer<typeof cronCadenceSchema>;
 
+export const SCHEDULE_CONTINUOUS_MAX_DELAY = 525_600;
+export const continuousCadenceSchema = z.object({
+  frequency: z.literal('continuous'),
+  delayMinutes: z.number().int().min(0).max(SCHEDULE_CONTINUOUS_MAX_DELAY),
+});
+export type TContinuousCadence = z.infer<typeof continuousCadenceSchema>;
+
 export const scheduleCadenceSchema = z.discriminatedUnion('frequency', [
   structuredCadenceSchema,
   cronCadenceSchema,
+  continuousCadenceSchema,
 ]);
 export type TScheduleCadence = z.infer<typeof scheduleCadenceSchema>;
 
