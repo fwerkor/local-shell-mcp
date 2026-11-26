@@ -25,6 +25,7 @@ permissions:
 concurrency:
   group: release-${{ github.event.inputs.tag }}
   cancel-in-progress: false
+  queue: max
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
