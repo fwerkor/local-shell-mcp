@@ -84,7 +84,7 @@ def test_original_schema_respects_other_tools_and_empty_policy(bound_policy, tmp
         "local", cid, scopes=base,
     )} == {"session_manage", "plan_manage"}
     assert registry.registered_definitions(("totally_missing",)) == []
-    assert registry._encode_result(([], {"ok": True})) == '{"ok": true}'
+    assert registry._encode_result(([], {"ok": True})) == '{"ok":true}'
     from mcp.types import (
         EmbeddedResource,
         ImageContent,
@@ -102,7 +102,7 @@ def test_original_schema_respects_other_tools_and_empty_policy(bound_policy, tmp
     assert json.loads(registry._encode_result({"path": tmp_path})) == {"path": str(tmp_path)}
     oversized = {"payload": "z" * 40000}
     assert json.loads(registry._encode_result(oversized)) == oversized
-    assert '"ok": true' in registry._encode_result(SimpleNamespace(model_dump=lambda **_: {"ok": True}))
+    assert json.loads(registry._encode_result(SimpleNamespace(model_dump=lambda **_: {"ok": True}))) == {"ok": True}
     assert registry._can_authorize("local", cid, "local", "read", base, None) is False
 
 
@@ -169,7 +169,7 @@ async def test_transfer_job_retry_rechecks_persisted_endpoints(bound_policy, mon
     monkeypatch.setattr(registry, "_invoke_registered", original)
     scopes = {"shell:read", "shell:write", "shell:execute", "remote:use"}
     call = ModelToolCall("retry", "job_retry", {"job_id": "transfer-job"})
-    assert await registry.call_tool("local", cid, call, granted_scopes=scopes) == '{"ok": true}'
+    assert json.loads(await registry.call_tool("local", cid, call, granted_scopes=scopes)) == {"ok": True}
     assert len(invoked) == 1
     repo.save_setting("local", "agent.machine_policy.conversation." + cid,
                       {"local": "write", "worker1": "none", "worker2": "write"})

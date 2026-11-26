@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # Справочник tools
 
 Эта страница строится из фактических MCP tool schemas. После изменения public tool surface запустите `python scripts/generate-tools-reference.py`, чтобы обновить English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Управляет одной долговечной Logical Session. start создаёт новую задачу и возвращает её session_id. resume продолжает только явный session_id, переданный пользователем или уже присутствующий в этом разговоре. Все действия, кроме start, требуют session_id. Действия: start, resume, get, report, finish, cancel, delete. report принимает summary/findings/next/blockers/objective/label; delete требует terminal Session. После 24 часов бездействия активные Sessions становятся stale при обращении, просмотре списка или запуске, если не выполняется вызов инструмента. Sessions stale можно возобновить либо удалить из истории начиная с самых старых.
+Управляет одной долговечной Logical Session. start создаёт новую задачу и возвращает её session_id. resume продолжает только явный session_id, переданный пользователем или уже присутствующий в этом разговоре. Все действия, кроме start, требуют session_id. Действия: start, resume, get, report, finish, cancel, delete. report принимает summary/findings/next/blockers/objective/label; delete требует terminal Session. После 24 часов бездействия активные Sessions становятся stale при обращении, просмотре списка или запуске, если не выполняется вызов инструмента. Sessions stale можно возобновить либо удалить из истории начиная с самых старых. Укажите verbose=true, чтобы включить всю недавнюю активность.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -112,6 +112,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Запускает одну non-interactive shell command локально или на remote machine. Используйте для build, test, package-manager, Git и inspection commands, которые должны быстро завершаться. Для long-running, interactive или streaming process используйте `shell_start` или `job_start`. Optional purpose/explanation fields позволяют указать причину запуска.
+Запускает одну non-interactive shell command локально или на remote machine. Используйте для build, test, package-manager, Git и inspection commands, которые должны быстро завершаться. Для long-running, interactive или streaming process используйте `shell_start` или `job_start`. Optional purpose/explanation fields позволяют указать причину запуска. Отсутствующие timed_out, truncated и persisted означают false, отсутствующий stderr — пустой вывод. Успешный exit_code=0 означает data.ok=true.
 
 При `persist_on_timeout=true` (по умолчанию false) задача продолжает выполняться после тайм-аута и возвращает `job_id`. Результат доступен через `job_tail`; stdout и stderr объединяются.
 
@@ -161,6 +162,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_python`
 
-Пишет и запускает short Python script локально или на remote machine.
+Пишет и запускает short Python script локально или на remote machine. Отсутствующие timed_out, truncated и persisted означают false, отсутствующий stderr — пустой вывод. Успешный exit_code=0 означает data.ok=true.
 
 При `persist_on_timeout=true` (по умолчанию false) задача продолжает выполняться после тайм-аута и возвращает `job_id`. Результат доступен через `job_tail`; stdout и stderr объединяются.
 
@@ -182,6 +184,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_tail`
 
-Читает recent output tracked local/remote job.
+Читает недавний вывод и состояние отслеживаемой задачи. Для полных метаданных используйте verbose=true или job_get; отсутствие log_truncated означает false.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-Возвращает full cached schema dynamic MCP tool с именем `<server>:<tool>`. Если cache stale, refresh server через `mcp_manage`.
+Возвращает полную кэшированную схему динамического инструмента MCP `<server>:<tool>`. Controller обновляет кэш автоматически; mcp_manage позволяет принудительно обновить его.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -784,7 +789,7 @@ OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, r
 
 ### `remote_manage`
 
-Управляет remote workers через action=invite, list, reset, revoke или rename. invite принимает name/workdir/ttl_s/max_uses; revoke требует machine; rename требует machine и new_name. Значение max_uses по умолчанию — 1. reset требует machine и очищает ожидающие или безопасно отменяемые активные запросы управления, не отключая worker; уже начатые защищённые операции сохраняются.
+Управляет remote workers через action=invite, list, reset, revoke или rename. invite принимает name/workdir/ttl_s/max_uses; revoke требует machine; rename требует machine и new_name. Значение max_uses по умолчанию — 1. reset требует machine и очищает ожидающие или безопасно отменяемые активные запросы управления, не отключая worker; уже начатые защищённые операции сохраняются. Для list параметр verbose=true включает диагностическую телеметрию.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -795,6 +800,7 @@ OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, r
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

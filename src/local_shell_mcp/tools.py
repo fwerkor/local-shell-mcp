@@ -104,6 +104,7 @@ from .remote_transfer import (
     get_upload_ticket_status,
     revoke_transfer_ticket,
 )
+from .result_compaction import compact_native_result
 from .search_ops import grep, tree
 from .session_runtime import (
     SESSION_IN_FLIGHT_LEASE_S,
@@ -1416,7 +1417,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP, *, agent_dispatch: bool = False) -
                     stage="completed",
                 )
                 logical_activity_finished = True
-                return result
+                return compact_native_result(__tool_name, call_arguments, result)
             except PublicToolTimeoutError as exc:
                 result = _timeout_payload_for_tool(__tool_name, exc)
                 audit(
@@ -3705,7 +3706,7 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
         persist_on_timeout: bool = False,
         idempotency_key: str | None = None,
     ) -> ToolResult:
-        """Run a shell command locally or remotely for builds, tests, package managers, and Git. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields state why it runs. With persist_on_timeout=true (default false), start one tracked job and wait up to timeout_s; if still running, return its job_id without rerunning the command. Persistent-job output combines stdout and stderr."""
+        """Run a shell command locally or remotely for builds, tests, package managers, and Git. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields state why it runs. With persist_on_timeout=true (default false), start one tracked job and wait up to timeout_s; if still running, return its job_id without rerunning the command. Persistent-job output combines stdout and stderr. Absent timed_out, truncated or persisted means false; absent stderr means empty. A successful exit_code=0 implies data.ok=true."""
         _audit_tool_purpose("run_shell", purpose, explanation)
         if machine:
             return await _remote_call(
@@ -3743,7 +3744,7 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
         persist_on_timeout: bool = False,
         idempotency_key: str | None = None,
     ) -> ToolResult:
-        """Write and run Python locally or remotely. persist_on_timeout=true (default false) keeps the same tracked job running and returns job_id when timeout_s expires; query it with job_tail/job_list. Persistent-job output combines stdout and stderr."""
+        """Write and run Python locally or remotely. persist_on_timeout=true (default false) keeps the same tracked job running and returns job_id when timeout_s expires; query it with job_tail/job_list. Persistent-job output combines stdout and stderr. Absent timed_out, truncated or persisted means false; absent stderr means empty. A successful exit_code=0 implies data.ok=true."""
         _audit_tool_purpose("run_python", purpose, explanation)
         if machine:
             return await _remote_call(
@@ -3899,8 +3900,9 @@ def _register_job_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotat
         job_id: str,
         lines: int = 200,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Read recent output for a tracked local or remote job."""
+        """Read recent output and status for a tracked job. Use verbose=true or job_get for full metadata; absent log_truncated means false."""
         if machine:
             return await _remote_call(
                 settings,
@@ -4312,8 +4314,9 @@ def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -
         findings: list[str] | None = None,
         next: str | None = None,
         blockers: list[str] | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session. Active Sessions idle for 24 hours become stale on access/list/start (unless a tool call is in flight); stale Sessions are resumable and eligible for oldest-first history pruning."""
+        """Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session. Use verbose=true to include full recent activity. Active Sessions idle for 24 hours become stale on access/list/start (unless a tool call is in flight); stale Sessions are resumable and eligible for oldest-first history pruning."""
         subject = _current_session_subject(create=action.strip().lower() == "start")
         result = await _tool_call(
             asyncio.to_thread,
@@ -4579,8 +4582,9 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
         max_uses: int = 1,
         machine: str | None = None,
         new_name: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved."""
+        """Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved. For list, verbose=true includes diagnostic telemetry."""
 
         async def run() -> Any:
             manager = remote_manager()

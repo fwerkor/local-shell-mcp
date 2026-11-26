@@ -260,7 +260,8 @@ async def test_wrapper_defaults_to_nonpersistent_execution(monkeypatch, isolated
     monkeypatch.setattr(tools, "public_run_shell", fake_normal)
     monkeypatch.setattr(tools, "run_job_with_timeout", should_not_start)
     result = await tools.build_mcp().call_tool("run_shell", {"command": "echo ok"})
-    assert _structured(result)["data"]["ok"] is True
+    assert _structured(result)["data"]["exit_code"] == 0
+    assert "ok" not in _structured(result)["data"]
     assert seen == [("echo ok", ".", None, None)]
 
 
@@ -314,7 +315,7 @@ async def test_local_mcp_opt_in_returns_tracked_job(isolated_job_workspace):
     data = _structured(result)["data"]
     assert data["job_id"].startswith("job_")
     assert data["job_status"] == "succeeded"
-    assert data["timed_out"] is False
+    assert "timed_out" not in data
     assert data["stdout"].strip() == "hello"
 
 

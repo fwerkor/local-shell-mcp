@@ -2,7 +2,7 @@
 
 This page is generated from the actual MCP tool schemas. Run `python scripts/generate-tools-reference.py` after changing the public tool surface.
 
-Most tools return a structured `ToolResult` containing `ok`, `message`, and `data`. `workspace_open` returns the model-visible state used to render the MCP App. Most execution and file tools accept an optional `machine`; omit it for the controller workspace and provide it for a connected worker. Git operations intentionally use `run_shell` or another shell tool rather than dedicated Git wrappers.
+Most tools return a structured `ToolResult` containing `ok`, `data`, and an optional `message` (omitted when empty). Native tools omit redundant echoes and documented default values; the underlying audit records and internal state remain complete. `workspace_open` returns the model-visible state used to render the MCP App. Most execution and file tools accept an optional `machine`; omit it for the controller workspace and provide it for a connected worker. Git operations intentionally use `run_shell` or another shell tool rather than dedicated Git wrappers.
 
 ## Selection guide
 
@@ -99,7 +99,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session. Active Sessions idle for 24 hours become stale on access/list/start (unless a tool call is in flight); stale Sessions are resumable and eligible for oldest-first history pruning.
+Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session. Use verbose=true to include full recent activity. Active Sessions idle for 24 hours become stale on access/list/start (unless a tool call is in flight); stale Sessions are resumable and eligible for oldest-first history pruning.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -111,6 +111,7 @@ Manage one durable Logical Session. Start creates a new task and returns its ses
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -146,7 +147,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Run a shell command locally or remotely for builds, tests, package managers, and Git. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields state why it runs. With persist_on_timeout=true (default false), start one tracked job and wait up to timeout_s; if still running, return its job_id without rerunning the command. Persistent-job output combines stdout and stderr.
+Run a shell command locally or remotely for builds, tests, package managers, and Git. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields state why it runs. With persist_on_timeout=true (default false), start one tracked job and wait up to timeout_s; if still running, return its job_id without rerunning the command. Persistent-job output combines stdout and stderr. Absent timed_out, truncated or persisted means false; absent stderr means empty. A successful exit_code=0 implies data.ok=true.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -158,6 +159,7 @@ Run a shell command locally or remotely for builds, tests, package managers, and
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -166,7 +168,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `run_python`
 
-Write and run Python locally or remotely. persist_on_timeout=true (default false) keeps the same tracked job running and returns job_id when timeout_s expires; query it with job_tail/job_list. Persistent-job output combines stdout and stderr.
+Write and run Python locally or remotely. persist_on_timeout=true (default false) keeps the same tracked job running and returns job_id when timeout_s expires; query it with job_tail/job_list. Persistent-job output combines stdout and stderr. Absent timed_out, truncated or persisted means false; absent stderr means empty. A successful exit_code=0 implies data.ok=true.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -177,6 +179,7 @@ Write and run Python locally or remotely. persist_on_timeout=true (default false
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -313,13 +316,14 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `job_tail`
 
-Read recent output for a tracked local or remote job.
+Read recent output and status for a tracked job. Use verbose=true or job_get for full metadata; absent log_truncated means false.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -542,6 +546,7 @@ Start a tracked job that copies a file or directory between the controller and r
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -626,7 +631,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-Return the full cached schema for one dynamic MCP tool named <server>:<tool>. Refresh the server with mcp_manage if its cached schema is stale.
+Return the full cached schema for one dynamic MCP tool named <server>:<tool>. The Controller automatically refreshes cached schemas; mcp_manage can force a refresh.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -780,7 +785,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `remote_manage`
 
-Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved.
+Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved. For list, verbose=true includes diagnostic telemetry.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -791,6 +796,7 @@ Manage remote workers with action=invite, list, reset, revoke, or rename. invite
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

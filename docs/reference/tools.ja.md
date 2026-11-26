@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
+<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
 # Tools reference
 
 このページは実際の MCP tool schema から構成されます。Public tool surface を変更した後は `python scripts/generate-tools-reference.py` を実行して English reference を更新します。
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-1 つの durable Logical Session を管理します。start は新しい task を作成して session_id を返します。resume は user が明示的に指定した、またはこの conversation にすでに存在する session_id だけを継続します。start 以外の全 action には session_id が必要です。Action: start, resume, get, report, finish, cancel, delete。report は summary/findings/next/blockers/objective/label を受け取り、delete には terminal Session が必要です。 24 時間操作のない Active Sessions は、アクセス・一覧表示・新規開始時に stale になります。ただし tool call の実行中は除きます。stale Sessions は再開でき、履歴整理時には古い順に削除されます。
+1 つの durable Logical Session を管理します。start は新しい task を作成して session_id を返します。resume は user が明示的に指定した、またはこの conversation にすでに存在する session_id だけを継続します。start 以外の全 action には session_id が必要です。Action: start, resume, get, report, finish, cancel, delete。report は summary/findings/next/blockers/objective/label を受け取り、delete には terminal Session が必要です。 24 時間操作のない Active Sessions は、アクセス・一覧表示・新規開始時に stale になります。ただし tool call の実行中は除きます。stale Sessions は再開でき、履歴整理時には古い順に削除されます。 verbose=true で最近のアクティビティをすべて含めます。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -112,6 +112,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `findings` | `array[string] \| null` | `null` |  |
 | `next` | `string \| null` | `null` |  |
 | `blockers` | `array[string] \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -147,7 +148,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Local または remote machine で non-interactive shell command を 1 回実行します。速やかに完了する build、test、package-manager、Git、inspection commands に使い、long-running、interactive、streaming process には `shell_start` または `job_start` を使います。Optional purpose/explanation fields で実行理由を示せます。
+Local または remote machine で non-interactive shell command を 1 回実行します。速やかに完了する build、test、package-manager、Git、inspection commands に使い、long-running、interactive、streaming process には `shell_start` または `job_start` を使います。Optional purpose/explanation fields で実行理由を示せます。 timed_out、truncated、persisted の省略は false、stderr の省略は空を意味します。正常終了の exit_code=0 は data.ok=true を意味します。
 
 `persist_on_timeout=true`（既定値 false）にすると、タイムアウト後も同じジョブを継続し、`job_id` を返します。`job_tail` で確認できます。標準出力と標準エラーは統合されます。
 
@@ -161,6 +162,7 @@ Local または remote machine で non-interactive shell command を 1 回実行
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -169,7 +171,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_python`
 
-Local または remote machine で short Python script を書いて実行します。
+Local または remote machine で short Python script を書いて実行します。 timed_out、truncated、persisted の省略は false、stderr の省略は空を意味します。正常終了の exit_code=0 は data.ok=true を意味します。
 
 `persist_on_timeout=true`（既定値 false）にすると、タイムアウト後も同じジョブを継続し、`job_id` を返します。`job_tail` で確認できます。標準出力と標準エラーは統合されます。
 
@@ -182,6 +184,7 @@ Local または remote machine で short Python script を書いて実行しま�
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
 | `persist_on_timeout` | `boolean` | `false` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -318,13 +321,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_tail`
 
-Tracked local/remote job の recent output を読み取ります。
+追跡対象ジョブの最近の出力と状態を取得します。完全なメタデータは verbose=true または job_get で取得できます。log_truncated の省略は false を意味します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `job_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -547,6 +551,7 @@ controller と remote machine の間で file/directory を copy する tracked j
 | `chunk_size` | `integer \| null` | `null` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -631,7 +636,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_tool_inspect`
 
-`<server>:<tool>` という dynamic MCP tool の full cached schema を返します。Cache が stale なら `mcp_manage` で server を refresh します。
+`<server>:<tool>` という動的 MCP ツールのキャッシュ済みスキーマ全体を返します。Controller がキャッシュを自動更新し、mcp_manage で強制更新できます。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -784,7 +789,7 @@ OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:s
 
 ### `remote_manage`
 
-action=invite、list、reset、revoke、rename で remote workers を管理します。invite は name/workdir/ttl_s/max_uses、revoke は machine、rename は machine と new_name が必要です。 max_uses の既定値は 1 です。reset には machine が必要で、worker を切断せずに待機中および安全にキャンセルできる実行中の制御リクエストを消去します。開始済みの保護対象操作は維持されます。
+action=invite、list、reset、revoke、rename で remote workers を管理します。invite は name/workdir/ttl_s/max_uses、revoke は machine、rename は machine と new_name が必要です。 max_uses の既定値は 1 です。reset には machine が必要で、worker を切断せずに待機中および安全にキャンセルできる実行中の制御リクエストを消去します。開始済みの保護対象操作は維持されます。 list で verbose=true を指定すると診断テレメトリも含まれます。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -795,6 +800,7 @@ action=invite、list、reset、revoke、rename で remote workers を管理し�
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

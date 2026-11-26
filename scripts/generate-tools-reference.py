@@ -143,7 +143,7 @@ async def generate() -> str:
         "",
         "This page is generated from the actual MCP tool schemas. Run `python scripts/generate-tools-reference.py` after changing the public tool surface.",
         "",
-        "Most tools return a structured `ToolResult` containing `ok`, `message`, and `data`. `workspace_open` returns the model-visible state used to render the MCP App. Most execution and file tools accept an optional `machine`; omit it for the controller workspace and provide it for a connected worker. Git operations intentionally use `run_shell` or another shell tool rather than dedicated Git wrappers.",
+        "Most tools return a structured `ToolResult` containing `ok`, `data`, and an optional `message` (omitted when empty). Native tools omit redundant echoes and documented default values; the underlying audit records and internal state remain complete. `workspace_open` returns the model-visible state used to render the MCP App. Most execution and file tools accept an optional `machine`; omit it for the controller workspace and provide it for a connected worker. Git operations intentionally use `run_shell` or another shell tool rather than dedicated Git wrappers.",
         "",
         "## Selection guide",
         "",
