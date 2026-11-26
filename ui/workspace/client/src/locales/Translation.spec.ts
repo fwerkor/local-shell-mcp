@@ -35,6 +35,8 @@ describe('WebUI locales', () => {
       'com_ui_special_var_current_date',
       'com_ui_special_var_desc_current_date',
       'com_ui_context_window',
+      'com_ui_context_cache_hit_rate',
+      'com_ui_context_input_composition',
       'com_ui_projects',
     ] as const) {
       const value = i18n.getResource(locale, 'translation', key);
