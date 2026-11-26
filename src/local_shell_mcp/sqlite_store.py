@@ -147,6 +147,15 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_web_sessions_expiry ON web_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_web_tickets_expiry ON web_login_tickets(expires_at);
+CREATE TABLE IF NOT EXISTS webui_message_bookmarks (
+    owner TEXT NOT NULL,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(owner,message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_webui_message_bookmarks_owner
+    ON webui_message_bookmarks(owner,created_at DESC,message_id);
 CREATE TABLE IF NOT EXISTS webui_tags (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
