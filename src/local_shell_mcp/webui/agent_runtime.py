@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
+from .provider_responses import ResponsesStreamError
 from .semantic_index import SemanticSnapshot
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,11 @@ def _model_retry_delay(error: Exception, attempt: int) -> float:
     from email.utils import parsedate_to_datetime
 
     delay = _MODEL_RETRY_DELAYS[attempt]
+    if isinstance(error, ResponsesStreamError):
+        # Parallel children should not all reconnect on the same boundary.
+        import random
+
+        return delay * random.uniform(1.0, 1.25)
     if isinstance(error, httpx.HTTPStatusError):
         value = error.response.headers.get("Retry-After")
         if value:
@@ -76,8 +82,11 @@ def _tool_batch_signature(calls: list[ModelToolCall], results: list[dict]) -> st
 
 
 def _retryable_model_error(error: Exception) -> bool:
-    """Only retry transient transport failures and explicitly temporary HTTP statuses."""
+    """Retry transient transport failures and classified provider-side failures."""
     import httpx
+
+    if isinstance(error, ResponsesStreamError):
+        return error.retryable
 
     if isinstance(error, httpx.HTTPStatusError):
         return error.response.status_code in {408, 429, 500, 502, 503, 504}
@@ -273,8 +282,9 @@ async def run_agent_loop(
 
                 retry_delay = _model_retry_delay(error, attempt)
                 status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+                diagnostic = str(error) if isinstance(error, ResponsesStreamError) else type(error).__name__
                 log.warning("Model transport %s (HTTP %s) before first event; retry %d/%d in %.1fs (model=%s)",
-                            type(error).__name__, status, attempt + 1, len(_MODEL_RETRY_DELAYS),
+                            diagnostic, status, attempt + 1, len(_MODEL_RETRY_DELAYS),
                             retry_delay, context.profile.model)
             finally:
                 close = getattr(source, "aclose", None)

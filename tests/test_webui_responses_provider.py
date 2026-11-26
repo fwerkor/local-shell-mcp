@@ -1,4 +1,5 @@
 """Responses protocol uses the same saved channel, tools and agent loop."""
+import asyncio
 import copy
 import json
 
@@ -14,7 +15,7 @@ from local_shell_mcp.webui.agent_runtime import (
     run_agent_loop,
 )
 from local_shell_mcp.webui.model_discovery import _parse_page
-from local_shell_mcp.webui.provider_responses import responses_input
+from local_shell_mcp.webui.provider_responses import ResponsesStreamError, responses_input
 from local_shell_mcp.webui.providers import (
     ModelFinish,
     ModelThought,
@@ -331,3 +332,123 @@ async def test_text_stream_terminal_errors(transport, events, error):
 async def test_unsupported_tool_declaration():
     with pytest.raises(ValueError, match="Unsupported Responses tool"):
         _ = [item async for item in stream_model_with_tools(PROFILE, [USER], tools=[{"type": "invalid"}])]
+
+@pytest.mark.parametrize("event,code,retryable", [
+    ({"type": "error", "code": "rate_limit_exceeded", "message": "private key"}, "rate_limit_exceeded", True),
+    ({"type": "response.failed", "response": {"error": {"code": "server_error"}}}, "server_error", True),
+    ({"type": "response.cancelled"}, None, True),
+    ({"type": "error", "error": {"type": "insufficient_quota"}}, "insufficient_quota", False),
+    ({"type": "error", "code": "invalid_api_key"}, "invalid_api_key", False),
+    ({"type": "error", "code": "private key"}, "unrecognized_code", False),
+])
+def test_sse_failure_classification_and_safe_diagnostics(event, code, retryable):
+    from local_shell_mcp.webui.error_diagnostics import generation_failure
+
+    error = ResponsesStreamError.from_event(event)
+    assert error.event_type == event["type"]
+    assert error.code == code and error.retryable is retryable
+    diagnostic = generation_failure(error, "run")
+    assert event["type"] in str(error) and event["type"] in diagnostic
+    if code:
+        assert code in diagnostic
+    assert "private key" not in str(error) + diagnostic
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [
+    {"type": "error", "code": "rate_limit_exceeded"},
+    {"type": "response.failed", "response": {"error": {"code": "server_error"}}},
+    {"type": "response.cancelled"},
+    {"type": "response.completed", "response": {"status": "failed", "error": {"code": "server_error"}}},
+])
+async def test_parallel_responses_recover_empty_sse_failure(transport, monkeypatch, failure):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0, 0))
+    batches, requests = transport
+    batches.extend([[complete([MESSAGE])]] * 8 + [[failure]] + [[complete([MESSAGE])]] * 2)
+
+    async def run_child():
+        state = AgentLoopState(AgentContext(PROFILE, []), [USER])
+        text = []
+
+        async def on_text(chunk):
+            text.append(chunk)
+
+        async def dispatch(*args):
+            pytest.fail("unexpected tool dispatch")
+
+        await run_agent_loop(state, stream_tools=stream_model_with_tools, stream_text=stream_model,
+                             dispatch=dispatch, on_text=on_text)
+        return "".join(text)
+
+    assert await asyncio.gather(*(run_child() for _ in range(10))) == ["Reading"] * 10
+    assert len(requests) == 11 and not batches
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix,code", [
+    ([], "insufficient_quota"),
+    ([{"type": "response.output_text.delta", "output_index": 0, "delta": "partial"}], "server_error"),
+    ([{"type": "response.reasoning_summary_text.delta", "delta": "thinking"}], "server_error"),
+])
+async def test_sse_does_not_retry_permanent_or_observable_failure(transport, monkeypatch, prefix, code):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0, 0))
+    batches, requests = transport
+    batches.append(prefix + [{"type": "error", "code": code}])
+    state = AgentLoopState(AgentContext(PROFILE, []), [USER])
+
+    async def ignore(*args):
+        pass
+
+    with pytest.raises(ResponsesStreamError, match=code):
+        await run_agent_loop(state, stream_tools=stream_model_with_tools, stream_text=stream_model,
+                             dispatch=ignore, on_text=ignore, on_thought=ignore)
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_sse_retry_preserves_completed_tool_results(transport, monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0, 0))
+    batches, requests = transport
+    batches.extend([
+        [complete([CALL])],
+        [{"type": "response.output_item.done", "output_index": 0, "item": CALL},
+         {"type": "response.failed", "response": {"error": {"code": "server_error"}}}],
+        [complete([MESSAGE])],
+    ])
+    state = AgentLoopState(AgentContext(PROFILE, TOOLS), [USER])
+    calls = []
+
+    async def dispatch(proposed, current):
+        calls.extend(proposed)
+        return ToolBatchOutput([{"role": "tool", "tool_call_id": proposed[0].call_id, "content": "result"}])
+
+    async def on_text(text):
+        pass
+
+    await run_agent_loop(state, stream_tools=stream_model_with_tools, stream_text=stream_model,
+                         dispatch=dispatch, on_text=on_text)
+    assert len(calls) == 1 and len(requests) == 3
+    assert requests[1][2]["input"] == requests[2][2]["input"]
+
+@pytest.mark.asyncio
+async def test_repeated_sse_failures_exhaust_retry_budget(transport, monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0, 0))
+    batches, requests = transport
+    batches.extend([[{"type": "response.failed", "response": {"error": {"code": "server_error"}}}]] * 3)
+    state = AgentLoopState(AgentContext(PROFILE, []), [USER])
+
+    async def unexpected(*args):
+        pytest.fail("failed attempts must not publish text or dispatch tools")
+
+    with pytest.raises(ResponsesStreamError, match="server_error"):
+        await run_agent_loop(state, stream_tools=stream_model_with_tools, stream_text=stream_model,
+                             dispatch=unexpected, on_text=unexpected)
+    assert len(requests) == 3 and state.messages == [USER]
