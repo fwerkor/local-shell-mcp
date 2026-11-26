@@ -232,7 +232,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await builder.locator("#model").get_by_text("independent-model", exact=True).wait_for()
                     await builder.get_by_role("button", name="Back to Builder").click()
                     await builder.locator("#instructions").fill("You are the configured Research Agent.")
-                    await builder.get_by_text("Add", exact=True).first.click(timeout=8000)
+                    await builder.get_by_text("Manage", exact=True).first.click(timeout=8000)
                     marketplace = page.get_by_role("dialog").last
                     await marketplace.get_by_text("Tool Library", exact=True).first.wait_for()
                     assert await marketplace.get_by_role("button", name=re.compile(r"^Ask User\b")).count() == 0

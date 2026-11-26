@@ -46,8 +46,8 @@ def agent_access_policy(agent: dict) -> tuple[dict[str, str], str] | None:
     if "machine_permissions" not in agent and "machine_default_permission" not in agent:
         return None
     default = agent.get("machine_default_permission", "write")
-    if not isinstance(default, str) or default not in _LEVELS:
-        raise ValueError("Default machine access must be none, read or write")
+    if not isinstance(default, str) or default not in _LEVELS | {"inherit"}:
+        raise ValueError("Default machine access must be inherit, none, read or write")
     return validate_access_map(agent.get("machine_permissions", {})), default
 
 
@@ -101,6 +101,14 @@ def resolve_access(owner: str, conversation_id: str | None = None, *, project_id
     return policy
 
 
+def resolve_agent_ceiling(owner: str, overrides: dict[str, str], default: str, *,
+                          repo: Any = None) -> tuple[dict[str, str], str]:
+    """Resolve inherited global defaults live; explicit Agent exceptions win."""
+    if default != "inherit":
+        return overrides, default
+    return {**resolve_access(owner, repo=repo), **overrides}, "none"
+
+
 def effective_machine_access(owner: str, conversation_id: str, *, agent: dict | None,
                              scopes: set[str], expires: int | None = None,
                              repo: Any = None) -> tuple[dict[str, str], str]:
@@ -109,11 +117,12 @@ def effective_machine_access(owner: str, conversation_id: str, *, agent: dict | 
 
     policy = resolve_access(owner, conversation_id, repo=repo)
     agent_policy, default = agent_access_policy(agent or {}) or ({}, "write")
+    agent_policy, fallback = resolve_agent_ceiling(owner, agent_policy, default, repo=repo)
     rank = {"none": 0, "read": 1, "write": 2}
     settings = get_settings()
     effective: dict[str, str] = {}
     for name, level in sorted(policy.items()):
-        level = min(level, agent_policy.get(name, default), key=rank.__getitem__)
+        level = min(level, agent_policy.get(name, fallback), key=rank.__getitem__)
         if (name == "local" and settings.disable_local
                 or name != "local" and not settings.remote_enabled):
             level = "none"
@@ -149,7 +158,7 @@ def machine_access_context(owner: str, conversation_id: str, *, agent: dict | No
         if groups[level]:
             lines.append(f"- {label}: {', '.join(groups[level])}")
     if default != "write":
-        label = {"none": "no access", "read": "read-only"}[default]
+        label = {"none": "no access", "read": "read-only", "inherit": "inherit global machine permissions"}[default]
         lines.append(f"- Agent default for newly registered machines: {label}")
     if execution_restricted:
         lines.append("- Shell and other execution-class operations are not authorized.")

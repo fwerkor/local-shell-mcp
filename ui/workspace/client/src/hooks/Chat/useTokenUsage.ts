@@ -316,8 +316,10 @@ export default function useTokenUsage({
         Number.isSafeInteger(effective.providerInputTokens) && effective.providerInputTokens! > 0
           ? effective.providerInputTokens
           : undefined;
-      const providerOutputTokens = providerInputTokens != null &&
-        Number.isSafeInteger(effective.providerOutputTokens) && effective.providerOutputTokens! >= 0
+      const providerOutputTokens =
+        providerInputTokens != null &&
+        Number.isSafeInteger(effective.providerOutputTokens) &&
+        effective.providerOutputTokens! >= 0
           ? effective.providerOutputTokens
           : undefined;
       const instructionTokens = normalizeTokenCount(
@@ -377,7 +379,12 @@ export default function useTokenUsage({
                 normalizeTokenCount(breakdown.messageTokens),
               ) + retainedToolTokens
             : undefined,
-        cacheRead: normalizeTokenCount(effective.cacheRead),
+        cacheRead:
+          Number.isSafeInteger(effective.cacheRead) &&
+          effective.cacheRead! >= 0 &&
+          (providerInputTokens == null || effective.cacheRead! <= providerInputTokens)
+            ? effective.cacheRead
+            : undefined,
         cacheWrite: normalizeTokenCount(effective.cacheWrite),
         toolMessageTokenCounts: breakdown.toolMessageTokenCounts,
         runwayTurns,

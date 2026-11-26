@@ -691,3 +691,33 @@ async def test_native_web_search_default_on_and_explicit_chat_opt_out(runtime, m
                          profile=profile, web_search_enabled=restarted.web_search_enabled)
     available = {tool["function"]["name"] for tool in runner._context(None).tools}
     assert not ({"web_search", "web_fetch"} & available)
+
+
+@pytest.mark.asyncio
+async def test_controller_sleep_available_to_restricted_agent_and_resumes(runtime, monkeypatch):
+    _, database, store, profile = runtime
+    agent = AgentRepository(database).create("local", {
+        "name": "Polling bot", "provider": "openAI", "model": "test", "tools": [],
+    })
+    generation, _ = store.begin("local", {"text": "wait briefly"}, agent)
+    requests = []
+
+    async def model(profile, history, **kwargs):
+        requests.append(history)
+        names = {tool["function"]["name"] for tool in kwargs["tools"]}
+        assert "sleep" in names
+        if len(requests) == 1:
+            yield ModelToolCall("wait", "sleep", {"seconds": 0.01})
+        else:
+            assert json.loads(history[-1]["content"])["slept_seconds"] >= 0.009
+            yield "Ready."
+
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", model)
+    await generation_routes._run_model("local", generation, profile, parent_agent=agent,
+                                       granted_scopes=frozenset())
+    assert len(requests) == 2
+    assert store.latest("local", generation.conversation_id).status == "complete"
+    events = [event for _, event in store.events("local", generation.run_id)]
+    dispatched = [e for e in events if e.get("event") == "on_tool_calls_dispatched"]
+    assert dispatched[0]["data"]["toolCalls"][0]["name"] == "sleep"
+    assert any(e.get("event") == "on_run_step_closed" for e in events)

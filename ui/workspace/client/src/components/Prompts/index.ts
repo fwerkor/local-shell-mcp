@@ -1,7 +1,7 @@
 export { InlinePromptsView } from './layouts';
 export { CategoryIcon, SkeletonForm } from './utils';
 export { PromptName, Command, Description, CategorySelector } from './fields';
-export { PreviewPrompt, DeleteVersion, VariableDialog, SharePrompt } from './dialogs';
+export { PreviewPrompt, DeleteVersion, VariableDialog } from './dialogs';
 export { PromptForm, CreatePromptForm, VariableForm, PromptLabelsForm } from './forms';
 export { PromptEditor, VariablesDropdown, CodeVariableGfm, PromptVariableGfm } from './editor';
 export { PromptDetails, PromptVariables, PromptVersions } from './display';

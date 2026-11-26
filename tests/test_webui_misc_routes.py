@@ -8,7 +8,7 @@ import httpx
 import pytest
 from starlette.applications import Starlette
 
-from local_shell_mcp.webui import misc_routes, routes, tag_routes
+from local_shell_mcp.webui import agent_routes, misc_routes, routes, tag_routes
 
 
 @pytest.mark.asyncio
@@ -49,7 +49,7 @@ async def test_disabled_optional_capabilities_never_claim_unsupported_services(t
 
     monkeypatch.setattr(settings, "get_settings", lambda: SimpleNamespace(disable_local=False))
     monkeypatch.setattr(routes, "get_settings", lambda: SimpleNamespace(auth_mode="none", state_dir=tmp_path))
-    app = Starlette(routes=[*tag_routes.tag_routes(), *misc_routes.misc_routes()])
+    app = Starlette(routes=[*misc_routes.misc_routes(), *agent_routes.agent_routes(), *tag_routes.tag_routes()])
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/api/banner")).json() is None
         assert (await client.get("/api/search/enable")).json() is True
@@ -67,7 +67,7 @@ async def test_disabled_optional_capabilities_never_claim_unsupported_services(t
         assert (await client.get("/health")).json()["status"] == "ok"
         assert (await client.get("/api/tags")).json() == []
         assert (await client.get("/api/files/config")).json()["serverFileSizeLimit"] == 32 * 1024 * 1024
-        assert (await client.get("/api/agents/tools/web_search/auth")).json()["authenticated"] is True
+        assert (await client.get("/api/agents/tools/web_search/auth")).json() == {"authenticated": True, "authTypes": []}
 
 
 @pytest.mark.asyncio

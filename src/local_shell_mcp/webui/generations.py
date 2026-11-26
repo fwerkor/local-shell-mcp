@@ -183,8 +183,10 @@ class GenerationStore:
         prompt = payload.get("text")
         if manual_compaction:
             prompt = ''
-        if not manual_compaction and (not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
-            raise ValueError("A non-empty text message is required (max 128 KiB)")
+        if prompt is None and payload.get("files"):
+            prompt = ""
+        if not manual_compaction and (not isinstance(prompt, str) or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
+            raise ValueError("Invalid text message (max 128 KiB)")
         manual_skill_ids = payload.get('manualSkills')
         if manual_skill_ids is not None:
             from .skill_runtime import resolve_manual_skills
@@ -291,6 +293,8 @@ class GenerationStore:
             from .attachments import resolve_files
 
             files = resolve_files(db, owner, payload.get("files", []))
+            if not manual_compaction and not prompt.strip() and not files:
+                raise ValueError("A non-empty text message or attachment is required (max 128 KiB)")
             user_metadata = {
                 "sender": "User", "isCreatedByUser": True,
                 "endpoint": str(payload.get("endpoint") or "agents"),
@@ -1253,7 +1257,7 @@ class GenerationStore:
             return int(event_row.lastrowid)
 
     def stage_summary(self, owner: str, run_id: str, summary_text: str, token_count: int,
-                      *, boundary: int = 0, manual: bool = False,
+                      *, boundary: int = 0, manual: bool = False, live: bool = False,
                       retained_tail: list[dict] | None = None,
                       covered_tool_call_ids: list[str] | None = None,
                       covered_steer_ids: list[str] | None = None,
@@ -1297,7 +1301,7 @@ class GenerationStore:
                 })
             state['summaryCheckpoint'] = {'type': 'summary', 'content': [{'type': 'text', 'text': summary_text}],
                 'boundary': {'messageIndex': boundary}, 'tokenCount': token_count,
-                **({'initiatedBy': 'user'} if manual else {}),
+                **({'initiatedBy': 'user'} if manual else {'initiatedBy': 'live'} if live else {}),
                 **({'retainedTail': retained_tail} if retained_tail is not None else {}),
                 **({'coveredToolCallIds': covered_tool_call_ids} if covered_tool_call_ids is not None else {}),
                 **({'coveredSteerIds': covered_steer_ids} if covered_steer_ids is not None else {}),
@@ -1319,6 +1323,77 @@ class GenerationStore:
             raise KeyError('Generation not found')
         value = json.loads(row['state']).get('postCompactionHistoryStart')
         return value if type(value) is int and value >= 0 else None
+
+
+    def request_live_compaction(self, owner: str, conversation_id: str) -> dict:
+        """Coalesce requests against the exact active, owner-scoped run."""
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = db.execute(
+                "SELECT r.id,r.state,a.config AS agent_config FROM runs r "
+                "JOIN conversations c ON c.id=r.conversation_id "
+                "LEFT JOIN agents a ON a.id=r.agent_id AND a.owner=c.owner "
+                "WHERE c.owner=? AND c.id=? AND r.status IN ('running','requires_action')",
+                (owner, conversation_id)).fetchall()
+            if len(rows) != 1:
+                raise ValueError('No unique active generation')
+            row = rows[0]
+            # Graph nodes own separate checkpoints; a root request must not
+            # wait indefinitely for a pre-model boundary that cannot consume it.
+            if row['agent_config'] and json.loads(row['agent_config']).get('edges'):
+                raise ValueError('Live compaction is unavailable for multi-agent graphs')
+            state = json.loads(row['state'])
+            if state.get('manualCompaction'):
+                raise ValueError('Generation is already compacting')
+            request_id = state.get('liveCompactionRequest') or uuid.uuid4().hex
+            state['liveCompactionRequest'] = request_id
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(state), _now(), row['id']))
+            return {'runId': row['id'], 'requestId': request_id}
+
+    def live_compaction_status(self, owner: str, run_id: str, request_id: str) -> str:
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state,r.status FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner)).fetchone()
+        if row is None:
+            raise KeyError('Generation not found')
+        state = json.loads(row['state'])
+        result = (state.get('liveCompactionResults') or {}).get(request_id)
+        if result:
+            return result
+        if (state.get('liveCompactionRequest') == request_id and
+                row['status'] in {'running', 'requires_action'}):
+            return 'pending'
+        return 'failed'
+
+    def live_compaction_request(self, owner: str, run_id: str) -> str | None:
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner)).fetchone()
+        return json.loads(row['state']).get('liveCompactionRequest') if row else None
+
+    def settle_live_compaction(self, owner: str, run_id: str, request_id: str,
+                               *, success: bool, actor_lease=None) -> None:
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner)).fetchone()
+            if row is None:
+                return
+            state = json.loads(row['state'])
+            if state.get('liveCompactionRequest') != request_id:
+                return
+            state.pop('liveCompactionRequest')
+            results = state.get('liveCompactionResults') or {}
+            results[request_id] = 'complete' if success else 'failed'
+            state['liveCompactionResults'] = dict(list(results.items())[-16:])
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(state), _now(), run_id))
 
     def manual_compaction(self, owner: str, run_id: str) -> bool:
         with self.database.connect() as db:
@@ -1614,17 +1689,22 @@ class GenerationStore:
                         if files:
                             descriptors = []
                             for item in files:
-                                attachment = db.execute("SELECT id,name,path FROM attachments WHERE id=? AND owner=?",
+                                attachment = db.execute("SELECT id,name,path,content_type FROM attachments WHERE id=? AND owner=?",
                                                         (item["file_id"], owner)).fetchone()
                                 descriptors.append({"file_id": item["file_id"], "machine": "local",
                                     **({"filename": attachment["name"], "path": attachment["path"]}
                                        if attachment else {"unavailable": True})})
-                            note = "Controller attachments (use authorized LSM file tools):\n" + _json(descriptors)
+                            from .steer_media import attachment_reference
+
+                            links = [attachment_reference(d["path"], d["filename"], item.get("type", ""))
+                                     for d, item in zip(descriptors, files, strict=True) if "path" in d]
+                            note = "\n".join([*links, "Controller attachments (use authorized LSM file tools):\n" + _json(descriptors)])
                             if isinstance(value, list):
                                 value = [*value, {"type": "text", "text": note}]
                             else:
                                 value += "\n\n" + note
-                        groups.append([{"role": "user", "content": value}])
+                        groups.append([{"role": "user", "content": value,
+                                        **({"source": "attachment", "files": files} if files else {})}])
                 if max_messages is not None and len(groups) >= max(1, max_messages):
                     break
                 message_id = row["parent_id"]

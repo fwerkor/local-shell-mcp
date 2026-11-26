@@ -188,7 +188,11 @@ const useNavigateToConvo = (index = 0) => {
    * once the real record is in hand. Every later switch to this conversation
    * takes the instant path above.
    */
-  const navigateWithRecord = async (conversation: TConversation, generation: number) => {
+  const navigateWithRecord = async (
+    conversation: TConversation,
+    generation: number,
+    suffix = '',
+  ) => {
     const conversationId = conversation.conversationId;
     if (!conversationId) {
       return;
@@ -216,20 +220,22 @@ const useNavigateToConvo = (index = 0) => {
       return;
     }
     applyConversation(record);
-    navigate(`/c/${conversationId}`);
+    navigate(`/c/${conversationId}${suffix}`);
   };
 
   const navigateToConvo = (
     conversation?: TConversation | null,
     options?: {
       currentConvoId?: string;
+      messageId?: string;
     },
   ) => {
     if (!conversation) {
       logger.warn('conversation', 'Conversation not provided to `navigateToConvo`');
       return;
     }
-    const { currentConvoId } = options || {};
+    const { currentConvoId, messageId } = options || {};
+    const suffix = messageId ? `?message=${encodeURIComponent(messageId)}` : '';
     logger.log('conversation', 'Navigating to conversation', conversation);
     hasSetConversation.current = true;
     /** Claim this click's place in the order before any await, so a request
@@ -295,7 +301,7 @@ const useNavigateToConvo = (index = 0) => {
       ]);
       queryClient.invalidateQueries([QueryKeys.conversation, convo.conversationId]);
       if (!cachedConvo) {
-        navigateWithRecord(convo, generation);
+        navigateWithRecord(convo, generation, suffix);
         return;
       }
       /** Route and conversation state change together, in the click's own
@@ -306,7 +312,7 @@ const useNavigateToConvo = (index = 0) => {
        * write this navigation makes — what the user sees now is what a send
        * will carry until they change it themselves. */
       applyConversation({ ...cachedConvo, ...convo });
-      navigate(`/c/${convo.conversationId}`);
+      navigate(`/c/${convo.conversationId}${suffix}`);
       refreshConversationRecord(convo.conversationId);
     } else {
       setConversation(convo);

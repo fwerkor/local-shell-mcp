@@ -2375,7 +2375,6 @@ export const interfaceSchema = z
         z.object({
           use: z.boolean().optional(),
           create: z.boolean().optional(),
-          maxPerUser: z.number().int().min(0).optional(),
           minIntervalMinutes: z.number().int().min(1).optional(),
           autoDisableAfterFailures: z.number().int().min(1).optional(),
           admissionConcurrency: z.number().int().min(1).max(100).optional(),
@@ -2458,7 +2457,7 @@ export const interfaceSchema = z
       public: true,
       snapshotFiles: true,
     },
-    schedules: { use: true, create: true, maxPerUser: 25, minIntervalMinutes: 5, requireProject: false },
+    schedules: { use: true, create: true, minIntervalMinutes: 5, requireProject: false },
   });
 
 export type TInterfaceConfig = z.infer<typeof interfaceSchema>;

@@ -22,6 +22,17 @@ export function useLsmExternalMcpServers() {
   });
 }
 
+export function isExternalMcpSelected(server: MCPServer, selected: string[] | null | undefined) {
+  return server.enabled && (selected == null || selected.includes(server.name));
+}
+
+export function useSelectedExternalMcpServers() {
+  const { control } = useFormContext<AgentForm>();
+  const selected = useWatch({ control, name: 'mcp_servers' });
+  const { data } = useLsmExternalMcpServers();
+  return (data?.servers ?? []).filter((server) => isExternalMcpSelected(server, selected));
+}
+
 export default function LsmExternalMcpServers() {
   const localize = useLocalize();
   const { data, isLoading, isError } = useLsmExternalMcpServers();
@@ -73,11 +84,11 @@ export default function LsmExternalMcpServers() {
             <input
               type="checkbox"
               aria-label={server.name}
-              checked={server.enabled && (selected == null || selected.includes(server.name))}
+              checked={isExternalMcpSelected(server, selected)}
               disabled={!server.enabled || isError}
               onChange={(event) => toggle(server.name, event.target.checked)}
             />
-            {localize(server.enabled && (selected == null || selected.includes(server.name))
+            {localize(isExternalMcpSelected(server, selected)
               ? 'com_lsm_external_mcp_enabled' : 'com_lsm_external_mcp_disabled')}
           </label>
         </div>
