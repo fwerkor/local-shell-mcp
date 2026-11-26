@@ -466,6 +466,11 @@ export default function useChatFunctions({
       conversationId === Constants.NEW_CONVO
         ? getRouteChatProjectId()
         : (conversation?.chatProjectId ?? null);
+    const draftMachinePermissions = conversationId === Constants.NEW_CONVO
+      ? queryClient.getQueryData<Record<string, 'none' | 'read' | 'write'>>(
+          ['lsm', 'draft-machine-permissions', index, chatProjectId || ''],
+        )
+      : undefined;
     const conversationForPayload =
       chatProjectId != null ? { ...(conversation ?? {}), chatProjectId } : (conversation ?? {});
 
@@ -756,6 +761,7 @@ export default function useChatFunctions({
 
     logger.log('message_state', initialResponse);
     const submission: TSubmission = {
+      draftMachinePermissions,
       conversation: {
         ...conversation,
         ...(chatProjectId ? { chatProjectId } : {}),

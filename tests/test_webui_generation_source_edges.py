@@ -63,7 +63,7 @@ async def test_source_generation_start_project_alias_agent_and_idempotent_confli
             'clientRequestId': 'dedup-start', 'generationProtocolVersion': 2})
         assert result.status_code == 202, result.text
         cid = result.json()['conversationId']
-        assert seen[-1] == (None, project_id)
+        assert seen[-2:] == [(None, project_id), (cid, None)]
         assert len(started) == 1 and started[0][0][3]['id'] == agent['id']
         assert started[0][1]['ask_user_enabled'] is False
         again = await client.post('/api/agents/chat/openAI', json={

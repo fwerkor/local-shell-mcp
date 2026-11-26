@@ -27,8 +27,9 @@ from .storage import _json, _now, _stamp
 log = logging.getLogger(__name__)
 _WORKER: asyncio.Task | None = None
 _ACTIVE: set[asyncio.Task] = set()
-_LIMITS = {'maxPerUser': 25, 'minIntervalMinutes': 5, 'requireProject': False}
+_LIMITS = {'minIntervalMinutes': 5, 'requireProject': False}
 _DAY_MS = 86_400_000
+_MAX_CONTINUOUS_DELAY_MINUTES = 525_600
 
 
 def _iso(ms: int | None):
@@ -76,6 +77,11 @@ def _parse_cadence(value):
     if not isinstance(value, dict):
         raise HTTPException(400, detail='Invalid schedule cadence')
     frequency = value.get('frequency')
+    if frequency == 'continuous':
+        delay = value.get('delayMinutes')
+        if type(delay) is not int or not 0 <= delay <= _MAX_CONTINUOUS_DELAY_MINUTES:
+            raise HTTPException(400, detail='Invalid continuous schedule delay')
+        return frequency, delay
     if frequency == 'cron':
         expression = value.get('expression')
         if not isinstance(expression, str) or len(expression) > 256:
@@ -133,6 +139,8 @@ def next_run(cadence, timezone, *, after_ms, min_interval_minutes=5):
     """UTC minute scan avoids nonexistent DST times and disambiguates repeated times."""
     parsed = _parse_cadence(cadence)
     zone = _zone(timezone)
+    if parsed[0] == 'continuous':
+        return after_ms + parsed[1] * 60_000
     initial = (after_ms // 60_000 + 1) * 60_000
     earliest = after_ms + min_interval_minutes * 60_000
     for timestamp in range(initial, initial + 370 * _DAY_MS, 60_000):
@@ -149,6 +157,27 @@ def next_run(cadence, timezone, *, after_ms, min_interval_minutes=5):
         if found is not None:
             return found
     raise HTTPException(400, detail='Schedule has no occurrence within one Gregorian cycle')
+
+
+def _initial_run(config, now):
+    if config['cadence']['frequency'] == 'continuous':
+        return now
+    return next_run(config['cadence'], config['timezone'], after_ms=now)
+
+
+def _continuous_next_run(db, cadence, occurrence):
+    # Prefer the generation's persisted terminal timestamp over the time the
+    # polling worker observed it. Admission failures have no generation.
+    terminal = db.execute(
+        "SELECT coalesce(terminal_at,updated_at) AS terminal_at FROM runs WHERE id=? "
+        "AND status IN ('complete','error','aborted','interrupted')",
+        (occurrence['run_id'],),
+    ).fetchone()
+    finished_ms = (terminal['terminal_at'] if terminal else occurrence['updated_at']) // 1000
+    delay = cadence['delayMinutes']
+    if occurrence['status'] != 'success':
+        delay = max(delay, _LIMITS['minIntervalMinutes'])
+    return finished_ms + delay * 60_000
 
 
 def _next_sparse_cron(parsed, zone, after_ms, earliest):
@@ -234,13 +263,23 @@ def _validate(owner, repo, data, *, partial=False, check_dependencies=True):
         raise HTTPException(400, detail='Invalid schedule request id')
     if 'enabled' in data and type(data['enabled']) is not bool:
         raise HTTPException(400, detail='enabled must be a boolean')
-    if 'target' in data and data['target'] != 'new':
-        raise HTTPException(400, detail='Only new-chat schedules are supported')
+    if 'target' in data and data['target'] not in ('new', 'reuse', 'existing'):
+        raise HTTPException(400, detail='Unsupported schedule target')
+    if 'targetConversationId' in data:
+        cid = data['targetConversationId']
+        if cid is not None and (not isinstance(cid, str) or not cid):
+            raise HTTPException(400, detail='Invalid schedule conversation')
+    if data.get('target') == 'existing' and (not partial or 'targetConversationId' in data):
+        cid = data.get('targetConversationId')
+        if not cid:
+            raise HTTPException(400, detail='Schedule conversation required')
+        if check_dependencies and repo.conversation(owner, cid) is None:
+            raise HTTPException(404, detail='Schedule conversation not found')
     if 'file_ids' in data:
         files = data['file_ids']
         if not isinstance(files, list) or len(files) > 10 or any(not isinstance(f, str) for f in files):
             raise HTTPException(400, detail='Invalid files')
-    if ('chatProjectId' in data and data['chatProjectId'] is not None
+    if (data.get('target') != 'existing' and 'chatProjectId' in data and data['chatProjectId'] is not None
             and (not isinstance(data['chatProjectId'], str) or
                  (check_dependencies and not repo.project(owner, data['chatProjectId'])))):
         raise HTTPException(404, detail='Schedule project not found')
@@ -295,22 +334,18 @@ async def schedules(request: Request):
                          (owner, data['clientRequestId'])).fetchone()
         if row is not None:
             return JSONResponse(_present(row, repo.database))
-        count = db.execute('SELECT COUNT(*) FROM webui_schedules WHERE owner=?', (owner,)).fetchone()[0]
-    if count >= _LIMITS['maxPerUser']:
-        raise HTTPException(400, detail='Schedule limit reached')
     config = {key: data[key] for key in
               ('name', 'prompt', 'agent_id', 'cadence', 'timezone', 'target', 'file_ids',
-               'chatProjectId') if key in data}
+               'chatProjectId', 'targetConversationId') if key in data}
     config.setdefault('target', 'new')
+    if config['target'] != 'existing':
+        config.pop('targetConversationId', None)
     now = int(time.time() * 1000)
     enabled = data.get('enabled', True)
-    next_at = next_run(config['cadence'], config['timezone'], after_ms=now) if enabled else None
+    next_at = _initial_run(config, now) if enabled else None
     sid = str(uuid.uuid4())
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        count = db.execute('SELECT COUNT(*) FROM webui_schedules WHERE owner=?', (owner,)).fetchone()[0]
-        if count >= _LIMITS['maxPerUser']:
-            raise HTTPException(400, detail='Schedule limit reached')
         db.execute('INSERT OR IGNORE INTO webui_schedules '
                    '(id,owner,request_id,config,enabled,next_run,created_at,updated_at) '
                    'VALUES(?,?,?,?,?,?,?,?)',
@@ -341,24 +376,59 @@ async def schedule(request: Request):
     _validate(owner, repo, payload, partial=True)
     config = json.loads(row['config'])
     for key in ('name', 'prompt', 'agent_id', 'cadence', 'timezone', 'target',
-                'file_ids', 'chatProjectId'):
+                'file_ids', 'chatProjectId', 'targetConversationId'):
         if key in payload:
             config[key] = payload[key]
     enabled = payload.get('enabled', bool(row['enabled']))
+    if config.get('target', 'new') != 'existing':
+        config.pop('targetConversationId', None)
+    elif not config.get('targetConversationId'):
+        raise HTTPException(400, detail='Schedule conversation required')
     _validate(owner, repo, config, partial=True, check_dependencies=enabled)
     timing_changed = (config['cadence'] != json.loads(row['config'])['cadence']
                       or config['timezone'] != json.loads(row['config'])['timezone'])
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        latest = db.execute('SELECT revision,enabled,next_run FROM webui_schedules WHERE id=? AND owner=?',
+        latest = db.execute('SELECT revision,enabled,next_run,config FROM webui_schedules WHERE id=? AND owner=?',
                             (sid, owner)).fetchone()
         if latest is None:
             raise HTTPException(404, detail='Schedule not found')
         if latest['revision'] != row['revision']:
             raise HTTPException(409, detail='Schedule configuration changed')
+        latest_config = json.loads(latest['config'])
+        target_changed = (config.get('target', 'new') != latest_config.get('target', 'new')
+                          or config.get('targetConversationId') != latest_config.get('targetConversationId'))
+        if target_changed and db.execute(
+            "SELECT 1 FROM webui_schedule_runs WHERE schedule_id=? "
+            "AND status IN ('claimed','started')", (sid,),
+        ).fetchone():
+            raise HTTPException(409, detail='Cannot change target while schedule is running')
+        # A first admission can bind a reusable chat while this PATCH is in flight.
+        # Carry the server-managed binding forward from the locked row, never the
+        # client's snapshot. Switching strategies intentionally resets the binding.
+        config.pop('reuseConversationId', None)
+        if not target_changed and latest_config.get('reuseConversationId'):
+            config['reuseConversationId'] = latest_config['reuseConversationId']
+        cid = _target_conversation(config)
+        if enabled and cid and not db.execute(
+            'SELECT 1 FROM conversations WHERE owner=? AND id=?', (owner, cid),
+        ).fetchone():
+            raise HTTPException(404, detail='Schedule conversation not found')
         if enabled and (timing_changed or not latest['enabled']):
-            next_at = next_run(config['cadence'], config['timezone'],
-                               after_ms=int(time.time() * 1000))
+            active = config['cadence']['frequency'] == 'continuous' and db.execute(
+                "SELECT 1 FROM webui_schedule_runs WHERE schedule_id=? "
+                "AND status IN ('claimed','started')", (sid,),
+            ).fetchone()
+            next_at = None if active else _initial_run(config, int(time.time() * 1000))
+            if (not active and latest['enabled'] and config['cadence']['frequency'] == 'continuous'
+                    and json.loads(row['config'])['cadence']['frequency'] == 'continuous'):
+                last = db.execute(
+                    "SELECT * FROM webui_schedule_runs WHERE schedule_id=? "
+                    "AND status IN ('success','error','interrupted') ORDER BY updated_at DESC LIMIT 1",
+                    (sid,),
+                ).fetchone()
+                if last is not None:
+                    next_at = _continuous_next_run(db, config['cadence'], last)
         else:
             # The scheduler may claim the due occurrence after the first read.
             # Preserve the latest next_run under the same SQLite write lease.
@@ -367,6 +437,14 @@ async def schedule(request: Request):
                    'revision=revision+1,updated_at=? WHERE id=? AND owner=?',
                    (_json(config), int(enabled), next_at, _now(), sid, owner))
     return JSONResponse(_present(_find(owner, sid, repo.database), repo.database))
+
+
+def _target_conversation(config):
+    if config.get('target') == 'existing':
+        return config.get('targetConversationId')
+    if config.get('target') == 'reuse':
+        return config.get('reuseConversationId')
+    return None
 
 
 def _claim_due(database, *, owner=None, sid=None, manual=False):
@@ -387,6 +465,11 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
         where.append("NOT EXISTS (SELECT 1 FROM webui_schedule_runs r "
                      "WHERE r.schedule_id=webui_schedules.id AND "
                      "r.status IN ('claimed','started'))")
+        where.append(
+            "NOT EXISTS (SELECT 1 FROM runs WHERE conversation_id=CASE json_extract(config,'$.target') "
+            "WHEN 'existing' THEN json_extract(config,'$.targetConversationId') "
+            "WHEN 'reuse' THEN json_extract(config,'$.reuseConversationId') END "
+            "AND status IN ('running','requires_action'))")
         rows = db.execute('SELECT * FROM webui_schedules WHERE ' + ' AND '.join(where) +
                           ' ORDER BY next_run LIMIT ?', (*values, 25)).fetchall()
         claimed = []
@@ -405,7 +488,17 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
                     continue
             # Anchor recurrence to the scheduled due minute, never to polling
             # latency. The creation/edit path already enforces the initial delay.
-            if manual:
+            if config['cadence']['frequency'] == 'continuous':
+                # Arm the next occurrence only when this one settles. A fast
+                # completion or disable/re-enable can reuse a millisecond; the
+                # occurrence identity must still be unique under this write lock.
+                while db.execute(
+                    'SELECT 1 FROM webui_schedule_runs WHERE schedule_id=? AND due_at=?',
+                    (row['id'], due),
+                ).fetchone():
+                    due += 1
+                next_at = None
+            elif manual:
                 next_at = row['next_run']
             else:
                 try:
@@ -442,7 +535,13 @@ def _recover_claimed(database, *, grace_seconds=90):
         rows = db.execute(
             "SELECT r.*,s.config,s.enabled FROM webui_schedule_runs r "
             "JOIN webui_schedules s ON s.id=r.schedule_id "
-            "WHERE r.status='claimed' AND r.updated_at<? ORDER BY r.created_at LIMIT 25",
+            "WHERE r.status='claimed' AND r.updated_at<? AND (s.enabled=0 OR "
+            "EXISTS (SELECT 1 FROM generation_requests gr WHERE gr.owner=r.owner "
+            "AND gr.client_request_id='schedule:' || r.id) OR "
+            "NOT EXISTS (SELECT 1 FROM runs WHERE conversation_id=CASE json_extract(s.config,'$.target') "
+            "WHEN 'existing' THEN json_extract(s.config,'$.targetConversationId') "
+            "WHEN 'reuse' THEN json_extract(s.config,'$.reuseConversationId') END "
+            "AND status IN ('running','requires_action'))) ORDER BY r.created_at LIMIT 25",
             (cutoff,),
         ).fetchall()
         for row in rows:
@@ -496,6 +595,15 @@ def _settle(database, occurrence_id, status, *, conversation_id=None, run_id=Non
             db.execute('UPDATE webui_schedules SET run_count=run_count+1,'
                        'failure_count=failure_count+?,last_run=?,updated_at=? WHERE id=?',
                        (int(status != 'success'), _json(data), _now(), row['schedule_id']))
+            schedule = db.execute('SELECT config,enabled FROM webui_schedules WHERE id=?',
+                                  (row['schedule_id'],)).fetchone()
+            if schedule is not None and schedule['enabled']:
+                cadence = json.loads(schedule['config'])['cadence']
+                if cadence['frequency'] == 'continuous':
+                    settled = db.execute('SELECT * FROM webui_schedule_runs WHERE id=?',
+                                         (occurrence_id,)).fetchone()
+                    db.execute('UPDATE webui_schedules SET next_run=? WHERE id=?',
+                               (_continuous_next_run(db, cadence, settled), row['schedule_id']))
 
 
 async def _dispatch(occurrence, database):
@@ -506,6 +614,7 @@ async def _dispatch(occurrence, database):
         validate_message_submission,
     )
     from .generation_routes import _generation_store, _start_task
+    from .generations import GenerationConflict
     from .memory_protection import configured_filters
     from .providers import provider_config, selected_provider
     from .storage import WorkspaceRepository
@@ -516,7 +625,7 @@ async def _dispatch(occurrence, database):
             raise ValueError('agent_deleted')
         repo = WorkspaceRepository(database)
         project_id = config.get('chatProjectId')
-        if project_id and repo.project(owner, project_id) is None:
+        if not _target_conversation(config) and project_id and repo.project(owner, project_id) is None:
             raise ValueError('project_deleted')
         filters = configured_filters(repo, owner)
         validate_message_submission(config['prompt'], filters)
@@ -533,7 +642,24 @@ async def _dispatch(occurrence, database):
             payload['projectId'] = project_id
         if config.get('file_ids'):
             payload['files'] = [{'file_id': file_id} for file_id in config['file_ids']]
-        generation, fresh = _generation_store().begin(owner, payload, agent)
+        # Atomically admit the turn and persist the reusable chat binding. A
+        # crash after this commit cannot create a second reusable conversation.
+        store = _generation_store()
+        with database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            current = db.execute('SELECT config FROM webui_schedules WHERE id=? AND owner=?',
+                                 (sid, owner)).fetchone()
+            if current is None:
+                return
+            current_config = json.loads(current['config'])
+            cid = _target_conversation(current_config)
+            if cid:
+                payload['conversationId'] = cid
+            generation, fresh = store.begin(owner, payload, agent, _connection=db)
+            if current_config.get('target') == 'reuse' and not cid:
+                current_config['reuseConversationId'] = generation.conversation_id
+                db.execute('UPDATE webui_schedules SET config=? WHERE id=?',
+                           (_json(current_config), sid))
         if not fresh:
             if generation.status != 'running':
                 status = 'success' if generation.status == 'complete' else 'interrupted'
@@ -562,6 +688,11 @@ async def _dispatch(occurrence, database):
             _settle(database, occurrence_id, 'interrupted',
                     conversation_id=generation.conversation_id, run_id=generation.run_id,
                     error='generation_not_started')
+    except GenerationConflict:
+        # A user or another schedule won admission after we claimed the due
+        # occurrence. Leave the durable claim pending for recovery, without
+        # adding a message or recording a failed model execution.
+        return
     except Exception as exc:
         # Only stable user-facing validation errors may be echoed into the run
         # record. Unexpected provider exceptions can contain credential data.

@@ -225,6 +225,19 @@ export default function ScheduleCard({ schedule, projectName }: ScheduleCardProp
 
   const statusChip = schedule.lastRun ? STATUS_CHIPS[schedule.lastRun.status] : null;
   const lastRunConvoId = schedule.lastRun?.conversationId;
+  const targetId =
+    schedule.target === 'existing'
+      ? schedule.targetConversationId
+      : schedule.target === 'reuse'
+        ? schedule.reuseConversationId
+        : undefined;
+  const targetLabel = localize(
+    schedule.target === 'existing'
+      ? 'com_ui_schedule_target_existing'
+      : schedule.target === 'reuse'
+        ? 'com_ui_schedule_target_reuse'
+        : 'com_ui_schedule_target_new',
+  );
 
   return (
     <div
@@ -279,6 +292,17 @@ export default function ScheduleCard({ schedule, projectName }: ScheduleCardProp
         </p>
       )}
       <p className="mt-1 text-sm text-text-primary">{cadenceText}</p>
+      {targetId ? (
+        <button
+          type="button"
+          className="mt-0.5 text-xs text-text-secondary hover:underline"
+          onClick={() => navigate(`/c/${targetId}`)}
+        >
+          {targetLabel}
+        </button>
+      ) : (
+        <p className="mt-0.5 text-xs text-text-secondary">{targetLabel}</p>
+      )}
       {nextRunText != null && <p className="mt-0.5 text-xs text-text-secondary">{nextRunText}</p>}
       {(statusChip != null || schedule.disabledReason != null) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">

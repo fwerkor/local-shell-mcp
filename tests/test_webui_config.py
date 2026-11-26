@@ -57,7 +57,7 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
         assert (await client.get("/api/config", headers=alice)).json()["compactionEnabled"] is True
         repo.save_setting("alice", "endpoints", {})
         assert startup["interface"]["schedules"] == {
-            "use": True, "create": True, "maxPerUser": 25,
+            "use": True, "create": True,
             "minIntervalMinutes": 5, "requireProject": False,
         }
         endpoints = (await client.get("/api/endpoints", headers=alice)).json()

@@ -13,11 +13,12 @@ const put = request.put as jest.Mock;
 
 function mount(conversationId: string, projectId?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <LsmChatPermissions conversationId={conversationId} projectId={projectId} />
     </QueryClientProvider>,
   );
+  return { ...view, client };
 }
 
 beforeEach(async () => {
@@ -73,7 +74,8 @@ describe.each(['light', 'dark'])('%s theme', (theme) => {
     const dialog = screen.getByRole('dialog', { name: '工具权限' });
     expect(dialog.parentElement).toBe(document.body);
     expect(dialog).toHaveClass('lsm-permissions-dialog', 'bg-surface-primary', 'text-text-primary');
-    expect(screen.getByRole('button', { name: '实例默认' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '当前会话' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '全局默认' }));
 
     const write = await screen.findByRole('button', { name: 'local 读写' });
     await waitFor(() => expect(write).not.toBeDisabled());
@@ -89,10 +91,11 @@ describe.each(['light', 'dark'])('%s theme', (theme) => {
   });
 });
 
-it('opens on the current project defaults when starting a project chat', async () => {
+it('can edit project defaults independently when starting a project chat', async () => {
   mount('new', 'project-1');
   fireEvent.click(screen.getByRole('button', { name: '工具权限' }));
-  expect(screen.getByRole('button', { name: '项目默认' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '当前会话' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '项目默认' }));
   await screen.findByRole('button', { name: 'worker1 读写' });
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'worker1 读写' })).toHaveAttribute('aria-pressed', 'true'),
@@ -124,6 +127,34 @@ it('renders permissions in the selected non-Chinese language', async () => {
   await changeLanguageSafely('en');
   mount('new');
   fireEvent.click(screen.getByRole('button', { name: 'Tool permissions' }));
-  expect(screen.getByRole('button', { name: 'Instance defaults' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Global defaults' })).toBeInTheDocument();
   expect(await screen.findByRole('button', { name: 'local Read/write' })).toBeInTheDocument();
+});
+
+it('keeps new-chat machine overrides local to the draft without changing defaults', async () => {
+  const { client } = mount('new', 'project-1');
+  fireEvent.click(screen.getByRole('button', { name: '工具权限' }));
+  const read = await screen.findByRole('button', { name: 'local 只读' });
+  await waitFor(() => expect(read).not.toBeDisabled());
+  fireEvent.click(read);
+  expect(client.getQueryData(['lsm', 'draft-machine-permissions', 0, 'project-1']))
+    .toEqual({ local: 'read' });
+  expect(put).not.toHaveBeenCalled();
+  const reset = screen.getByRole('button', { name: 'local 恢复继承' });
+  await waitFor(() => expect(reset).not.toBeDisabled());
+  fireEvent.click(reset);
+  await waitFor(() => expect(client.getQueryData(['lsm', 'draft-machine-permissions', 0, 'project-1'])).toEqual({}));
+});
+
+it('keeps the popup inside the viewport when the composer is near the middle', () => {
+  mount('new');
+  const trigger = screen.getByRole('button', { name: '工具权限' });
+  jest.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
+    top: 300, bottom: 340, right: 700, left: 600, width: 100, height: 40, x: 600, y: 300,
+    toJSON: () => ({}),
+  });
+  fireEvent.click(trigger);
+  const dialog = screen.getByRole('dialog');
+  expect(dialog.style.top).toBe('348px');
+  expect(Number.parseFloat(dialog.style.maxHeight)).toBeLessThanOrEqual(window.innerHeight - 356);
 });

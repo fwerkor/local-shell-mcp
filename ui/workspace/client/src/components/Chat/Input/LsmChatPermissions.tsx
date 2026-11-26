@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, RotateCcw, ShieldCheck, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -90,20 +90,38 @@ function MachineAccessRow({
 export default function LsmChatPermissions({
   conversationId,
   projectId = null,
+  index = 0,
 }: {
   conversationId?: string | null;
   projectId?: string | null;
+  index?: number;
 }) {
   const localize = useLocalize();
   const client = useQueryClient();
   const hasChat = !!conversationId && !['new', 'new_conversation'].includes(conversationId);
   const chatId = hasChat ? conversationId! : '';
   const [open, setOpen] = useState(false);
-  const [scope, setScope] = useState<Scope>(hasChat ? 'chat' : projectId ? 'project' : 'global');
+  const [scope, setScope] = useState<Scope>('chat');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ right: 8, bottom: 80 });
+  const [position, setPosition] = useState<{ right: number; top?: number; bottom?: number; maxHeight: number }>({ right: 8, bottom: 8, maxHeight: 0 });
+  const draftKey = useMemo(() => ['lsm', 'draft-machine-permissions', index, projectId || ''], [index, projectId]);
+  // Keep the draft observed while the composer is mounted so it cannot expire
+  // before the first send, even if the permission dialog has been closed.
+  const draftQuery = useQuery<Record<string, Access>>({
+    queryKey: draftKey,
+    enabled: false,
+    queryFn: async () => ({}),
+  });
+  useEffect(() => {
+    if (hasChat) return;
+    return () => {
+      // Reset rather than remove: a mounted observer (including StrictMode's
+      // effect replay) must stay attached to the same cache entry.
+      if (client.getQueryData(draftKey) !== undefined) client.setQueryData(draftKey, {});
+    };
+  }, [client, draftKey, hasChat]);
 
   const chat = useQuery<ChatPolicy>({
     queryKey: ['lsm', 'chat-permissions', chatId],
@@ -112,7 +130,7 @@ export default function LsmChatPermissions({
     retry: false,
   });
   const associatedProject = (hasChat ? chat.data?.projectId : projectId) ?? '';
-  const currentProject = selectedProjectId || associatedProject;
+  const currentProject = scope === 'project' ? selectedProjectId || associatedProject : associatedProject;
   const machines = useQuery<{ machines: Machine[] }>({
     queryKey: ['lsm', 'permission-machines'],
     queryFn: () => request.get('/api/lsm/permissions/machines'),
@@ -139,20 +157,29 @@ export default function LsmChatPermissions({
   });
 
   useEffect(() => {
-    setScope(hasChat ? 'chat' : projectId ? 'project' : 'global');
+    setScope('chat');
     setSelectedProjectId('');
     setOpen(false);
   }, [chatId, hasChat, projectId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     const reposition = () => {
       const bounds = trigger.current?.getBoundingClientRect();
       if (!bounds) return;
-      setPosition({
-        right: Math.max(8, window.innerWidth - bounds.right),
-        bottom: Math.max(8, window.innerHeight - bounds.top + 8),
-      });
+      const height = window.innerHeight;
+      const above = Math.max(0, bounds.top - 16);
+      const below = Math.max(0, height - bounds.bottom - 16);
+      const limit = Math.min(650, height * 0.7);
+      const width = window.innerWidth;
+      const right = Math.min(Math.max(8, width - bounds.right), Math.max(8, width - 384 - 8));
+      if (Math.max(above, below) < Math.min(240, limit)) {
+        setPosition({ right, top: 8, maxHeight: Math.max(0, height - 16) });
+      } else if (above >= below || above >= limit) {
+        setPosition({ right, bottom: height - bounds.top + 8, maxHeight: Math.min(limit, above) });
+      } else {
+        setPosition({ right, top: bounds.bottom + 8, maxHeight: Math.min(limit, below) });
+      }
     };
     const onEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
@@ -176,9 +203,10 @@ export default function LsmChatPermissions({
     };
   }, [open]);
 
-  const active: Scope = scope === 'chat' && !hasChat ? (projectId ? 'project' : 'global') : scope;
+  const active = scope;
+  const isDraft = active === 'chat' && !hasChat;
   const selected = active === 'global' ? global : active === 'project' ? project : chat;
-  const explicit = selected.data?.machines ?? {};
+  const explicit = (isDraft ? draftQuery.data : selected.data?.machines) ?? {};
   const inherited: Record<string, Access> = active === 'global'
     ? global.data?.effective ?? {}
     : active === 'project'
@@ -210,14 +238,19 @@ export default function LsmChatPermissions({
   const url = active === 'global' ? '/api/lsm/permissions/defaults'
     : active === 'project' ? `/api/lsm/permissions/projects/${encodeURIComponent(currentProject)}`
       : `/api/lsm/preferences/${encodeURIComponent(chatId)}`;
-  const disabled = mutation.isLoading || selected.isFetching || !selected.data ||
-    (active === 'project' && !currentProject);
+  const disabled = mutation.isLoading || (isDraft
+    ? !global.data || (!!associatedProject && !project.data) || machines.isFetching
+    : selected.isFetching || !selected.data || (active === 'project' && !currentProject));
 
   const saveMachines = (machine: string, access: Access | 'inherit') => {
     if (disabled) return;
     const next = { ...explicit };
     if (access === 'inherit') delete next[machine];
     else next[machine] = access;
+    if (isDraft) {
+      client.setQueryData(draftKey, next);
+      return;
+    }
     const value = active === 'chat'
       ? { machines: next, web: chat.data?.web ?? true, mcp: chat.data?.mcp ?? true,
           memory: chat.data?.memory ?? true }
@@ -227,6 +260,7 @@ export default function LsmChatPermissions({
 
   const projectName = projects.data?.projects.find((item) => item.id === associatedProject)?.name;
   const isUnavailable = selected.isError || machines.isError ||
+    (isDraft && (global.isError || (!!associatedProject && project.isError))) ||
     (active === 'project' && (project.isError || projects.isError));
 
   return (
@@ -244,8 +278,8 @@ export default function LsmChatPermissions({
 
       {open && createPortal(
         <div ref={panel} role="dialog" aria-label={localize('com_lsm_permission_tool_permissions')}
-          className="lsm-permissions-dialog fixed z-[1000] flex w-96 max-w-[calc(100vw-16px)] max-h-[min(70vh,650px)] flex-col overflow-hidden rounded-2xl border border-border-light bg-surface-primary text-text-primary shadow-xl"
-          style={{ right: position.right, bottom: position.bottom }}>
+          className="lsm-permissions-dialog fixed z-[1000] flex w-96 max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-2xl border border-border-light bg-surface-primary text-text-primary shadow-xl"
+          style={position}>
           <div className="flex shrink-0 items-start justify-between gap-2 px-4 pb-3 pt-4">
             <div>
               <h2 className="text-sm font-semibold">{localize('com_lsm_permission_tool_permissions')}</h2>
@@ -257,7 +291,7 @@ export default function LsmChatPermissions({
             </button>
           </div>
           <div className="mx-4 flex shrink-0 gap-1 rounded-lg bg-surface-secondary p-1" role="group" aria-label={localize('com_lsm_permission_scope')}>
-            {(['chat', 'project', 'global'] as const).filter((item) => item !== 'chat' || hasChat)
+            {(['chat', 'project', 'global'] as const)
               .map((item) => (
                 <button type="button" key={item} aria-pressed={active === item}
                   className={`flex-1 rounded-md px-2 py-2 text-xs transition-colors ${

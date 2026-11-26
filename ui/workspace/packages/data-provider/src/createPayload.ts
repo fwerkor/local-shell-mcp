@@ -31,6 +31,7 @@ export default function createPayload(submission: t.TSubmission) {
     clientRequestId,
     recoverySteerId,
     expectedPredecessorCreatedAt,
+    draftMachinePermissions,
   } = submission;
   const { conversationId } = s.tConvoUpdateSchema.parse(conversation);
   const { endpoint: _e, endpointType } = endpointOption as {
@@ -51,6 +52,7 @@ export default function createPayload(submission: t.TSubmission) {
   const payload: t.TPayload = {
     ...userMessage,
     ...endpointOption,
+    ...(draftMachinePermissions != null && { draftMachinePermissions }),
     ...(conversation.lsmSampling != null && { lsmSampling: conversation.lsmSampling }),
     endpoint,
     addedConvo,

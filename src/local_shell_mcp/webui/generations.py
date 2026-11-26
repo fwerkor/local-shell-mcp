@@ -144,6 +144,8 @@ class GenerationStore:
                 raise ValueError("Internal completion idempotency key cannot be submitted")
             if client_request_id.startswith("subagent:") and trusted_new_conversation_id is None:
                 raise ValueError("Internal child idempotency key cannot be submitted")
+            if client_request_id.startswith("schedule:") and _connection is None:
+                raise ValueError("Internal schedule idempotency key cannot be submitted")
             if client_request_id.startswith("trigger_") and _connection is None:
                 raise ValueError("Internal Agent Trigger idempotency key cannot be submitted")
         raw_conversation_id = payload.get("conversationId")
@@ -159,6 +161,13 @@ class GenerationStore:
         project_id = payload.get("projectId", payload.get("chatProjectId")) if new_conversation else None
         if project_id is not None and (not isinstance(project_id, str) or not project_id):
             raise ValueError("Invalid project id")
+        draft_machine_permissions = None
+        if "draftMachinePermissions" in payload:
+            if not new_conversation:
+                raise ValueError("Draft machine permissions require a new conversation")
+            from .machine_permissions import validate_access_map
+
+            draft_machine_permissions = validate_access_map(payload["draftMachinePermissions"])
         # Internal-only allocation for a host-reserved subagent child. No HTTP
         # field can select this value; the host registered its trusted lineage
         # before this conversation becomes externally observable.
@@ -230,6 +239,11 @@ class GenerationStore:
                      payload.get("endpoint") or "agents", project_id,
                      _json({"lsmSampling": state["sampling"]} if "lsmSampling" in payload and not agent else {}), now, now),
                 )
+                if draft_machine_permissions is not None:
+                    from .machine_permissions import _CONVERSATION
+
+                    db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?)",
+                               (owner, _CONVERSATION + conversation_id, _json(draft_machine_permissions)))
             elif not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                                 (conversation_id, owner)).fetchone():
                 raise KeyError("Conversation not found")
@@ -1846,8 +1860,8 @@ class GenerationStore:
             if status != "interrupted":
                 run_state.pop("resumeClaim", None)
                 run_state.pop("approvedToolBatch", None)
-            db.execute("UPDATE runs SET status=?,state=?,updated_at=? WHERE id=?",
-                       (status, _json(run_state), now, run_id))
+            db.execute("UPDATE runs SET status=?,state=?,updated_at=?,terminal_at=? WHERE id=?",
+                       (status, _json(run_state), now, now, run_id))
             unread = db.execute(
                 "UPDATE conversations SET updated_at=?,unread_marker="
                 "CASE WHEN unread_marker LIKE 'manual:%' THEN ? ELSE ? END "
