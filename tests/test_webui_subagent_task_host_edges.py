@@ -679,25 +679,40 @@ async def test_remote_owner_renews_before_expiry_then_later_disappears(host_envi
     handle = json.loads(await host.start(invocation))
     task_id = handle["background_task_id"]
     monkeypatch.setattr(host, "_ensure_active", original)
+    # Use a controlled lease clock: Windows SQLite setup can take longer
+    # than the original 110 ms lease before the recovery scan even starts.
     now = module._now()
-    with host.db.connect() as db:
-        db.execute("UPDATE subagent_tasks SET lease_owner=?,lease_until=? WHERE id=?",
-                   ("remote-controller", now + 110, task_id))
-    accepted = await module.recover_subagent_tasks(host.db, stream_tools=model, stream_text=model)
-    assert accepted == 1
-    assert await module.recover_subagent_tasks(host.db, stream_tools=model, stream_text=model) == 1
-    assert len(module._RECOVERY_WATCHERS) == 1
-    await asyncio.sleep(.05)
-    with host.db.connect() as db:
-        db.execute("UPDATE subagent_tasks SET lease_until=? WHERE id=?",
-                   (module._now() + 320, task_id))
-    await asyncio.sleep(.18)
-    assert host._get(task_id)["child_run_id"] is None
-    assert host._get(task_id)["lease_owner"] == "remote-controller"
-    settled = await settle(host, task_id, timeout=3)
-    assert settled["status"] == "completed"
-    assert json.loads(await host.check({"background_task_id": task_id}))["result"] == "recovered after second remote expiry"
-    await shutdown_subagent_tasks()
+    clock = [now]
+    monkeypatch.setattr(module, "_now", lambda: clock[0])
+    checked = asyncio.Event()
+    ensure_active = SQLiteSubagentTaskHost._ensure_active
+
+    async def observe_recovery(self, key):
+        await ensure_active(self, key)
+        if clock[0] > now:
+            checked.set()
+
+    monkeypatch.setattr(SQLiteSubagentTaskHost, "_ensure_active", observe_recovery)
+    try:
+        with host.db.connect() as db:
+            db.execute("UPDATE subagent_tasks SET lease_owner=?,lease_until=? WHERE id=?",
+                       ("remote-controller", now + 110, task_id))
+        assert await module.recover_subagent_tasks(host.db, stream_tools=model, stream_text=model) == 1
+        assert await module.recover_subagent_tasks(host.db, stream_tools=model, stream_text=model) == 1
+        assert len(module._RECOVERY_WATCHERS) == 1
+        with host.db.connect() as db:
+            db.execute("UPDATE subagent_tasks SET lease_until=? WHERE id=?",
+                       (now + 320, task_id))
+        clock[0] = now + 180
+        await asyncio.wait_for(checked.wait(), 10)
+        assert host._get(task_id)["child_run_id"] is None
+        assert host._get(task_id)["lease_owner"] == "remote-controller"
+        clock[0] = now + 400
+        settled = await settle(host, task_id, timeout=20)
+        assert settled["status"] == "completed"
+        assert json.loads(await host.check({"background_task_id": task_id}))["result"] == "recovered after second remote expiry"
+    finally:
+        await shutdown_subagent_tasks()
 
 
 @pytest.mark.asyncio
