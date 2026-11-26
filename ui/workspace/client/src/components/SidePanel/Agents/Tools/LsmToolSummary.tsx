@@ -4,11 +4,12 @@ import type { AgentForm } from '~/common';
 import { useLocalize } from '~/hooks';
 
 type Access = 'none' | 'read' | 'write';
-type MachineSummary = { defaultAccess: Access; overrides: Record<Access, number> };
+type DefaultAccess = Access | 'inherit';
+type MachineSummary = { defaultAccess: DefaultAccess; overrides: Record<Access, number> };
 
 export function summarizeMachineAccess(
   selected: Record<string, Access> | undefined,
-  defaultPermission: Access | undefined,
+  defaultPermission: DefaultAccess | undefined,
 ): MachineSummary | null {
   // Legacy agents select individual native tools, already represented in the list.
   if (selected === undefined && defaultPermission === undefined) return null;
@@ -93,7 +94,7 @@ export function MachineAccessSummary({
 }) {
   const localize = useLocalize();
   const detail = [
-    `${localize('com_lsm_agent_machine_default')}: ${localize(`com_lsm_agent_machine_${summary.defaultAccess}`)}`,
+    `${localize('com_lsm_agent_machine_default')}: ${localize(summary.defaultAccess === 'inherit' ? 'com_lsm_agent_machine_inherit_global' : `com_lsm_agent_machine_${summary.defaultAccess}`)}`,
     ...(['read', 'write', 'none'] as const)
       .filter((level) => summary.overrides[level] > 0)
       .map((level) => `${summary.overrides[level]} ${localize(`com_lsm_agent_machine_${level}`)}`),

@@ -102,3 +102,13 @@ test('summary follows external MCP and machine policy changes without reopening 
   fireEvent.click(screen.getByText('revoke'));
   expect(screen.queryByRole('button', { name: machineName })).not.toBeInTheDocument();
 });
+
+test('global inheritance remains visible with explicit overrides', () => {
+  const summary = summarizeMachineAccess({ local: 'none', remote: 'read' }, 'inherit');
+  expect(summary).toEqual({
+    defaultAccess: 'inherit',
+    overrides: { none: 1, read: 1, write: 0 },
+  });
+  render(<ul><MachineAccessSummary summary={summary!} onManage={manage} /></ul>);
+  expect(screen.getByRole('button')).toHaveTextContent('com_lsm_agent_machine_inherit_global');
+});
