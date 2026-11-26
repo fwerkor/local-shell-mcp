@@ -245,7 +245,8 @@ CREATE TABLE IF NOT EXISTS runs (
     status TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT '{}',
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    terminal_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS active_subagent_threads (
     owner TEXT NOT NULL,
@@ -680,6 +681,11 @@ class SQLiteDatabase:
                     db.execute(f"ALTER TABLE agent_event_deliveries ADD COLUMN {column} {definition}")
             db.execute("CREATE INDEX IF NOT EXISTS idx_agent_event_delivery_batch "
                        "ON agent_event_deliveries(owner,coalesce_key,batch_root_id,coalesce_until)")
+            run_columns = {row["name"] for row in db.execute("PRAGMA table_info(runs)")}
+            if "terminal_at" not in run_columns:
+                db.execute("ALTER TABLE runs ADD COLUMN terminal_at INTEGER")
+                db.execute("UPDATE runs SET terminal_at=updated_at "
+                           "WHERE status IN ('complete','error','aborted','interrupted')")
             # Source event-driven completion readiness: committing a parent
             # turn or durable child terminal row clears its waiting backoff in
             # the SAME transaction. No cross-process in-memory wake event.

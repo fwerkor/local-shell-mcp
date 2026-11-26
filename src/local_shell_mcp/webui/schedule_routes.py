@@ -169,11 +169,11 @@ def _continuous_next_run(db, cadence, occurrence):
     # Prefer the generation's persisted terminal timestamp over the time the
     # polling worker observed it. Admission failures have no generation.
     terminal = db.execute(
-        "SELECT updated_at FROM runs WHERE id=? "
+        "SELECT coalesce(terminal_at,updated_at) AS terminal_at FROM runs WHERE id=? "
         "AND status IN ('complete','error','aborted','interrupted')",
         (occurrence['run_id'],),
     ).fetchone()
-    finished_ms = (terminal['updated_at'] if terminal else occurrence['updated_at']) // 1000
+    finished_ms = (terminal['terminal_at'] if terminal else occurrence['updated_at']) // 1000
     delay = cadence['delayMinutes']
     if occurrence['status'] != 'success':
         delay = max(delay, _LIMITS['minIntervalMinutes'])

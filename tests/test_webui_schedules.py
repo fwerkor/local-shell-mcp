@@ -359,8 +359,11 @@ async def test_continuous_rearms_from_persisted_completion(state, monkeypatch, d
         generation = dispatched[0]
         store.finish('alice', generation.run_id, status='complete', text='Done')
         with repo.database.connect() as db:
-            finished = db.execute('SELECT updated_at FROM runs WHERE id=?',
+            finished = db.execute('SELECT terminal_at FROM runs WHERE id=?',
                                   (generation.run_id,)).fetchone()[0] // 1000
+            # Artifact edits update the run without changing model completion.
+            db.execute('UPDATE runs SET updated_at=updated_at+300000000 WHERE id=?',
+                       (generation.run_id,))
         # A fresh database instance simulates the scheduler observing completion
         # after a restart, long after the model actually finished.
         reopened = SQLiteDatabase(repo.database.root)

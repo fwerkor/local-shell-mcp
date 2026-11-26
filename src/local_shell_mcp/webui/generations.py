@@ -1844,8 +1844,8 @@ class GenerationStore:
             if status != "interrupted":
                 run_state.pop("resumeClaim", None)
                 run_state.pop("approvedToolBatch", None)
-            db.execute("UPDATE runs SET status=?,state=?,updated_at=? WHERE id=?",
-                       (status, _json(run_state), now, run_id))
+            db.execute("UPDATE runs SET status=?,state=?,updated_at=?,terminal_at=? WHERE id=?",
+                       (status, _json(run_state), now, now, run_id))
             unread = db.execute(
                 "UPDATE conversations SET updated_at=?,unread_marker="
                 "CASE WHEN unread_marker LIKE 'manual:%' THEN ? ELSE ? END "
