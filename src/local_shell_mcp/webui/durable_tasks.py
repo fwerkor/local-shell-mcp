@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..audit import audit
-from .machine_permissions import agent_access_policy, authorize_machine_action, resolve_agent_ceiling
+from .machine_permissions import (
+    agent_access_policy,
+    authorize_machine_action,
+    resolve_agent_ceiling,
+)
 
 log = logging.getLogger(__name__)
 _STARTS = frozenset({"job_start", "shell_start", "job_retry", "remote_transfer"})

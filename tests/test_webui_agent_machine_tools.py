@@ -447,10 +447,12 @@ async def test_remote_discovery_reports_effective_machine_access(machine_agent, 
 
 @pytest.mark.asyncio
 async def test_agent_inherits_global_ceiling_live(machine_agent, monkeypatch):
-    from local_shell_mcp.webui.machine_permissions import (
-        agent_access_policy, effective_machine_access, machine_access_context,
-    )
     from local_shell_mcp.webui import durable_tasks as durable
+    from local_shell_mcp.webui.machine_permissions import (
+        agent_access_policy,
+        effective_machine_access,
+        machine_access_context,
+    )
 
     repo, cid, agents, agent = machine_agent
     key = "agent.machine_policy.global"
