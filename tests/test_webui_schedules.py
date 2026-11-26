@@ -430,3 +430,87 @@ async def test_continuous_failure_has_retry_floor(state):
         assert row['failure_count'] == 1
         assert row['next_run'] >= before + 300_000
         assert schedule_routes._claim_due(repo.database) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('target', ['new', 'reuse', 'existing'])
+async def test_schedule_conversation_targets(state, monkeypatch, target):
+    import time
+
+    from local_shell_mcp.webui import generation_routes, providers
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    app, repo, agent = state
+    store = GenerationStore(repo.database)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(providers, 'provider_config',
+                        lambda *args, **kwargs: ProviderConfig('openai', 'mock-model', 'http://mock', ''))
+    started = []
+
+    async def start(owner, generation, *args, **kwargs):
+        assert not kwargs['granted_scopes']
+        started.append(generation)
+        return True
+
+    monkeypatch.setattr(generation_routes, '_start_task', start)
+    existing = repo.create_conversation('alice', {'title': 'Existing'})['conversationId']
+    other = repo.create_conversation('bob', {'title': 'Private'})['conversationId']
+    payload = {
+        'name': 'Recurring', 'prompt': 'Continue', 'agent_id': agent['id'],
+        'cadence': {'frequency': 'continuous', 'delayMinutes': 0},
+        'timezone': 'UTC', 'target': target, 'clientRequestId': 'targets',
+    }
+    if target == 'existing':
+        payload['targetConversationId'] = existing
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as client:
+        if target == 'existing':
+            denied = await client.post('/api/schedules', json={**payload, 'targetConversationId': other})
+            assert denied.status_code == 404
+            missing = await client.post('/api/schedules', json={**payload, 'targetConversationId': None})
+            assert missing.status_code == 400
+        created = await client.post('/api/schedules', json=payload)
+        assert created.status_code == 201, created.text
+        sid = created.json()['id']
+        occurrence = schedule_routes._claim_due(repo.database)[0]
+        await schedule_routes._dispatch(occurrence, repo.database)
+        first = started[0]
+        if target == 'existing':
+            assert first.conversation_id == existing
+        if target == 'reuse':
+            bound = (await client.get('/api/schedules/' + sid)).json()
+            assert bound['reuseConversationId'] == first.conversation_id
+        assert not schedule_routes._claim_due(repo.database)
+        store.finish('alice', first.run_id, status='complete', text='Done')
+        schedule_routes._refresh(repo.database)
+        # Restart the repository and edit unrelated fields. Binding must survive.
+        db = SQLiteDatabase(repo.database.root)
+        patched = await client.patch('/api/schedules/' + sid, json={'name': 'Renamed'})
+        assert patched.status_code == 200
+        if target != 'new':
+            manual, _ = store.begin('alice', {'text': 'Human turn',
+                                             'conversationId': first.conversation_id}, agent)
+            assert not schedule_routes._claim_due(db)
+            store.finish('alice', manual.run_id, status='complete', text='Human response')
+        with db.connect() as conn:
+            conn.execute('UPDATE webui_schedules SET next_run=? WHERE id=?',
+                         (int(time.time() * 1000) - 1, sid))
+        second = schedule_routes._claim_due(db)[0]
+        await schedule_routes._dispatch(second, db)
+        assert len(started) == 2
+        if target == 'new':
+            assert started[1].conversation_id != first.conversation_id
+        else:
+            assert started[1].conversation_id == first.conversation_id
+            messages = repo.messages('alice', first.conversation_id)['messages']
+            assert [m['text'] for m in messages] == [
+                'Continue', 'Done', 'Human turn', 'Human response', 'Continue']
+            assert messages[-1]['parentMessageId'] == messages[-2]['messageId']
+        store.finish('alice', started[1].run_id, status='complete', text='Done again')
+        schedule_routes._refresh(db)
+        final = (await client.get('/api/schedules/' + sid)).json()
+        assert final['runCount'] == 2 and final['failureCount'] == 0
+        assert (await client.delete('/api/schedules/' + sid)).status_code == 200
+        assert repo.conversation('alice', first.conversation_id) is not None

@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { QueryKeys } from 'librechat-data-provider';
 import type { TSchedule } from 'librechat-data-provider';
 import { trackScheduledRun, releaseScheduledRun } from '~/data-provider/Schedules/admission';
 import { invalidateConversationLists } from '~/utils';
@@ -17,7 +18,7 @@ const inFlightChats = (schedule: Pick<TSchedule, 'inFlight'>): string[] =>
 const runState = (schedule: Occurrences): string => {
   const { lastRun } = schedule;
   const live = inFlightChats(schedule).sort().join(',');
-  return `${live}|${lastRun?.conversationId ?? ''}:${lastRun?.status ?? ''}`;
+  return `${live}|${lastRun?.conversationId ?? ''}:${lastRun?.status ?? ''}:${lastRun?.firedAt ?? ''}`;
 };
 
 /** A schedule that has never run. What a schedule this client has not seen before
@@ -76,7 +77,16 @@ export default function useRunSync(schedules?: TSchedule[], observedAt?: number)
     const current = new Map<string, string>();
     const live = new Set<string>();
     for (const schedule of schedules) {
-      current.set(schedule.id, runState(schedule));
+      const state = runState(schedule);
+      current.set(schedule.id, state);
+      const settled = schedule.lastRun?.conversationId;
+      if (
+        settled &&
+        !inFlightChats(schedule).includes(settled) &&
+        previous?.get(schedule.id) !== state
+      ) {
+        void queryClient.invalidateQueries([QueryKeys.messages, settled]);
+      }
       for (const conversationId of inFlightChats(schedule)) {
         live.add(conversationId);
         void trackScheduledRun(queryClient, conversationId, { retain: true });

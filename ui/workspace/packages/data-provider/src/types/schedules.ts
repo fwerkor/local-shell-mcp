@@ -15,7 +15,7 @@ export type ScheduleFrequency = (typeof scheduleFrequencies)[number];
  *  list: an every-minute-of-the-hour cadence spelled out runs past two hundred chars. */
 export const SCHEDULE_CRON_MAX_LENGTH = 256;
 
-export const scheduleTargets = ['new'] as const;
+export const scheduleTargets = ['new', 'reuse', 'existing'] as const;
 export type ScheduleTarget = (typeof scheduleTargets)[number];
 
 export type ScheduleDisabledReason =
@@ -88,6 +88,7 @@ export const createSchedulePayloadSchema = z.object({
   cadence: scheduleCadenceSchema,
   timezone: z.string().min(1),
   target: z.enum(scheduleTargets).default('new'),
+  targetConversationId: z.string().trim().min(1).nullable().optional(),
   file_ids: z
     .array(z.string())
     .max(10)
@@ -145,6 +146,8 @@ export type TSchedule = {
   cadence: TScheduleCadence;
   timezone: string;
   target: ScheduleTarget;
+  targetConversationId?: string | null;
+  reuseConversationId?: string;
   file_ids?: string[];
   chatProjectId?: string | null;
   enabled: boolean;

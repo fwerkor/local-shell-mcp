@@ -263,13 +263,23 @@ def _validate(owner, repo, data, *, partial=False, check_dependencies=True):
         raise HTTPException(400, detail='Invalid schedule request id')
     if 'enabled' in data and type(data['enabled']) is not bool:
         raise HTTPException(400, detail='enabled must be a boolean')
-    if 'target' in data and data['target'] != 'new':
-        raise HTTPException(400, detail='Only new-chat schedules are supported')
+    if 'target' in data and data['target'] not in ('new', 'reuse', 'existing'):
+        raise HTTPException(400, detail='Unsupported schedule target')
+    if 'targetConversationId' in data:
+        cid = data['targetConversationId']
+        if cid is not None and (not isinstance(cid, str) or not cid):
+            raise HTTPException(400, detail='Invalid schedule conversation')
+    if data.get('target') == 'existing' and (not partial or 'targetConversationId' in data):
+        cid = data.get('targetConversationId')
+        if not cid:
+            raise HTTPException(400, detail='Schedule conversation required')
+        if check_dependencies and repo.conversation(owner, cid) is None:
+            raise HTTPException(404, detail='Schedule conversation not found')
     if 'file_ids' in data:
         files = data['file_ids']
         if not isinstance(files, list) or len(files) > 10 or any(not isinstance(f, str) for f in files):
             raise HTTPException(400, detail='Invalid files')
-    if ('chatProjectId' in data and data['chatProjectId'] is not None
+    if (data.get('target') != 'existing' and 'chatProjectId' in data and data['chatProjectId'] is not None
             and (not isinstance(data['chatProjectId'], str) or
                  (check_dependencies and not repo.project(owner, data['chatProjectId'])))):
         raise HTTPException(404, detail='Schedule project not found')
@@ -329,8 +339,10 @@ async def schedules(request: Request):
         raise HTTPException(400, detail='Schedule limit reached')
     config = {key: data[key] for key in
               ('name', 'prompt', 'agent_id', 'cadence', 'timezone', 'target', 'file_ids',
-               'chatProjectId') if key in data}
+               'chatProjectId', 'targetConversationId') if key in data}
     config.setdefault('target', 'new')
+    if config['target'] != 'existing':
+        config.pop('targetConversationId', None)
     now = int(time.time() * 1000)
     enabled = data.get('enabled', True)
     next_at = _initial_run(config, now) if enabled else None
@@ -370,21 +382,44 @@ async def schedule(request: Request):
     _validate(owner, repo, payload, partial=True)
     config = json.loads(row['config'])
     for key in ('name', 'prompt', 'agent_id', 'cadence', 'timezone', 'target',
-                'file_ids', 'chatProjectId'):
+                'file_ids', 'chatProjectId', 'targetConversationId'):
         if key in payload:
             config[key] = payload[key]
     enabled = payload.get('enabled', bool(row['enabled']))
+    if config.get('target', 'new') != 'existing':
+        config.pop('targetConversationId', None)
+    elif not config.get('targetConversationId'):
+        raise HTTPException(400, detail='Schedule conversation required')
     _validate(owner, repo, config, partial=True, check_dependencies=enabled)
     timing_changed = (config['cadence'] != json.loads(row['config'])['cadence']
                       or config['timezone'] != json.loads(row['config'])['timezone'])
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        latest = db.execute('SELECT revision,enabled,next_run FROM webui_schedules WHERE id=? AND owner=?',
+        latest = db.execute('SELECT revision,enabled,next_run,config FROM webui_schedules WHERE id=? AND owner=?',
                             (sid, owner)).fetchone()
         if latest is None:
             raise HTTPException(404, detail='Schedule not found')
         if latest['revision'] != row['revision']:
             raise HTTPException(409, detail='Schedule configuration changed')
+        latest_config = json.loads(latest['config'])
+        target_changed = (config.get('target', 'new') != latest_config.get('target', 'new')
+                          or config.get('targetConversationId') != latest_config.get('targetConversationId'))
+        if target_changed and db.execute(
+            "SELECT 1 FROM webui_schedule_runs WHERE schedule_id=? "
+            "AND status IN ('claimed','started')", (sid,),
+        ).fetchone():
+            raise HTTPException(409, detail='Cannot change target while schedule is running')
+        # A first admission can bind a reusable chat while this PATCH is in flight.
+        # Carry the server-managed binding forward from the locked row, never the
+        # client's snapshot. Switching strategies intentionally resets the binding.
+        config.pop('reuseConversationId', None)
+        if not target_changed and latest_config.get('reuseConversationId'):
+            config['reuseConversationId'] = latest_config['reuseConversationId']
+        cid = _target_conversation(config)
+        if enabled and cid and not db.execute(
+            'SELECT 1 FROM conversations WHERE owner=? AND id=?', (owner, cid),
+        ).fetchone():
+            raise HTTPException(404, detail='Schedule conversation not found')
         if enabled and (timing_changed or not latest['enabled']):
             active = config['cadence']['frequency'] == 'continuous' and db.execute(
                 "SELECT 1 FROM webui_schedule_runs WHERE schedule_id=? "
@@ -410,6 +445,14 @@ async def schedule(request: Request):
     return JSONResponse(_present(_find(owner, sid, repo.database), repo.database))
 
 
+def _target_conversation(config):
+    if config.get('target') == 'existing':
+        return config.get('targetConversationId')
+    if config.get('target') == 'reuse':
+        return config.get('reuseConversationId')
+    return None
+
+
 def _claim_due(database, *, owner=None, sid=None, manual=False):
     now = int(time.time() * 1000)
     with database.connect() as db:
@@ -428,6 +471,11 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
         where.append("NOT EXISTS (SELECT 1 FROM webui_schedule_runs r "
                      "WHERE r.schedule_id=webui_schedules.id AND "
                      "r.status IN ('claimed','started'))")
+        where.append(
+            "NOT EXISTS (SELECT 1 FROM runs WHERE conversation_id=CASE json_extract(config,'$.target') "
+            "WHEN 'existing' THEN json_extract(config,'$.targetConversationId') "
+            "WHEN 'reuse' THEN json_extract(config,'$.reuseConversationId') END "
+            "AND status IN ('running','requires_action'))")
         rows = db.execute('SELECT * FROM webui_schedules WHERE ' + ' AND '.join(where) +
                           ' ORDER BY next_run LIMIT ?', (*values, 25)).fetchall()
         claimed = []
@@ -493,7 +541,13 @@ def _recover_claimed(database, *, grace_seconds=90):
         rows = db.execute(
             "SELECT r.*,s.config,s.enabled FROM webui_schedule_runs r "
             "JOIN webui_schedules s ON s.id=r.schedule_id "
-            "WHERE r.status='claimed' AND r.updated_at<? ORDER BY r.created_at LIMIT 25",
+            "WHERE r.status='claimed' AND r.updated_at<? AND (s.enabled=0 OR "
+            "EXISTS (SELECT 1 FROM generation_requests gr WHERE gr.owner=r.owner "
+            "AND gr.client_request_id='schedule:' || r.id) OR "
+            "NOT EXISTS (SELECT 1 FROM runs WHERE conversation_id=CASE json_extract(s.config,'$.target') "
+            "WHEN 'existing' THEN json_extract(s.config,'$.targetConversationId') "
+            "WHEN 'reuse' THEN json_extract(s.config,'$.reuseConversationId') END "
+            "AND status IN ('running','requires_action'))) ORDER BY r.created_at LIMIT 25",
             (cutoff,),
         ).fetchall()
         for row in rows:
@@ -566,6 +620,7 @@ async def _dispatch(occurrence, database):
         validate_message_submission,
     )
     from .generation_routes import _generation_store, _start_task
+    from .generations import GenerationConflict
     from .memory_protection import configured_filters
     from .providers import provider_config, selected_provider
     from .storage import WorkspaceRepository
@@ -576,7 +631,7 @@ async def _dispatch(occurrence, database):
             raise ValueError('agent_deleted')
         repo = WorkspaceRepository(database)
         project_id = config.get('chatProjectId')
-        if project_id and repo.project(owner, project_id) is None:
+        if not _target_conversation(config) and project_id and repo.project(owner, project_id) is None:
             raise ValueError('project_deleted')
         filters = configured_filters(repo, owner)
         validate_message_submission(config['prompt'], filters)
@@ -593,7 +648,24 @@ async def _dispatch(occurrence, database):
             payload['projectId'] = project_id
         if config.get('file_ids'):
             payload['files'] = [{'file_id': file_id} for file_id in config['file_ids']]
-        generation, fresh = _generation_store().begin(owner, payload, agent)
+        # Atomically admit the turn and persist the reusable chat binding. A
+        # crash after this commit cannot create a second reusable conversation.
+        store = _generation_store()
+        with database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            current = db.execute('SELECT config FROM webui_schedules WHERE id=? AND owner=?',
+                                 (sid, owner)).fetchone()
+            if current is None:
+                return
+            current_config = json.loads(current['config'])
+            cid = _target_conversation(current_config)
+            if cid:
+                payload['conversationId'] = cid
+            generation, fresh = store.begin(owner, payload, agent, _connection=db)
+            if current_config.get('target') == 'reuse' and not cid:
+                current_config['reuseConversationId'] = generation.conversation_id
+                db.execute('UPDATE webui_schedules SET config=? WHERE id=?',
+                           (_json(current_config), sid))
         if not fresh:
             if generation.status != 'running':
                 status = 'success' if generation.status == 'complete' else 'interrupted'
@@ -622,6 +694,11 @@ async def _dispatch(occurrence, database):
             _settle(database, occurrence_id, 'interrupted',
                     conversation_id=generation.conversation_id, run_id=generation.run_id,
                     error='generation_not_started')
+    except GenerationConflict:
+        # A user or another schedule won admission after we claimed the due
+        # occurrence. Leave the durable claim pending for recovery, without
+        # adding a message or recording a failed model execution.
+        return
     except Exception as exc:
         # Only stable user-facing validation errors may be echoed into the run
         # record. Unexpected provider exceptions can contain credential data.
