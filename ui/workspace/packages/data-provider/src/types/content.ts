@@ -281,6 +281,7 @@ export type TMessageContentParts =
       reasoning_unavailable?: boolean;
     } & ContentMetadata)
   | (SteerContentPart & ContentMetadata)
+  | ({ type: ContentTypes.GOAL_CONTINUATION; id: string } & ContentMetadata)
   | ({
       type: ContentTypes.TEXT;
       text?: string | TextData;

@@ -52,6 +52,10 @@ async def test_goal_continues_in_same_generation(goal_context, monkeypatch, outc
             })
         elif "Automatic Goal continuation" in str(last.get("content")):
             continuations += 1
+            snapshot, _ = store.resume_snapshot("local", generation.run_id)
+            markers = [p for p in snapshot["aggregatedContent"] if p.get("type") == "goal_continuation"]
+            assert len(markers) == continuations
+            assert all("goal_continuation" not in str(m.get("content")) for m in history)
             assert chat_goal.bound_session(database, "local", generation.run_id) == sid
             assert store.latest("local", generation.conversation_id).status == "running"
             if outcome == "no_progress":
@@ -88,6 +92,15 @@ async def test_goal_continues_in_same_generation(goal_context, monkeypatch, outc
                               "long": "completed"}[outcome]
     assert plan["continuation_count"] == 0  # Live Workspace's timer is not used.
     assert plan["continuation_driver"] == "chat"
+    events = [event for _, event in store.events("local", generation.run_id)]
+    markers = [event["data"] for event in events if event.get("event") == "on_goal_continuation"]
+    assert len(markers) == continuations
+    assert len({marker["id"] for marker in markers}) == continuations
+    final_parts = events[-1]["responseMessage"]["content"]
+    assert [part["id"] for part in final_parts if part["type"] == "goal_continuation"] == [
+        marker["id"] for marker in markers
+    ]
+    assert events[-1]["responseMessage"]["text"].count("Automatic Goal continuation") == 0
     with database.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM messages WHERE role='user'").fetchone()[0] == 1

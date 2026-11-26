@@ -14,6 +14,7 @@ export enum ContentTypes {
   SUMMARY = 'summary',
   ACTIVITY_LABEL = 'activity_label',
   STEER = 'steer',
+  GOAL_CONTINUATION = 'goal_continuation',
   ERROR = 'error',
 }
 

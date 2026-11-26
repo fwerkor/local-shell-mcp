@@ -1777,6 +1777,17 @@ class AgentRunner:
                                       self.generation.run_id, current.messages)
                 if prompt is not None:
                     current.messages.append(prompt)
+                    snapshot, _ = self.store.resume_snapshot(self.owner, self.generation.run_id)
+                    marker_id = f"goal:{self.generation.run_id}:{current.model_turn}"
+                    parts = snapshot["aggregatedContent"]
+                    if not any(part.get("type") == "goal_continuation" and part.get("id") == marker_id
+                               for part in parts):
+                        self.store.append(self.owner, self.generation.run_id, {
+                            "event": "on_goal_continuation", "data": {
+                                "id": marker_id, "index": len(parts),
+                                "runId": self.generation.response_message_id,
+                            },
+                        }, actor_lease=self.actor_lease)
                     if self.on_injected is not None:
                         await self.on_injected()
                     return True

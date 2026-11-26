@@ -1,4 +1,6 @@
 import { memo } from 'react';
+import { RotateCw } from 'lucide-react';
+import useLocalize from '~/hooks/useLocalize';
 import {
   Tools,
   Constants,
@@ -77,6 +79,7 @@ const Part = memo(function Part({
   onToolExpand,
 }: PartProps) {
   const { partIndex } = useMessageContext();
+  const localize = useLocalize();
   if (!part) {
     return null;
   }
@@ -90,6 +93,18 @@ const Part = memo(function Part({
         question={askUserQuestion.ask_user_question.question}
         questions={askUserQuestion.ask_user_question.questions}
       />
+    );
+  }
+
+  if (part.type === ContentTypes.GOAL_CONTINUATION) {
+    return (
+      <div className="my-3 flex items-center gap-2 text-xs text-text-tertiary" role="separator"
+        aria-label={localize('com_ui_goal_continuation')}>
+        <span aria-hidden="true" className="h-px flex-1 bg-border-light" />
+        <RotateCw aria-hidden="true" className="size-3 shrink-0" />
+        <span>{localize('com_ui_goal_continuation')}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border-light" />
+      </div>
     );
   }
 
