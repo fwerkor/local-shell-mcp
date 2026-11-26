@@ -179,3 +179,188 @@ async def test_account_storage_model_refresh_and_rename(setup_profiles, monkeypa
         assert await model_oauth.access_token(db, "Codex", stored["oauth_id"]) == refreshed["access_token"]
         await model_discovery.refresh_model_channels(db)
         assert model_oauth.unseal(db, profile("Renamed")) == refreshed
+
+
+def token_result(**changes):
+    return {"scope": model_oauth.SCOPE, "expires_in": 3600, "token_type": "Bearer",
+            "access_token": "mock-access", "refresh_token": "mock-refresh", "id_token": "mock-id", **changes}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,payload,error", [
+    (200, token_result(), None),
+    (200, [], ValueError),
+    (400, {"error": "invalid_grant"}, model_oauth.ReauthorizationRequired),
+    (401, {"error": "refresh_token_reused"}, model_oauth.ReauthorizationRequired),
+    (400, [], ValueError),
+    (503, {"error": "unavailable"}, ValueError),
+])
+async def test_token_exchange_http_contract(monkeypatch, status, payload, error):
+    client_type = httpx.AsyncClient
+    def respond(request):
+        assert str(request.url) == model_oauth.TOKEN_URL
+        assert request.method == "POST"
+        assert parse_qs(request.content.decode()) == {"grant_type": ["refresh_token"]}
+        return httpx.Response(status, json=payload)
+    monkeypatch.setattr(model_oauth.httpx, "AsyncClient", lambda **kwargs:
+                        client_type(transport=httpx.MockTransport(respond), **kwargs))
+    if error:
+        with pytest.raises(error):
+            await model_oauth._token({"grant_type": "refresh_token"})
+    else:
+        assert await model_oauth._token({"grant_type": "refresh_token"}) == payload
+
+
+@pytest.mark.parametrize("changes,error", [
+    ({"scope": "openid"}, model_oauth.ReauthorizationRequired),
+    ({"scope": None}, model_oauth.ReauthorizationRequired),
+    ({"expires_in": True}, ValueError),
+    ({"expires_in": 0}, ValueError),
+    ({"expires_in": 86401}, ValueError),
+    ({"token_type": "Basic"}, ValueError),
+    ({"access_token": ""}, ValueError),
+    ({"refresh_token": "has whitespace"}, ValueError),
+    ({"refresh_token": None}, ValueError),
+])
+def test_credentials_reject_invalid_response(changes, error):
+    with pytest.raises(error):
+        model_oauth._credentials(token_result(**changes), {})
+
+
+def test_credentials_preserve_scope_and_normalize_refresh_time():
+    payload = token_result(earliest_refresh_at="invalid")
+    payload.pop("scope")
+    payload.pop("id_token")
+    previous = {"scope": model_oauth.SCOPE, "id_token": "retained"}
+    value = model_oauth._credentials(payload, previous)
+    assert value["scope"] == model_oauth.SCOPE
+    assert value["id_token"] == "retained"
+    assert value["earliest_refresh_at"] == 0
+
+
+@pytest.mark.parametrize("claims,nonce,valid", [
+    ({"sub": "account", "aud": "oaiapp_mock", "nonce": "nonce"}, "nonce", True),
+    ({"sub": "", "aud": "oaiapp_mock"}, None, False),
+    ({"sub": "account", "aud": "oaiapp_mock", "nonce": "other"}, "nonce", False),
+    ({"sub": "account", "aud": ["oaiapp_mock", "other"]}, None, False),
+    ({"sub": "account", "aud": ["oaiapp_mock", "other"], "azp": "oaiapp_mock"}, None, True),
+])
+def test_identity_claim_validation(monkeypatch, claims, nonce, valid):
+    from types import SimpleNamespace
+    monkeypatch.setattr(model_oauth.jwt, "PyJWKClient", lambda url, timeout:
+                        SimpleNamespace(get_signing_key_from_jwt=lambda token: SimpleNamespace(key="mock-key")))
+    def decode(token, key, **kwargs):
+        assert key == "mock-key"
+        assert kwargs["algorithms"] == ["RS256"]
+        assert kwargs["audience"] == "oaiapp_mock"
+        assert kwargs["issuer"] == model_oauth.ISSUER
+        assert set(kwargs["options"]["require"]) == {"exp", "sub", "iss", "aud"}
+        return claims
+    monkeypatch.setattr(model_oauth.jwt, "decode", decode)
+    if valid:
+        assert model_oauth._verify_id("mock-id", "oaiapp_mock", nonce) == claims
+    else:
+        with pytest.raises(ValueError, match="verify ChatGPT identity"):
+            model_oauth._verify_id("mock-id", "oaiapp_mock", nonce)
+
+
+@pytest.mark.asyncio
+async def test_adapter_exchange_and_refresh_validate_registered_identity(monkeypatch):
+    auth = model_oauth.adapter("chatgpt")
+    calls = []
+    async def token(data):
+        calls.append(data)
+        return token_result()
+    monkeypatch.setattr(model_oauth, "_token", token)
+    monkeypatch.setattr(model_oauth, "_verify_id", lambda *args: {"sub": "account"})
+    query = {"client_id": "oaiapp_mock", "code": "mock-code"}
+    for invalid in ({"error": "access_denied"}, {"client_id": "other", "code": "x"},
+                    {"client_id": "oaiapp_mock"}):
+        with pytest.raises(ValueError):
+            await auth.exchange(invalid, "redirect", "nonce", "verifier", {})
+    assert not calls
+    credential = await auth.exchange(query, "redirect", "nonce", "verifier", {})
+    assert credential["subject"] == "account"
+    assert calls[-1] == {"grant_type": "authorization_code", "client_id": "oaiapp_mock",
+                         "code": "mock-code", "code_verifier": "verifier", "redirect_uri": "redirect",
+                         "resource": model_oauth.RESOURCE}
+    assert (await auth.refresh(credential))["subject"] == "account"
+    assert calls[-1]["refresh_token"] == credential["refresh_token"]
+    with pytest.raises(ValueError, match="registration"):
+        await auth.exchange({**query, "client_id": "oaiapp_other"}, "redirect", "nonce", "verifier", credential)
+    monkeypatch.setattr(model_oauth, "_verify_id", lambda *args: {"sub": "other-account"})
+    with pytest.raises(ValueError, match="original ChatGPT account"):
+        await auth.exchange(query, "redirect", "nonce", "verifier", credential)
+    with pytest.raises(model_oauth.ReauthorizationRequired, match="identity changed"):
+        await auth.refresh(credential)
+
+
+@pytest.mark.asyncio
+async def test_catalog_uses_account_capability_and_retries_unauthorized(monkeypatch):
+    from local_shell_mcp.webui import model_discovery
+    tokens = []
+    async def fetch(protocol, base, token, **kwargs):
+        assert (protocol, base) == ("openai-responses", model_oauth.RESOURCE)
+        assert kwargs == {"allow_empty": True, "account": True}
+        tokens.append(token)
+        if token == "old":
+            response = httpx.Response(401, request=httpx.Request("GET", base))
+            response.raise_for_status()
+        return {"models": ["mock"], "model_contexts": {}}
+    async def access(db, name, identity, *, rejected=None):
+        assert (name, identity) == ("Codex", "id")
+        return "new" if rejected == "old" else "old"
+    monkeypatch.setattr(model_discovery, "_fetch_models", fetch)
+    monkeypatch.setattr(model_oauth, "access_token", access)
+    value = {"name": "Codex", "oauth_id": "id", "auth_method": "chatgpt",
+             "provider": "openai-responses", "base_url": model_oauth.RESOURCE}
+    assert await model_oauth.catalog_for(None, value) == {"models": ["mock"], "model_contexts": {}}
+    assert tokens == ["old", "new"]
+    with pytest.raises(ValueError, match="original API endpoint"):
+        await model_oauth.catalog_for(None, {**value, "base_url": "https://other.invalid"})
+    with pytest.raises(ValueError, match="Unsupported"):
+        model_oauth.adapter("other")
+
+
+@pytest.mark.asyncio
+async def test_account_reauthorization_and_expiry_storage(setup_profiles, monkeypatch):
+    import time
+
+    from local_shell_mcp.webui import routes
+    from local_shell_mcp.webui.provider_profiles import profile
+
+    db = routes._repo().database
+    auth = model_oauth.ChatGPTAuthorization
+    async def catalog(self, token):
+        return {"models": ["mock"], "model_contexts": {}}
+    monkeypatch.setattr(auth, "catalog", catalog)
+    credential = model_oauth._credentials(token_result(), {"client_id": "oaiapp_mock", "subject": "account"})
+    await model_oauth.save_account(db, "chatgpt", "Codex", credential)
+    saved = profile("Codex")
+    assert model_oauth.host_id(db) == model_oauth.host_id(db)
+    with pytest.raises(model_oauth.ReauthorizationRequired):
+        model_oauth.unseal(db, {"oauth_credentials": "invalid"})
+    with pytest.raises(ValueError, match="already exists"):
+        await model_oauth.save_account(db, "chatgpt", "Codex", credential)
+    with pytest.raises(ValueError, match="registration is already connected"):
+        await model_oauth.save_account(db, "chatgpt", "Other", credential)
+    with pytest.raises(ValueError, match="original account"):
+        await model_oauth.save_account(db, "chatgpt", "Codex", {**credential, "subject": "other"}, original=saved)
+    updated = {**credential, "expires_at": time.time() + 30, "earliest_refresh_at": time.time() + 180}
+    await model_oauth.save_account(db, "chatgpt", "Codex", updated, original=saved)
+    current = profile("Codex")
+    with pytest.raises(model_oauth.ReauthorizationRequired):
+        await model_oauth.access_token(db, "Codex", saved["oauth_id"])
+    assert await model_oauth.access_token(db, "Codex", current["oauth_id"]) == credential["access_token"]
+    with pytest.raises(ValueError, match="cannot be refreshed yet"):
+        await model_oauth.access_token(db, "Codex", current["oauth_id"], rejected=credential["access_token"])
+    await model_oauth.save_account(db, "chatgpt", "Codex", {**credential, "expires_at": 0}, original=current)
+    expired = profile("Codex")
+    async def refresh(self, value):
+        raise model_oauth.ReauthorizationRequired("Sign in again")
+    monkeypatch.setattr(auth, "refresh", refresh)
+    with pytest.raises(model_oauth.ReauthorizationRequired, match="Sign in again"):
+        await model_oauth.access_token(db, "Codex", expired["oauth_id"])
+    assert profile("Codex")["oauth_error"] == "Sign in again"
+    with pytest.raises(model_oauth.ReauthorizationRequired):
+        await model_oauth.access_token(db, "Codex", expired["oauth_id"])
