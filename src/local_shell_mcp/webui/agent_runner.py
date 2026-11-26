@@ -252,7 +252,7 @@ class AgentRunner:
                 and memory_enabled(settings, self.owner, tools=True)):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
-        if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
+        if self.ask_user_enabled and not self.background_deny and self._publishes_tool_steps():
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
         configs = self.child_configs if self.child_configs is not None else build_subagent_configs(

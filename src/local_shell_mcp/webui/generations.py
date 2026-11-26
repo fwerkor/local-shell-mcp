@@ -20,7 +20,6 @@ from typing import Any
 
 from .approval_runtime import ApprovalBatch, prepare_approval_batch
 from .artifact_prompts import artifact_mode
-from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
 from .sampling import validate_channel_sampling
@@ -206,7 +205,9 @@ class GenerationStore:
             "generationProtocolVersion": protocol_version,
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
-            "askUserEnabled": ask_user_requested(agent, payload),
+            # Internal transactional deliveries (schedules, triggers, wakeups)
+            # and reserved child conversations are not interactive turns.
+            "askUserEnabled": _connection is None and trusted_new_conversation_id is None,
             "webSearchEnabled": _web_search_requested(agent, payload),
             'manualCompaction': manual_compaction,
             "artifactsMode": artifact_mode(payload, agent),
