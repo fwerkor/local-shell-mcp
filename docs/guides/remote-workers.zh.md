@@ -52,3 +52,16 @@ Worker 支持 shell 和 persistent shell session、tracked job、filesystem 操�
 ## 故障排查
 
 worker 未出现时，检查出站 HTTPS 访问、public base URL 可达性、邀请是否过期、系统时间以及 control-server log。
+
+
+### Windows worker 锁竞争
+
+managed worker 获取状态目录的独占锁时最多等待 30 秒。若诊断信息可用，
+错误会包含最后记录的持锁进程 PID；这不代表该 PID 当前一定仍属于 worker。
+不要在 worker 运行时删除锁文件，也不要批量结束无关 Python 进程。
+
+若旧版本 worker 已卡死，请停止计划任务，使用更新后的 wheel 中的管理 CLI
+执行 `python -m local_shell_mcp.remote_worker restart`（或 `install-service`）。Windows 服务管理会清理
+可确认归属的服务启动器进程树；锁仍被占用时会拒绝重复启动。若旧版遗留进程已
+脱离该进程树，请核实其命令行与创建时间，再结束对应 worker 或重启系统后重试。
+已断开连接的 worker 无法接收控制面下发的自动升级。

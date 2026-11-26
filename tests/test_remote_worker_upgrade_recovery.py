@@ -144,6 +144,7 @@ def test_upgrade_install_failure_keeps_previous_runtime(tmp_path, monkeypatch):
 
 
 def test_trial_timeout_terminates_hung_candidate(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: False)
     pending = tmp_path / "runtime.pending.json"
     pending.write_text(json.dumps({"candidate_digest": "broken"}), encoding="utf-8")
     monkeypatch.setattr(bootstrap, "_TRIAL_START_TIMEOUT_S", 0.0)
@@ -214,20 +215,30 @@ async def test_windows_service_bootstrap_is_refreshed_before_upgrade(monkeypatch
     assert calls == ["install-launcher", "refresh-task-entrypoint", "install-candidate", "reexec"]
 
 
-def test_worker_reexec_inside_supervisor_avoids_nested_windows_supervisor(monkeypatch, tmp_path):
-    from local_shell_mcp import remote, remote_worker_cli, remote_worker_service
+def test_worker_reexec_inside_supervisor_avoids_nested_windows_supervisor(monkeypatch):
+    from local_shell_mcp import remote
+    from local_shell_mcp.remote_worker_bootstrap import WorkerRestartRequested
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED", "1")
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_RESTART_PROTOCOL", "1")
     monkeypatch.setattr(remote.sys, "platform", "win32")
-    monkeypatch.setattr(remote_worker_service, "_current_worker_is_managed", lambda: True)
-    monkeypatch.setattr(remote_worker_service, "_windows_task_launcher_path", lambda: tmp_path / "worker-service.pyw")
-    monkeypatch.setattr(remote_worker_service, "prepare_worker_lock_reexec", lambda: None)
-    monkeypatch.setattr(remote_worker_cli, "_worker_run_exec_argv", lambda: ["python", "-m", "local_shell_mcp.remote_worker", "run"])
-    calls = []
-    monkeypatch.setattr(remote.os, "execv", lambda executable, argv: calls.append(argv))
-    remote._reexec_updated_worker_runtime()
-    assert calls == [["python", "-m", "local_shell_mcp.remote_worker", "run"]]
+    monkeypatch.setattr(remote.os, "execv", lambda *args: pytest.fail("nested Windows worker"))
+    with pytest.raises(WorkerRestartRequested):
+        remote._reexec_updated_worker_runtime()
+
+
+@pytest.mark.asyncio
+async def test_windows_restart_request_does_not_rollback_candidate(monkeypatch):
+    from local_shell_mcp import remote
+    from local_shell_mcp.remote_worker_bootstrap import WorkerRestartRequested
+
+    monkeypatch.setattr(remote.sys, "platform", "win32")
+    monkeypatch.setattr(state, "install_launcher", lambda: None)
+    monkeypatch.setattr(installer, "install_or_update_runtime", lambda server: {"version": "v2"})
+    monkeypatch.setattr(installer, "rollback_pending_runtime",
+                        lambda: pytest.fail("requested restart is not a failed trial"))
+    with pytest.raises(WorkerRestartRequested):
+        await remote._upgrade_worker_runtime("https://example.test", "v2")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX launcher is a shell script")

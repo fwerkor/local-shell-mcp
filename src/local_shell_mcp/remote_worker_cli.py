@@ -5,14 +5,24 @@ import asyncio
 import json
 import os
 import secrets
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from . import remote
-from .remote_worker_bootstrap import needs_worker_reaper, supervise_worker
-from .remote_worker_installer import install_or_update_runtime
+from .remote_worker_bootstrap import (
+    _RESTART_PROTOCOL_ENV,
+    _WORKER_LOCK_BUSY_EXIT,
+    _WORKER_RESTART_EXIT,
+    WorkerRestartRequested,
+    needs_worker_reaper,
+    supervise_worker,
+)
+from .remote_worker_installer import install_or_update_runtime, rollback_pending_runtime
 from .remote_worker_service import (
+    WorkerAlreadyRunningError,
+    _wait_for_windows_worker_unlock,
     cancel_worker_lock_reexec,
     install_service,
     prepare_worker_lock_reexec,
@@ -28,6 +38,8 @@ from .remote_worker_state import (
     ensure_user_bin_on_path,
     install_launcher,
     read_worker_config,
+    worker_bootstrap_path,
+    worker_state_dir,
     write_worker_config,
 )
 from .shell_environment import is_frozen_app
@@ -182,11 +194,42 @@ async def _connect(args: argparse.Namespace) -> None:
             runtime_digest=args.runtime_digest,
             runtime_version=args.runtime_version,
         )
+        if sys.platform != "win32":
+            _reexec_worker_run()
+    if sys.platform == "win32":
+        # Initial enrollment is complete. Do not carry a Windows region
+        # lock (or invitation arguments) into the new worker process.
         _reexec_worker_run()
+
+
+def _restart_windows_worker() -> None:
+    if os.environ.get(_RESTART_PROTOCOL_ENV) == "1":
+        raise SystemExit(_WORKER_RESTART_EXIT)
+    # A directly invoked wheel or a legacy supervisor cannot understand the
+    # restart status. Bridge once to the newly installed standalone supervisor
+    # *after* the worker lock has been released. Its children use the protocol.
+    # Wait for it so the original venv/task process remains tracked.
+    env = os.environ.copy()
+    env.pop("LOCAL_SHELL_MCP_WORKER_LOCK_FD", None)
+    result = subprocess.run([sys.executable, str(worker_bootstrap_path())], env=env, check=False)
+    raise SystemExit(result.returncode)
+
+
+def _prepare_windows_maintenance() -> None:
+    _wait_for_windows_worker_unlock()
+    # Recover a previously interrupted trial only after the old worker has
+    # stopped. Refresh the trusted bootstrap before staging another candidate.
+    attempted = worker_state_dir() / "runtime.attempted"
+    if attempted.exists():
+        rollback_pending_runtime()
+        attempted.unlink(missing_ok=True)
+    install_launcher()
 
 
 def _prepare_worker_start() -> None:
     config = _load_config_or_migrate()
+    if sys.platform == "win32":
+        _prepare_windows_maintenance()
     install_or_update_runtime(str(config["server"]))
     install_launcher()
     ensure_user_bin_on_path()
@@ -248,6 +291,11 @@ def _run_command(args: argparse.Namespace) -> None:
         prepare_worker_service_environment()
         asyncio.run(run_enrolled_worker())
     elif args.command == "start":
+        if sys.platform == "win32":
+            before = service_status()
+            if before["running"]:
+                _print_result(before)
+                return
         _prepare_worker_start()
         _print_result(start_service())
     elif args.command == "stop":
@@ -261,16 +309,33 @@ def _run_command(args: argparse.Namespace) -> None:
     elif args.command == "update":
         config = _load_config_or_migrate()
         before = service_status()
-        result = install_or_update_runtime(str(config["server"]), force=args.force)
-        install_launcher()
-        if result["updated"]:
-            refresh_installed_service_definition()
-            if before["running"]:
+        if sys.platform == "win32" and (before["running"] or before.get("installed")):
+            stop_service()
+        try:
+            if sys.platform == "win32":
+                _prepare_windows_maintenance()
+            result = install_or_update_runtime(str(config["server"]), force=args.force)
+            install_launcher()
+            if result["updated"]:
+                refresh_installed_service_definition()
+        except Exception:
+            if sys.platform == "win32" and before["running"]:
+                start_service()
+            raise
+        if before["running"]:
+            if sys.platform == "win32":
+                start_service()
+            elif result["updated"]:
                 stop_service()
                 start_service()
         _print_result(result)
     elif args.command == "install-service":
         config = _load_config_or_migrate()
+        if sys.platform == "win32":
+            before = service_status()
+            if before["running"] or before.get("installed"):
+                stop_service()
+            _prepare_windows_maintenance()
         install_or_update_runtime(str(config["server"]))
         _print_result(install_service(start=not args.no_start))
     elif args.command == "uninstall-service":
@@ -298,6 +363,11 @@ def run_worker_cli(argv: list[str] | None = None) -> None:
             if args.command in {"run", "connect"} and needs_worker_reaper():
                 raise SystemExit(supervise_worker([*_worker_run_exec_argv()[:-1], *argv]))
             _run_command(args)
+        except WorkerRestartRequested:
+            _restart_windows_worker()
+        except WorkerAlreadyRunningError as exc:
+            print(f"Status: worker command failed: {exc}", file=sys.stderr, flush=True)
+            raise SystemExit(_WORKER_LOCK_BUSY_EXIT) from None
         except KeyboardInterrupt:
             print("\nStatus: disconnected by user.", file=sys.stderr, flush=True)
             raise SystemExit(130) from None
