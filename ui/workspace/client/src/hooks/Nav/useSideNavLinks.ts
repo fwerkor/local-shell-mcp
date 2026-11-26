@@ -4,6 +4,7 @@ import {
   Bot,
   Brain,
   Bookmark,
+  Tags,
   NotebookPen,
   ScrollText,
   CalendarClock,
@@ -21,6 +22,7 @@ import { useAgentCapabilities, useGetAgentsConfig, useHasAccess } from '~/hooks'
 import { AuthContext } from '~/hooks/AuthContext';
 import LsmNestedMcpPanel from '~/components/SidePanel/MCPBuilder/LsmNestedMcpPanel';
 import AgentPanelSwitch from '~/components/SidePanel/Agents/AgentPanelSwitch';
+import MessageBookmarkPanel from '~/components/SidePanel/MessageBookmarks/MessageBookmarkPanel';
 import BookmarkPanel from '~/components/SidePanel/Bookmarks/BookmarkPanel';
 import PanelSwitch from '~/components/SidePanel/Builder/PanelSwitch';
 import { SchedulePanel } from '~/components/SidePanel/Schedules';
@@ -160,9 +162,19 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_sidepanel_conversation_tags',
         label: '',
-        icon: Bookmark,
+        icon: Tags,
         id: 'bookmarks',
         Component: BookmarkPanel,
+      });
+    }
+
+    if (isAuthenticated) {
+      links.push({
+        title: 'com_ui_message_bookmarks',
+        label: '',
+        icon: Bookmark,
+        id: 'message-bookmarks',
+        Component: MessageBookmarkPanel,
       });
     }
 
@@ -205,7 +217,7 @@ export default function useSideNavLinks({
     hasAccessToMemories,
     hasAccessToReadMemories,
     isAuthenticated,
-      hasAccessToBookmarks,
+    hasAccessToBookmarks,
     includeHidePanel,
     hidePanel,
   ]);

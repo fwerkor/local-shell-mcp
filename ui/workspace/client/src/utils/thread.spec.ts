@@ -2,6 +2,7 @@ import type { TFile, TMessage } from 'librechat-data-provider';
 import {
   ROOT_KEY,
   buildThreadIndex,
+  messageBranchSelections,
   changedParentKeys,
   reconcileSiblingIdx,
   resolveThreadRows,
@@ -152,5 +153,38 @@ describe('changedParentKeys', () => {
     const after = buildThreadIndex([...fixture(), message('a3', 'u3')]);
     expect(changedParentKeys(before, after)).toEqual(['u3']);
     expect(changedParentKeys(null, before).length).toBe(before.children.size);
+  });
+});
+
+describe('message bookmark branch selection', () => {
+  it('reveals an old regenerated response instead of the newest sibling', () => {
+    const index = buildThreadIndex(fixture());
+    const selection = messageBranchSelections(index, 'a2-old');
+    const rows = resolveThreadRows(
+      index,
+      'c',
+      (key) => selection.get(key === 'c' ? ROOT_KEY : key) ?? 0,
+      null,
+    );
+    expect(rows.map((row) => row.source.messageId)).toEqual(['u1', 'a1', 'u2', 'a2-old']);
+  });
+  it('restores root and nested sibling selections for a bookmarked descendant', () => {
+    const index = buildThreadIndex([
+      ...fixture(),
+      message('old-followup', 'a2-old'),
+      message('new-root', ROOT),
+    ]);
+    const selection = messageBranchSelections(index, 'old-followup');
+    expect(selection.get(ROOT_KEY)).toBe(1);
+    expect(selection.get('u2')).toBe(1);
+    expect(
+      resolveThreadRows(
+        index,
+        'c',
+        (key) => selection.get(key === 'c' ? ROOT_KEY : key) ?? 0,
+        null,
+      ).map((row) => row.source.messageId),
+    ).toEqual(['u1', 'a1', 'u2', 'a2-old', 'old-followup']);
+    expect(messageBranchSelections(index, 'missing').size).toBe(0);
   });
 });
