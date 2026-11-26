@@ -232,16 +232,12 @@ function TokenUsageIndicator({
             compactionAvailable={compactionAvailable}
             currency={currency}
           />
-          {compactionAvailable && (
-            <>
-              <div className="border-t border-border-light" role="separator" />
-              <CompactAction
-                compact={compaction.compact}
-                canCompact={compaction.canCompact}
-                isCompacting={compaction.isCompacting}
-              />
-            </>
-          )}
+          <div className="border-t border-border-light" role="separator" />
+          <CompactAction
+            compact={compaction.compact}
+            canCompact={compactionAvailable && compaction.canCompact}
+            isCompacting={compaction.isCompacting}
+          />
         </div>
       </Ariakit.Popover>
     </>
@@ -250,7 +246,20 @@ function TokenUsageIndicator({
 
 /** Config gate kept outside the indicator so disabled deployments mount nothing */
 const TokenUsage = memo(function TokenUsage(props: TokenUsageProps) {
-  const { data: startupConfig } = useGetStartupConfig();
+  const { data: startupConfig, refetch } = useGetStartupConfig();
+  // An older cached startup response may not advertise the capability. Recheck
+  // once rather than hide the action or send a billed ordinary empty turn.
+  const checkedCapability = useRef(false);
+  useEffect(() => {
+    if (
+      startupConfig != null &&
+      startupConfig.compactionEnabled == null &&
+      !checkedCapability.current
+    ) {
+      checkedCapability.current = true;
+      void refetch();
+    }
+  }, [startupConfig, refetch]);
   /** Wait for config before mounting: until it loads `contextUsage === false`
    *  reads as undefined, so a disabled deployment would briefly mount the
    *  indicator and fire the token-config query on first load */

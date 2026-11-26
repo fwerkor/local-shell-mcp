@@ -1317,6 +1317,77 @@ class GenerationStore:
         value = json.loads(row['state']).get('postCompactionHistoryStart')
         return value if type(value) is int and value >= 0 else None
 
+
+    def request_live_compaction(self, owner: str, conversation_id: str) -> dict:
+        """Coalesce requests against the exact active, owner-scoped run."""
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = db.execute(
+                "SELECT r.id,r.state,a.config AS agent_config FROM runs r "
+                "JOIN conversations c ON c.id=r.conversation_id "
+                "LEFT JOIN agents a ON a.id=c.agent_id AND a.owner=c.owner "
+                "WHERE c.owner=? AND c.id=? AND r.status IN ('running','requires_action')",
+                (owner, conversation_id)).fetchall()
+            if len(rows) != 1:
+                raise ValueError('No unique active generation')
+            row = rows[0]
+            # Graph nodes own separate checkpoints; a root request must not
+            # wait indefinitely for a pre-model boundary that cannot consume it.
+            if row['agent_config'] and json.loads(row['agent_config']).get('edges'):
+                raise ValueError('Live compaction is unavailable for multi-agent graphs')
+            state = json.loads(row['state'])
+            if state.get('manualCompaction'):
+                raise ValueError('Generation is already compacting')
+            request_id = state.get('liveCompactionRequest') or uuid.uuid4().hex
+            state['liveCompactionRequest'] = request_id
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(state), _now(), row['id']))
+            return {'runId': row['id'], 'requestId': request_id}
+
+    def live_compaction_status(self, owner: str, run_id: str, request_id: str) -> str:
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state,r.status FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner)).fetchone()
+        if row is None:
+            raise KeyError('Generation not found')
+        state = json.loads(row['state'])
+        result = (state.get('liveCompactionResults') or {}).get(request_id)
+        if result:
+            return result
+        if (state.get('liveCompactionRequest') == request_id and
+                row['status'] in {'running', 'requires_action'}):
+            return 'pending'
+        return 'failed'
+
+    def live_compaction_request(self, owner: str, run_id: str) -> str | None:
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner)).fetchone()
+        return json.loads(row['state']).get('liveCompactionRequest') if row else None
+
+    def settle_live_compaction(self, owner: str, run_id: str, request_id: str,
+                               *, success: bool, actor_lease=None) -> None:
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if actor_lease is not None:
+                actor_lease.assert_current(db)
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner)).fetchone()
+            if row is None:
+                return
+            state = json.loads(row['state'])
+            if state.get('liveCompactionRequest') != request_id:
+                return
+            state.pop('liveCompactionRequest')
+            results = state.get('liveCompactionResults') or {}
+            results[request_id] = 'complete' if success else 'failed'
+            state['liveCompactionResults'] = dict(list(results.items())[-16:])
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(state), _now(), run_id))
+
     def manual_compaction(self, owner: str, run_id: str) -> bool:
         with self.database.connect() as db:
             row = db.execute('SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id '

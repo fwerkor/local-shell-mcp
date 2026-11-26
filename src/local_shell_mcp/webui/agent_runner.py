@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -968,7 +969,7 @@ class AgentRunner:
 
     async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
                                  prompt=None, update_prompt=None, head_count=0,
-                                 semantic_index=None, retained_tail=None, profile=None):
+                                 semantic_index=None, retained_tail=None, profile=None, live_request_id=None):
         """Request the original checkpoint prompt from the selected model.
 
         A failed/partial summary is never written, and never makes the old
@@ -1075,7 +1076,7 @@ class AgentRunner:
             elif message.get('role') == 'tool' and isinstance(message.get('tool_call_id'), str):
                 covered_calls.add(message['tool_call_id'])
         self.store.stage_summary(self.owner, self.generation.run_id, summary, count,
-                                 boundary=head_count, manual=manual,
+                                 boundary=head_count, manual=manual or bool(live_request_id),
                                  retained_tail=retained_tail,
                                  covered_tool_call_ids=sorted(covered_calls),
                                  covered_steer_ids=sorted(covered_steers),
@@ -1094,7 +1095,7 @@ class AgentRunner:
                     'id': identity, 'type': 'summary', 'summary': {
                         'type': 'summary', 'content': [{'type': 'text', 'text': summary}],
                         'boundary': {'messageIndex': head_count}, 'tokenCount': count,
-                        **({'initiatedBy': 'user'} if manual else {}),
+                        **({'initiatedBy': 'user'} if manual or live_request_id else {}),
                     }},},
             })
         return summary
@@ -1230,9 +1231,10 @@ class AgentRunner:
         from .compaction import build_summary_carrier_text
         from .content_filters import inspect_content, model_message_fragments
         from .context_budget import (
+            DEFAULT_COMPACTION_RATIO,
             calculate_budget,
             should_trigger_summarization,
-            split_recent_turns,
+            split_compaction_history,
         )
         from .storage import WorkspaceRepository
 
@@ -1246,7 +1248,10 @@ class AgentRunner:
             return
         settings = repository.setting(self.owner, 'endpoints', {}) or {}
         max_raw = self._context_limit(state, settings)
-        if max_raw is None:
+        request_id = self.store.live_compaction_request(self.owner, self.generation.run_id)
+        compacted = False
+        cancelled = False
+        if max_raw is None and not request_id:
             return
         calibration = self.store.token_calibration(
             self.owner, self.generation.run_id,
@@ -1257,25 +1262,47 @@ class AgentRunner:
                 config = {}
             budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
                                       reserve_ratio=config.get('reserveRatio', 0.05),
-                                      calibration_ratio=calibration.ratio)
-            self._update_fading_tier(state, budget, calibration, config, int(max_raw))
-            if config.get('enabled') is False or (budget.remaining_context_tokens > 0 and not isinstance(config.get('trigger'), dict)):
+                                      calibration_ratio=calibration.ratio) if max_raw is not None else None
+            if budget is not None:
+                self._update_fading_tier(state, budget, calibration, config, int(max_raw))
+            if config.get('enabled') is False:
                 return
-            if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
-                return
+            if not request_id:
+                if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
+                    return
+                # The reserve belongs to the model's output, not consumed input.
+                # Use total estimated input, including system and tool schema.
+                used = budget.instruction_tokens + budget.tool_schema_tokens + budget.message_tokens
+                trigger = config.get('trigger')
+                if not isinstance(trigger, dict):
+                    trigger = {'type': 'token_ratio', 'value': DEFAULT_COMPACTION_RATIO}
+                if not should_trigger_summarization(
+                    messages_to_refine_count=len(state.messages), trigger=trigger,
+                    max_context_tokens=budget.max_context_tokens,
+                    pre_prune_context_tokens=used,
+                    remaining_context_tokens=budget.remaining_context_tokens,
+                ):
+                    return
             system = [message for message in state.messages if message.get('role') == 'system']
             messages = [message for message in state.messages if message.get('role') != 'system']
             retain = config.get('retainRecent') or {}
-            head, tail = split_recent_turns(messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'))
-            if not should_trigger_summarization(
-                messages_to_refine_count=len(head), trigger=config.get('trigger'),
+            # Keep the last two turns when they fit; a long single user turn
+            # needs an exchange-aligned boundary within that turn.
+            head, tail = split_compaction_history(
+                messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'),
+                tail_budget=max(1, int(budget.available_for_messages * 0.35 / calibration.ratio))
+                if budget is not None else None)
+            if not head:
+                return
+            if not request_id and not should_trigger_summarization(
+                messages_to_refine_count=len(head), trigger=trigger,
                 max_context_tokens=budget.max_context_tokens,
-                pre_prune_context_tokens=budget.max_context_tokens - budget.remaining_context_tokens,
+                pre_prune_context_tokens=used,
                 remaining_context_tokens=budget.remaining_context_tokens,
             ):
                 return
             self._last_compaction_attempt_size = len(state.messages)
-            if budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
+            if budget is not None and budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
                 return
             try:
                 options = config.get('parameters') or {}
@@ -1284,7 +1311,7 @@ class AgentRunner:
                     max_tokens=options.get('maxSummaryTokens', 2048),
                     prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
                     semantic_index=state.context.compaction_semantic_index,
-                    retained_tail=tail, profile=state.context.profile)
+                    retained_tail=tail, profile=state.context.profile, live_request_id=request_id)
                 # Keep stable instructions and current summary, then the exact
                 # retained recent turns. Original messages stay in SQLite.
                 plain_system = [message for message in system if not (
@@ -1293,6 +1320,7 @@ class AgentRunner:
                 state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
                 self._summary_failures = 0
                 await self._save(state, [])
+                compacted = True
                 # History length may return to its pre-compaction value after
                 # the next tool batch. Do not suppress that distinct input as
                 # if it were an attempted retry of the old oversized history.
@@ -1301,6 +1329,8 @@ class AgentRunner:
                 # fresh v2 fading tier so past masking doesn't pin this run.
                 from .fading import create_fading_tier
 
+                if max_raw is None:
+                    return
                 state.context.fading_tier = create_fading_tier(int(max_raw))
                 try:
                     self.store.record_fading_tier(
@@ -1316,20 +1346,28 @@ class AgentRunner:
                 # substitute an empty checkpoint or truncate a tool result.
                 return
 
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
+            if request_id and not cancelled:
+                self.store.settle_live_compaction(
+                    self.owner, self.generation.run_id, request_id,
+                    success=compacted, actor_lease=self.actor_lease)
             # The pinned frontend consumes this event before the model call and
             # reads the same last snapshot from response metadata after reload.
             from .context_budget import context_usage_snapshot
 
             config = settings.get('summarization') or {}
             ratio = config.get('reserveRatio', 0.05) if isinstance(config, dict) else 0.05
-            snapshot = context_usage_snapshot(
-                state.messages, state.context.tools, int(max_raw), reserve_ratio=ratio,
-                run_id=self.generation.run_id,
-                agent_id=(state.context.agent or {}).get('id'),
-                calibration_ratio=calibration.ratio,
-            )
-            self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
+            if max_raw is not None:
+                snapshot = context_usage_snapshot(
+                    state.messages, state.context.tools, int(max_raw), reserve_ratio=ratio,
+                    run_id=self.generation.run_id,
+                    agent_id=(state.context.agent or {}).get('id'),
+                    calibration_ratio=calibration.ratio,
+                )
+                self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
 
     async def _manual_compact(self, history):
         from .storage import WorkspaceRepository
@@ -1578,6 +1616,9 @@ class AgentRunner:
                                          "source": "steer", "steerId": item["steerId"],
                                          "id": "steer:" + item["steerId"],
                                          "files": item.get("files", [])})
+            if boundary == "terminal" and not self.namespace and not (recovered or applied):
+                if self.store.live_compaction_request(self.owner, self.generation.run_id):
+                    await self._before_model(current)
             return bool(recovered or applied)
 
         async def should_seal_stream():

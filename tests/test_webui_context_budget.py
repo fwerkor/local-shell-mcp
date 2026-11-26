@@ -406,3 +406,161 @@ def test_failed_summary_followed_by_orphan_recovery_preserves_full_history(ctx):
     assert any('User question 0' in str(item.get('content')) for item in history)
     assert not any(item.get('role') == 'system' and '<summary>' in item.get('content', '')
                    for item in history)
+
+
+def _tool_exchange(call_id, size):
+    return [
+        {'role': 'assistant', 'content': None, 'tool_calls': [
+            {'id': call_id, 'type': 'function', 'function': {'name': 'read', 'arguments': '{}'}}]},
+        {'role': 'tool', 'tool_call_id': call_id, 'content': 'data ' * size},
+    ]
+
+
+def test_single_turn_compaction_preserves_tool_batch_boundaries():
+    from local_shell_mcp.webui.context_budget import split_compaction_history
+
+    original = [
+        {'role': 'user', 'content': 'Keep monitoring'},
+        *_tool_exchange('old', 250),
+        *_tool_exchange('recent', 10),
+    ]
+    head, tail = split_compaction_history(original, turns=2, tokens=None, tail_budget=80)
+    assert head == original[:3]
+    assert tail[0]['role'] == 'user'
+    assert tail[1:] == original[3:]
+    assert original[-1]['tool_call_id'] == 'recent'
+    assert split_compaction_history(original[:-1], turns=2, tokens=None, tail_budget=80)[0] == []
+
+
+@pytest.mark.asyncio
+async def test_default_threshold_compacts_one_long_running_turn(ctx):
+    db, store, repo, profile = ctx
+    run, _ = store.begin('a', {'text': 'Keep monitoring'})
+    repo.save_setting('a', 'endpoints', {})
+    calls = []
+
+    async def summarize(_profile, messages, **kwargs):
+        calls.append(messages)
+        yield 'Continue monitoring; old data was read.'
+
+    runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=summarize, on_text=_emit_noop,
+                         profile=profile)
+    original = [{'role': 'user', 'content': 'Keep monitoring'},
+                *_tool_exchange('old', 700), *_tool_exchange('recent', 10)]
+    budget = calculate_budget(original, [], 1000)
+    input_tokens = budget.message_tokens + budget.instruction_tokens + budget.tool_schema_tokens
+    below = int(input_tokens / 0.84)
+    above = int(input_tokens / 0.86)
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': below}), list(original))
+    await runner._before_model(state)
+    assert not calls and state.messages == original
+    state.context.parameters = {'max_context_tokens': above}
+    await runner._before_model(state)
+    assert len(calls) == 1
+    assert state.messages[0]['content'].startswith('<summary>')
+    assert state.messages[-2:] == original[-2:]
+    assert all(message.get('tool_call_id') != 'old' for message in state.messages)
+    assert store.finish('a', run.run_id, status='complete', text='Continued')
+    history = store.history('a', run.conversation_id)
+    assert history[0]['role'] == 'system'
+    assert not any(message.get('tool_call_id') == 'old' for message in history)
+    assert any(message.get('tool_call_id') == 'recent' for message in history)
+
+
+@pytest.mark.asyncio
+async def test_live_compaction_is_owner_scoped_durable_and_bypasses_threshold(ctx):
+    db, store, _, profile = ctx
+    run, _ = store.begin('a', {'text': 'Keep monitoring'})
+    with pytest.raises(ValueError):
+        store.request_live_compaction('b', run.conversation_id)
+    receipt = store.request_live_compaction('a', run.conversation_id)
+    assert store.request_live_compaction('a', run.conversation_id) == receipt
+    request_id = receipt['requestId']
+    reopened = GenerationStore(SQLiteDatabase(db.root))
+    assert reopened.live_compaction_status('a', run.run_id, request_id) == 'pending'
+    with pytest.raises(KeyError):
+        reopened.live_compaction_status('b', run.run_id, request_id)
+
+    async def summarize(_profile, messages, **kwargs):
+        yield 'Monitoring task, continuing safely.'
+
+    runner = AgentRunner('a', run, db, reopened, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=summarize, on_text=_emit_noop,
+                         profile=profile)
+    original = [{'role': 'user', 'content': 'Keep monitoring'},
+                *_tool_exchange('old', 300), *_tool_exchange('recent', 5)]
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 100000}), original)
+    await runner._before_model(state)
+    assert reopened.live_compaction_status('a', run.run_id, request_id) == 'complete'
+    assert reopened.live_compaction_request('a', run.run_id) is None
+    assert state.messages[0]['role'] == 'system'
+    assert not reopened.manual_compaction('a', run.run_id)
+    summaries = [value['data']['result']['summary'] for _, value in reopened.events('a', run.run_id)
+                 if value.get('event') == 'on_run_step_completed'
+                 and 'summary' in value.get('data', {}).get('result', {})]
+    assert summaries[-1]['initiatedBy'] == 'user'
+
+
+@pytest.mark.asyncio
+async def test_live_compaction_failure_preserves_messages_and_reports_result(ctx):
+    db, store, _, profile = ctx
+    run, _ = store.begin('a', {'text': 'Keep monitoring'})
+    receipt = store.request_live_compaction('a', run.conversation_id)
+    runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=_empty_text, on_text=_emit_noop,
+                         profile=profile)
+    original = [{'role': 'user', 'content': 'Keep monitoring'},
+                *_tool_exchange('old', 300), *_tool_exchange('recent', 5)]
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 10000}), list(original))
+    await runner._before_model(state)
+    assert state.messages == original
+    assert store.live_compaction_status('a', run.run_id, receipt['requestId']) == 'failed'
+    next_receipt = store.request_live_compaction('a', run.conversation_id)
+    assert next_receipt != receipt
+    assert store.finish('a', run.run_id, status='complete', text='Done')
+    assert store.live_compaction_status('a', run.run_id, next_receipt['requestId']) == 'failed'
+
+
+@pytest.mark.asyncio
+async def test_live_compaction_requested_during_tool_batch_resumes_model(ctx):
+    from local_shell_mcp.webui.agent_runtime import ToolBatchOutput, run_agent_loop
+    from local_shell_mcp.webui.providers import ModelToolCall
+
+    db, store, _, profile = ctx
+    run, _ = store.begin('a', {'text': 'Keep monitoring'})
+    called = []
+    receipt = None
+
+    async def summarize(_profile, messages, **kwargs):
+        assert any(message.get('tool_call_id') == 'old' for message in messages)
+        assert not any(message.get('tool_call_id') == 'live' for message in messages)
+        yield 'Prior results have been processed; continue monitoring.'
+
+    async def model(_profile, messages, **kwargs):
+        called.append(list(messages))
+        if len(called) == 1:
+            yield ModelToolCall('live', 'read', {})
+        else:
+            assert messages[0]['content'].startswith('<summary>')
+            assert messages[-1]['tool_call_id'] == 'live'
+            yield 'Continued after compaction.'
+
+    async def dispatch(calls, state):
+        nonlocal receipt
+        assert calls[0].call_id == 'live'
+        receipt = store.request_live_compaction('a', run.conversation_id)
+        assert store.live_compaction_status('a', run.run_id, receipt['requestId']) == 'pending'
+        return ToolBatchOutput([{'role': 'tool', 'tool_call_id': 'live', 'content': 'current data'}])
+
+    runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=model, stream_text=summarize, on_text=_emit_noop, profile=profile)
+    context = AgentContext(profile, [{'type': 'function', 'function': {'name': 'read'}}],
+                           {'max_context_tokens': 100000})
+    state = AgentLoopState(context, [{'role': 'user', 'content': 'Keep monitoring'},
+                                     *_tool_exchange('old', 300)])
+    result = await run_agent_loop(state, stream_tools=model, stream_text=model, dispatch=dispatch,
+                                  before_model=runner._before_model, on_text=_emit_noop)
+    assert len(called) == 2
+    assert result[-1]['content'] == 'Continued after compaction.'
+    assert store.live_compaction_status('a', run.run_id, receipt['requestId']) == 'complete'
