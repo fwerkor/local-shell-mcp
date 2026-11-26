@@ -13,10 +13,11 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
-from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
 from .provider_responses import ResponsesStreamError
+from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
 from .semantic_index import SemanticSnapshot
 
 log = logging.getLogger(__name__)
@@ -35,9 +36,10 @@ _MAX_RETRY_AFTER = 120
 
 
 def _model_retry_delay(error: Exception, attempt: int) -> float:
-    import httpx
-    from datetime import datetime, timezone
+    from datetime import datetime
     from email.utils import parsedate_to_datetime
+
+    import httpx
 
     delay = _MODEL_RETRY_DELAYS[attempt]
     if isinstance(error, ResponsesStreamError):
@@ -54,8 +56,8 @@ def _model_retry_delay(error: Exception, attempt: int) -> float:
                 try:
                     date = parsedate_to_datetime(value)
                     if date.tzinfo is None:
-                        date = date.replace(tzinfo=timezone.utc)
-                    seconds = (date - datetime.now(timezone.utc)).total_seconds()
+                        date = date.replace(tzinfo=UTC)
+                    seconds = (date - datetime.now(UTC)).total_seconds()
                 except (ValueError, TypeError, OverflowError):
                     return delay
             delay = max(delay, min(_MAX_RETRY_AFTER, seconds))
