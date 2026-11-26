@@ -247,13 +247,13 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
             from .webui.event_trigger_routes import event_trigger_routes
             from .webui.generation_routes import generation_routes
             from .webui.memory_routes import memory_routes
+            from .webui.message_bookmark_routes import message_bookmark_routes
             from .webui.misc_routes import misc_routes
             from .webui.routes import webui_routes
             from .webui.schedule_routes import schedule_routes
             from .webui.skill_routes import skill_routes
             from .webui.skill_tree_routes import skill_tree_routes
             from .webui.tag_routes import tag_routes
-            from .webui.message_bookmark_routes import message_bookmark_routes
 
             routes[2:2] = webui_routes()
             routes[2:2] = auth_routes()
