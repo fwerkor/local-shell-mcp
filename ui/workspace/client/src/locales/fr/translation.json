@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Portée de l'autorisation",
   "com_lsm_permission_chat": "Discussion actuelle",
   "com_lsm_permission_project": "Valeurs par défaut du projet",
-  "com_lsm_permission_global": "Valeurs par défaut de l'instance",
+  "com_lsm_permission_global": "Valeurs par défaut globales",
   "com_lsm_permission_current_project": "Projet actuel",
   "com_lsm_permission_select_project": "Sélectionnez un projet",
   "com_lsm_permission_select_project_placeholder": "Sélectionnez un projet…",

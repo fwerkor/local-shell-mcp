@@ -143,6 +143,7 @@ export type TEphemeralAgent = {
 export type TPayload = Partial<TMessage> &
   Partial<TEndpointOption> & {
     lsmSampling?: TConversation['lsmSampling'];
+    draftMachinePermissions?: TSubmission['draftMachinePermissions'];
     isContinued: boolean;
     isRegenerate?: boolean;
     /** Manual context compaction: summarize the branch up to `parentMessageId`
@@ -200,6 +201,8 @@ export type TEditedContent =
     };
 
 export type TSubmission = {
+  /** Machine overrides for a new conversation, captured before its first turn. */
+  draftMachinePermissions?: Record<string, 'none' | 'read' | 'write'>;
   userMessage: TMessage;
   isEdited?: boolean;
   isContinued?: boolean;

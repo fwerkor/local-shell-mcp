@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "ཆོག་མཆན་ཁྱབ་ཁོངས།",
   "com_lsm_permission_chat": "ད་ལྟའི་གླེང་མོལ།",
   "com_lsm_permission_project": "ལས་གཞིའི་སྔོན་སྒྲིག",
-  "com_lsm_permission_global": "དཔེ་མཚོན་སྔོན་སྒྲིག",
+  "com_lsm_permission_global": "སྤྱིའི་སྔོན་སྒྲིག",
   "com_lsm_permission_current_project": "ད་ལྟའི་ལས་གཞི།",
   "com_lsm_permission_select_project": "ལས་གཞི་འདེམས།",
   "com_lsm_permission_select_project_placeholder": "ལས་གཞི་འདེམས།",

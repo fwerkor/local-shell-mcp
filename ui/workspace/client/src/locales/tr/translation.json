@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "İzin kapsamı",
   "com_lsm_permission_chat": "Mevcut sohbet",
   "com_lsm_permission_project": "Proje varsayılanları",
-  "com_lsm_permission_global": "Örnek varsayılanları",
+  "com_lsm_permission_global": "Genel varsayılanlar",
   "com_lsm_permission_current_project": "Mevcut proje",
   "com_lsm_permission_select_project": "Proje seçin",
   "com_lsm_permission_select_project_placeholder": "Proje seç…",

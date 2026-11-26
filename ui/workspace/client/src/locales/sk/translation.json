@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Rozsah povolenia",
   "com_lsm_permission_chat": "Aktuálny chat",
   "com_lsm_permission_project": "Predvolené hodnoty projektu",
-  "com_lsm_permission_global": "Predvolené hodnoty inštancie",
+  "com_lsm_permission_global": "Globálne predvolené nastavenia",
   "com_lsm_permission_current_project": "Aktuálny projekt",
   "com_lsm_permission_select_project": "Vyberte projekt",
   "com_lsm_permission_select_project_placeholder": "Vybrať projekt…",

@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Область дозволу",
   "com_lsm_permission_chat": "Поточний чат",
   "com_lsm_permission_project": "Стандартні параметри проекту",
-  "com_lsm_permission_global": "Примірники за замовчуванням",
+  "com_lsm_permission_global": "Глобальні налаштування за замовчуванням",
   "com_lsm_permission_current_project": "Поточний проект",
   "com_lsm_permission_select_project": "Виберіть проект",
   "com_lsm_permission_select_project_placeholder": "Виберіть проект…",

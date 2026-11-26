@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "ขอบเขตการอนุญาต",
   "com_lsm_permission_chat": "แชทปัจจุบัน",
   "com_lsm_permission_project": "ค่าเริ่มต้นของโครงการ",
-  "com_lsm_permission_global": "ค่าเริ่มต้นของอินสแตนซ์",
+  "com_lsm_permission_global": "ค่าเริ่มต้นส่วนกลาง",
   "com_lsm_permission_current_project": "โครงการปัจจุบัน",
   "com_lsm_permission_select_project": "เลือกโครงการ",
   "com_lsm_permission_select_project_placeholder": "เลือกโครงการ...",

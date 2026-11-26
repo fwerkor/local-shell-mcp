@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Phạm vi quyền",
   "com_lsm_permission_chat": "Trò chuyện hiện tại",
   "com_lsm_permission_project": "Mặc định dự án",
-  "com_lsm_permission_global": "Mặc định của phiên bản",
+  "com_lsm_permission_global": "Mặc định toàn cục",
   "com_lsm_permission_current_project": "Dự án hiện tại",
   "com_lsm_permission_select_project": "Chọn dự án",
   "com_lsm_permission_select_project_placeholder": "Chọn dự án…",

@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Թույլտվության շրջանակը",
   "com_lsm_permission_chat": "Ընթացիկ զրույց",
   "com_lsm_permission_project": "Ծրագրի լռելյայն",
-  "com_lsm_permission_global": "Օրինակի լռելյայն",
+  "com_lsm_permission_global": "Ընդհանուր լռելյայն կարգավորումներ",
   "com_lsm_permission_current_project": "Ընթացիկ նախագիծ",
   "com_lsm_permission_select_project": "Ընտրեք նախագիծ",
   "com_lsm_permission_select_project_placeholder": "Ընտրեք նախագիծ…",

@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Ambito di autorizzazione",
   "com_lsm_permission_chat": "Chat attuale",
   "com_lsm_permission_project": "Impostazioni predefinite del progetto",
-  "com_lsm_permission_global": "Impostazioni predefinite dell'istanza",
+  "com_lsm_permission_global": "Impostazioni predefinite globali",
   "com_lsm_permission_current_project": "Progetto attuale",
   "com_lsm_permission_select_project": "Seleziona progetto",
   "com_lsm_permission_select_project_placeholder": "Seleziona progetto...",

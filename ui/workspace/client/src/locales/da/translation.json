@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Tilladelsesomfang",
   "com_lsm_permission_chat": "Aktuel chat",
   "com_lsm_permission_project": "Projektets standardindstillinger",
-  "com_lsm_permission_global": "Forekomst standarder",
+  "com_lsm_permission_global": "Globale standardindstillinger",
   "com_lsm_permission_current_project": "Aktuelt projekt",
   "com_lsm_permission_select_project": "Vælg projekt",
   "com_lsm_permission_select_project_placeholder": "Vælg projekt...",

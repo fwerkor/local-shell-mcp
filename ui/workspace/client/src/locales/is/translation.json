@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Umfang leyfis",
   "com_lsm_permission_chat": "Núverandi spjall",
   "com_lsm_permission_project": "Vanskil verkefni",
-  "com_lsm_permission_global": "Sjálfgefið tilvik",
+  "com_lsm_permission_global": "Almennar sjálfgefnar stillingar",
   "com_lsm_permission_current_project": "Núverandi verkefni",
   "com_lsm_permission_select_project": "Veldu verkefni",
   "com_lsm_permission_select_project_placeholder": "Veldu verkefni…",

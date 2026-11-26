@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Àmbit del permís",
   "com_lsm_permission_chat": "Xat actual",
   "com_lsm_permission_project": "Valors predeterminats del projecte",
-  "com_lsm_permission_global": "Valors predeterminats de la instància",
+  "com_lsm_permission_global": "Valors predeterminats globals",
   "com_lsm_permission_current_project": "Projecte actual",
   "com_lsm_permission_select_project": "Seleccioneu el projecte",
   "com_lsm_permission_select_project_placeholder": "Selecciona el projecte...",

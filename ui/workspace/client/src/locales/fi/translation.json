@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Luvan laajuus",
   "com_lsm_permission_chat": "Nykyinen chat",
   "com_lsm_permission_project": "Projektin oletusasetukset",
-  "com_lsm_permission_global": "Instanssien oletusasetukset",
+  "com_lsm_permission_global": "Yleiset oletusasetukset",
   "com_lsm_permission_current_project": "Nykyinen projekti",
   "com_lsm_permission_select_project": "Valitse projekti",
   "com_lsm_permission_select_project_placeholder": "Valitse projekti…",

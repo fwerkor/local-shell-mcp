@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "היקף ההרשאה",
   "com_lsm_permission_chat": "צ'אט נוכחי",
   "com_lsm_permission_project": "ברירת המחדל של הפרויקט",
-  "com_lsm_permission_global": "ברירת מחדל של מופע",
+  "com_lsm_permission_global": "ברירות מחדל כלליות",
   "com_lsm_permission_current_project": "פרויקט נוכחי",
   "com_lsm_permission_select_project": "בחר פרויקט",
   "com_lsm_permission_select_project_placeholder": "בחר פרויקט...",

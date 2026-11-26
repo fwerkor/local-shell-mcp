@@ -894,7 +894,7 @@ const ChatForm = memo(function ChatForm({
                 )}
                 <div className="grow" />
                 {index === 0 && (
-                  <LsmChatPermissions conversationId={conversationId} projectId={project?._id} />
+                  <LsmChatPermissions conversationId={conversationId} projectId={project?._id} index={index} />
                 )}
                 <TokenUsage index={index} conversation={conversation} isSubmitting={isSubmitting} />
                 {SpeechToText && (
