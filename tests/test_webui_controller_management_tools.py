@@ -61,7 +61,10 @@ def test_administration_requires_local_write_and_matching_oauth_scopes(policy):
         if item["function"]["name"] not in controller | agent_control:
             continue
         tool = original[item["function"]["name"]]
-        assert item["function"]["description"] == tool.description[:2048]
+        if tool.name == "plan_manage":
+            assert "immediately continues" in item["function"]["description"]
+        else:
+            assert item["function"]["description"] == tool.description[:2048]
         assert "logical_session_id" not in item["function"]["parameters"].get("properties", {})
     repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "none"})
     assert not controller & exposed("local", cid, scopes)

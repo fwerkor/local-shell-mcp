@@ -523,10 +523,13 @@ async def _run_model(
         from .error_diagnostics import generation_failure
 
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
+        from .chat_goal import pause as pause_goal
+
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
                     error=generation_failure(exc, generation.run_id),
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
                                                              "".join(text_parts)), actor_lease=actor_lease)
+        pause_goal(repo.database, owner, generation.run_id, "Generation failed. Resume after resolving the error.")
     finally:
         children = [task for task in (memory_task, heartbeat) if task is not None]
         for task in children:
@@ -1096,6 +1099,7 @@ async def abort_generation(request: Request):
         raise HTTPException(409, detail="Generation identity mismatch")
     if generation.status not in {"running", "requires_action"}:
         raise HTTPException(409, detail="Generation is not active")
+    from .chat_goal import pause as pause_goal
     from .durable_tasks import cancel_run
     from .steering import SteeringStore
 
@@ -1108,6 +1112,7 @@ async def abort_generation(request: Request):
     store.finish(owner, generation.run_id, status="aborted")
     if task and not task.done():
         task.cancel()
+    pause_goal(store.database, owner, generation.run_id, "Stopped by user.")
     return JSONResponse({"success": True, "generationProtocolVersion": protocol,
                          **({"pendingSteers": pending_steers} if pending_steers else {})},
                         headers=_generator_headers(protocol))

@@ -203,6 +203,16 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
         if not params["required"]:
             params.pop("required", None)
         description = (tool.description or "")[:2048]
+        if tool.name == "plan_manage":
+            description = (
+                "Manage Goal mode for a Logical Session. In Chat, starting or resuming "
+                "a plan binds it to the current generation. If the plan is still active "
+                "when a model turn ends, Chat immediately continues the same generation. "
+                "Update progress, finish completed plans, or block with a concrete reason. "
+                "Actions: start, get, update, block, resume, finish, cancel. "
+                "Start requires objective and steps; finish requires all steps completed or skipped. "
+                "session_id must be returned by session_manage."
+            )
         if tool.name == "browser_session":
             writable = any(level == "write" and _can_authorize(
                 owner, conversation_id, machine, "write", scopes, expires,
@@ -369,11 +379,19 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     for field in ("machine", "source_machine", "destination_machine"):
         if invocation.get(field) == "local":
             invocation[field] = None
+    session_kwargs = {}
+    if run_id is not None and tool.name not in _AGENT_CONTROL:
+        from .chat_goal import active_plan
+        from .routes import _repo
+
+        active = active_plan(_repo().database, owner, run_id)
+        if active:
+            session_kwargs["logical_session_id"] = active[0]
     try:
         result = await _await_authorized(
             _invoke_registered(owner, conversation_id, tool.name, invocation,
                                scopes=granted_scopes, machines=_targets(tool, arguments),
-                               intent=intent),
+                               intent=intent, **session_kwargs),
             check_authorization,
         )
         if run_id is not None and json.loads(result).get("ok", True) is not False:
@@ -460,13 +478,13 @@ def registered_definitions(names: tuple[str, ...]) -> list[dict]:
 async def _invoke_registered(owner: str, conversation_id: str, name: str,
                              arguments: dict[str, Any], *, scopes: set[str],
                              machines: list[str] | None = None,
-                             intent=None) -> str:
+                             intent=None, logical_session_id: str | None = None) -> str:
     """Call only an explicitly vetted tool using MCP's own validated executor."""
     from ..auth import _CURRENT_PRINCIPAL, Principal
 
     _validate_arguments(arguments)
     invocation = dict(arguments)
-    invocation["logical_session_id"] = None
+    invocation["logical_session_id"] = logical_session_id
     token = _CURRENT_PRINCIPAL.set(Principal(
         email=None, subject=owner,
         claims={"scope": " ".join(sorted(scopes)), "auth": "webui-agent"},
