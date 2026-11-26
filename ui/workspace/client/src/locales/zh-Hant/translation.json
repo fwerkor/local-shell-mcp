@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "每週",
   "com_ui_schedules": "定時會話",
   "com_ui_schedules_error": "無法載入定時會話",
-  "com_ui_schedules_used": "已使用 {{used}} / {{max}} 個定時會話",
   "com_ui_schema": "綱要",
   "com_ui_scope": "範圍",
   "com_ui_scroll_left": "向左滾動",

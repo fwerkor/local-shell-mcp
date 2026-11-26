@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "Iganädalane",
   "com_ui_schedules": "Plaanitud vestlused",
   "com_ui_schedules_error": "Teie ajastatud vestlusi ei saanud laadida",
-  "com_ui_schedules_used": "Kasutatud {{used}}/{{max}} ajakava",
   "com_ui_schema": "Skeem",
   "com_ui_scope": "Ulatus",
   "com_ui_scroll_left": "Kerige vasakule",

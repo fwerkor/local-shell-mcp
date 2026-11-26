@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "Semanalmente",
   "com_ui_schedules": "Bate-papos agendados",
   "com_ui_schedules_error": "Não foi possível carregar seus bate-papos agendados",
-  "com_ui_schedules_used": "{{used}} de programações {{max}} usadas",
   "com_ui_schema": "Esquema",
   "com_ui_scope": "Escopo",
   "com_ui_scroll_left": "Role para a esquerda",

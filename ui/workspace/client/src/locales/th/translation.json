@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "รายสัปดาห์",
   "com_ui_schedules": "การแชทตามกำหนดเวลา",
   "com_ui_schedules_error": "ไม่สามารถโหลดการแชทที่กำหนดเวลาไว้ของคุณได้",
-  "com_ui_schedules_used": "ใช้ตาราง {{used}} ของ {{max}}",
   "com_ui_schema": "สคีมา",
   "com_ui_scope": "ขอบเขต",
   "com_ui_scroll_left": "เลื่อนไปทางซ้าย",

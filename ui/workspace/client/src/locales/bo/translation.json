@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "བདུན་ཕྲག་རེར།",
   "com_ui_schedules": "དུས་གཏན་ཁ་བརྡ།",
   "com_ui_schedules_error": "དུས་ཚོད་གཏན་འཁེལ་བྱས་པའི་གླེང་མོལ་འགོད་ཐུབ་མ་སོང་།",
-  "com_ui_schedules_used": "དུས་ཚོད་འཆར་གཞི་ {{max}} ལས་ {{used}} བེད་སྤྱོད་བྱས།",
   "com_ui_schema": "འཆར་གཞི།",
   "com_ui_scope": "ཁྱབ་ཁོངས།",
   "com_ui_scroll_left": "གཡོན་དུ་བཤུད།",

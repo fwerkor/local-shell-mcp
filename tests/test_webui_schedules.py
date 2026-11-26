@@ -207,7 +207,7 @@ def test_schedule_cadence_validation_and_calendar_matches():
 
 
 @pytest.mark.asyncio
-async def test_schedule_rejects_invalid_create_update_and_origin(state, monkeypatch):
+async def test_schedule_rejects_invalid_create_update_and_origin(state):
     app, repo, agent = state
     valid = {
         'name': 'Daily test', 'prompt': 'Prompt', 'agent_id': agent['id'],
@@ -250,9 +250,27 @@ async def test_schedule_rejects_invalid_create_update_and_origin(state, monkeypa
         assert enabled.json()['nextRunAt']
         assert (await c.get('/api/schedules/not-found')).status_code == 404
         assert (await c.post('/api/schedules/not-found/run')).status_code == 404
-        monkeypatch.setitem(schedule_routes._LIMITS, 'maxPerUser', 1)
-        rejected = await c.post('/api/schedules', json={**valid, 'clientRequestId': 'other-try'})
-        assert rejected.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_schedule_creation_has_no_count_quota(state):
+    app, _, agent = state
+    payload = {
+        'name': 'Scheduled task', 'prompt': 'Prompt', 'agent_id': agent['id'],
+        'cadence': {'frequency': 'daily', 'hour': 9, 'minute': 0},
+        'timezone': 'UTC',
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as c:
+        for index in range(30):
+            created = await c.post('/api/schedules', json={
+                **payload, 'clientRequestId': f'unlimited-{index}', 'enabled': index % 2 == 0,
+            })
+            assert created.status_code == 201, created.text
+        listing = (await c.get('/api/schedules')).json()
+        assert len(listing['schedules']) == 30
+        assert 'maxPerUser' not in listing['limits']
+        assert len([item for item in listing['schedules'] if item['enabled']]) == 15
 
 
 def test_due_claim_terminal_settlement_and_disabled_recovery(state):

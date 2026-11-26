@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "أسبوعيا",
   "com_ui_schedules": "الدردشات المجدولة",
   "com_ui_schedules_error": "تعذر تحميل الدردشات المجدولة",
-  "com_ui_schedules_used": "تم استخدام جداول {{used}} لـ {{max}}",
   "com_ui_schema": "المخطط",
   "com_ui_scope": "مجال",
   "com_ui_scroll_left": "قم بالتمرير إلى اليسار",

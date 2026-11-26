@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "Settimanale",
   "com_ui_schedules": "Chat programmate",
   "com_ui_schedules_error": "Impossibile caricare le chat pianificate",
-  "com_ui_schedules_used": "{{used}} dei programmi {{max}} utilizzati",
   "com_ui_schema": "Schema",
   "com_ui_scope": "Ambito",
   "com_ui_scroll_left": "Scorri a sinistra",

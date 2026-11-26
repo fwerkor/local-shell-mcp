@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "viikoittain",
   "com_ui_schedules": "Aikataulutetut chatit",
   "com_ui_schedules_error": "Ajoitettuja keskustelujasi ei voitu ladata",
-  "com_ui_schedules_used": "Käytettyjen aikataulujen {{used}}/{{max}}",
   "com_ui_schema": "Kaavio",
   "com_ui_scope": "Laajuus",
   "com_ui_scroll_left": "Vieritä vasemmalle",

@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "Setmanalment",
   "com_ui_schedules": "Xats programats",
   "com_ui_schedules_error": "No s'han pogut carregar els xats programats",
-  "com_ui_schedules_used": "{{used}} dels horaris {{max}} utilitzats",
   "com_ui_schema": "Esquema",
   "com_ui_scope": "Abast",
   "com_ui_scroll_left": "Desplaça't cap a l'esquerra",

@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "Еженедельно",
   "com_ui_schedules": "Запланированные чаты",
   "com_ui_schedules_error": "Не удалось загрузить запланированные чаты.",
-  "com_ui_schedules_used": "Используемые расписания {{used}} из {{max}}",
   "com_ui_schema": "Схема",
   "com_ui_scope": "Объем",
   "com_ui_scroll_left": "Прокрутить влево",

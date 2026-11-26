@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "שבועי",
   "com_ui_schedules": "צ'אטים מתוזמנים",
   "com_ui_schedules_error": "לא ניתן היה לטעון את הצ'אטים המתוזמנים שלך",
-  "com_ui_schedules_used": "{{used}} של {{max}} לוחות זמנים בשימוש",
   "com_ui_schema": "סכמה",
   "com_ui_scope": "תחום",
   "com_ui_scroll_left": "גלול שמאלה",

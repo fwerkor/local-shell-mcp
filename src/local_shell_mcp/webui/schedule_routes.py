@@ -27,7 +27,7 @@ from .storage import _json, _now, _stamp
 log = logging.getLogger(__name__)
 _WORKER: asyncio.Task | None = None
 _ACTIVE: set[asyncio.Task] = set()
-_LIMITS = {'maxPerUser': 25, 'minIntervalMinutes': 5, 'requireProject': False}
+_LIMITS = {'minIntervalMinutes': 5, 'requireProject': False}
 _DAY_MS = 86_400_000
 
 
@@ -295,9 +295,6 @@ async def schedules(request: Request):
                          (owner, data['clientRequestId'])).fetchone()
         if row is not None:
             return JSONResponse(_present(row, repo.database))
-        count = db.execute('SELECT COUNT(*) FROM webui_schedules WHERE owner=?', (owner,)).fetchone()[0]
-    if count >= _LIMITS['maxPerUser']:
-        raise HTTPException(400, detail='Schedule limit reached')
     config = {key: data[key] for key in
               ('name', 'prompt', 'agent_id', 'cadence', 'timezone', 'target', 'file_ids',
                'chatProjectId') if key in data}
@@ -308,9 +305,6 @@ async def schedules(request: Request):
     sid = str(uuid.uuid4())
     with repo.database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        count = db.execute('SELECT COUNT(*) FROM webui_schedules WHERE owner=?', (owner,)).fetchone()[0]
-        if count >= _LIMITS['maxPerUser']:
-            raise HTTPException(400, detail='Schedule limit reached')
         db.execute('INSERT OR IGNORE INTO webui_schedules '
                    '(id,owner,request_id,config,enabled,next_run,created_at,updated_at) '
                    'VALUES(?,?,?,?,?,?,?,?)',

@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "هفتگی",
   "com_ui_schedules": "چت های برنامه ریزی شده",
   "com_ui_schedules_error": "چت های برنامه ریزی شده شما بارگیری نشد",
-  "com_ui_schedules_used": "{{used}} از برنامه های {{max}} استفاده شده است",
   "com_ui_schema": "طرحواره",
   "com_ui_scope": "دامنه",
   "com_ui_scroll_left": "به سمت چپ حرکت کنید",

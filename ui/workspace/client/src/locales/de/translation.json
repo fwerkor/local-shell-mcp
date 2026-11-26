@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "Wöchentlich",
   "com_ui_schedules": "Geplante Chats",
   "com_ui_schedules_error": "Ihre geplanten Chats konnten nicht geladen werden",
-  "com_ui_schedules_used": "Verwendete Zeitpläne {{used}} oder {{max}}",
   "com_ui_schema": "Schema",
   "com_ui_scope": "Umfang",
   "com_ui_scroll_left": "Nach links scrollen",

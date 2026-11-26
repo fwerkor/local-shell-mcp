@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "Semanalmente",
   "com_ui_schedules": "Bate-papos agendados",
   "com_ui_schedules_error": "Não foi possível carregar os seus chats agendados",
-  "com_ui_schedules_used": "{{used}} de programações {{max}} utilizadas",
   "com_ui_schema": "Esquema",
   "com_ui_scope": "Âmbito",
   "com_ui_scroll_left": "Percorra para a esquerda",

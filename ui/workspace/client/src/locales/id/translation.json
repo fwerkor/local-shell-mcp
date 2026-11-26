@@ -2076,7 +2076,6 @@
   "com_ui_schedule_weekly": "Mingguan",
   "com_ui_schedules": "Obrolan terjadwal",
   "com_ui_schedules_error": "Tidak dapat memuat obrolan terjadwal Anda",
-  "com_ui_schedules_used": "{{used}} dari jadwal {{max}} yang digunakan",
   "com_ui_schema": "Skema",
   "com_ui_scope": "Ruang lingkup",
   "com_ui_scroll_left": "Gulir ke kiri",
