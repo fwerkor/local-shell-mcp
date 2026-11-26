@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "권한 범위",
   "com_lsm_permission_chat": "현재 채팅",
   "com_lsm_permission_project": "프로젝트 기본값",
-  "com_lsm_permission_global": "인스턴스 기본값",
+  "com_lsm_permission_global": "전역 기본값",
   "com_lsm_permission_current_project": "현재 프로젝트",
   "com_lsm_permission_select_project": "프로젝트 선택",
   "com_lsm_permission_select_project_placeholder": "프로젝트 선택…",

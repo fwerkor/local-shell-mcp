@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Az engedély hatálya",
   "com_lsm_permission_chat": "Jelenlegi csevegés",
   "com_lsm_permission_project": "A projekt alapértelmezett beállításai",
-  "com_lsm_permission_global": "A példány alapértelmezett beállításai",
+  "com_lsm_permission_global": "Globális alapértelmezések",
   "com_lsm_permission_current_project": "Jelenlegi projekt",
   "com_lsm_permission_select_project": "Válassza ki a projektet",
   "com_lsm_permission_select_project_placeholder": "Projekt kiválasztása…",

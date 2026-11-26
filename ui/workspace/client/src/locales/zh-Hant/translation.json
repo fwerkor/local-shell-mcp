@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "權限範圍",
   "com_lsm_permission_chat": "目前聊天",
   "com_lsm_permission_project": "項目預設值",
-  "com_lsm_permission_global": "實例預設值",
+  "com_lsm_permission_global": "全域預設值",
   "com_lsm_permission_current_project": "目前專案",
   "com_lsm_permission_select_project": "選擇項目",
   "com_lsm_permission_select_project_placeholder": "選擇項目...",

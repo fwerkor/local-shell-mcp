@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Toestemmingsbereik",
   "com_lsm_permission_chat": "Huidige chat",
   "com_lsm_permission_project": "Standaardwaarden voor projecten",
-  "com_lsm_permission_global": "Standaardinstellingen voor instanties",
+  "com_lsm_permission_global": "Globale standaardinstellingen",
   "com_lsm_permission_current_project": "Huidig project",
   "com_lsm_permission_select_project": "Selecteer project",
   "com_lsm_permission_select_project_placeholder": "Project selecteren…",

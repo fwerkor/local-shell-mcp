@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Rozsah oprávnění",
   "com_lsm_permission_chat": "Aktuální chat",
   "com_lsm_permission_project": "Výchozí nastavení projektu",
-  "com_lsm_permission_global": "Výchozí nastavení instance",
+  "com_lsm_permission_global": "Globální výchozí nastavení",
   "com_lsm_permission_current_project": "Aktuální projekt",
   "com_lsm_permission_select_project": "Vyberte projekt",
   "com_lsm_permission_select_project_placeholder": "Vybrat projekt…",

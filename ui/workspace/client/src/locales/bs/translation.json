@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Opseg dozvole",
   "com_lsm_permission_chat": "Trenutni chat",
   "com_lsm_permission_project": "Projektne postavke",
-  "com_lsm_permission_global": "Zadane postavke instance",
+  "com_lsm_permission_global": "Globalne zadane postavke",
   "com_lsm_permission_current_project": "Trenutni projekat",
   "com_lsm_permission_select_project": "Odaberite projekat",
   "com_lsm_permission_select_project_placeholder": "Odaberite projekat…",

@@ -157,6 +157,13 @@ class GenerationStore:
         project_id = payload.get("projectId", payload.get("chatProjectId")) if new_conversation else None
         if project_id is not None and (not isinstance(project_id, str) or not project_id):
             raise ValueError("Invalid project id")
+        draft_machine_permissions = None
+        if "draftMachinePermissions" in payload:
+            if not new_conversation:
+                raise ValueError("Draft machine permissions require a new conversation")
+            from .machine_permissions import validate_access_map
+
+            draft_machine_permissions = validate_access_map(payload["draftMachinePermissions"])
         # Internal-only allocation for a host-reserved subagent child. No HTTP
         # field can select this value; the host registered its trusted lineage
         # before this conversation becomes externally observable.
@@ -228,6 +235,11 @@ class GenerationStore:
                      payload.get("endpoint") or "agents", project_id,
                      _json({"lsmSampling": state["sampling"]} if "lsmSampling" in payload and not agent else {}), now, now),
                 )
+                if draft_machine_permissions is not None:
+                    from .machine_permissions import _CONVERSATION
+
+                    db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?)",
+                               (owner, _CONVERSATION + conversation_id, _json(draft_machine_permissions)))
             elif not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                                 (conversation_id, owner)).fetchone():
                 raise KeyError("Conversation not found")

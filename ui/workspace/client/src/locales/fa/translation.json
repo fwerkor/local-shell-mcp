@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "محدوده مجوز",
   "com_lsm_permission_chat": "چت فعلی",
   "com_lsm_permission_project": "پیش فرض های پروژه",
-  "com_lsm_permission_global": "پیش فرض های نمونه",
+  "com_lsm_permission_global": "پیش‌فرض‌های سراسری",
   "com_lsm_permission_current_project": "پروژه فعلی",
   "com_lsm_permission_select_project": "پروژه را انتخاب کنید",
   "com_lsm_permission_select_project_placeholder": "انتخاب پروژه…",

@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "ნებართვის ფარგლები",
   "com_lsm_permission_chat": "მიმდინარე ჩატი",
   "com_lsm_permission_project": "პროექტის ნაგულისხმევი",
-  "com_lsm_permission_global": "მაგალითად ნაგულისხმევი",
+  "com_lsm_permission_global": "გლობალური ნაგულისხმევი პარამეტრები",
   "com_lsm_permission_current_project": "მიმდინარე პროექტი",
   "com_lsm_permission_select_project": "აირჩიეთ პროექტი",
   "com_lsm_permission_select_project_placeholder": "აირჩიეთ პროექტი…",

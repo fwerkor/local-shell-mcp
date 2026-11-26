@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Leidimo apimtis",
   "com_lsm_permission_chat": "Dabartinis pokalbis",
   "com_lsm_permission_project": "Projekto numatytieji nustatymai",
-  "com_lsm_permission_global": "Numatytieji atvejo nustatymai",
+  "com_lsm_permission_global": "Visuotiniai numatytieji nustatymai",
   "com_lsm_permission_current_project": "Dabartinis projektas",
   "com_lsm_permission_select_project": "Pasirinkite projektą",
   "com_lsm_permission_select_project_placeholder": "Pasirinkite projektą…",

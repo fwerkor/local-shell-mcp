@@ -168,9 +168,16 @@ async def test_real_react_machine_permission_scopes_and_inheritance(tmp_path, mo
                 # exposes machine access as segmented buttons, not a <select>.
                 selector = page.get_by_role("button", name="Tool permissions", exact=True)
                 await selector.wait_for(timeout=15_000)
+                await page.set_viewport_size({"width": 1000, "height": 480})
                 await selector.click()
+                dialog = page.get_by_role("dialog", name="Tool permissions")
+                await dialog.wait_for()
+                bounds = await dialog.bounding_box()
+                assert bounds and bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 480
+                assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 1000
+                await page.get_by_role("button", name="Current chat", exact=True).click()
                 await page.get_by_role("button", name="local Read only").wait_for(timeout=10_000)
-                await page.get_by_role("group", name="Permission scope").get_by_role("button", name="Instance defaults", exact=True).click()
+                await page.get_by_role("group", name="Permission scope").get_by_role("button", name="Global defaults", exact=True).click()
                 await page.get_by_role("button", name="local Read only").click()
                 for _ in range(100):
                     if (await http.get("/api/lsm/permissions/defaults")).json().get("machines", {}).get("local") == "read":

@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Zakres uprawnień",
   "com_lsm_permission_chat": "Aktualny czat",
   "com_lsm_permission_project": "Domyślne ustawienia projektu",
-  "com_lsm_permission_global": "Wartości domyślne instancji",
+  "com_lsm_permission_global": "Globalne ustawienia domyślne",
   "com_lsm_permission_current_project": "Aktualny projekt",
   "com_lsm_permission_select_project": "Wybierz projekt",
   "com_lsm_permission_select_project_placeholder": "Wybierz projekt…",

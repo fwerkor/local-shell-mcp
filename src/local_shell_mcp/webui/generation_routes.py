@@ -821,15 +821,14 @@ async def start_generation(request: Request):
     existing_cid = payload.get("conversationId")
     try:
         if isinstance(existing_cid, str) and existing_cid not in {"", "new", "new_conversation"}:
-            policy = resolve_access(owner, existing_cid)
+            resolve_access(owner, existing_cid)
         else:
             project_id = payload.get("projectId")
             if project_id is not None and not isinstance(project_id, str):
                 raise HTTPException(400, detail="Invalid project id")
-            policy = resolve_access(owner, project_id=project_id)
+            resolve_access(owner, project_id=project_id)
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    requested_tools = any(level in {"read", "write"} for level in policy.values())
     scopes, grant_expires = _request_grant(request)
     try:
         profile = provider_config(kind, model)
@@ -844,6 +843,8 @@ async def start_generation(request: Request):
         raise HTTPException(400, detail=str(exc)) from exc
     protocol = min(protocol, result.protocol_version)
     if fresh:
+        policy = resolve_access(owner, result.conversation_id)
+        requested_tools = any(level in {"read", "write"} for level in policy.values())
         ask_user_enabled = ask_user_requested(agent, payload)
 
         mcp_enabled = effective_features(owner, result.conversation_id)["mcp"]

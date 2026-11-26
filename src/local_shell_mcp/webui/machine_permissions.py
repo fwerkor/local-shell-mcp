@@ -35,7 +35,7 @@ def validate_access_map(value: Any) -> dict[str, str]:
     for name, access in value.items():
         if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
             raise ValueError("Invalid machine identifier")
-        if access not in _LEVELS:
+        if not isinstance(access, str) or access not in _LEVELS:
             raise ValueError("Machine access must be none, read or write")
         result[name] = access
     return result

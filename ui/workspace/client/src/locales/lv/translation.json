@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Atļaujas apjoms",
   "com_lsm_permission_chat": "Pašreizējā tērzēšana",
   "com_lsm_permission_project": "Projekta noklusējuma iestatījumi",
-  "com_lsm_permission_global": "Gadījuma noklusējuma iestatījumi",
+  "com_lsm_permission_global": "Globālie noklusējuma iestatījumi",
   "com_lsm_permission_current_project": "Pašreizējais projekts",
   "com_lsm_permission_select_project": "Izvēlieties projektu",
   "com_lsm_permission_select_project_placeholder": "Izvēlieties projektu…",

@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Obseg dovoljenja",
   "com_lsm_permission_chat": "Trenutni klepet",
   "com_lsm_permission_project": "Privzete nastavitve projekta",
-  "com_lsm_permission_global": "Privzete nastavitve primerka",
+  "com_lsm_permission_global": "Globalne privzete nastavitve",
   "com_lsm_permission_current_project": "Trenutni projekt",
   "com_lsm_permission_select_project": "Izberite projekt",
   "com_lsm_permission_select_project_placeholder": "Izberite projekt ...",

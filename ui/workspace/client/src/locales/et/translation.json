@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "Loa ulatus",
   "com_lsm_permission_chat": "Praegune vestlus",
   "com_lsm_permission_project": "Projekti vaikesätted",
-  "com_lsm_permission_global": "Eksemplari vaikeväärtused",
+  "com_lsm_permission_global": "Üldised vaikesätted",
   "com_lsm_permission_current_project": "Praegune projekt",
   "com_lsm_permission_select_project": "Valige projekt",
   "com_lsm_permission_select_project_placeholder": "Valige projekt…",

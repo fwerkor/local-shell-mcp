@@ -55,7 +55,7 @@ def test_effective_permission_precedence_and_isolation(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("value", [
-    [], {"local": "admin"}, {"*": "read"}, {"local": True},
+    [], {"local": []}, {"local": "admin"}, {"*": "read"}, {"local": True},
     {"../../../": "read"}, {"": "read"}, {"m": None},
     {str(i): "read" for i in range(129)},
 ])
@@ -228,6 +228,26 @@ async def test_new_conversation_inherits_project_machine_policy_on_first_turn(tm
             assert not {"run_shell", "job_start", "shell_send", "file_write", "mcp_manage"} & names
             assert repo.conversation("local", cid)["projectId"] == project["id"]
             assert access_level("local", cid, "local", repo=repo) == "read"
+            # First-turn overrides must be persisted and enforced before any tool is exposed.
+            restricted = await client.post("/api/agents/chat", json={
+                "conversationId": "new", "projectId": project["id"], "text": "Restricted draft",
+                "draftMachinePermissions": {"local": "none"},
+            })
+            assert restricted.status_code == 202, restricted.text
+            restricted_id = restricted.json()["conversationId"]
+            for _ in range(50):
+                if (await client.get(f"/api/agents/chat/status/{restricted_id}")).json().get("status") == "complete":
+                    break
+                await asyncio.sleep(0.02)
+            assert len(observed) == 2
+            assert not {"file_read", "run_shell"} & {tool["function"]["name"] for tool in observed[1]}
+            assert access_level("local", restricted_id, "local", repo=repo) == "none"
+            assert access_level("local", cid, "local", repo=repo) == "read"
+            invalid = await client.post("/api/agents/chat", json={
+                "conversationId": "new", "text": "Invalid draft",
+                "draftMachinePermissions": {"local": []},
+            })
+            assert invalid.status_code == 400
             missing = await client.post("/api/agents/chat", json={
                 "conversationId": "new", "projectId": "not-allowed", "text": "Invalid project",
             })

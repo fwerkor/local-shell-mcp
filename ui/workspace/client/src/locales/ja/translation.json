@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "許可範囲",
   "com_lsm_permission_chat": "現在のチャット",
   "com_lsm_permission_project": "プロジェクトのデフォルト",
-  "com_lsm_permission_global": "インスタンスのデフォルト",
+  "com_lsm_permission_global": "グローバル既定値",
   "com_lsm_permission_current_project": "現在のプロジェクト",
   "com_lsm_permission_select_project": "プロジェクトの選択",
   "com_lsm_permission_select_project_placeholder": "プロジェクトを選択…",

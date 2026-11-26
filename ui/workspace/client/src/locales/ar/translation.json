@@ -2944,7 +2944,7 @@
   "com_lsm_permission_scope": "نطاق الإذن",
   "com_lsm_permission_chat": "الدردشة الحالية",
   "com_lsm_permission_project": "افتراضيات المشروع",
-  "com_lsm_permission_global": "الإعدادات الافتراضية للمثيل",
+  "com_lsm_permission_global": "الإعدادات الافتراضية العامة",
   "com_lsm_permission_current_project": "المشروع الحالي",
   "com_lsm_permission_select_project": "حدد المشروع",
   "com_lsm_permission_select_project_placeholder": "حدد المشروع…",
