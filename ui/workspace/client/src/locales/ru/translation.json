@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Контекстное окно: {{0}} использованных токенов {{1}} ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Использование контекста: используются токены {{0}}.",
   "com_ui_context_window": "Контекстное окно",
+  "com_ui_goal_continuation": "Цель · Автоматическое продолжение",
   "com_ui_continue": "Продолжить",
   "com_ui_continue_chat": "Продолжить этот чат",
   "com_ui_continue_chat_error": "При копировании этого разговора произошла ошибка.",

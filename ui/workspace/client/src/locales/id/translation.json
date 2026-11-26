@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Jendela konteks: {{0}} dari token {{1}} yang digunakan ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Penggunaan konteks: Token {{0}} digunakan",
   "com_ui_context_window": "Jendela konteks",
+  "com_ui_goal_continuation": "Tujuan · Melanjutkan secara otomatis",
   "com_ui_continue": "Lanjutkan",
   "com_ui_continue_chat": "Lanjutkan obrolan ini",
   "com_ui_continue_chat_error": "Terjadi kesalahan saat menyalin percakapan ini",

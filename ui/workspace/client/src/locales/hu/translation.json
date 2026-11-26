@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontextusablak: {{0}}/{{1}} használt token ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Kontextus használat: {{0}} tokenek használtak",
   "com_ui_context_window": "Kontextus ablak",
+  "com_ui_goal_continuation": "Cél · Automatikus folytatás",
   "com_ui_continue": "Folytatás",
   "com_ui_continue_chat": "Folytassa ezt a csevegést",
   "com_ui_continue_chat_error": "Hiba történt a beszélgetés másolásakor",

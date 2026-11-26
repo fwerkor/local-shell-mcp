@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontekstiikkuna: {{0}}/Käytettyjen {{1}}-tunnusten ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Kontekstikäyttö: käytetyt {{0}}-tunnisteet",
   "com_ui_context_window": "Konteksti-ikkuna",
+  "com_ui_goal_continuation": "Tavoite · Jatketaan automaattisesti",
   "com_ui_continue": "Jatka",
   "com_ui_continue_chat": "Jatka tätä keskustelua",
   "com_ui_continue_chat_error": "Tämän keskustelun kopioinnissa tapahtui virhe",

@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontekst prozor: {{0}} od {{1}} tokena korištenih ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Upotreba konteksta: Korišteni tokeni {{0}}",
   "com_ui_context_window": "Kontekstni prozor",
+  "com_ui_goal_continuation": "Cilj · Automatski nastavak",
   "com_ui_continue": "Nastavi",
   "com_ui_continue_chat": "Nastavite sa ovim razgovorom",
   "com_ui_continue_chat_error": "Došlo je do greške pri kopiranju ovog razgovora",

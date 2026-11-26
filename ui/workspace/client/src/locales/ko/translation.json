@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "컨텍스트 창: 사용된 {{1}} 토큰 중 {{0}}({{2}}%)",
   "com_ui_context_usage_label_unknown": "컨텍스트 사용법: {{0}} 토큰 사용",
   "com_ui_context_window": "컨텍스트 창",
+  "com_ui_goal_continuation": "목표 · 자동으로 계속 진행 중",
   "com_ui_continue": "계속",
   "com_ui_continue_chat": "이 채팅을 계속하세요",
   "com_ui_continue_chat_error": "이 대화를 복사하는 중에 오류가 발생했습니다.",

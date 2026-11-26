@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontekstno okno: {{0}} uporabljenih žetonov {{1}} ({{2}} %)",
   "com_ui_context_usage_label_unknown": "Uporaba konteksta: uporabljeni žetoni {{0}}",
   "com_ui_context_window": "Kontekstno okno",
+  "com_ui_goal_continuation": "Cilj · Samodejno nadaljevanje",
   "com_ui_continue": "Nadaljuj",
   "com_ui_continue_chat": "Nadaljujte s tem klepetom",
   "com_ui_continue_chat_error": "Pri kopiranju tega pogovora je prišlo do napake",

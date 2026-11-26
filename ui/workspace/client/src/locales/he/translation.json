@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "חלון הקשר: {{0}} מתוך {{1}} טוקנים בשימוש ({{2}}%)",
   "com_ui_context_usage_label_unknown": "שימוש בהקשר: {{0}} טוקנים בשימוש",
   "com_ui_context_window": "חלון הקשר",
+  "com_ui_goal_continuation": "יעד · המשך אוטומטי",
   "com_ui_continue": "המשך",
   "com_ui_continue_chat": "המשך את השיחה הזו",
   "com_ui_continue_chat_error": "אירעה שגיאה בהעתקת השיחה",

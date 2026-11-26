@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Konteksta logs: {{0}} no {{1}} izmantotie tokeni ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Konteksta lietojums: {{0}} tokeni izmantoti",
   "com_ui_context_window": "Konteksta logs",
+  "com_ui_goal_continuation": "Mērķis · Automātiska turpināšana",
   "com_ui_continue": "Turpināt",
   "com_ui_continue_chat": "Turpināt šo sarunu",
   "com_ui_continue_chat_error": "Kopējot šo sarunu, radās kļūda",

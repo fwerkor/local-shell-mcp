@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Համատեքստային պատուհան. {{0}} օգտագործված {{1}} նշաններից ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Համատեքստի օգտագործումը. Օգտագործված {{0}} նշաններ",
   "com_ui_context_window": "Համատեքստային պատուհան",
+  "com_ui_goal_continuation": "Նպատակ · Ավտոմատ շարունակություն",
   "com_ui_continue": "Շարունակել",
   "com_ui_continue_chat": "Շարունակեք այս զրույցը",
   "com_ui_continue_chat_error": "Այս խոսակցությունը պատճենելիս սխալ տեղի ունեցավ",

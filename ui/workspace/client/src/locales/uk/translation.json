@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Контекстне вікно: використано {{0}} із {{1}} токенів ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Використання контексту: використано маркери {{0}}",
   "com_ui_context_window": "Контекстне вікно",
+  "com_ui_goal_continuation": "Мета · Автоматичне продовження",
   "com_ui_continue": "Продовжити",
   "com_ui_continue_chat": "Продовжуйте цей чат",
   "com_ui_continue_chat_error": "Під час копіювання цієї розмови сталася помилка",

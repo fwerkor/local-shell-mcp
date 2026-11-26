@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Konteksto langas: naudojama {{0}} iš {{1}} ženklų ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Konteksto naudojimas: naudojama {{0}} ženklų",
   "com_ui_context_window": "Konteksto langas",
+  "com_ui_goal_continuation": "Tikslas · Automatiškai tęsiama",
   "com_ui_continue": "Tęsti",
   "com_ui_continue_chat": "Tęsti šį pokalbį",
   "com_ui_continue_chat_error": "Kopijuojant šį pokalbį įvyko klaida",

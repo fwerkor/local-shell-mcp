@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "コンテキストウィンドウ： {{0}} / {{1}} トークン ({{2}}％)",
   "com_ui_context_usage_label_unknown": "コンテキスト使用： {{0}} トークン",
   "com_ui_context_window": "コンテキストウィンドウ",
+  "com_ui_goal_continuation": "目標 · 自動で続行中",
   "com_ui_continue": "続ける",
   "com_ui_continue_chat": "このチャットを続ける",
   "com_ui_continue_chat_error": "会話の複製中にエラーが発生しました",

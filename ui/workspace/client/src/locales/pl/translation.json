@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Okno kontekstowe: {{0}} z {{1}} używanych tokenów ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Użycie kontekstu: użyte tokeny {{0}}",
   "com_ui_context_window": "Okno kontekstowe",
+  "com_ui_goal_continuation": "Cel · Automatyczne kontynuowanie",
   "com_ui_continue": "Kontynuuj",
   "com_ui_continue_chat": "Kontynuuj ten czat",
   "com_ui_continue_chat_error": "Podczas kopiowania tej rozmowy wystąpił błąd",

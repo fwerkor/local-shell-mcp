@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "หน้าต่างบริบท: {{0}} ของโทเค็น {{1}} ที่ใช้ ({{2}}%)",
   "com_ui_context_usage_label_unknown": "การใช้บริบท: ใช้โทเค็น {{0}}",
   "com_ui_context_window": "หน้าต่างบริบท",
+  "com_ui_goal_continuation": "เป้าหมาย · ดำเนินการต่อโดยอัตโนมัติ",
   "com_ui_continue": "ดำเนินการต่อ",
   "com_ui_continue_chat": "สนทนาต่อนี้ต่อไป",
   "com_ui_continue_chat_error": "เกิดข้อผิดพลาดในการคัดลอกการสนทนานี้",

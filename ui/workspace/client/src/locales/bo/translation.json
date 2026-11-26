@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "སྐབས་དོན་སྒེའུ་ཁུང་། {{0}}ཡི་{{1}}རྟགས་མཚན་བེད་སྤྱོད་བྱས། ({{2}}%)",
   "com_ui_context_usage_label_unknown": "སྐབས་དོན་བེད་སྤྱོད། {{0}}རྟགས་མཚན་བེད་སྤྱོད་བྱས།",
   "com_ui_context_window": "སྐབས་དོན་སྒེའུ་ཁུང་།",
+  "com_ui_goal_continuation": "དམིགས་ཡུལ། · རང་འགུལ་གྱིས་མུ་མཐུད་པ།",
   "com_ui_continue": "མུ་མཐུད།",
   "com_ui_continue_chat": "ཁ་བརྡ་འདི་མུ་མཐུད།",
   "com_ui_continue_chat_error": "ཁ་བརྡ་འདི་འདྲ་བཤུས་བྱེད་སྐབས་ནོར་འཁྲུལ་བྱུང་འདུག",

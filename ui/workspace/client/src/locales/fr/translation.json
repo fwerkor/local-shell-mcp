@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Fenêtre contextuelle : {{0}} des jetons {{1}} utilisés ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Utilisation du contexte : jetons {{0}} utilisés",
   "com_ui_context_window": "Fenêtre de contexte",
+  "com_ui_goal_continuation": "Objectif · Poursuite automatique",
   "com_ui_continue": "Continuer",
   "com_ui_continue_chat": "Continuer cette discussion",
   "com_ui_continue_chat_error": "Une erreur s'est produite lors de la copie de cette conversation",

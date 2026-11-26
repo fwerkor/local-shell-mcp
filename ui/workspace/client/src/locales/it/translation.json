@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Finestra di contesto: {{0}} di {{1}} token utilizzati ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Utilizzo contesto: {{0}} token utilizzati",
   "com_ui_context_window": "Finestra di contesto",
+  "com_ui_goal_continuation": "Obiettivo · Continuazione automatica",
   "com_ui_continue": "Continua",
   "com_ui_continue_chat": "Continua questa chat",
   "com_ui_continue_chat_error": "Si è verificato un errore durante la copia di questa conversazione",
