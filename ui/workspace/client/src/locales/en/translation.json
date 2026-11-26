@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimum size 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Custom Tool",
   "com_agents_mcp_trust_subtext": "Custom connectors are not verified by LSM",
-  "com_agents_memory_info": "When enabled, the agent can save, update, and delete memories about the user during the conversation using the set_memory and delete_memory tools.",
+  "com_agents_memory_info": "Enable proactive memory management and retrieval of saved memories or past conversation text.",
   "com_agents_memory_scope": "Keep memories separate for this agent",
   "com_agents_memory_scope_info": "When enabled, this agent reads and writes its own memories, isolated from your shared memories and from other agents. Existing shared memories are not shown to this agent.",
   "com_agents_missing_name": "Please type in a name before creating an agent.",

@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Ukuran minimal 128 x 128 piksel",
   "com_agents_mcp_name_placeholder": "Alat Kustom",
   "com_agents_mcp_trust_subtext": "Konektor khusus tidak diverifikasi oleh LSM",
-  "com_agents_memory_info": "Jika diaktifkan, agen dapat menyimpan, memperbarui, dan menghapus kenangan tentang pengguna selama percakapan menggunakan alat set_memory dan delete_memory.",
+  "com_agents_memory_info": "Jika diaktifkan, agen dapat menyimpan, memperbarui, dan menghapus kenangan tentang pengguna selama percakapan menggunakan alat set_memory.",
   "com_agents_memory_scope": "Pisahkan kenangan untuk agen ini",
   "com_agents_memory_scope_info": "Jika diaktifkan, agen ini membaca dan menulis ingatannya sendiri, diisolasi dari ingatan Anda bersama dan dari agen lain. Kenangan bersama yang ada tidak diperlihatkan kepada agen ini.",
   "com_agents_missing_name": "Silakan ketik nama sebelum membuat agen.",

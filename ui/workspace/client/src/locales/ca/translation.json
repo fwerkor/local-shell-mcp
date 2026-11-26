@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Mida mínima 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Eina personalitzada",
   "com_agents_mcp_trust_subtext": "Els connectors personalitzats no estan verificats per LSM",
-  "com_agents_memory_info": "Quan està activat, l'agent pot desar, actualitzar i suprimir memòries sobre l'usuari durant la conversa mitjançant les eines set_memory i delete_memory.",
+  "com_agents_memory_info": "Quan està activat, l'agent pot desar, actualitzar i suprimir memòries sobre l'usuari durant la conversa mitjançant les eines set_memory.",
   "com_agents_memory_scope": "Mantingueu els records separats per a aquest agent",
   "com_agents_memory_scope_info": "Quan està activat, aquest agent llegeix i escriu els seus propis records, aïllats dels teus records compartits i d'altres agents. Els records compartits existents no es mostren a aquest agent.",
   "com_agents_missing_name": "Escriu un nom abans de crear un agent.",

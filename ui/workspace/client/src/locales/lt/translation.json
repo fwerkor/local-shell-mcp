@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimalus dydis 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Pasirinktinis įrankis",
   "com_agents_mcp_trust_subtext": "Pasirinktinės jungtys nėra patikrintos LSM",
-  "com_agents_memory_info": "Kai įjungta, agentas gali išsaugoti, atnaujinti ir ištrinti prisiminimus apie vartotoją pokalbio metu naudodamas įrankius set_memory ir delete_memory.",
+  "com_agents_memory_info": "Kai įjungta, agentas gali išsaugoti, atnaujinti ir ištrinti prisiminimus apie vartotoją pokalbio metu naudodamas įrankius set_memory.",
   "com_agents_memory_scope": "Šio agento prisiminimus laikykite atskirai",
   "com_agents_memory_scope_info": "Kai įjungta, šis agentas skaito ir rašo savo prisiminimus, atskirtus nuo bendrų prisiminimų ir kitų agentų. Esami bendri prisiminimai šiam agentui nerodomi.",
   "com_agents_missing_name": "Prieš kuriant agentą, įveskite pavadinimą.",

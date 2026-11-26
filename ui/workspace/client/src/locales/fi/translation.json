@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimikoko 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Mukautettu työkalu",
   "com_agents_mcp_trust_subtext": "LSM ei varmenna mukautettuja liittymiä.",
-  "com_agents_memory_info": "Kun tämä on käytössä, agentti voi tallentaa, päivittää ja poistaa käyttäjää koskevia muistoja keskustelun aikana set_memory- ja delete_memory-työkalujen avulla.",
+  "com_agents_memory_info": "Kun tämä on käytössä, agentti voi tallentaa, päivittää ja poistaa käyttäjää koskevia muistoja keskustelun aikana set_memory-työkalujen avulla.",
   "com_agents_memory_scope": "Pidä tämän agentin muistot erillään",
   "com_agents_memory_scope_info": "Kun tämä on käytössä, tämä agentti lukee ja kirjoittaa omia muistojaan, jotka on eristetty yhteisistä muistoistasi ja muista agenteista. Olemassa olevia jaettuja muistoja ei näytetä tälle agentille.",
   "com_agents_missing_name": "Kirjoita nimi ennen agentin luomista.",

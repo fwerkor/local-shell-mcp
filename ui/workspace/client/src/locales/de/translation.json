@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Mindestgröße 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Eigenes Tool",
   "com_agents_mcp_trust_subtext": "Benutzerdefinierte Konnektoren werden nicht von LSM verifiziert.",
-  "com_agents_memory_info": "Wenn aktiviert, kann der Agent während der Unterhaltung Erinnerungen über dich speichern, aktualisieren und löschen – mithilfe der Tools set_memory und delete_memory.",
+  "com_agents_memory_info": "Wenn aktiviert, kann der Agent während der Unterhaltung Erinnerungen über dich speichern, aktualisieren und löschen – mithilfe der Tools set_memory.",
   "com_agents_memory_scope": "Erinnerungen für diesen Agenten getrennt speichern",
   "com_agents_memory_scope_info": "Wenn diese Option aktiviert ist, verwendet und speichert dieser Agent eigene Erinnerungen. Sie sind von deinen gemeinsamen Erinnerungen und den Erinnerungen anderer Agenten getrennt. Bereits vorhandene gemeinsame Erinnerungen werden diesem Agenten nicht angezeigt.",
   "com_agents_missing_name": "Bitte gib einen Namen ein, bevor du einen Agenten erstellst.",
