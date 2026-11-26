@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RecoilRoot } from 'recoil';
 import { dataService, QueryKeys, StepEvents, Tools } from 'librechat-data-provider';
 import type { ReactNode } from 'react';
-import type { EventSubmission, MemoriesResponse } from 'librechat-data-provider';
+import type { EventSubmission, MemoriesResponse, TAttachment } from 'librechat-data-provider';
 import useAttachmentHandler from '~/hooks/SSE/useAttachmentHandler';
 import useStepHandler from '~/hooks/SSE/useStepHandler';
 import { useMemoriesQuery } from './queries';
@@ -34,7 +34,7 @@ const saved: MemoriesResponse = {
   usagePercentage: 3,
 };
 
-const submission = { messages: [], userMessage: { messageId: 'user' } } as EventSubmission;
+const submission = { messages: [], userMessage: { messageId: 'user' } } as unknown as EventSubmission;
 
 describe('memory list freshness', () => {
   const getMemories = jest.mocked(dataService.getMemories);
@@ -84,7 +84,7 @@ describe('memory list freshness', () => {
           messageId: 'response',
           conversationId: 'conversation',
           memory: { type: 'update', key: 'style', value: 'Stale replayed value' },
-        },
+        } as TAttachment,
         submission,
       });
 
