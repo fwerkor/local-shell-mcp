@@ -231,7 +231,7 @@
   "com_agents_run_code_info": "Gerir fulltrúanum kleift að skrifa og keyra kóða í öruggu umhverfi fyrir útreikninga, gagnagreiningu og skráavinnslu.",
   "com_agents_search_aria": "Leita að fulltrúum",
   "com_agents_search_empty_heading": "Engar leitarniðurstöður",
-  "com_agents_search_info": "Ef virkjað, getur fulltrúinn leitað að nýjustu upplýsingum á vefnum. Krefst gilds API-lykils.",
+  "com_agents_search_info": "Leyfir umboðsmanninum að leita að nýjustu upplýsingum á vefnum og vísa í heimildir.",
   "com_agents_search_instructions": "Sláðu inn til að leita að fulltrúum eftir nafni eða lýsingu",
   "com_agents_search_name": "Leita að fulltrúum eftir heiti",
   "com_agents_search_no_results": "Engir fulltrúar fundust fyrir „{{query}}“",

@@ -231,7 +231,7 @@
   "com_agents_run_code_info": "Ermöglicht dem Agenten, Code in einer sicheren Sandbox zu schreiben und auszuführen, etwa für Berechnungen, Datenanalysen und die Verarbeitung von Dateien.",
   "com_agents_search_aria": "Nach Agenten suchen",
   "com_agents_search_empty_heading": "Keine Suchergebnisse",
-  "com_agents_search_info": "Ermöglicht dem Agenten, im Internet nach aktuellen Informationen zu suchen und seine Quellen anzugeben. Erfordert einen konfigurierten Suchanbieter.",
+  "com_agents_search_info": "Ermöglicht dem Agenten, im Internet nach aktuellen Informationen zu suchen und seine Quellen anzugeben.",
   "com_agents_search_instructions": "Gib einen Namen oder eine Beschreibung ein, um nach Agenten zu suchen.",
   "com_agents_search_name": "Agenten nach Namen suchen",
   "com_agents_search_no_results": "Keine Agenten für \"{{query}}\" gefunden",

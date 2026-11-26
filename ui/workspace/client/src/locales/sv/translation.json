@@ -231,7 +231,7 @@
   "com_agents_run_code_info": "Låter agenten skriva och köra kod i en säker sandlåda för att hantera beräkningar, dataanalys och filbehandling.",
   "com_agents_search_aria": "Sök efter agenter",
   "com_agents_search_empty_heading": "Inga sökresultat",
-  "com_agents_search_info": "När detta är aktiverat kan din agent söka på webben efter aktuell information. En giltig API-nyckel krävs. ",
+  "com_agents_search_info": "Låter agenten söka på webben efter aktuell information och ange källorna.",
   "com_agents_search_instructions": "Skriv för att söka efter agenter med namn eller beskrivning",
   "com_agents_search_name": "Sök på agenter efter namn",
   "com_agents_search_no_results": "Inga agenter hittades för \"{{query}}\"",

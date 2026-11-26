@@ -231,7 +231,7 @@
   "com_agents_run_code_info": "Cho phép tác nhân viết và chạy mã trong hộp cát an toàn để xử lý các phép tính, phân tích dữ liệu và xử lý tệp.",
   "com_agents_search_aria": "Tìm kiếm đại lý",
   "com_agents_search_empty_heading": "Không có kết quả tìm kiếm",
-  "com_agents_search_info": "Khi được bật, cho phép agent của bạn tìm kiếm thông tin mới nhất trên web. Yêu cầu khóa API hợp lệ.",
+  "com_agents_search_info": "Cho phép tác nhân tìm kiếm thông tin mới nhất trên web và trích dẫn nguồn.",
   "com_agents_search_instructions": "Nhập để tìm kiếm đại lý theo tên hoặc mô tả",
   "com_agents_search_name": "Tìm kiếm đại lý theo tên",
   "com_agents_search_no_results": "Không tìm thấy đại lý nào cho \"{{query}}\"",

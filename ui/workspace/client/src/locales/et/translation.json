@@ -231,7 +231,7 @@
   "com_agents_run_code_info": "Võimaldab agendil kirjutada ja käivitada koodi turvalises liivakastis, et tegeleda arvutuste, andmete analüüsi ja failitöötlusega.",
   "com_agents_search_aria": "Otsige agente",
   "com_agents_search_empty_heading": "Otsingutulemused puuduvad",
-  "com_agents_search_info": "Kui see on lubatud, saab sinu agent otsida veebist ajakohast teavet. Vajalik on kehtiv API võti.",
+  "com_agents_search_info": "Võimaldab agendil otsida veebist ajakohast teavet ja viidata allikatele.",
   "com_agents_search_instructions": "Tippige agentide otsimiseks nime või kirjelduse järgi",
   "com_agents_search_name": "Otsi agente nime järgi",
   "com_agents_search_no_results": "\"{{query}}\" jaoks agente ei leitud",
