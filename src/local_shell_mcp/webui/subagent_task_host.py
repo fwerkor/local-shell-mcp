@@ -604,7 +604,11 @@ class SQLiteSubagentTaskHost:
                 elif (agent or {}).get("edges"):
                     new_messages = result_turns
                 else:
-                    new_messages = []
+                    # Full compaction can discard every input turn. The
+                    # runner's checkpointed partial_text belongs to this
+                    # invocation only, including across crash recovery.
+                    new_messages = ([{"role": "assistant", "content": runner.partial_text}]
+                                    if runner.partial_text else [])
             final_text = _limited(filter_subagent_result(new_messages), _MAX_RESULT)
             # For graph teams the tool result is deliberately only the designated
             # sink. Their whole thread transcript remains inside graph checkpoint.

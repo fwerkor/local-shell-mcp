@@ -73,7 +73,14 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
             return []
         # The account and project boundary must hold even for untrusted queries.
         params = [owner, conversation_id, current['project_id']]
-        where = 'c.owner=? AND c.id<>? AND c.project_id IS ?'
+        # Internal child transcripts inherit the parent's privacy boundary but
+        # are not independently recallable. The reservation also fences the
+        # interval between child creation and writing its metadata.
+        where = """c.owner=? AND c.id<>? AND c.project_id IS ?
+            AND json_extract(c.metadata,'$.subagentTask') IS NULL
+            AND json_extract(c.metadata,'$.parentConversationId') IS NULL
+            AND NOT EXISTS (SELECT 1 FROM subagent_tasks t
+                            WHERE t.owner=c.owner AND t.child_conversation_id=c.id)"""
         # A conversation's selected agent is mutable and can be null even
         # during an Agent generation. Runs record the actual generating agent.
         # Do not recall a mixed-agent conversation into a private partition,

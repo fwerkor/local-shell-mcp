@@ -159,3 +159,19 @@ def test_run_agent_history_scope_is_not_conversation_selection(state, fts):
         connection.execute("UPDATE agents SET config=json_set(config,'$.memory_scope','personal') WHERE id=?",
                            (private['id'],))
     assert search() == []
+
+def test_detached_child_conversations_are_not_history_sources(state):
+    db, workspace, memory = state
+    current = chat(workspace)
+    project = workspace.create_project('alice', 'private project')['id']
+    parent = chat(workspace, projectId=project)
+    child = chat(workspace)
+    message(workspace, child, 'Confidential detached project transcript')
+    with db.connect() as conn:
+        conn.execute('UPDATE conversations SET metadata=? WHERE id=?',
+                     (json.dumps({'subagentTask': 'child-task', 'parentConversationId': parent}), child))
+    result = retrieve(memory, 'alice', '', query='Confidential detached',
+                      include_conversations=True, conversation_id=current)
+    assert result['results'] == []
+    assert 'Confidential' not in recall_context(memory, 'alice', '', query='Confidential detached',
+                                               conversation_id=current, filters=None)
