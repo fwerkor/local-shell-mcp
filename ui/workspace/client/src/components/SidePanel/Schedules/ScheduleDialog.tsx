@@ -26,12 +26,14 @@ import {
   isValidCronExpression,
   cadenceIntervalMinutes,
   SCHEDULE_CRON_MAX_LENGTH,
+  SCHEDULE_CONTINUOUS_MAX_DELAY,
 } from 'librechat-data-provider';
 import type {
   TSchedule,
   TCreateSchedule,
   TScheduleCadence,
   ScheduleFrequency,
+  ScheduleTarget,
 } from 'librechat-data-provider';
 import type { TranslationKeys } from '~/hooks';
 import {
@@ -45,6 +47,7 @@ import {
 } from './cadence';
 import {
   useProjectQuery,
+  useConversationsInfiniteQuery,
   useListAgentsQuery,
   useSchedulesQuery,
   useCreateScheduleMutation,
@@ -69,6 +72,8 @@ type ScheduleFormValues = {
   name: string;
   prompt: string;
   agent_id: string;
+  target: ScheduleTarget;
+  targetConversationId: string;
   /** `''` means unscoped; the picker has no null option of its own. */
   chatProjectId: string;
   frequency: ScheduleFrequency;
@@ -78,6 +83,7 @@ type ScheduleFormValues = {
   /** Only read when `frequency` is `cron`; held across a switch away and back so a
    *  user who tries a preset does not lose the expression they typed. */
   expression: string;
+  delayMinutes: number;
   timezone: string;
 };
 
@@ -87,6 +93,7 @@ const FREQUENCY_LABELS: Record<ScheduleFrequency, TranslationKeys> = {
   weekdays: 'com_ui_schedule_weekdays',
   weekly: 'com_ui_schedule_weekly',
   cron: 'com_ui_schedule_cron',
+  continuous: 'com_ui_schedule_continuous',
 };
 
 /** Every weekday at 09:00: a recognisable starting point to edit rather than an
@@ -111,12 +118,15 @@ const getDefaultValues = (schedule?: TSchedule): ScheduleFormValues => {
       name: '',
       prompt: '',
       agent_id: '',
+      target: 'new',
+      targetConversationId: '',
       chatProjectId: '',
       frequency: 'daily',
       hour: 9,
       minute: 0,
       daysOfWeek: DEFAULT_WEEKLY_DAYS,
       expression: DEFAULT_CRON,
+      delayMinutes: 0,
       timezone: localTimezone,
     };
   }
@@ -124,12 +134,25 @@ const getDefaultValues = (schedule?: TSchedule): ScheduleFormValues => {
     name: schedule.name,
     prompt: schedule.prompt,
     agent_id: schedule.agent_id,
+    target: schedule.target ?? 'new',
+    targetConversationId: schedule.targetConversationId ?? '',
     chatProjectId: schedule.chatProjectId ?? '',
     // A stored row always has one; the fallback only covers a legacy row written
     // before the field existed, which would otherwise render an empty picker.
     timezone: schedule.timezone || localTimezone,
   };
   const cadence = schedule.cadence;
+  if (cadence.frequency === 'continuous') {
+    return {
+      ...identity,
+      frequency: 'continuous',
+      hour: 9,
+      minute: 0,
+      daysOfWeek: DEFAULT_WEEKLY_DAYS,
+      expression: DEFAULT_CRON,
+      delayMinutes: cadence.delayMinutes,
+    };
+  }
   if (isCronCadence(cadence)) {
     // A cron row carries no hour or minute of its own, so the structured pickers keep
     // their defaults: switching away from Custom then lands on a sensible time rather
@@ -141,6 +164,7 @@ const getDefaultValues = (schedule?: TSchedule): ScheduleFormValues => {
       minute: 0,
       daysOfWeek: DEFAULT_WEEKLY_DAYS,
       expression: cadence.expression,
+      delayMinutes: 0,
     };
   }
   return {
@@ -152,15 +176,19 @@ const getDefaultValues = (schedule?: TSchedule): ScheduleFormValues => {
       ? [...cadence.daysOfWeek].sort((a, b) => a - b)
       : DEFAULT_WEEKLY_DAYS,
     expression: DEFAULT_CRON,
+    delayMinutes: 0,
   };
 };
 
 type CadenceFormValues = Pick<
   ScheduleFormValues,
-  'frequency' | 'hour' | 'minute' | 'daysOfWeek' | 'expression'
+  'frequency' | 'hour' | 'minute' | 'daysOfWeek' | 'expression' | 'delayMinutes'
 >;
 
 const buildCadence = (values: CadenceFormValues): TScheduleCadence => {
+  if (values.frequency === 'continuous') {
+    return { frequency: 'continuous', delayMinutes: values.delayMinutes };
+  }
   if (values.frequency === 'cron') {
     return { frequency: 'cron', expression: values.expression.trim() };
   }
@@ -217,8 +245,34 @@ export default function ScheduleDialog({
   const minute = watch('minute');
   const daysOfWeek = watch('daysOfWeek');
   const expression = watch('expression');
+  const delayMinutes = watch('delayMinutes');
   const timezone = watch('timezone');
   const selectedAgentId = watch('agent_id');
+  const target = watch('target');
+  const targetConversationId = watch('targetConversationId');
+  const canChooseProject =
+    target !== 'existing' && !(target === 'reuse' && schedule?.reuseConversationId);
+  const [conversationSearch, setConversationSearch] = useState('');
+  const conversations = useConversationsInfiniteQuery(
+    { search: conversationSearch.trim() || undefined },
+    { enabled: open && target === 'existing' },
+  );
+  const conversationItems = useMemo(
+    () =>
+      (conversations.data?.pages ?? []).flatMap((page) =>
+        page.conversations.flatMap((chat) =>
+          chat.conversationId
+            ? [{ value: chat.conversationId, label: chat.title || chat.conversationId }]
+            : [],
+        ),
+      ),
+    [conversations.data],
+  );
+  const targetOptions: { value: ScheduleTarget; label: string }[] = [
+    { value: 'new', label: localize('com_ui_schedule_target_new') },
+    { value: 'reuse', label: localize('com_ui_schedule_target_reuse') },
+    { value: 'existing', label: localize('com_ui_schedule_target_existing') },
+  ];
   /** Not named `hour12`: that is already the form's own 12-hour clock VALUE (1-12).
    *  This is the preference deciding whether a time is written with a meridiem. */
   const prefersMeridiem = useClockFormat();
@@ -374,7 +428,8 @@ export default function ScheduleDialog({
     dirtyFields.hour === true ||
     dirtyFields.minute === true ||
     dirtyFields.daysOfWeek != null ||
-    dirtyFields.expression === true;
+    dirtyFields.expression === true ||
+    dirtyFields.delayMinutes === true;
   /** Whether this submit changes the schedule's TIMING. The zone alone re-times
    *  every occurrence (the server recomputes the next run and re-measures the
    *  interval floor against the effective cadence/zone pair), so the floor below
@@ -394,11 +449,18 @@ export default function ScheduleDialog({
         ...(dirtyFields.name ? { name: values.name.trim() } : {}),
         ...(dirtyFields.prompt ? { prompt: values.prompt.trim() } : {}),
         ...(dirtyFields.agent_id ? { agent_id: values.agent_id } : {}),
+        ...(dirtyFields.target || dirtyFields.targetConversationId
+          ? {
+              target: values.target,
+              targetConversationId:
+                values.target === 'existing' ? values.targetConversationId : null,
+            }
+          : {}),
         // Explicit `null` is the only way to CLEAR the scope; omitting the field
         // leaves the stored project alone. Never sent while pinned — the server owns
         // the destination there, and echoing it back would only be a chance to
         // disagree with a pin that changed since the dialog opened.
-        ...(dirtyFields.chatProjectId && pinnedProjectId == null
+        ...(dirtyFields.chatProjectId && pinnedProjectId == null && canChooseProject
           ? { chatProjectId: values.chatProjectId || null }
           : {}),
         ...(cadenceTouched ? { cadence } : {}),
@@ -429,12 +491,15 @@ export default function ScheduleDialog({
       name: values.name.trim(),
       prompt: values.prompt.trim(),
       agent_id: values.agent_id,
-      ...(pinnedProjectId == null && values.chatProjectId
+      ...(pinnedProjectId == null && values.target !== 'existing' && values.chatProjectId
         ? { chatProjectId: values.chatProjectId }
         : {}),
       cadence: buildCadence(values),
       timezone: values.timezone,
-      target: 'new' as const,
+      target: values.target,
+      ...(values.target === 'existing'
+        ? { targetConversationId: values.targetConversationId }
+        : {}),
       enabled: true,
     };
     // STABLE across retries of the SAME intent, which is the whole point: the server
@@ -463,9 +528,9 @@ export default function ScheduleDialog({
   /** Read by the summary, the preview and the interval floor, each of which walks
    *  croner. Memoized so a name or prompt keystroke does not re-derive all three. */
   const previewCadence = useMemo(
-    () => buildCadence({ frequency, hour, minute, daysOfWeek, expression }),
+    () => buildCadence({ frequency, hour, minute, daysOfWeek, expression, delayMinutes }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `daysKey` IS `daysOfWeek`
-    [frequency, hour, minute, daysKey, expression],
+    [frequency, hour, minute, daysKey, expression, delayMinutes],
   );
 
   /** Weekly with nothing selected is expressible in the form but not on the wire (the
@@ -503,6 +568,7 @@ export default function ScheduleDialog({
    *  branch walks 32 occurrences to find its tightest gap. */
   const belowFloor = useMemo(
     () =>
+      previewCadence.frequency !== 'continuous' &&
       floorApplies &&
       cronIsValid &&
       daysAreValid &&
@@ -514,7 +580,15 @@ export default function ScheduleDialog({
     [floorApplies, cronIsValid, daysAreValid, minIntervalMinutes, previewCadence, timezone],
   );
 
+  const delayIsValid =
+    frequency !== 'continuous' ||
+    (Number.isInteger(delayMinutes) &&
+      delayMinutes >= 0 &&
+      delayMinutes <= SCHEDULE_CONTINUOUS_MAX_DELAY);
   const resolveCadenceError = (): string | null => {
+    if (!delayIsValid) {
+      return localize('com_ui_schedule_delay_invalid', { max: SCHEDULE_CONTINUOUS_MAX_DELAY });
+    }
     if (!daysAreValid) {
       return localize('com_ui_schedule_days_required');
     }
@@ -524,15 +598,29 @@ export default function ScheduleDialog({
     return null;
   };
   const cadenceError = resolveCadenceError();
-  const canSubmit = cronIsValid && daysAreValid && !belowFloor && !isLoading;
+  const canSubmit =
+    cronIsValid &&
+    daysAreValid &&
+    delayIsValid &&
+    !belowFloor &&
+    !isLoading &&
+    (target !== 'existing' || !!targetConversationId);
 
   /** The offset disambiguates two similar names, which matters now that the zone is
    *  something the user picks rather than the browser's own. Memoized because it
    *  builds an Intl formatter and the dialog re-renders per keystroke. */
   const timezoneOffset = useMemo(() => formatTimezoneOffset(timezone, locale), [timezone, locale]);
-  const summary = `${describeCadence(previewCadence, localize, locale, prefersMeridiem, weekStartsOn)} · ${
-    timezoneOffset ? `${timezone} (${timezoneOffset})` : timezone
-  }`;
+  const cadenceSummary = describeCadence(
+    previewCadence,
+    localize,
+    locale,
+    prefersMeridiem,
+    weekStartsOn,
+  );
+  const summary =
+    frequency === 'continuous'
+      ? cadenceSummary
+      : `${cadenceSummary} · ${timezoneOffset ? `${timezone} (${timezoneOffset})` : timezone}`;
 
   /** Both labels for every pill, in week order, built once per locale and week start:
    *  inline they cost fourteen `Intl.DateTimeFormat` constructions on every keystroke
@@ -655,95 +743,157 @@ export default function ScheduleDialog({
                   />
                   <FieldMessage id="schedule-agent-message" message={errors.agent_id?.message} />
                 </div>
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="schedule-project"
-                    className="text-sm font-medium text-text-primary"
-                  >
-                    {localize('com_ui_project')}
-                  </Label>
-                  {pinnedProjectId != null ? (
-                    /* Pinned by the operator: there is no choice to offer, so show the
+                {canChooseProject && (
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="schedule-project"
+                      className="text-sm font-medium text-text-primary"
+                    >
+                      {localize('com_ui_project')}
+                    </Label>
+                    {pinnedProjectId != null ? (
+                      /* Pinned by the operator: there is no choice to offer, so show the
                      destination rather than a disabled control the user would keep
                      trying to open. */
-                    <div
-                      id="schedule-project"
-                      data-testid="schedule-project-pinned"
-                      className="flex h-10 w-full items-center gap-2 rounded-xl border border-border-light bg-surface-secondary px-3 text-sm text-text-secondary"
-                    >
-                      <Folder className="h-4 w-4 shrink-0" aria-hidden="true" />
-                      <span className="truncate">{projectDisplayName(pinnedProjectId)}</span>
-                    </div>
-                  ) : (
-                    <Controller
-                      name="chatProjectId"
-                      control={control}
-                      // Only for a schedule this submit leaves ENABLED. The server waives
-                      // the requirement for a disabled row precisely so one auto-disabled
-                      // for `project_required` can still be renamed or tidied up; requiring
-                      // it here made that path unreachable, and an owner with no projects
-                      // at all could not edit the stopped schedule.
-                      rules={
-                        requireProject && (schedule == null || schedule.enabled)
-                          ? { required: localize('com_ui_field_required') }
-                          : undefined
-                      }
-                      render={({ field }) => (
-                        <ControlCombobox
-                          selectedValue={field.value}
-                          // Never `''` for a real id: that renders the placeholder,
-                          // which reads as "No project" on a schedule that has one.
-                          displayValue={field.value ? projectDisplayName(field.value) : ''}
-                          selectPlaceholder={localize(
-                            requireProject
-                              ? 'com_ui_select_project'
-                              : 'com_ui_schedule_project_none',
-                          )}
-                          searchPlaceholder={localize('com_ui_search_projects')}
-                          setValue={field.onChange}
-                          onBlur={field.onBlur}
-                          items={projectItems}
-                          SelectIcon={
-                            <Folder className="h-4 w-4 text-text-secondary" aria-hidden="true" />
-                          }
-                          ariaLabel={localize('com_ui_project')}
-                          ariaInvalid={errors.chatProjectId != null}
-                          ariaDescribedBy="schedule-project-message"
-                          selectId="schedule-project"
-                          isCollapsed={false}
-                          showCarat={true}
-                          placement="bottom-start"
-                          /* Same focus-trap constraint as the agent picker above. */
-                          portal={false}
-                          matchTriggerWidth={true}
-                          variant="field"
-                        />
-                      )}
+                      <div
+                        id="schedule-project"
+                        data-testid="schedule-project-pinned"
+                        className="flex h-10 w-full items-center gap-2 rounded-xl border border-border-light bg-surface-secondary px-3 text-sm text-text-secondary"
+                      >
+                        <Folder className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        <span className="truncate">{projectDisplayName(pinnedProjectId)}</span>
+                      </div>
+                    ) : (
+                      <Controller
+                        name="chatProjectId"
+                        control={control}
+                        // Only for a schedule this submit leaves ENABLED. The server waives
+                        // the requirement for a disabled row precisely so one auto-disabled
+                        // for `project_required` can still be renamed or tidied up; requiring
+                        // it here made that path unreachable, and an owner with no projects
+                        // at all could not edit the stopped schedule.
+                        rules={
+                          requireProject && (schedule == null || schedule.enabled)
+                            ? { required: localize('com_ui_field_required') }
+                            : undefined
+                        }
+                        render={({ field }) => (
+                          <ControlCombobox
+                            selectedValue={field.value}
+                            // Never `''` for a real id: that renders the placeholder,
+                            // which reads as "No project" on a schedule that has one.
+                            displayValue={field.value ? projectDisplayName(field.value) : ''}
+                            selectPlaceholder={localize(
+                              requireProject
+                                ? 'com_ui_select_project'
+                                : 'com_ui_schedule_project_none',
+                            )}
+                            searchPlaceholder={localize('com_ui_search_projects')}
+                            setValue={field.onChange}
+                            onBlur={field.onBlur}
+                            items={projectItems}
+                            SelectIcon={
+                              <Folder className="h-4 w-4 text-text-secondary" aria-hidden="true" />
+                            }
+                            ariaLabel={localize('com_ui_project')}
+                            ariaInvalid={errors.chatProjectId != null}
+                            ariaDescribedBy="schedule-project-message"
+                            selectId="schedule-project"
+                            isCollapsed={false}
+                            showCarat={true}
+                            placement="bottom-start"
+                            /* Same focus-trap constraint as the agent picker above. */
+                            portal={false}
+                            matchTriggerWidth={true}
+                            variant="field"
+                          />
+                        )}
+                      />
+                    )}
+                    <FieldMessage
+                      id="schedule-project-message"
+                      message={errors.chatProjectId?.message}
                     />
-                  )}
-                  <FieldMessage
-                    id="schedule-project-message"
-                    message={errors.chatProjectId?.message}
+                    {pinnedProjectId == null && hasMoreProjects && (
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="h-auto justify-start px-0 text-xs"
+                        onClick={() => fetchMoreProjects()}
+                        disabled={isFetchingMoreProjects}
+                      >
+                        {localize(isFetchingMoreProjects ? 'com_ui_loading' : 'com_ui_load_more')}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <fieldset className="space-y-2">
+              <legend>
+                <Label id="schedule-target-label">{localize('com_ui_schedule_target')}</Label>
+              </legend>
+              <Controller
+                name="target"
+                control={control}
+                render={({ field }) => (
+                  <Radio
+                    options={targetOptions}
+                    value={field.value}
+                    onChange={field.onChange}
+                    fullWidth
+                    wrap
+                    aria-labelledby="schedule-target-label"
                   />
-                  {pinnedProjectId == null && hasMoreProjects && (
+                )}
+              />
+              {target === 'existing' && (
+                <>
+                  <Input
+                    value={conversationSearch}
+                    onChange={(event) => setConversationSearch(event.target.value)}
+                    placeholder={localize('com_ui_search')}
+                    aria-label={localize('com_ui_search')}
+                  />
+                  <Controller
+                    name="targetConversationId"
+                    control={control}
+                    render={({ field }) => (
+                      <ControlCombobox
+                        selectedValue={field.value}
+                        displayValue={
+                          conversationItems.find((item) => item.value === field.value)?.label ??
+                          field.value
+                        }
+                        selectPlaceholder={localize('com_ui_select')}
+                        searchPlaceholder={localize('com_ui_search')}
+                        setValue={field.onChange}
+                        items={conversationItems}
+                        ariaLabel={localize('com_ui_chat')}
+                        selectId="schedule-target-conversation"
+                        isCollapsed={false}
+                        showCarat={true}
+                        placement="bottom-start"
+                        portal={false}
+                        matchTriggerWidth={true}
+                        variant="field"
+                      />
+                    )}
+                  />
+                  {conversations.hasNextPage && (
                     <Button
                       type="button"
                       variant="link"
-                      className="h-auto justify-start px-0 text-xs"
-                      onClick={() => fetchMoreProjects()}
-                      disabled={isFetchingMoreProjects}
+                      disabled={conversations.isFetchingNextPage}
+                      onClick={() => void conversations.fetchNextPage()}
                     >
-                      {localize(isFetchingMoreProjects ? 'com_ui_loading' : 'com_ui_load_more')}
+                      {localize('com_ui_load_more')}
                     </Button>
                   )}
-                </div>
-              </div>
-              {/* Full width, not inside the agent cell: at a third of the dialog this
-                sentence wraps an extra line and makes the identity row needlessly tall. */}
-              <p className="text-xs text-text-secondary">
-                {localize('com_ui_schedule_target_new_chat')}
-              </p>
-            </div>
+                </>
+              )}
+            </fieldset>
 
             <Controller
               name="prompt"
@@ -800,7 +950,23 @@ export default function ScheduleDialog({
               />
             </fieldset>
 
-            {frequency === 'cron' ? (
+            {frequency === 'continuous' ? (
+              <div className="space-y-2">
+                <Label htmlFor="schedule-delay" className="text-sm font-medium text-text-primary">
+                  {localize('com_ui_schedule_delay_minutes')}
+                </Label>
+                <Input
+                  id="schedule-delay"
+                  type="number"
+                  min={0}
+                  max={SCHEDULE_CONTINUOUS_MAX_DELAY}
+                  step={1}
+                  aria-invalid={!delayIsValid}
+                  aria-describedby="schedule-cadence-message"
+                  {...register('delayMinutes', { valueAsNumber: true })}
+                />
+              </div>
+            ) : frequency === 'cron' ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="schedule-cron" className="text-sm font-medium text-text-primary">
@@ -957,7 +1123,7 @@ export default function ScheduleDialog({
               {/* With no day selected, `buildCadence` substitutes Monday so the maths
                   downstream stays defined — but describing that substitution would
                   contradict the "pick at least one day" message right below it. */}
-              {daysAreValid && (
+              {daysAreValid && delayIsValid && (
                 <p
                   className="break-words rounded-lg bg-surface-secondary px-3 py-2 text-sm text-text-secondary"
                   data-testid="schedule-summary"

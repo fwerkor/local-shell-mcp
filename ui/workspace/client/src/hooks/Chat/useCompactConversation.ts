@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { atom, useAtom } from 'jotai';
-import { Constants, isCompactedLeaf, isAssistantsEndpoint } from 'librechat-data-provider';
+import { useQuery } from '@tanstack/react-query';
+import { useToastContext } from '@librechat/client';
+import {
+  Constants,
+  dataService,
+  isCompactedLeaf,
+  isAssistantsEndpoint,
+} from 'librechat-data-provider';
+import useLocalize from '~/hooks/useLocalize';
 import { useLatestMessage } from '~/hooks/Messages/useLatestMessage';
 import { useChatContext } from '~/Providers';
 
@@ -12,7 +20,7 @@ export const compactingConversationAtom = atom<string | null>(null);
  * local history would compact nothing. Callers hide the action there.
  */
 export const supportsCompaction = (endpoint?: string | null): boolean =>
-  endpoint != null && endpoint !== '' && !isAssistantsEndpoint(endpoint);
+  !isAssistantsEndpoint(endpoint);
 
 /**
  * Manual context compaction. Submits a summarize-only turn hung off the
@@ -23,6 +31,13 @@ export const supportsCompaction = (endpoint?: string | null): boolean =>
 export default function useCompactConversation() {
   const { ask, index, conversation, isSubmitting } = useChatContext();
   const latestMessage = useLatestMessage(index);
+  const localize = useLocalize();
+  const { showToast } = useToastContext();
+  const [requesting, setRequesting] = useState(false);
+  const [live, setLive] = useState<{
+    conversationId: string;
+    receipt: Awaited<ReturnType<typeof dataService.requestLiveCompaction>>;
+  } | null>(null);
   const [compactingConversation, setCompactingConversation] = useAtom(compactingConversationAtom);
 
   const conversationId = conversation?.conversationId;
@@ -30,13 +45,37 @@ export default function useCompactConversation() {
     conversationId != null &&
     conversationId !== Constants.NEW_CONVO &&
     conversationId !== Constants.PENDING_CONVO;
-  const isCompacting = isSubmitting && compactingConversation === conversationId;
+  const livePending = live != null && live.conversationId === conversationId;
+  const liveStatus = useQuery(
+    ['lsm-live-compaction', live?.receipt.runId, live?.receipt.requestId],
+    () => dataService.getLiveCompactionStatus(live!.receipt),
+    { enabled: livePending, refetchInterval: 2000, retry: 2, staleTime: 0 },
+  );
+  useEffect(() => {
+    if (
+      !livePending ||
+      (!liveStatus.isError && (liveStatus.data == null || liveStatus.data.status === 'pending'))
+    ) {
+      return;
+    }
+    const success = !liveStatus.isError && liveStatus.data?.status === 'complete';
+    showToast({
+      message: success
+        ? localize('com_ui_context_compacted_by_you')
+        : localize('com_ui_failed_subject', { 0: localize('com_ui_context_compact') }),
+      status: success ? 'success' : 'error',
+    });
+    setLive(null);
+  }, [livePending, liveStatus.data, liveStatus.isError, localize, showToast]);
+  const isCompacting =
+    requesting || livePending || (isSubmitting && compactingConversation === conversationId);
   const canCompact =
     hasConversation &&
-    !isSubmitting &&
-    latestMessage != null &&
-    latestMessage.parentMessageId != null &&
-    !isCompactedLeaf(latestMessage);
+    !isCompacting &&
+    (isSubmitting ||
+      (latestMessage != null &&
+        latestMessage.parentMessageId != null &&
+        !isCompactedLeaf(latestMessage)));
 
   /** The marker lives from the submission until the turn it started settles:
    *  cleared on the submitting → idle edge, or on a mount that finds the
@@ -55,7 +94,25 @@ export default function useCompactConversation() {
   }, [isSubmitting, compactingConversation, setCompactingConversation]);
 
   const compact = useCallback(() => {
-    if (!canCompact || latestMessage == null || conversationId == null) {
+    if (!canCompact || conversationId == null) {
+      return;
+    }
+    if (isSubmitting) {
+      setRequesting(true);
+      void dataService
+        .requestLiveCompaction(conversationId)
+        .then(
+          (receipt) => setLive({ conversationId, receipt }),
+          () =>
+            showToast({
+              message: localize('com_ui_failed_subject', { 0: localize('com_ui_context_compact') }),
+              status: 'error',
+            }),
+        )
+        .finally(() => setRequesting(false));
+      return;
+    }
+    if (latestMessage == null) {
       return;
     }
     setCompactingConversation(conversationId);
@@ -73,7 +130,16 @@ export default function useCompactConversation() {
     if (accepted === false) {
       setCompactingConversation(null);
     }
-  }, [ask, canCompact, conversationId, latestMessage, setCompactingConversation]);
+  }, [
+    ask,
+    canCompact,
+    conversationId,
+    isSubmitting,
+    latestMessage,
+    localize,
+    setCompactingConversation,
+    showToast,
+  ]);
 
   return { compact, canCompact, isCompacting };
 }

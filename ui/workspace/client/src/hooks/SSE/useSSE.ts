@@ -1,3 +1,5 @@
+import { useToastContext } from '@librechat/client';
+import useLocalize from '~/hooks/useLocalize';
 import { useEffect, useState } from 'react';
 import { v4 } from 'uuid';
 import { useToastContext } from '@librechat/client';
@@ -155,6 +157,8 @@ export default function useSSE(
         };
 
         createdHandler(data, { ...submission, userMessage } as EventSubmission);
+      } else if (data.event === 'on_attachment_image_fallback') {
+        showToast({ message: localize('com_ui_attachment_image_fallback'), status: 'info' });
       } else if (data.event === 'title') {
         titleHandler(data);
       } else if (data.event === 'on_model_retry') {

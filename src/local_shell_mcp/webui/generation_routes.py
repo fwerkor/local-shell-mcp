@@ -1001,6 +1001,35 @@ async def active_generations(request: Request):
                          "generationProtocolVersion": protocol}, headers=_generator_headers(protocol))
 
 
+async def request_live_compaction(request: Request):
+    from .storage import WorkspaceRepository
+
+    owner = _owner(request)
+    body = await _body(request)
+    conversation_id = body.get('conversationId')
+    if not isinstance(conversation_id, str) or not conversation_id:
+        raise HTTPException(400, detail='Invalid conversation ID')
+    database = _database()
+    config = (WorkspaceRepository(database).setting(owner, 'endpoints', {}) or {}).get('summarization')
+    if isinstance(config, dict) and config.get('enabled') is False:
+        raise HTTPException(403, detail='Compaction is disabled')
+    try:
+        receipt = GenerationStore(database).request_live_compaction(owner, conversation_id)
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    return JSONResponse(receipt, status_code=202)
+
+
+async def live_compaction_status(request: Request):
+    owner = _owner(request)
+    try:
+        status = GenerationStore(_database()).live_compaction_status(
+            owner, request.path_params['run_id'], request.path_params['request_id'])
+    except KeyError as exc:
+        raise HTTPException(404, detail='Generation not found') from exc
+    return JSONResponse({'status': status})
+
+
 async def steer_generation(request: Request):
     """Original React steering POST contract, no provider-bound side effects on replay."""
     from .steering import SteeringStore, SteerRejection
@@ -1324,6 +1353,8 @@ def generation_routes() -> list[Route]:
         Route("/api/agents/chat/status/{conversation_id}", generation_status, methods=["GET"]),
         Route("/api/agents/chat/active", active_generations, methods=["GET"]),
         Route("/api/agents/chat/abort", abort_generation, methods=["POST"]),
+        Route("/api/agents/chat/compact", request_live_compaction, methods=["POST"]),
+        Route("/api/agents/chat/compact/{run_id}/{request_id}", live_compaction_status, methods=["GET"]),
         Route("/api/agents/chat/steer", steer_generation, methods=["POST"]),
         Route("/api/agents/chat/steer/deliver", steer_generation, methods=["POST"]),
         Route("/api/agents/chat/steer/cancel", mutate_steer, methods=["POST"]),

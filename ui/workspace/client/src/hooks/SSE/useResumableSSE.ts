@@ -1,3 +1,4 @@
+import { useToastContext } from '@librechat/client';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { v4 } from 'uuid';
 import { useToastContext } from '@librechat/client';
@@ -2224,6 +2225,11 @@ export default function useResumableSSE(
             return;
           }
 
+          if (data.event === 'on_attachment_image_fallback') {
+            showToast({ message: localize('com_ui_attachment_image_fallback'), status: 'info' });
+            return;
+          }
+
           if (data.event === 'title') {
             titleHandler(data);
             return;
@@ -3923,6 +3929,8 @@ export default function useResumableSSE(
     },
     [
       isAddedRequest,
+      localize,
+      showToast,
       setConversation,
       runIndex,
       token,

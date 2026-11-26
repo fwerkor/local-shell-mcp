@@ -227,3 +227,36 @@ async def test_http_negotiation_persists_first_protocol_and_never_upgrades(datab
             status = await client.get("/api/agents/chat/status/" + cid,
                                       params={"generationProtocolVersion": "2"})
             assert status.json()["generationProtocolVersion"] == expected
+
+
+@pytest.mark.asyncio
+async def test_live_compaction_http_is_owner_scoped_and_obeys_settings(database, monkeypatch):
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
+    store = GenerationStore(database)
+    run, _ = store.begin('alice', {'text': 'Monitor'})
+    monkeypatch.setattr(generation_routes, '_database', lambda: database)
+    monkeypatch.setattr(generation_routes, '_owner', lambda request: request.headers['x-test-owner'])
+    app = Starlette(routes=generation_routes.generation_routes())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url='http://test') as client:
+        body = {'conversationId': run.conversation_id}
+        alice = {'x-test-owner': 'alice'}
+        bob = {'x-test-owner': 'bob'}
+        url = '/api/agents/chat/compact'
+        assert (await client.post(url, json=body, headers=bob)).status_code == 409
+        assert (await client.post(url, json={}, headers=alice)).status_code == 400
+        repo = WorkspaceRepository(database)
+        repo.save_setting('alice', 'endpoints', {'summarization': {'enabled': False}})
+        assert (await client.post(url, json=body, headers=alice)).status_code == 403
+        repo.save_setting('alice', 'endpoints', {})
+        response = await client.post(url, json=body, headers=alice)
+        assert response.status_code == 202
+        receipt = response.json()
+        status_url = f"{url}/{receipt['runId']}/{receipt['requestId']}"
+        assert (await client.get(status_url, headers=alice)).json() == {'status': 'pending'}
+        assert (await client.get(status_url, headers=bob)).status_code == 404
+        store.settle_live_compaction('alice', run.run_id, receipt['requestId'], success=True)
+        assert (await client.get(status_url, headers=alice)).json() == {'status': 'complete'}
+        assert store.finish('alice', run.run_id, status='complete', text='Done')
+        assert (await client.post(url, json=body, headers=alice)).status_code == 409

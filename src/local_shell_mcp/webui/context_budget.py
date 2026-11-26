@@ -14,6 +14,7 @@ from .context_calibration import clamp_calibration_ratio
 from .tokenizer import count_tokens
 
 DEFAULT_RESERVE_RATIO = 0.05
+DEFAULT_COMPACTION_RATIO = 0.85
 DEFAULT_RETAIN_RECENT_TURNS = 2
 
 
@@ -86,6 +87,40 @@ def context_usage_snapshot(messages: list[dict], tools: list[dict],
                      or message.get('tool_calls')]
     tool_message_tokens = min(budget.message_tokens,
                               math.floor(sum(map(message_token_count, tool_messages)) * ratio + 0.5))
+    # Match tool responses to their originating calls without relying on a
+    # provider-specific tool response name field.
+    call_names: dict[str, str] = {}
+    result_counts: dict[str, int] = {}
+    for message in messages:
+        for call in message.get('tool_calls') or []:
+            if not isinstance(call, dict):
+                continue
+            function = call.get('function') or {}
+            if isinstance(call.get('id'), str) and isinstance(function.get('name'), str):
+                call_names[call['id']] = function['name']
+        if message.get('role') == 'tool':
+            name = call_names.get(message.get('tool_call_id')) or message.get('name')
+            if isinstance(name, str) and name:
+                result_counts[name] = result_counts.get(name, 0) + message_token_count(message)
+    result_counts = {name: math.floor(count * ratio + 0.5)
+                     for name, count in result_counts.items()}
+    # Attribute the serialized schema budget by each tool's estimated weight.
+    # Include delimiters in the total rather than double-counting them per tool.
+    schema_weights: dict[str, int] = {}
+    for tool in tools:
+        name = (tool.get('function') or {}).get('name')
+        if isinstance(name, str) and name:
+            weight = count_tokens(json.dumps(tool, ensure_ascii=False, separators=(',', ':')), exact=False)
+            schema_weights[name] = schema_weights.get(name, 0) + weight
+    schema_counts: dict[str, int] = {}
+    if schema_weights and sum(schema_weights.values()) > 0:
+        total_weight = sum(schema_weights.values())
+        cumulative = allocated = 0
+        for name, weight in schema_weights.items():
+            cumulative += weight
+            target = budget.tool_schema_tokens * cumulative // total_weight
+            schema_counts[name] = target - allocated
+            allocated = target
     return {
         **({'runId': run_id} if run_id else {}),
         **({'agentId': agent_id} if agent_id else {}),
@@ -101,6 +136,8 @@ def context_usage_snapshot(messages: list[dict], tools: list[dict],
             'messageTokens': budget.message_tokens,
             'availableForMessages': budget.available_for_messages,
             'toolMessageTokens': tool_message_tokens,
+            'toolMessageTokenCounts': result_counts,
+            **({'toolTokenCounts': schema_counts} if schema_counts else {}),
         },
         'calibrationRatio': ratio,
         'contextBudget': max(0, budget.max_context_tokens - budget.reserve_tokens),
@@ -115,32 +152,29 @@ def provider_usage_snapshot(*, input_tokens: int, output_tokens: int,
                             tools: list[dict], max_context_tokens: int | None,
                             run_id: str, agent_id: str | None = None,
                             reserve_ratio: float = DEFAULT_RESERVE_RATIO,
-                            calibration_ratio: float = 1.0) -> dict:
+                            calibration_ratio: float = 1.0,
+                            cache_read: int | None = None,
+                            cache_write: int | None = None) -> dict:
     """Snapshot of confirmed request usage; unknown window size stays unknown.
 
     The total is a provider-reported request total, not a tokenizer guess about
     the next prompt. The category breakdown (where available) remains estimated.
     """
-    if max_context_tokens is not None:
-        snapshot = context_usage_snapshot(
-            messages, tools, max_context_tokens, reserve_ratio=reserve_ratio,
-            run_id=run_id, agent_id=agent_id, calibration_ratio=calibration_ratio)
-    else:
-        snapshot = {
-            'runId': run_id,
-            **({'agentId': agent_id} if agent_id else {}),
-            'breakdown': {
-                'maxContextTokens': 0, 'instructionTokens': 0,
-                'systemMessageTokens': 0, 'dynamicInstructionTokens': 0,
-                'toolSchemaTokens': 0, 'summaryTokens': 0,
-                'toolCount': len(tools), 'messageCount': len(messages),
-                'messageTokens': 0, 'availableForMessages': 0,
-            },
-        }
+    # Counting the sent prompt does not require knowing the model window.
+    snapshot = context_usage_snapshot(
+        messages, tools, max_context_tokens or 1, reserve_ratio=reserve_ratio,
+        run_id=run_id, agent_id=agent_id, calibration_ratio=calibration_ratio)
+    if max_context_tokens is None:
+        snapshot['breakdown']['maxContextTokens'] = 0
+        snapshot['breakdown']['availableForMessages'] = 0
+        snapshot.pop('contextBudget', None)
+        snapshot.pop('remainingContextTokens', None)
     snapshot.update({
         'provider': provider, 'model': model,
         'providerInputTokens': input_tokens,
         'providerOutputTokens': output_tokens,
+        **({'cacheRead': cache_read} if cache_read is not None else {}),
+        **({'cacheWrite': cache_write} if cache_write is not None else {}),
     })
     return snapshot
 
@@ -215,6 +249,49 @@ def split_recent_turns(messages: list[dict], *, turns: int = DEFAULT_RETAIN_RECE
                               if messages[index].get('role') == 'user'), 0)
         boundary = previous_user
     return list(messages[:boundary]), list(messages[boundary:])
+
+
+def split_compaction_history(messages: list[dict], *, turns: int, tokens: int | None,
+                             tail_budget: int | None) -> tuple[list[dict], list[dict]]:
+    """Prefer recent turns, but bound retention for a long-running single turn.
+
+    A tool call and all of its results must remain on the same side of the
+    boundary. A synthetic continuation anchors a mid-turn suffix for providers
+    that require a user message before the assistant/tool exchange.
+    """
+    head, tail = split_recent_turns(messages, turns=turns, tokens=tokens)
+    if head and (tail_budget is None or
+                 sum(map(message_token_count, tail)) <= tail_budget):
+        return head, tail
+    if not messages or _open_tool_calls(messages):
+        return head, tail
+    # Walk backward once, retaining complete exchanges, not isolated results.
+    # The latest exchange may itself be oversized; in that case summarize it
+    # too and resume from the summary rather than retain an oversized prompt.
+    remaining = sum(map(message_token_count, tail)) // 2
+    if tail_budget is not None:
+        remaining = min(remaining, tail_budget)
+    pending = set()
+    boundary = len(messages)
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        remaining -= message_token_count(message)
+        if remaining < 0:
+            break
+        if message.get('role') == 'tool':
+            pending.add(message.get('tool_call_id'))
+        elif message.get('role') == 'assistant':
+            pending.difference_update(call.get('id') for call in message.get('tool_calls') or []
+                                      if isinstance(call, dict))
+        if not pending and message.get('role') in {'user', 'assistant'}:
+            boundary = index
+    # Never summarize a half-open exchange, even on unusual provider history.
+    if boundary <= 0 or _open_tool_calls(messages[:boundary]):
+        return head, tail
+    retained = list(messages[boundary:])
+    if not retained or retained[0].get('role') != 'user':
+        retained.insert(0, {'role': 'user', 'content': 'Continue the current task from the checkpoint.'})
+    return list(messages[:boundary]), retained
 
 
 def summarize_options(settings: dict | None, params: dict) -> tuple[int | None, dict]:

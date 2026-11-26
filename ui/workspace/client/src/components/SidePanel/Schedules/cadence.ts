@@ -45,6 +45,9 @@ export const describeCadence = (
   hour12?: boolean,
   weekStartsOn: WeekStartDay = 0,
 ): string => {
+  if (cadence.frequency === 'continuous') {
+    return localize('com_ui_schedule_runs_continuous', { minutes: cadence.delayMinutes });
+  }
   if (isCronCadence(cadence)) {
     // Shown verbatim rather than translated into prose. A five-field expression can
     // say things no sentence template covers, and a wrong summary of the cadence a

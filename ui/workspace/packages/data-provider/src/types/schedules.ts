@@ -4,14 +4,18 @@ import { z } from 'zod';
 export const scheduleStructuredFrequencies = ['hourly', 'daily', 'weekdays', 'weekly'] as const;
 export type ScheduleStructuredFrequency = (typeof scheduleStructuredFrequencies)[number];
 
-export const scheduleFrequencies = [...scheduleStructuredFrequencies, 'cron'] as const;
+export const scheduleFrequencies = [
+  ...scheduleStructuredFrequencies,
+  'continuous',
+  'cron',
+] as const;
 export type ScheduleFrequency = (typeof scheduleFrequencies)[number];
 
 /** Bounds a stored expression. Generous for five fields, because each one can hold a
  *  list: an every-minute-of-the-hour cadence spelled out runs past two hundred chars. */
 export const SCHEDULE_CRON_MAX_LENGTH = 256;
 
-export const scheduleTargets = ['new'] as const;
+export const scheduleTargets = ['new', 'reuse', 'existing'] as const;
 export type ScheduleTarget = (typeof scheduleTargets)[number];
 
 export type ScheduleDisabledReason =
@@ -60,9 +64,17 @@ export const cronCadenceSchema = z.object({
 });
 export type TCronCadence = z.infer<typeof cronCadenceSchema>;
 
+export const SCHEDULE_CONTINUOUS_MAX_DELAY = 525_600;
+export const continuousCadenceSchema = z.object({
+  frequency: z.literal('continuous'),
+  delayMinutes: z.number().int().min(0).max(SCHEDULE_CONTINUOUS_MAX_DELAY),
+});
+export type TContinuousCadence = z.infer<typeof continuousCadenceSchema>;
+
 export const scheduleCadenceSchema = z.discriminatedUnion('frequency', [
   structuredCadenceSchema,
   cronCadenceSchema,
+  continuousCadenceSchema,
 ]);
 export type TScheduleCadence = z.infer<typeof scheduleCadenceSchema>;
 
@@ -76,6 +88,7 @@ export const createSchedulePayloadSchema = z.object({
   cadence: scheduleCadenceSchema,
   timezone: z.string().min(1),
   target: z.enum(scheduleTargets).default('new'),
+  targetConversationId: z.string().trim().min(1).nullable().optional(),
   file_ids: z
     .array(z.string())
     .max(10)
@@ -133,6 +146,8 @@ export type TSchedule = {
   cadence: TScheduleCadence;
   timezone: string;
   target: ScheduleTarget;
+  targetConversationId?: string | null;
+  reuseConversationId?: string;
   file_ids?: string[];
   chatProjectId?: string | null;
   enabled: boolean;
@@ -171,7 +186,6 @@ export type TScheduleRun = {
  *  per-principal `interface.schedules` resolution the write handlers and the fire
  *  path enforce, so the form can never offer a choice the server would refuse. */
 export type TScheduleLimits = {
-  maxPerUser: number;
   /** Served with the list so the dialog can refuse a cadence the floor would reject
    *  rather than surfacing it as a 400 after submit. */
   minIntervalMinutes: number;

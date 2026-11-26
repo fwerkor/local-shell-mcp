@@ -19,7 +19,8 @@ import { revealedQueuedTurnFamily } from '~/store/steer';
 import { Fork } from '~/components/Conversations';
 import { hoverButtonClasses } from './styles';
 import MessageAudio from './MessageAudio';
-import { cn } from '~/utils';
+import MessageBookmarkButton from './MessageBookmarkButton';
+import { cn, isTemporaryConversation } from '~/utils';
 import store from '~/store';
 
 type THoverButtons = {
@@ -263,6 +264,14 @@ const HoverButtons = ({
               : '',
           )}
           dataTestId={!isCreatedByUser ? 'copy-response-button' : undefined}
+        />
+      )}
+
+      {!isActiveStreamingMessage && !isTemporaryConversation(conversation) && (
+        <MessageBookmarkButton
+          messageId={message.messageId}
+          conversationId={conversation.conversationId}
+          isLast={isLast}
         />
       )}
 
