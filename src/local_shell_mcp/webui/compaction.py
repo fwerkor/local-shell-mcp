@@ -11,6 +11,14 @@ _JS_WHITESPACE = "\u0009\u000a\u000b\u000c\u000d \u00a0\u1680\u2000\u2001\u2002\
 class CompactionFailed(ValueError):
     code = "COMPACTION_FAILED"
 
+    def __init__(self, message: str, *, diagnostics: tuple[str, ...] = ()):
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
+class SummaryResponseError(ValueError):
+    """An uncommitted summary response that can safely be requested again."""
+
 
 COMPACTION_FAILED_ERROR = '{"type":"compaction_failed"}'
 SUMMARY_CARRIER_INSTRUCTION = "This is your own checkpoint: you wrote it to preserve context after compaction. Pick up where you left off based on the summary above. Do not repeat prior tasks, information or acknowledge this checkpoint message directly."

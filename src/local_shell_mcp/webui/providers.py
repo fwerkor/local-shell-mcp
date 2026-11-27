@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
-from contextlib import aclosing, asynccontextmanager
+from contextlib import aclosing, asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit
 
@@ -120,6 +120,13 @@ async def check_image_response(response) -> None:
         problem = (await response.aread())[:8192].decode("utf-8", errors="replace")
         if image_input_rejected(problem):
             raise UnsupportedImageInput("Provider does not support image input")
+    if response.is_error and response.status_code not in {400, 415, 422}:
+        # Streaming errors otherwise have no body available to diagnostics.
+        # Keep the HTTP status even if the error body cannot be read.
+        import httpx
+
+        with suppress(httpx.RequestError):
+            await response.aread()
     response.raise_for_status()
 
 

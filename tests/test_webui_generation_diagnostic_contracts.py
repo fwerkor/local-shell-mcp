@@ -107,6 +107,72 @@ def test_browser_grant_rejects_session_revoked_between_reads(monkeypatch):
     assert routes._webui_grant_cookie(request) is None
 
 
+def test_compaction_diagnostic_preserves_causes_and_redacts_credentials():
+    from local_shell_mcp.webui.compaction import CompactionFailed
+
+    request = httpx.Request("POST", "https://example.invalid/v1?key=query-credential",
+                            headers={"Authorization": "Bearer request-credential"})
+    response = httpx.Response(429, request=request, json={"error": {
+        "type": "rate_limit_error", "code": "insufficient_quota",
+        "message": "Quota exhausted for request-credential; query-credential; configured-credential",
+    }})
+
+    def upstream():
+        response.raise_for_status()
+
+    try:
+        try:
+            upstream()
+        except httpx.HTTPStatusError as cause:
+            raise CompactionFailed("failed", diagnostics=("Context limit: 8192",)) from cause
+    except CompactionFailed as error:
+        record = json.loads(generation_failure(error, "run-test", credentials=("configured-credential",)))
+    detail = record["details"]
+    assert "CompactionFailed" in detail and "Caused by:" in detail
+    assert "HTTPStatusError" in detail and "HTTP status: 429" in detail
+    assert "Provider code: insufficient_quota" in detail
+    assert "Quota exhausted" in detail and "in upstream" in detail
+    assert "Context limit: 8192" in detail
+    assert all(secret not in detail for secret in ("request-credential", "query-credential", "configured-credential"))
+
+
+def test_diagnostic_preserves_implicit_chain_and_all_frames():
+    def deep(n):
+        if n:
+            deep(n - 1)
+        else:
+            raise TimeoutError("secret-token")
+
+    try:
+        try:
+            deep(40)
+        except TimeoutError:
+            raise ValueError("another secret")  # noqa: B904 - exercise implicit exception context
+    except ValueError as error:
+        detail = json.loads(generation_failure(error, "run-test"))["details"]
+    assert "During handling of:" in detail
+    assert "TimeoutError" in detail
+    assert detail.count(" in deep") == 41
+    assert "secret-token" not in detail and "another secret" not in detail
+
+
+@pytest.mark.asyncio
+async def test_streaming_http_error_body_available_to_diagnostics():
+    from local_shell_mcp.webui.providers import check_image_response
+
+    class ErrorStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'{"error":{"code":"insufficient_quota","message":"Quota exhausted"}}'
+
+    request = httpx.Request("POST", "https://example.invalid/v1")
+    response = httpx.Response(429, request=request, stream=ErrorStream())
+    with pytest.raises(httpx.HTTPStatusError) as error:
+        await check_image_response(response)
+    detail = json.loads(generation_failure(error.value, "run-test"))["details"]
+    assert "Provider code: insufficient_quota" in detail
+    assert "Provider message: Quota exhausted" in detail
+
+
 def test_generation_failure_preserves_cause_location_not_message():
     from local_shell_mcp.webui.agent_runtime import RuntimeSafetyError
 
@@ -120,6 +186,6 @@ def test_generation_failure_preserves_cause_location_not_message():
             raise RuntimeSafetyError(str(error)) from error
     except RuntimeSafetyError as error:
         record = json.loads(generation_failure(error, "run-test"))
-    assert "Caused by: PermissionError" in record["details"]
+    assert "Caused by:\nException: PermissionError" in record["details"]
     assert "in inner" in record["details"]
     assert "private-token-never-serialize" not in json.dumps(record)
