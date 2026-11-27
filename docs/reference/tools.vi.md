@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -787,9 +787,20 @@ Phạm vi OAuth: `shell:read, shell:write, shell:execute, browser:use, file:shar
 Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy qua giao thức worker từ xa.
 ## Remote worker administration
 
+### `remote_list`
+
+Liệt kê remote workers đã đăng ký, trạng thái và khả năng. verbose=true bao gồm dữ liệu đo từ xa phục vụ chẩn đoán.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-Quản lý remote workers bằng action=invite, list, reset, revoke hoặc rename. invite nhận name/workdir/ttl_s/max_uses; revoke cần machine; rename cần machine và new_name. max_uses có giá trị mặc định là 1. reset cần machine và xóa các yêu cầu điều khiển đang chờ hoặc đang chạy có thể hủy an toàn mà không ngắt kết nối worker; các thao tác được bảo vệ đã bắt đầu vẫn được giữ nguyên. Với list, verbose=true bao gồm dữ liệu đo từ xa phục vụ chẩn đoán.
+Quản lý remote workers bằng action=invite, reset, revoke hoặc rename. invite nhận name/workdir/ttl_s/max_uses; revoke cần machine; rename cần machine và new_name. max_uses có giá trị mặc định là 1. reset cần machine và xóa các yêu cầu điều khiển đang chờ hoặc đang chạy có thể hủy an toàn mà không ngắt kết nối worker; các thao tác được bảo vệ đã bắt đầu vẫn được giữ nguyên.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -800,7 +811,6 @@ Quản lý remote workers bằng action=invite, list, reset, revoke hoặc renam
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

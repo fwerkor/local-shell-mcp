@@ -62,9 +62,9 @@ def test_machine_and_job_list_keep_actionable_metadata():
            "interactive_queue_depth": 0, "transfer_queue_depth": 0,
            "capabilities": ["shell"], "info": {"gpu": "AMD"}}
     raw = _envelope({"machines": [row]})
-    compact = compact_native_result("remote_manage", {"action": "list"}, raw)["data"]["machines"][0]
+    compact = compact_native_result("remote_list", {}, raw)["data"]["machines"][0]
     assert compact == {key: row[key] for key in ("name", "status", "queue_depth", "capabilities", "info")}
-    assert compact_native_result("remote_manage", {"action": "list", "verbose": True}, raw)["data"] == raw["data"]
+    assert compact_native_result("remote_list", {"verbose": True}, raw)["data"] == raw["data"]
     assert compact_native_result("remote_manage", {"action": "reset"}, raw)["data"] == raw["data"]
     jobs = _envelope({"jobs": [{"job_id": "j", "command_truncated": True, "log_truncated": False,
                                 "name": None, "error": "failure"}], "next_offset": 2})
@@ -98,7 +98,7 @@ async def test_actual_mcp_schema_and_both_result_representations(tmp_path, monke
         assert json.loads(content[0].text) == structured
         assert structured == {"ok": True, "data": {"exit_code": 0, "duration_ms": 1, "stdout": "hello"}}
         jsonschema.validate(structured, tools["run_shell"].outputSchema)
-        for name in ("job_tail", "session_manage", "remote_manage"):
+        for name in ("job_tail", "session_manage", "remote_list"):
             assert tools[name].inputSchema["properties"]["verbose"]["default"] is False
     finally:
         get_settings.cache_clear()

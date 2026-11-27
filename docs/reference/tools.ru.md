@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # Справочник tools
 
 Эта страница строится из фактических MCP tool schemas. После изменения public tool surface запустите `python scripts/generate-tools-reference.py`, чтобы обновить English reference.
@@ -787,9 +787,20 @@ OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, r
 Если задан `machine`, вызову также требуется `remote:use`, и он выполняется через протокол удалённого worker.
 ## Remote worker administration
 
+### `remote_list`
+
+Выводит зарегистрированные remote workers, их состояние и возможности. verbose=true включает диагностическую телеметрию.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-Управляет remote workers через action=invite, list, reset, revoke или rename. invite принимает name/workdir/ttl_s/max_uses; revoke требует machine; rename требует machine и new_name. Значение max_uses по умолчанию — 1. reset требует machine и очищает ожидающие или безопасно отменяемые активные запросы управления, не отключая worker; уже начатые защищённые операции сохраняются. Для list параметр verbose=true включает диагностическую телеметрию.
+Управляет remote workers через action=invite, reset, revoke или rename. invite принимает name/workdir/ttl_s/max_uses; revoke требует machine; rename требует machine и new_name. Значение max_uses по умолчанию — 1. reset требует machine и очищает ожидающие или безопасно отменяемые активные запросы управления, не отключая worker; уже начатые защищённые операции сохраняются.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -800,7 +811,6 @@ OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, r
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

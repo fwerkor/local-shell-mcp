@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # Tools reference
 
 यह page वास्तविक MCP tool schemas से बनती है। Public tool surface बदलने के बाद English reference update करने के लिए `python scripts/generate-tools-reference.py` चलाएँ।
@@ -788,9 +788,20 @@ OAuth क्षेत्र: `shell:read, shell:write, shell:execute, browser:us
 
 ## Remote worker administration
 
+### `remote_list`
+
+पंजीकृत remote workers, उनकी स्थिति और क्षमताओं की सूची दिखाता है। verbose=true निदान टेलीमेट्री शामिल करता है।
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-action=invite, list, reset, revoke या rename से remote workers manage करती है। invite name/workdir/ttl_s/max_uses स्वीकार करता है; revoke को machine; rename को machine और new_name चाहिए। max_uses का डिफ़ॉल्ट मान 1 है। reset के लिए machine आवश्यक है; यह worker को डिस्कनेक्ट किए बिना queued और सुरक्षित रूप से रद्द किए जा सकने वाले सक्रिय control requests हटाता है, जबकि शुरू हो चुके protected operations सुरक्षित रहते हैं। list में verbose=true डायग्नोस्टिक टेलीमेट्री शामिल करता है।
+action=invite, reset, revoke या rename से remote workers manage करती है। invite name/workdir/ttl_s/max_uses स्वीकार करता है; revoke को machine; rename को machine और new_name चाहिए। max_uses का डिफ़ॉल्ट मान 1 है। reset के लिए machine आवश्यक है; यह worker को डिस्कनेक्ट किए बिना queued और सुरक्षित रूप से रद्द किए जा सकने वाले सक्रिय control requests हटाता है, जबकि शुरू हो चुके protected operations सुरक्षित रहते हैं।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -801,7 +812,6 @@ action=invite, list, reset, revoke या rename से remote workers manage �
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

@@ -77,7 +77,7 @@ def compact_native_result(name: str, arguments: dict, result: Any) -> Any:
                     'completed_at': None, 'error': None}
         data = {**data, 'jobs': [_omit_defaults(row, defaults) if isinstance(row, dict)
                                  else row for row in data['jobs']]}
-    elif (name == 'remote_manage' and str(arguments.get('action', '')).strip().lower() == 'list'
+    elif (name == 'remote_list'
           and not verbose and isinstance(data, dict) and isinstance(data.get('machines'), list)):
         rows = []
         for row in data['machines']:

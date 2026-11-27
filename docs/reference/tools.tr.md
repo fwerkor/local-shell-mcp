@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # Tools referansı
 
 Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface değiştiğinde English reference güncellemek için `python scripts/generate-tools-reference.py` çalıştırın.
@@ -787,9 +787,20 @@ OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:sh
 `machine` verildiğinde çağrı ayrıca `remote:use` gerektirir ve uzak worker protokolü üzerinden çalışır.
 ## Remote worker administration
 
+### `remote_list`
+
+Kayıtlı remote workers, durumları ve yeteneklerini listeler. verbose=true tanılama telemetrisini içerir.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-action=invite, list, reset, revoke veya rename ile remote workers yönetir. invite name/workdir/ttl_s/max_uses kabul eder; revoke machine gerektirir; rename machine ve new_name gerektirir. max_uses varsayılan olarak 1'dir. reset için machine gerekir; worker bağlantısını kesmeden sıradaki veya güvenle iptal edilebilir etkin kontrol isteklerini temizler, başlamış korumalı işlemler korunur. list için verbose=true tanılama telemetrisini içerir.
+action=invite, reset, revoke veya rename ile remote workers yönetir. invite name/workdir/ttl_s/max_uses kabul eder; revoke machine gerektirir; rename machine ve new_name gerektirir. max_uses varsayılan olarak 1'dir. reset için machine gerekir; worker bağlantısını kesmeden sıradaki veya güvenle iptal edilebilir etkin kontrol isteklerini temizler, başlamış korumalı işlemler korunur.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -800,7 +811,6 @@ action=invite, list, reset, revoke veya rename ile remote workers yönetir. invi
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

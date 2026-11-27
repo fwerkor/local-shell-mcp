@@ -10,6 +10,7 @@ import logging
 import sqlite3
 import time
 
+from . import agent_runtime
 from .agent_execution import execute_tool_batch, replay_key
 from .agent_runtime import (
     AgentContext,
@@ -67,6 +68,10 @@ from .subagents import (
     invoke_subagent,
     subagent_tools,
 )
+
+
+class _SummaryResponseError(ValueError):
+    """An uncommitted summary response that can safely be requested again."""
 
 
 class AgentRunner:
@@ -1068,7 +1073,7 @@ class AgentRunner:
         """Request the original checkpoint prompt from the selected model.
 
         A failed/partial summary is never written, and never makes the old
-        context unreachable. The live model receives the same intact history.
+        context unreachable. Provider retries happen before publishing a checkpoint.
         """
         from .compaction import (
             DEFAULT_SUMMARIZATION_PROMPT,
@@ -1124,21 +1129,33 @@ class AgentRunner:
             raise RuntimeSafetyError('Summary context was blocked by content protection')
         limit = max(128, min(int(max_tokens), 16384))
         profile = profile or self.initial_profile or self._context(self.root_agent).profile
+        from .context_budget import message_token_count
+
+        # If a large request fails, prefer bounded fragments over repeatedly
+        # submitting the same potentially oversized input. Each fragment uses
+        # the ordinary provider retry budget independently.
+        can_fragment = (context_limit is not None
+                        and all(message.get('content') is None or isinstance(message.get('content'), str)
+                                for message in summary_messages[:-1])
+                        and sum(map(message_token_count, summary_messages)) >= context_limit / 2)
         try:
-            summary = await self._request_summary(profile, summary_messages, limit)
+            summary = await self._request_summary(profile, summary_messages, limit,
+                                                  retry=not can_fragment)
         except RuntimeSafetyError:
             raise
-        except Exception:
-            if context_limit is None:
+        except Exception as error:
+            if not can_fragment:
                 raise
-            # A huge individual tool response can overflow even a summary-only
-            # request. Never persist a prefix checkpoint: fold the full source
-            # in bounded textual fragments and commit only the final summary.
-            from .context_budget import message_token_count
+            import httpx
 
-            if sum(map(message_token_count, summary_messages)) < context_limit / 2:
+            if isinstance(error, httpx.HTTPStatusError) and not (
+                agent_runtime._retryable_model_error(error) or error.response.status_code in {400, 413, 422}
+            ):
                 raise
+            # Never persist a prefix checkpoint: commit only the final summary.
             logging.getLogger(__name__).warning('Full context summary failed; trying bounded fragments')
+            if agent_runtime._retryable_model_error(error) and agent_runtime._MODEL_RETRY_DELAYS:
+                await self._wait_summary_retry(agent_runtime._model_retry_delay(error, 0))
             summary = await self._summarize_fragments(
                 profile, summary_messages[:-1], prior=prior, context_limit=context_limit,
                 max_tokens=limit, prompt=prompt or DEFAULT_SUMMARIZATION_PROMPT,
@@ -1181,7 +1198,39 @@ class AgentRunner:
             })
         return summary
 
-    async def _request_summary(self, profile, summary_messages, limit):
+    async def _request_summary(self, profile, summary_messages, limit, *, retry=True):
+        # Summaries have no observable partial output or tool side effects.
+        # Retrying even a partially received stream is safe: each attempt
+        # starts with an empty buffer and only a complete summary is returned.
+        delays = agent_runtime._MODEL_RETRY_DELAYS if retry else ()
+        for attempt in range(len(delays) + 1):
+            self._check_grant()
+            try:
+                summary = await self._request_summary_once(profile, summary_messages, limit)
+                self._check_grant()
+                return summary
+            except Exception as error:
+                if (attempt == len(delays)
+                        or not (agent_runtime._retryable_model_error(error) or isinstance(error, _SummaryResponseError))):
+                    raise
+                delay = (agent_runtime._model_retry_delay(error, attempt)
+                         if agent_runtime._retryable_model_error(error) else delays[attempt])
+                logging.getLogger(__name__).warning(
+                    'Context summary request failed (%s); retry %d/%d in %.1fs',
+                    type(error).__name__, attempt + 1, len(delays), delay)
+                await self._wait_summary_retry(delay)
+
+    async def _wait_summary_retry(self, delay):
+        # Keep cancellation and revocable execution grants responsive.
+        while delay > 0:
+            interval = min(delay, 1)
+            await asyncio.sleep(interval)
+            delay -= interval
+            self._check_grant()
+
+    async def _request_summary_once(self, profile, summary_messages, limit):
+        from contextlib import aclosing
+
         from .tokenizer import count_tokens
 
         chunks = []
@@ -1195,28 +1244,29 @@ class AgentRunner:
         else:
             response = self._stream_with_image_fallback(self.stream_text, profile, summary_messages, max_tokens=limit,
                                         emit_finish_reason=True)
-        async for value in response:
-            if isinstance(value, str):
-                chunks.append(value)
-            elif isinstance(value, (ModelUsage, ModelThought)):
-                # A summarizer's provider metadata must never be inserted into
-                # user-visible checkpoint text or mistaken for a tool call.
-                continue
-            elif isinstance(value, ModelFinish):
-                finish_reason = value.reason.lower()
-            else:
-                raise ValueError('Summary provider returned a tool call instead of text')
+        async with aclosing(response):
+            async for value in response:
+                if isinstance(value, str):
+                    chunks.append(value)
+                elif isinstance(value, (ModelUsage, ModelThought)):
+                    # A summarizer's provider metadata must never be inserted into
+                    # user-visible checkpoint text or mistaken for a tool call.
+                    continue
+                elif isinstance(value, ModelFinish):
+                    finish_reason = value.reason.lower()
+                else:
+                    raise _SummaryResponseError('Summary provider returned a tool call instead of text')
         summary = ''.join(chunks).strip()
         if not summary:
-            raise ValueError('Summarization produced empty output')
+            raise _SummaryResponseError('Summarization produced empty output')
         if finish_reason in {'length', 'max_tokens', 'max_tokens_reached', 'max_output_tokens',
                              'max_output_tokens_reached', 'incomplete'}:
-            raise ValueError('Summary response was truncated by the provider output limit')
+            raise _SummaryResponseError('Summary response was truncated by the provider output limit')
         # Some OpenAI-compatible endpoints omit finish_reason entirely. For
         # them, refuse near-limit output instead of committing a partial
         # checkpoint whose source conversation would become unreachable.
         if finish_reason in {None, 'unknown'} and count_tokens(summary, exact=False) >= limit * 0.85:
-            raise ValueError('Summary completion is unverified near output token limit')
+            raise _SummaryResponseError('Summary completion is unverified near output token limit')
         return summary
 
     async def _summarize_fragments(self, profile, messages, *, prior, context_limit,
@@ -1418,7 +1468,7 @@ class AgentRunner:
 
     async def _before_model(self, state):
         """SDK-style recency + trigger, using the shared SQLite checkpoint."""
-        from .compaction import build_summary_carrier_text
+        from .compaction import CompactionFailed, build_summary_carrier_text
         from .content_filters import inspect_content, model_message_fragments
         from .context_budget import (
             DEFAULT_COMPACTION_RATIO,
@@ -1521,9 +1571,14 @@ class AgentRunner:
             except Exception as error:
                 self._compaction_status = 'failed'
                 logging.getLogger(__name__).warning('Context compaction failed (%s)', type(error).__name__)
-                # The source leaves the state intact on summary failure; never
-                # substitute an empty checkpoint or truncate a tool result.
-                return
+                self._last_compaction_attempt_size = None
+                # A triggered compaction is a blocking precondition of the
+                # next model turn. Never fall through to the old context.
+                if isinstance(error, RuntimeSafetyError):
+                    raise
+                raise CompactionFailed(
+                    'Context compaction failed; model generation stopped. Original history is preserved.'
+                ) from error
 
         except asyncio.CancelledError:
             cancelled = True

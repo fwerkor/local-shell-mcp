@@ -2,12 +2,14 @@
 import asyncio
 import json
 
+import httpx
 import pytest
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
+from local_shell_mcp.webui import agent_runtime
 from local_shell_mcp.webui.agent_runner import AgentRunner
-from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState
-from local_shell_mcp.webui.compaction import build_summary_carrier_text
+from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState, run_agent_loop
+from local_shell_mcp.webui.compaction import CompactionFailed, build_summary_carrier_text
 from local_shell_mcp.webui.context_budget import (
     calculate_budget,
     message_token_count,
@@ -207,19 +209,40 @@ async def test_runtime_auto_compacts_with_real_model_callback_and_resume(ctx):
 
 
 @pytest.mark.asyncio
-async def test_summary_failure_does_not_truncate_or_retrigger_empty(ctx):
-    db, store, _, profile = ctx
+async def test_summary_failure_stops_generation_and_preserves_history(ctx, monkeypatch):
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0,) * 8)
+    db, store, repo, profile = ctx
+    repo.save_setting('a', 'endpoints', {'summarization': {
+        'trigger': {'type': 'token_ratio', 'value': 0.01}}})
     g = _conversation(store, count=5, size=75)
     pending, _ = store.begin('a', {'text': 'new question', 'conversationId': g.conversation_id,
                                   'parentMessageId': g.response_message_id})
+    attempts = []
+
+    async def empty_summary(*args, **kwargs):
+        attempts.append(True)
+        if False:
+            yield ''
+
     runner = AgentRunner('a', pending, db, store, scopes=set(), grant_expires=None,
-                         stream_tools=_empty_text, stream_text=_empty_text, on_text=_emit_noop, profile=profile)
+                         stream_tools=_empty_text, stream_text=empty_summary, on_text=_emit_noop, profile=profile)
     original = store.history('a', g.conversation_id, message_id=pending.user_message_id)
-    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 270}), list(original))
-    await runner._before_model(state)
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 10000}), list(original))
+    model_calls = []
+
+    async def main_model(*args, **kwargs):
+        model_calls.append(True)
+        yield 'Must not run'
+
+    with pytest.raises(CompactionFailed, match='model generation stopped'):
+        await run_agent_loop(state, stream_tools=main_model, stream_text=main_model,
+                             dispatch=None, before_model=runner._before_model, on_text=_emit_noop)
+    assert len(attempts) == 9  # initial request plus eight retries
+    assert model_calls == []
     assert original == state.messages
     assert not called_summary(store, pending.run_id)
-    await runner._before_model(state)
+    with pytest.raises(CompactionFailed):
+        await runner._before_model(state)
     assert original == state.messages
 
 
@@ -503,7 +526,8 @@ async def test_live_compaction_is_owner_scoped_durable_and_bypasses_threshold(ct
 
 
 @pytest.mark.asyncio
-async def test_live_compaction_failure_preserves_messages_and_reports_result(ctx):
+async def test_live_compaction_failure_preserves_messages_and_reports_result(ctx, monkeypatch):
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0,) * 8)
     db, store, _, profile = ctx
     run, _ = store.begin('a', {'text': 'Keep monitoring'})
     receipt = store.request_live_compaction('a', run.conversation_id)
@@ -513,7 +537,8 @@ async def test_live_compaction_failure_preserves_messages_and_reports_result(ctx
     original = [{'role': 'user', 'content': 'Keep monitoring'},
                 *_tool_exchange('old', 300), *_tool_exchange('recent', 5)]
     state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 10000}), list(original))
-    await runner._before_model(state)
+    with pytest.raises(CompactionFailed):
+        await runner._before_model(state)
     assert state.messages == original
     assert store.live_compaction_status('a', run.run_id, receipt['requestId']) == 'failed'
     next_receipt = store.request_live_compaction('a', run.conversation_id)
@@ -592,7 +617,11 @@ async def test_oversized_tool_result_fragmented_checkpoint_is_atomic(ctx, fail_f
                          stream_tools=_empty_text, stream_text=summarize, on_text=_emit_noop,
                          profile=profile)
     state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 8192}), list(original))
-    await runner._before_model(state)
+    if fail_fragment:
+        with pytest.raises(CompactionFailed):
+            await runner._before_model(state)
+    else:
+        await runner._before_model(state)
     assert len(fragments) >= 2
     snapshots = [value['data'] for _, value in store.events('a', run.run_id)
                  if value.get('event') == 'on_context_usage']
@@ -609,7 +638,8 @@ async def test_oversized_tool_result_fragmented_checkpoint_is_atomic(ctx, fail_f
 
 
 @pytest.mark.asyncio
-async def test_auto_compaction_can_recover_after_more_than_three_failures(ctx):
+async def test_auto_compaction_can_recover_after_more_than_three_failures(ctx, monkeypatch):
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0,) * 8)
     db, store, repo, profile = ctx
     run, _ = store.begin('a', {'text': 'Keep reading'})
     repo.save_setting('a', 'endpoints', {'summarization': {
@@ -620,7 +650,8 @@ async def test_auto_compaction_can_recover_after_more_than_three_failures(ctx):
     async def summarize(_profile, messages, **kwargs):
         attempts.append(messages)
         if len(attempts) <= 4:
-            raise ValueError('temporary provider failure')
+            yield 'Uncommitted partial summary'
+            raise httpx.ReadError('temporary provider failure')
         yield 'Recovered summary.'
 
     runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
@@ -629,16 +660,82 @@ async def test_auto_compaction_can_recover_after_more_than_three_failures(ctx):
     state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 10000}),
                            [{'role': 'user', 'content': 'Keep reading'},
                             *_tool_exchange('initial', 600)])
-    for i in range(4):
-        await runner._before_model(state)
-        assert not called_summary(store, run.run_id)
-        await runner._before_model(state)
-        assert len(attempts) == i + 1
-        state.messages.extend(_tool_exchange(str(i), 10))
-    await runner._before_model(state)
+    model_calls = []
+
+    async def main_model(_profile, messages, **kwargs):
+        assert called_summary(store, run.run_id)
+        assert 'Recovered summary.' in messages[0]['content']
+        assert 'Uncommitted partial summary' not in messages[0]['content']
+        model_calls.append(True)
+        yield 'Continued.'
+
+    await run_agent_loop(state, stream_tools=main_model, stream_text=main_model,
+                         dispatch=None, before_model=runner._before_model, on_text=_emit_noop)
     assert len(attempts) == 5
+    assert len(model_calls) == 1
     assert called_summary(store, run.run_id)
     assert state.messages[0]['content'].startswith('<summary>')
+
+
+@pytest.mark.asyncio
+async def test_fragment_retry_keeps_completed_prefix(ctx, monkeypatch):
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0,) * 8)
+    db, store, _, profile = ctx
+    run, _ = store.begin('a', {'text': 'Read every fragment'})
+    requests = []
+
+    async def summarize(_profile, messages, **kwargs):
+        if any(message.get('role') == 'tool' for message in messages):
+            raise httpx.HTTPStatusError('oversized', request=httpx.Request('POST', profile.url),
+                                        response=httpx.Response(504))
+        requests.append(messages)
+        assert not called_summary(store, run.run_id)
+        if len(requests) == 2:
+            yield 'Discard this partial fragment'
+            raise httpx.ReadError('temporary disconnect')
+        yield 'Successful fragment ' + str(len(requests))
+
+    runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=summarize, on_text=_emit_noop,
+                         profile=profile)
+    original = [{'role': 'user', 'content': 'Read every fragment'},
+                *_tool_exchange('huge', 18000), *_tool_exchange('recent', 5)]
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 8192}), list(original))
+    await runner._before_model(state)
+    assert len(requests) >= 3
+    assert requests[1] == requests[2]
+    assert 'Successful fragment 1' in requests[2][-1]['content']
+    assert 'Discard this partial fragment' not in str(state.messages)
+    assert called_summary(store, run.run_id)
+
+
+@pytest.mark.asyncio
+async def test_summary_permanent_provider_failure_does_not_retry(ctx, monkeypatch):
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0,) * 8)
+    db, store, _, profile = ctx
+    run, _ = store.begin('a', {'text': 'Preserve context'})
+    attempts = []
+
+    async def summarize(*args, **kwargs):
+        attempts.append(True)
+        raise httpx.HTTPStatusError('unauthorized', request=httpx.Request('POST', profile.url),
+                                    response=httpx.Response(401))
+        if False:
+            yield ''
+
+    runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=summarize, on_text=_emit_noop,
+                         profile=profile)
+    original = [{'role': 'user', 'content': 'Preserve context'},
+                *_tool_exchange('huge', 18000), *_tool_exchange('recent', 5)]
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 8192}), list(original))
+    with pytest.raises(CompactionFailed) as error:
+        await runner._before_model(state)
+    assert len(attempts) == 1
+    assert state.messages == original
+    assert not called_summary(store, run.run_id)
+    from local_shell_mcp.webui.error_diagnostics import generation_failure
+    assert 'Context compaction failed' in json.loads(generation_failure(error.value, run.run_id))['message']
 
 
 def test_live_compaction_rejects_active_graph_agent(ctx):

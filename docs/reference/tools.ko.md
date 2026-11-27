@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # Tools reference
 
 이 페이지는 실제 MCP tool schema에서 구성됩니다. Public tool surface를 변경한 뒤 `python scripts/generate-tools-reference.py`를 실행해 English reference를 갱신하십시오.
@@ -787,9 +787,20 @@ OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 `machine`을 지정하면 호출에 `remote:use` 권한도 필요하며 원격 worker 프로토콜을 통해 실행됩니다.
 ## Remote worker administration
 
+### `remote_list`
+
+등록된 remote workers와 상태 및 기능을 나열합니다. verbose=true로 진단 원격 측정 데이터를 포함합니다.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-action=invite, list, reset, revoke, rename으로 remote workers를 관리합니다. invite는 name/workdir/ttl_s/max_uses, revoke는 machine, rename은 machine과 new_name이 필요합니다. max_uses 기본값은 1입니다. reset에는 machine이 필요하며 worker 연결을 끊지 않고 대기 중이거나 안전하게 취소 가능한 실행 중 제어 요청을 지웁니다. 이미 시작된 보호 대상 작업은 유지됩니다. list에서 verbose=true를 지정하면 진단 원격 측정 데이터도 포함됩니다.
+action=invite, reset, revoke, rename으로 remote workers를 관리합니다. invite는 name/workdir/ttl_s/max_uses, revoke는 machine, rename은 machine과 new_name이 필요합니다. max_uses 기본값은 1입니다. reset에는 machine이 필요하며 worker 연결을 끊지 않고 대기 중이거나 안전하게 취소 가능한 실행 중 제어 요청을 지웁니다. 이미 시작된 보호 대상 작업은 유지됩니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -800,7 +811,6 @@ action=invite, list, reset, revoke, rename으로 remote workers를 관리합니�
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

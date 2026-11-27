@@ -1307,6 +1307,7 @@ _TOOL_OPERATION_GROUPS: dict[str, frozenset[str]] = {
     ),
     "remote": frozenset(
         {
+            "remote_list",
             "remote_manage",
             "remote_transfer",
         }

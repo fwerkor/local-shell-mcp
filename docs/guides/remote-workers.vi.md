@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
+<!-- i18n-source-sha256: 0a505e16fea0b2b70ac808a4423986879615fe5f69be5ffbc4972372aa576f70 -->
 # Remote workers
 
 Remote worker cho phép `local-shell-mcp` điều khiển các máy có thể gửi yêu cầu HTTP(S) đi ra nhưng không thể nhận kết nối SSH đi vào.
@@ -11,7 +11,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 1. Tạo lời mời bằng `remote_manage(action="invite", ...)`.
 2. Chạy lệnh được tạo trên máy từ xa.
-3. Xác nhận đăng ký bằng `remote_manage(action="list")`.
+3. Xác nhận đăng ký bằng `remote_list()`.
 4. Gọi tool thông thường với `machine="<worker-name>"`, ví dụ `environment_get`, `run_shell`, `file_read` hoặc `browser_run_script`.
 5. Dùng `remote_transfer` để bắt đầu transfer tệp/thư mục được theo dõi controller-to-worker, worker-to-controller hoặc worker-to-worker. Theo dõi bằng `job_list` hoặc `job_tail`; dừng hoặc thử lại bằng `job_stop` hoặc `job_retry`.
 6. Đổi tên hoặc thu hồi worker bằng `remote_manage(action="rename", ...)` hoặc `remote_manage(action="revoke", ...)`.
