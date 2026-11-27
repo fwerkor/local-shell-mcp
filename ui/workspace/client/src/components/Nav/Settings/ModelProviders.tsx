@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useLocalize from '~/hooks/useLocalize';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import { useQueryClient } from '@tanstack/react-query';
@@ -75,6 +75,12 @@ export default function ModelProviders() {
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [addMenu, setAddMenu] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (addMenu) {
+      addMenuRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
+  }, [addMenu]);
   const [authorization, setAuthorization] = useState<Authorization | null>(null);
   const [callback, setCallback] = useState('');
   const [oauthBusy, setOauthBusy] = useState(false);
@@ -413,7 +419,7 @@ export default function ModelProviders() {
       <div>
         <button type="button" disabled={busy || authorization != null} onClick={() => setAddMenu((value) => !value)}
           aria-label={localize('com_lsm_channel_add')} aria-expanded={addMenu} aria-haspopup="menu" className={button}>{localize('com_lsm_channel_add')} ▾</button>
-        {addMenu && <div role="menu" className="mt-1 w-max min-w-0 max-w-full rounded-lg border border-border-medium bg-surface-primary p-1 shadow-lg">
+        {addMenu && <div ref={addMenuRef} role="menu" aria-label={localize('com_lsm_channel_add')} className="mt-1 w-max min-w-0 max-w-full rounded-lg border border-border-medium bg-surface-primary p-1 shadow-lg">
           <button role="menuitem" type="button" onClick={beginAdd} className="block w-full break-words rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize('com_lsm_channel_manual_config')}</button>
           {accountMethods.map((method) => <button role="menuitem" type="button" key={method.id}
             onClick={() => selectAccount(method)} className="block w-full break-words rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize(method.label)}</button>)}
