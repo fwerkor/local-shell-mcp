@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "このターンを削除",
+  "com_ui_message_turn_delete_confirm": "このユーザーメッセージとそれに対するすべての返信を削除しますか？以降のメッセージは保持されます。この操作は取り消せません。",
+  "com_ui_message_turn_delete_error": "このターンを削除できませんでした",
   "com_ui_tool_approval_mode": "ツール承認モード",
   "com_ui_tool_approval_auto": "自動",
   "com_ui_tool_approval_dangerous": "リスクのある業務を見直す",

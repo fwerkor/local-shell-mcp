@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "이 대화 차례 삭제",
+  "com_ui_message_turn_delete_confirm": "이 사용자 메시지와 모든 답변을 삭제하시겠습니까? 이후 메시지는 유지됩니다. 이 작업은 되돌릴 수 없습니다.",
+  "com_ui_message_turn_delete_error": "이 대화 차례를 삭제하지 못했습니다",
   "com_ui_tool_approval_mode": "도구 승인 모드",
   "com_ui_tool_approval_auto": "자동",
   "com_ui_tool_approval_dangerous": "위험한 작업 검토",

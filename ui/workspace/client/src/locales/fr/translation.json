@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Supprimer cet échange",
+  "com_ui_message_turn_delete_confirm": "Supprimer ce message utilisateur et toutes ses réponses ? Les messages suivants seront conservés. Cette action est irréversible.",
+  "com_ui_message_turn_delete_error": "Impossible de supprimer cet échange",
   "com_ui_tool_approval_mode": "Mode d'approbation des outils",
   "com_ui_tool_approval_auto": "Automatique",
   "com_ui_tool_approval_dangerous": "Revoir les opérations à risque",

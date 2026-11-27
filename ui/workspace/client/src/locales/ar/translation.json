@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "حذف هذه الجولة",
+  "com_ui_message_turn_delete_confirm": "هل تريد حذف رسالة المستخدم هذه وجميع الردود عليها؟ ستبقى الرسائل اللاحقة. لا يمكن التراجع عن ذلك.",
+  "com_ui_message_turn_delete_error": "تعذر حذف هذه الجولة",
   "com_ui_tool_approval_mode": "وضع الموافقة على الأداة",
   "com_ui_tool_approval_auto": "تلقائي",
   "com_ui_tool_approval_dangerous": "مراجعة العمليات الخطرة",

@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Удалить этот ход",
+  "com_ui_message_turn_delete_confirm": "Удалить это сообщение пользователя и все ответы на него? Последующие сообщения будут сохранены. Это действие нельзя отменить.",
+  "com_ui_message_turn_delete_error": "Не удалось удалить этот ход",
   "com_ui_tool_approval_mode": "Режим утверждения инструмента",
   "com_ui_tool_approval_auto": "Автоматический",
   "com_ui_tool_approval_dangerous": "Обзор рискованных операций",

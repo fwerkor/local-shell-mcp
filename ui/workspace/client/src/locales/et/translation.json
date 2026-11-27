@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Kustuta see vestlusvoor",
+  "com_ui_message_turn_delete_confirm": "Kas kustutada see kasutaja sõnum ja kõik selle vastused? Hilisemad sõnumid säilivad. Seda ei saa tagasi võtta.",
+  "com_ui_message_turn_delete_error": "Vestlusvooru ei õnnestunud kustutada",
   "com_ui_tool_approval_mode": "Tööriista kinnitusrežiim",
   "com_ui_tool_approval_auto": "Automaatne",
   "com_ui_tool_approval_dangerous": "Vaadake üle riskantne tegevus",

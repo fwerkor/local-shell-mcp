@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Hapus giliran ini",
+  "com_ui_message_turn_delete_confirm": "Hapus pesan pengguna ini beserta semua balasannya? Pesan berikutnya akan dipertahankan. Tindakan ini tidak dapat dibatalkan.",
+  "com_ui_message_turn_delete_error": "Gagal menghapus giliran ini",
   "com_ui_tool_approval_mode": "Mode persetujuan alat",
   "com_ui_tool_approval_auto": "Otomatis",
   "com_ui_tool_approval_dangerous": "Tinjau operasi berisiko",

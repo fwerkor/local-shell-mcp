@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Slett denne runden",
+  "com_ui_message_turn_delete_confirm": "Slette denne brukermeldingen og alle svarene på den? Senere meldinger beholdes. Dette kan ikke angres.",
+  "com_ui_message_turn_delete_error": "Kunne ikke slette denne runden",
   "com_ui_tool_approval_mode": "Verktøygodkjenningsmodus",
   "com_ui_tool_approval_auto": "Automatisk",
   "com_ui_tool_approval_dangerous": "Gjennomgå risikofylte operasjoner",

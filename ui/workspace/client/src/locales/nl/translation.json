@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Deze beurt verwijderen",
+  "com_ui_message_turn_delete_confirm": "Dit gebruikersbericht en alle bijbehorende antwoorden verwijderen? Latere berichten blijven behouden. Dit kan niet ongedaan worden gemaakt.",
+  "com_ui_message_turn_delete_error": "Kon deze beurt niet verwijderen",
   "com_ui_tool_approval_mode": "Gereedschapsgoedkeuringsmodus",
   "com_ui_tool_approval_auto": "Automatisch",
   "com_ui_tool_approval_dangerous": "Beoordeel risicovolle operaties",
