@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "ลบรอบการสนทนานี้",
+  "com_ui_message_turn_delete_confirm": "ลบข้อความของผู้ใช้นี้และคำตอบทั้งหมดใช่ไหม ข้อความหลังจากนี้จะยังคงอยู่ การดำเนินการนี้ไม่สามารถย้อนกลับได้",
+  "com_ui_message_turn_delete_error": "ไม่สามารถลบรอบการสนทนานี้ได้",
   "com_ui_tool_approval_mode": "โหมดการอนุมัติเครื่องมือ",
   "com_ui_tool_approval_auto": "อัตโนมัติ",
   "com_ui_tool_approval_dangerous": "ทบทวนการดำเนินงานที่มีความเสี่ยง",

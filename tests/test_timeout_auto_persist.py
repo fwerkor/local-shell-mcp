@@ -53,18 +53,25 @@ def _structured(result):
 @pytest.mark.asyncio
 async def test_timeout_preserves_one_execution_and_tracks_output(isolated_job_workspace):
     path = isolated_job_workspace / "executed.txt"
+    release = isolated_job_workspace / "release-job"
     command = python_shell_command(
         f"from pathlib import Path; import time; "
         f"p=Path({str(path)!r}); p.open('a').write('once\\n'); "
-        "print('before timeout', flush=True); time.sleep(2); print('finished')"
+        f"release=Path({str(release)!r}); print('before timeout', flush=True); "
+        "deadline=time.monotonic()+120; "
+        "exec('while not release.exists() and time.monotonic() < deadline: time.sleep(0.05)'); "
+        "assert release.exists(), 'test never released the job'; print('finished')"
     )
-    result = await run_job_with_timeout(command, ".", 1)
-    assert result["timed_out"] is True
-    assert result["persisted"] is True
-    assert result["job_id"].startswith("job_")
-    assert result["job_status"] == "running"
-    # Slow CI machines may still be starting the runner at the deadline.
-    assert result["stdout"].strip() in {"", "before timeout"}
+    try:
+        result = await run_job_with_timeout(command, ".", 1)
+        assert result["timed_out"] is True
+        assert result["persisted"] is True
+        assert result["job_id"].startswith("job_")
+        assert result["job_status"] == "running"
+        # Slow CI machines may still be starting the runner at the deadline.
+        assert result["stdout"].strip() in {"", "before timeout"}
+    finally:
+        release.touch()
 
     completed = await _wait_job(result["job_id"])
     assert completed["job"]["exit_code"] == 0

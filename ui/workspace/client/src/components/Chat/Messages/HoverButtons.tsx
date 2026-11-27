@@ -20,6 +20,7 @@ import { Fork } from '~/components/Conversations';
 import { hoverButtonClasses } from './styles';
 import MessageAudio from './MessageAudio';
 import MessageBookmarkButton from './MessageBookmarkButton';
+import DeleteMessageTurnButton from './DeleteMessageTurnButton';
 import { cn, isTemporaryConversation } from '~/utils';
 import store from '~/store';
 
@@ -274,6 +275,19 @@ const HoverButtons = ({
           isLast={isLast}
         />
       )}
+
+      {!isSubagentThreadReadOnly &&
+        !isTemporaryConversation(conversation) &&
+        !isEditing &&
+        getMessages() != null &&
+        (isCreatedByUser || parentIsUserMessage === true) && (
+          <DeleteMessageTurnButton
+            messageId={message.messageId}
+            conversationId={conversation.conversationId}
+            isLast={isLast}
+            disabled={isSubmitting || pendingReveal != null}
+          />
+        )}
 
       {/* Edit Button */}
       {!isSubagentThreadReadOnly && isEditableEndpoint && !hideEditButton && (

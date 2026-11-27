@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Ištrinti šį pokalbio etapą",
+  "com_ui_message_turn_delete_confirm": "Ištrinti šį naudotojo pranešimą ir visus jo atsakymus? Vėlesni pranešimai bus išsaugoti. Šio veiksmo atšaukti negalima.",
+  "com_ui_message_turn_delete_error": "Nepavyko ištrinti pokalbio etapo",
   "com_ui_tool_approval_mode": "Įrankio patvirtinimo režimas",
   "com_ui_tool_approval_auto": "Automatinis",
   "com_ui_tool_approval_dangerous": "Peržiūrėkite rizikingas operacijas",

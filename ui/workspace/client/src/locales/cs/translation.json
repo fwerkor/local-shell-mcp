@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Smazat tento tah",
+  "com_ui_message_turn_delete_confirm": "Smazat tuto zprávu uživatele a všechny její odpovědi? Pozdější zprávy zůstanou zachovány. Tuto akci nelze vrátit.",
+  "com_ui_message_turn_delete_error": "Tento tah se nepodařilo smazat",
   "com_ui_tool_approval_mode": "Režim schválení nástroje",
   "com_ui_tool_approval_auto": "Automaticky",
   "com_ui_tool_approval_dangerous": "Zkontrolujte rizikové operace",

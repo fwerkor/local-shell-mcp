@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Видалити цей хід",
+  "com_ui_message_turn_delete_confirm": "Видалити це повідомлення користувача та всі відповіді на нього? Наступні повідомлення буде збережено. Цю дію не можна скасувати.",
+  "com_ui_message_turn_delete_error": "Не вдалося видалити цей хід",
   "com_ui_tool_approval_mode": "Режим затвердження інструменту",
   "com_ui_tool_approval_auto": "Автоматичний",
   "com_ui_tool_approval_dangerous": "Перегляньте ризиковані операції",

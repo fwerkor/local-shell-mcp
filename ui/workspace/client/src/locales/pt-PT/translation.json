@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Eliminar este turno",
+  "com_ui_message_turn_delete_confirm": "Eliminar esta mensagem do utilizador e todas as suas respostas? As mensagens posteriores serão mantidas. Esta ação não pode ser anulada.",
+  "com_ui_message_turn_delete_error": "Não foi possível eliminar este turno",
   "com_ui_tool_approval_mode": "Modo de aprovação da ferramenta",
   "com_ui_tool_approval_auto": "Automático",
   "com_ui_tool_approval_dangerous": "Reveja as operações arriscadas",

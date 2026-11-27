@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Slet denne tur",
+  "com_ui_message_turn_delete_confirm": "Vil du slette denne brugerbesked og alle dens svar? Senere beskeder bevares. Handlingen kan ikke fortrydes.",
+  "com_ui_message_turn_delete_error": "Kunne ikke slette denne tur",
   "com_ui_tool_approval_mode": "Værktøjsgodkendelsestilstand",
   "com_ui_tool_approval_auto": "Automatisk",
   "com_ui_tool_approval_dangerous": "Gennemgå risikable operationer",

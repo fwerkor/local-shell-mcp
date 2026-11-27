@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "གླེང་མོལ་སྐོར་འདི་སུབ་པ།",
+  "com_ui_message_turn_delete_confirm": "སྤྱོད་མཁན་གྱི་འཕྲིན་འདི་དང་ལན་ཚང་མ་སུབ་བམ། རྗེས་ཀྱི་འཕྲིན་ཚང་མ་ཉར་རྒྱུ་རེད། ཕྱིར་བསྡུ་མི་ཐུབ།",
+  "com_ui_message_turn_delete_error": "སྐོར་འདི་སུབ་མ་ཐུབ།",
   "com_ui_tool_approval_mode": "ལག་ཆའི་ཆོག་མཆན་ཐབས་ལམ།",
   "com_ui_tool_approval_auto": "རང་འགུལ་ཅན།",
   "com_ui_tool_approval_dangerous": "ཉེན་ཁ་ཆེ་བའི་བྱ་སྤྱོད་ལ་བསྐྱར་ཞིབ་བྱེད་པ།",

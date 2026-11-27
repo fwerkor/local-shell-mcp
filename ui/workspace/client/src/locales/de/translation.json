@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Diesen Gesprächsschritt löschen",
+  "com_ui_message_turn_delete_confirm": "Diese Nutzernachricht und alle zugehörigen Antworten löschen? Spätere Nachrichten bleiben erhalten. Dies kann nicht rückgängig gemacht werden.",
+  "com_ui_message_turn_delete_error": "Gesprächsschritt konnte nicht gelöscht werden",
   "com_ui_tool_approval_mode": "Werkzeuggenehmigungsmodus",
   "com_ui_tool_approval_auto": "Automatisch",
   "com_ui_tool_approval_dangerous": "Überprüfen Sie riskante Vorgänge",

@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "מחיקת סבב זה",
+  "com_ui_message_turn_delete_confirm": "למחוק את הודעת המשתמש הזו ואת כל התשובות לה? הודעות מאוחרות יותר יישמרו. לא ניתן לבטל פעולה זו.",
+  "com_ui_message_turn_delete_error": "לא ניתן למחוק סבב זה",
   "com_ui_tool_approval_mode": "מצב אישור כלי",
   "com_ui_tool_approval_auto": "אוטומטי",
   "com_ui_tool_approval_dangerous": "סקור פעולות מסוכנות",

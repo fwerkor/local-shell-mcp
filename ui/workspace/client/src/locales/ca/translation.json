@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Suprimeix aquest torn",
+  "com_ui_message_turn_delete_confirm": "Vols suprimir aquest missatge de l'usuari i totes les seves respostes? Es conservaran els missatges posteriors. Aquesta acció no es pot desfer.",
+  "com_ui_message_turn_delete_error": "No s'ha pogut suprimir aquest torn",
   "com_ui_tool_approval_mode": "Mode d'aprovació de l'eina",
   "com_ui_tool_approval_auto": "Automàtic",
   "com_ui_tool_approval_dangerous": "Revisar les operacions de risc",

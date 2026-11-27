@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Ջնջել այս փուլը",
+  "com_ui_message_turn_delete_confirm": "Ջնջե՞լ օգտատիրոջ այս հաղորդագրությունն ու բոլոր պատասխանները։ Հետագա հաղորդագրությունները կպահպանվեն։ Գործողությունն անշրջելի է։",
+  "com_ui_message_turn_delete_error": "Չհաջողվեց ջնջել այս փուլը",
   "com_ui_tool_approval_mode": "Գործիքի հաստատման ռեժիմ",
   "com_ui_tool_approval_auto": "Ավտոմատ",
   "com_ui_tool_approval_dangerous": "Վերանայեք ռիսկային գործողությունները",
