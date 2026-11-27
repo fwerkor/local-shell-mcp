@@ -31,6 +31,7 @@ def _config(agent, cadence=None):
         'name': 'Daily', 'prompt': 'Run', 'agent_id': agent['id'],
         'cadence': cadence or {'frequency': 'daily', 'hour': 9, 'minute': 0},
         'timezone': 'UTC', 'clientRequestId': 'test-request',
+        'executionScopes': [],
     }
 
 

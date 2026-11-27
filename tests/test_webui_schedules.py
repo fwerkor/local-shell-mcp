@@ -16,6 +16,7 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 def state(tmp_path, monkeypatch):
     from local_shell_mcp.settings import get_settings
 
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'none')
     monkeypatch.setenv('LOCAL_SHELL_MCP_WORKSPACE_ROOT', str(tmp_path))
     monkeypatch.setenv('LOCAL_SHELL_MCP_STATE_DIR', str(tmp_path / '.local-shell-mcp'))
     get_settings.cache_clear()
@@ -117,7 +118,10 @@ async def test_schedule_dispatch_creates_real_generation_and_settles(state, monk
         assert started.status_code == 200, started.text
         assert len(dispatched) == 1
         owner, generation, _, _, kwargs = dispatched[0]
-        assert owner == 'alice' and not kwargs['granted_scopes']
+        from local_shell_mcp.oauth import ALL_OAUTH_SCOPES
+        assert owner == 'alice' and kwargs['granted_scopes'] == frozenset(ALL_OAUTH_SCOPES)
+        assert kwargs['mcp_enabled'] and kwargs['ask_user_enabled']
+        assert kwargs['native_file_tools'] and kwargs['write_tools']
         assert repo.conversation('alice', generation.conversation_id)['title'] == 'Generate a digest.'
         # Claim retry does not execute the model twice.
         assert (await c.post('/api/schedules/' + created['id'] + '/run')).status_code == 409
@@ -472,7 +476,8 @@ async def test_schedule_conversation_targets(state, monkeypatch, target):
     started = []
 
     async def start(owner, generation, *args, **kwargs):
-        assert not kwargs['granted_scopes']
+        from local_shell_mcp.oauth import ALL_OAUTH_SCOPES
+        assert kwargs['granted_scopes'] == frozenset(ALL_OAUTH_SCOPES)
         started.append(generation)
         return True
 
@@ -537,3 +542,141 @@ async def test_schedule_conversation_targets(state, monkeypatch, target):
         assert final['runCount'] == 2 and final['failureCount'] == 0
         assert (await client.delete('/api/schedules/' + sid)).status_code == 200
         assert repo.conversation('alice', first.conversation_id) is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mcp_enabled', [True, False])
+async def test_scheduled_model_uses_live_tool_permissions(state, monkeypatch, mcp_enabled):
+    import asyncio
+
+    from local_shell_mcp.webui import generation_routes, nested_mcp, providers
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
+
+    app, repo, _ = state
+    store = GenerationStore(repo.database)
+    monkeypatch.setattr(generation_routes, '_database', lambda: repo.database)
+    monkeypatch.setattr(providers, 'provider_config',
+                        lambda *args, **kwargs: ProviderConfig('openai', 'mock-model', 'http://mock', ''))
+    for module in ('routes', 'misc_routes', 'machine_permissions'):
+        monkeypatch.setattr(f'local_shell_mcp.webui.{module}._repo', lambda: repo)
+    monkeypatch.setattr('local_shell_mcp.webui.machine_permissions._registered_defaults',
+                        lambda: {'local': 'write'})
+    agent = AgentRepository(repo.database).create('alice', {
+        'name': 'QQBot', 'provider': 'openAI', 'model': 'mock-model',
+        'machine_default_permission': 'read', 'machine_permissions': {}, 'mcp_servers': None,
+    })
+    cid = repo.create_conversation('alice', {'title': 'Existing chat'})['conversationId']
+    repo.save_setting('alice', 'conversation.permissions.' + cid, {'mcp': mcp_enabled})
+    repo.save_setting('alice', 'approval.mode', 'automatic')
+    called = []
+    model_tool_lists = []
+
+    async def external(owner, conversation_id, name, arguments, *, scopes):
+        assert owner == 'alice' and conversation_id == cid
+        assert {'shell:read', 'shell:execute'}.issubset(scopes)
+        called.append(name)
+        return 'external-result'
+
+    async def model(profile, history, *, tools, **kwargs):
+        names = {tool['function']['name'] for tool in tools}
+        model_tool_lists.append(names)
+        assert 'file_read' in names and 'run_shell' not in names
+        assert 'ask_user_question' in names
+        mcp_names = {'mcp_tool_search', 'mcp_tool_inspect', 'mcp_tool_call'}
+        if not mcp_enabled:
+            assert not names.intersection(mcp_names)
+            yield 'Done'
+            return
+        assert mcp_names.issubset(names)
+        count = sum(message.get('role') == 'tool' for message in history)
+        if count == 0:
+            yield ModelToolCall('search', 'mcp_tool_search', {'query': 'echo'})
+        elif count == 1:
+            yield ModelToolCall('call', 'mcp_tool_call', {'name': 'test:echo', 'arguments': {}})
+        else:
+            assert 'external-result' in history[-1]['content']
+            yield 'Done'
+
+    monkeypatch.setattr(nested_mcp, '_invoke_registered', external)
+    monkeypatch.setattr(generation_routes, 'stream_model_with_tools', model)
+    payload = {'name': 'QQ', 'prompt': 'Start', 'agent_id': agent['id'],
+               'cadence': {'frequency': 'continuous', 'delayMinutes': 0}, 'timezone': 'UTC',
+               'target': 'existing', 'targetConversationId': cid, 'clientRequestId': 'live-tools'}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url='http://test') as client:
+            assert (await client.post('/api/schedules', json=payload)).status_code == 201
+        occurrence, = schedule_routes._claim_due(repo.database)
+        await schedule_routes._dispatch(occurrence, repo.database)
+        tasks = list(generation_routes._TASKS.values())
+        if tasks:
+            await asyncio.wait_for(asyncio.gather(*tasks), 30)
+        generation = store.latest('alice', cid)
+        assert generation.status == 'complete', store.events('alice', generation.run_id)[-1]
+        assert model_tool_lists
+        assert called == (['mcp_tool_search', 'mcp_tool_call'] if mcp_enabled else [])
+        with repo.database.connect() as db:
+            assert db.execute("SELECT json_extract(state,'$.askUserEnabled') FROM runs WHERE id=?",
+                              (generation.run_id,)).fetchone()[0] == 1
+    finally:
+        await generation_routes.shutdown_generations()
+
+
+@pytest.mark.asyncio
+async def test_schedule_scope_grant_is_durable_and_cannot_be_supplied_by_client(state, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.webui import generation_routes, providers
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    app, repo, agent = state
+    monkeypatch.setenv('LOCAL_SHELL_MCP_AUTH_MODE', 'oauth')
+    get_settings.cache_clear()
+    monkeypatch.setattr(generation_routes, '_request_grant',
+                        lambda request: (set(request.headers.get('x-scopes', '').split()), 1))
+    store = GenerationStore(repo.database)
+    monkeypatch.setattr(generation_routes, '_generation_store', lambda: store)
+    monkeypatch.setattr(providers, 'provider_config',
+                        lambda *args, **kwargs: ProviderConfig('openai', 'mock-model', 'http://mock', ''))
+    started = []
+
+    async def start(owner, generation, profile, selected_agent, **kwargs):
+        started.append((generation, kwargs))
+        return True
+
+    monkeypatch.setattr(generation_routes, '_start_task', start)
+    payload = {'name': 'Authorized', 'prompt': 'Run', 'agent_id': agent['id'],
+               'cadence': {'frequency': 'continuous', 'delayMinutes': 0}, 'timezone': 'UTC',
+               'clientRequestId': 'scope-test', 'executionScopes': ['shell:execute', 'remote:use']}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url='http://test') as client:
+        created = await client.post('/api/schedules', json=payload, headers={'x-scopes': 'shell:read'})
+        assert created.status_code == 201, created.text
+        sid = created.json()['id']
+        assert created.json()['executionScopes'] == ['shell:read']
+        # The worker starts without a browser, cookie or access-token expiry.
+        occurrence, = schedule_routes._claim_due(repo.database)
+        await schedule_routes._dispatch(occurrence, repo.database)
+        generation, kwargs = started[0]
+        assert kwargs['granted_scopes'] == {'shell:read'}
+        assert kwargs.get('grant_expires') is None and kwargs.get('webui_cookie') is None
+        store.finish('alice', generation.run_id, status='complete', text='Done')
+        schedule_routes._refresh(repo.database)
+        # A narrower principal cannot trigger a stronger saved grant.
+        with repo.database.connect() as db:
+            db.execute('UPDATE webui_schedule_runs SET created_at=0 WHERE schedule_id=?', (sid,))
+        response = await client.post('/api/schedules/' + sid + '/run')
+        assert response.status_code == 403, response.text
+        # Editing under a narrower grant changes future authorization; the
+        # caller cannot smuggle additional privileges into the JSON.
+        changed = await client.patch('/api/schedules/' + sid, json={'executionScopes': ['shell:execute']})
+        assert changed.status_code == 200 and changed.json()['executionScopes'] == []
+        # An authenticated owner can reauthorize a legacy schedule with Run.
+        with repo.database.connect() as db:
+            db.execute("UPDATE webui_schedules SET config=json_remove(config,'$.executionScopes') WHERE id=?", (sid,))
+        response = await client.post('/api/schedules/' + sid + '/run', headers={'x-scopes': 'shell:read shell:execute'})
+        assert response.status_code == 200, response.text
+        assert started[-1][1]['granted_scopes'] == {'shell:read', 'shell:execute'}
+        saved = (await client.get('/api/schedules/' + sid)).json()
+        assert saved['executionScopes'] == ['shell:execute', 'shell:read']
