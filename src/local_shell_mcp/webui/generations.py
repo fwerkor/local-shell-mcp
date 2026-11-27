@@ -188,10 +188,13 @@ class GenerationStore:
         if not manual_compaction and (not isinstance(prompt, str) or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
             raise ValueError("Invalid text message (max 128 KiB)")
         manual_skill_ids = payload.get('manualSkills')
+        manual_skill_text = ''
         if manual_skill_ids is not None:
-            from .skill_runtime import resolve_manual_skills
+            from .skill_runtime import manual_context
 
-            resolve_manual_skills(self.database, owner, agent, manual_skill_ids)
+            # Resolve and freeze explicit selections when accepting this turn.
+            # Replay uses the original body even if the Skill is later edited.
+            manual_skill_text = manual_context(self.database, owner, agent, manual_skill_ids)
         else:
             manual_skill_ids = []
         user_message_id = str(payload.get('parentMessageId') if manual_compaction else (payload.get('messageId') or uuid.uuid4()))
@@ -309,6 +312,9 @@ class GenerationStore:
                     (user_message_id, conversation_id, parent_id, "user", prompt,
                      _json(payload.get("content") or {}), _json(user_metadata), now, now),
                 )
+                if manual_skill_text:
+                    db.execute("INSERT INTO webui_manual_skill_contexts(message_id,content) VALUES(?,?)",
+                               (user_message_id, manual_skill_text))
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
             db.execute("INSERT INTO runs(id,conversation_id,agent_id,status,state,created_at,updated_at) "
                        "VALUES(?,?,?,?,?,?,?)",
@@ -1467,8 +1473,13 @@ class GenerationStore:
                 if message_id in seen:
                     raise ValueError("Message graph contains a cycle")
                 seen.add(message_id)
-                row = db.execute("SELECT id,parent_id,role,text,content,metadata FROM messages WHERE id=? AND conversation_id=?",
-                                 (message_id, conversation_id)).fetchone()
+                row = db.execute(
+                    "SELECT m.id,m.parent_id,m.role,m.text,m.content,m.metadata,"
+                    "s.content AS manual_skill_context FROM messages m "
+                    "LEFT JOIN webui_manual_skill_contexts s ON s.message_id=m.id "
+                    "WHERE m.id=? AND m.conversation_id=?",
+                    (message_id, conversation_id),
+                ).fetchone()
                 if row is None:
                     raise KeyError("Message ancestor not found")
                 if row["role"] in {"user", "assistant"}:
@@ -1651,6 +1662,15 @@ class GenerationStore:
                                 value = [*value, {"type": "text", "text": note}]
                             else:
                                 value += "\n\n" + note
+                        selected = row["manual_skill_context"]
+                        if selected is not None:
+                            # A turn-local user message fragment, never a
+                            # mutable leading system instruction. UI text stays
+                            # unchanged; historical model prefixes are replayed.
+                            if isinstance(value, list):
+                                value = [{"type": "text", "text": selected}, *value]
+                            else:
+                                value = selected + "\n\n" + value
                         groups.append([{"role": "user", "content": value,
                                         **({"source": "attachment", "files": files} if files else {})}])
                 if max_messages is not None and len(groups) >= max(1, max_messages):

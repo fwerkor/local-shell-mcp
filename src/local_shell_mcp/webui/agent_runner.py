@@ -204,6 +204,34 @@ class AgentRunner:
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
         return (context or '') + ('\n\n' + MEMORY_TOOL_INSTRUCTIONS if has_tools else '')
 
+    def _automatic_prompt_context(self, query: str) -> tuple[str, str]:
+        from .misc_routes import effective_features
+        from .prompt_snapshots import automatic_context
+        from .skill_runtime import catalog
+        from .storage import WorkspaceRepository
+
+        agent = self.root_agent
+
+        def snapshot(kind, build):
+            return automatic_context(self.database, self.owner,
+                self.generation.conversation_id, self.authorization_conversation_id,
+                agent, kind, build)
+
+        # Live feature opt-outs and authorization boundaries still win. Normal
+        # memory/Skill CRUD, including empty-to-nonempty stores, never rebuilds
+        # an already admitted conversation's automatic fragments.
+        settings = WorkspaceRepository(self.database)
+        memory_text = ''
+        if ((not self.namespace or self.graph_node)
+                and effective_features(self.owner, self.authorization_conversation_id, repo=settings)["memory"]
+                and memory_enabled(settings, self.owner)):
+            memory_text = snapshot('memory', lambda: self._memory_context(agent, query))
+        skills_text = ''
+        if agent is None or (agent.get('skills_enabled') is True
+                             and agent.get('skills_scope') != 'none'):
+            skills_text = snapshot('skills', lambda: catalog(self.database, self.owner, agent))
+        return memory_text, skills_text
+
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
         from .lsm_tool_registry import available_tools
@@ -1555,12 +1583,9 @@ class AgentRunner:
             return await run_multi_agent_graph(self, history, topology, recursion_limit=recursion_limit)
         restored = self.saver.get_tuple(self.config)
         context = self._context(self.root_agent, profile=self.initial_profile, selected_tools=self.selected_tools)
-        if (not self.namespace or
+        if not restored and (not self.namespace or
                 (self.graph_node and self.namespace.startswith('/graph:')) or
                 '/subagent:' in self.namespace):
-            from .skill_runtime import catalog
-
-            skills_text = catalog(self.database, self.owner, self.root_agent)
             # Personal memory remains scoped to the main agent; delegated Agents
             # must independently receive their own selected Skill catalog.
             user_text = next((message.get('content') for message in reversed(history)
@@ -1571,46 +1596,21 @@ class AgentRunner:
                                      and isinstance(part.get('text'), str))
             query = (user_text if isinstance(user_text, str) else '') + '\n' + str(
                 (self.root_agent or {}).get('instructions') or '')
-            memory_text = self._memory_context(self.root_agent, query.strip()) if (
-                not self.namespace or self.graph_node) else ''
-            supplementary = []
-            if memory_text:
-                supplementary.append({'role': 'system', 'content': memory_text})
-            if skills_text:
-                supplementary.append({'role': 'system', 'content': skills_text})
-            if not self.namespace:
-                # The selection is stored on the exact user message in SQLite,
-                # rather than carrying a transient HTTP field across retries.
-                with self.database.connect() as db:
-                    record = db.execute(
-                        'SELECT m.metadata FROM messages m JOIN conversations c '
-                        'ON c.id=m.conversation_id WHERE m.id=? AND c.owner=? '
-                        'AND m.conversation_id=? AND m.role=\'user\'',
-                        (self.generation.user_message_id, self.owner,
-                         self.generation.conversation_id)).fetchone()
-                if record is not None:
-                    selected_ids = json.loads(record['metadata']).get('manualSkills') or []
-                    if selected_ids:
-                        from .skill_runtime import manual_context
-
-                        selected_text = manual_context(self.database, self.owner,
-                                                       self.root_agent, selected_ids)
-                        if selected_text:
-                            supplementary.append({'role': 'system', 'content': selected_text})
+            memory_text, skills_text = self._automatic_prompt_context(query.strip())
+            supplementary = '\n\n'.join(part for part in (memory_text, skills_text) if part)
             if supplementary:
-                # Preserve the built-in artifact/Agent system message as the
-                # single leading prompt, appending Memory/Skill context to it.
-                # Empty memories must never inject a second system message.
+                # Keep automatic fragments in the stable instructions, not
+                # inside the replaceable compaction summary carrier.
                 index = 0
-                while index < len(history) and history[index].get('role') == 'system':
+                while (index < len(history) and history[index].get('role') == 'system'
+                       and not str(history[index].get('content')).startswith('<summary>\n')):
                     index += 1
                 if index:
                     last = dict(history[index - 1])
-                    last['content'] = str(last['content']) + '\n\n' + '\n\n'.join(
-                        item['content'] for item in supplementary)
+                    last['content'] = str(last['content']) + '\n\n' + supplementary
                     history = [*history[:index - 1], last, *history[index:]]
                 else:
-                    history = [*supplementary, *history]
+                    history = [{'role': 'system', 'content': supplementary}, *history]
         state = AgentLoopState(context, history)
         if restored:
             self.active_config = restored["config"]

@@ -367,13 +367,23 @@ async def test_manual_skill_selection_survives_storage_and_reaches_model(state, 
         stream_tools=model, stream_text=model, on_text=send, agent=agent,
         profile=ProviderConfig('openai', 'mock', 'http://example.test/v1', ''),
     )
-    await runner.run([{'role': 'user', 'content': 'Use the manual Skill'}])
+    first_history = store.history('alice', generation.conversation_id)
+    # The selected body is frozen at admission, not at replay or generation.
+    with db.connect() as conn:
+        conn.execute("DELETE FROM webui_skills WHERE id='manual-id'")
+        assert conn.execute("SELECT text FROM messages WHERE id=?",
+                            (generation.user_message_id,)).fetchone()['text'] == selected_payload['text']
+    await runner.run(store.history('alice', generation.conversation_id))
     assert captured
-    assert 'Perform the manually selected task.' in '\n'.join(m['content'] for m in captured[0] if m['role'] == 'system')
-    assert 'Manually selected Skills' in '\n'.join(m['content'] for m in captured[0] if m['role'] == 'system')
-    # A non-selected turn does not inherit the previous turn's transient catalog.
-    assert not any('Perform the manually selected task.' in (str(message.get('content')))
-                   for message in store.history('alice', generation.conversation_id))
+    assert 'Perform the manually selected task.' in captured[0][-1]['content']
+    assert 'Manually selected Skills' in captured[0][-1]['content']
+    assert all('Manually selected Skills' not in m['content'] for m in captured[0] if m['role'] == 'system')
+    assert store.finish('alice', generation.run_id, status='complete', text='Done')
+    follow, _ = store.begin('alice', {'conversationId': generation.conversation_id,
+                                       'text': 'Next turn'}, agent)
+    history = store.history('alice', generation.conversation_id, message_id=follow.user_message_id)
+    assert history[:len(first_history)] == first_history
+    assert history[-1] == {'role': 'user', 'content': 'Next turn'}
 
 
 @pytest.mark.asyncio
