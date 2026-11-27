@@ -127,7 +127,7 @@ export default function Breakdown({
   if (typeof view.percent === 'number' && Number.isFinite(view.percent)) {
     percent = Math.min(Math.max(view.percent, 0), 100);
   }
-  const { snapshot, snapshotActive, branchUsage, hasUsage } = view;
+  const { snapshot, snapshotActive, branchUsage, hasUsage, recordedUsage } = view;
   const providerReported = view.providerInputTokens != null;
   /** Show the all-branches total only when it (a) exceeds the active branch —
    *  epsilon guards against float summation order surfacing a spurious row in an
@@ -138,16 +138,6 @@ export default function Breakdown({
     Number.isFinite(view.totalCost) &&
     Number.isFinite(view.branchCost) &&
     view.totalCost - view.branchCost > 1e-9;
-
-  /** Every normalized bucket of the subagent calls: a cached call reports its
-   *  prompt under `cacheRead`/`cacheWrite`, so summing input+output alone
-   *  under-reports it — and hides a fully cached call with no output entirely,
-   *  while the Totals rows above still count its cache traffic. */
-  const subagentTokens =
-    normalizeTokenCount(view.subagentUsage?.input) +
-    normalizeTokenCount(view.subagentUsage?.output) +
-    normalizeTokenCount(view.subagentUsage?.cacheRead) +
-    normalizeTokenCount(view.subagentUsage?.cacheWrite);
 
   const breakdown = snapshotActive ? snapshot?.breakdown : undefined;
   const instructionTokens = normalizeTokenCount(
@@ -167,19 +157,6 @@ export default function Breakdown({
     instructionTokens +
     summaryTokens +
     retainedToolTokens;
-  const estimatedInput =
-    breakdown != null
-      ? Math.min(
-          usedTokens,
-          Math.max(
-            compositionInput,
-            usedTokens -
-              normalizeTokenCount(snapshot?.completedOutputTokens) -
-              normalizeTokenCount(snapshot?.resumedOutputTokens) -
-              normalizeTokenCount(view.liveTokens),
-          ),
-        )
-      : Math.max(0, usedTokens - normalizeTokenCount(view.liveTokens));
   const messageBudget = Math.max(0, compositionInput - instructionTokens - summaryTokens);
   const rawToolCallTokens =
     breakdown?.toolMessageTokens != null
@@ -267,30 +244,6 @@ export default function Breakdown({
    *  swatch if and only if it is a segment, so the two can never disagree.
    *  Deferred tools keep their family's slot and are hatched — same identity,
    *  held out of the active set. */
-  const overviewSegments: Array<MeterSegment & { label: string }> = providerReported
-    ? [
-        {
-          id: 'provider-input',
-          label: localize('com_ui_input'),
-          value: view.providerInputTokens ?? 0,
-          slot: 1,
-        },
-        {
-          id: 'provider-output',
-          label: localize('com_ui_output'),
-          value: view.providerOutputTokens ?? 0,
-          slot: 2,
-        },
-      ]
-    : [
-        { id: 'provider-input', label: localize('com_ui_input'), value: estimatedInput, slot: 1 },
-        {
-          id: 'provider-output',
-          label: localize('com_ui_output'),
-          value: Math.max(0, usedTokens - estimatedInput),
-          slot: 2,
-        },
-      ];
   const segments: Array<MeterSegment & { label: string }> =
     breakdown == null
       ? [
@@ -384,14 +337,39 @@ export default function Breakdown({
             slot: 8,
           },
         ];
-  const meterSegments: MeterSegment[] = overviewSegments;
-  // Category counts are estimates of the prompt, not exact API counts.
-  // Keep their own denominator rather than inventing the API's attribution.
+  // The provider confirms the total, but category estimates are approximate.
+  // Reconcile overestimates proportionally and explicitly retain any unclassified
+  // remainder (e.g. provider-injected prompt tokens or newly generated output).
   const categoryTotal = segments.reduce((sum, segment) => sum + segment.value, 0);
-  const hasComposition = categoryTotal > 0;
+  if (categoryTotal > usedTokens) {
+    let remaining = usedTokens;
+    let rawRemaining = categoryTotal;
+    for (const segment of segments) {
+      const original = segment.value;
+      segment.value = rawRemaining > 0 ? Math.round((remaining * original) / rawRemaining) : 0;
+      remaining -= segment.value;
+      rawRemaining -= original;
+    }
+  }
+  const unclassified = Math.max(
+    0,
+    usedTokens - segments.reduce((sum, segment) => sum + segment.value, 0),
+  );
+  if (unclassified > 0) {
+    segments.push({
+      id: 'unclassified',
+      label: localize('com_ui_unknown'),
+      value: unclassified,
+      slot: 8,
+    });
+  }
+  const hasComposition = usedTokens > 0;
+  const meterMax = Math.max(maxTokens ?? usedTokens, usedTokens, 1);
   const cacheHitRate =
-    providerReported && view.cacheRead != null && view.providerInputTokens! > 0
-      ? Math.min(100, (view.cacheRead / view.providerInputTokens!) * 100)
+    recordedUsage != null &&
+    recordedUsage.inputTokens > 0 &&
+    recordedUsage.cacheKnownInputTokens === recordedUsage.inputTokens
+      ? Math.min(100, (100 * recordedUsage.cacheReadTokens) / recordedUsage.inputTokens)
       : undefined;
 
   /** A hovered row can vanish mid-hover (live snapshot update, or the view
@@ -401,7 +379,7 @@ export default function Breakdown({
    *  row reappears with the pointer elsewhere. Render-phase reset: React
    *  re-renders immediately and never commits the stale highlight. */
   const hoverIsValid = (id: string): boolean =>
-    [...meterSegments, ...segments].some((segment) => segment.id === id && segment.value > 0);
+    segments.some((segment) => segment.id === id && segment.value > 0);
   if (hoveredSegment != null && !hoverIsValid(hoveredSegment)) {
     setHoveredSegment(null);
   }
@@ -410,6 +388,33 @@ export default function Breakdown({
 
   return (
     <div className="w-72" role="region" aria-label={localize('com_ui_context_usage')}>
+      <div className="space-y-2" data-testid="token-usage-totals">
+        <h3 className="text-sm font-medium text-text-primary">
+          {localize('com_ui_context_totals')}
+        </h3>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs text-text-secondary">{localize('com_ui_input')}</p>
+            <p className="text-xl font-semibold tabular-nums text-text-primary">
+              {recordedUsage == null ? '—' : formatTokens(recordedUsage.inputTokens)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-text-secondary">{localize('com_ui_output')}</p>
+            <p className="text-xl font-semibold tabular-nums text-text-primary">
+              {recordedUsage == null ? '—' : formatTokens(recordedUsage.outputTokens)}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-4 text-sm">
+          <span className="text-text-secondary">{localize('com_ui_context_cache_hit_rate')}</span>
+          <span className="font-medium tabular-nums text-text-primary">
+            {cacheHitRate == null ? '—' : `${Number(cacheHitRate.toFixed(1))}%`}
+          </span>
+        </div>
+        <p className="text-xs text-text-tertiary">{localize('com_ui_context_recorded_only')}</p>
+      </div>
+      <div className="my-3 border-t border-border-light" role="separator" />
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 text-sm font-medium text-text-primary">
           {localize('com_ui_context_window')}
@@ -423,43 +428,21 @@ export default function Breakdown({
       </div>
       <SegmentedMeter
         className="mt-3"
-        segments={maxTokens != null ? meterSegments : []}
-        max={maxTokens ?? 1}
-        highlightId={activeSegment?.startsWith('provider-') ? activeSegment : null}
+        segments={segments}
+        max={meterMax}
+        highlightId={activeSegment}
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={maxTokens != null ? Math.round(percent) : undefined}
         aria-label={localize('com_ui_context_usage')}
       />
-      <div className="mt-3 space-y-1.5" data-testid="context-overview">
-        {overviewSegments.map(({ id, label, value, ...segment }) => (
-          <Row
-            key={id}
-            id={id}
-            label={label}
-            value={value}
-            max={maxTokens}
-            segment={segment}
-            onHoverChange={setHoveredSegment}
-          />
-        ))}
-        {freeTokens != null && (
-          <Row label={localize('com_ui_context_free')} value={freeTokens} max={maxTokens} track />
-        )}
-        <div className="flex items-center justify-between gap-4 text-sm">
-          <span className="text-text-secondary">{localize('com_ui_context_cache_hit_rate')}</span>
-          <span className="font-medium tabular-nums text-text-primary">
-            {cacheHitRate == null ? '—' : `${Number(cacheHitRate.toFixed(1))}%`}
-          </span>
-        </div>
-      </div>
       {maxTokens == null && (
         <p className="mt-2 text-xs text-text-secondary">{localize('com_ui_context_unknown')}</p>
       )}
       <Collapsible open={expanded} onOpenChange={setExpanded}>
         <CollapsibleTrigger
-          className="group mt-3 flex w-full items-center justify-between gap-2 border-t border-border-light pt-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
+          className="group mt-3 flex w-full items-center justify-between gap-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
           data-testid="context-breakdown-toggle"
         >
           <span>{localize('com_ui_context_input_composition')}</span>
@@ -477,76 +460,12 @@ export default function Breakdown({
             single 12px jump after the height reached zero. */}
         <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:data-[state=closed]:animate-none motion-reduce:data-[state=open]:animate-none">
           <div className="mt-3 space-y-3">
-            {(pressure !== 'none' || insights.length > 0) && (
-              <div className="relative flex items-center justify-between gap-2">
-                {pressure !== 'none' ? (
-                  <p
-                    className={cn(
-                      'flex min-w-0 items-center gap-1.5 text-xs',
-                      pressure === 'danger' ? 'text-text-destructive' : 'text-text-warning',
-                    )}
-                  >
-                    <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-                    {localize(
-                      pressure === 'danger'
-                        ? 'com_ui_context_pressure_danger'
-                        : 'com_ui_context_pressure_warn',
-                    )}
-                  </p>
-                ) : (
-                  <span />
-                )}
-                {insights.length > 0 && (
-                  <HoverCard open={insightsOpen} onOpenChange={setInsightsOpen}>
-                    <HoverCardTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={localize('com_ui_context_insights')}
-                        aria-expanded={insightsOpen}
-                        aria-controls={insightsOpen ? insightsId : undefined}
-                        data-testid="context-insights-toggle"
-                        className="size-6 text-text-secondary"
-                        onFocus={() => setInsightsOpen(true)}
-                        onBlur={() => setInsightsOpen(false)}
-                        onClick={() => setInsightsOpen(true)}
-                      >
-                        <Info className="size-3.5" aria-hidden="true" />
-                      </Button>
-                    </HoverCardTrigger>
-                    <HoverCardPortal>
-                      <HoverCardContent
-                        id={insightsId}
-                        role="region"
-                        aria-label={localize('com_ui_context_insights')}
-                        data-testid="context-hints"
-                        className="max-w-[calc(100vw-2rem)] motion-reduce:data-[state=closed]:animate-none motion-reduce:data-[state=open]:animate-none"
-                        align="end"
-                      >
-                        {insights.map((insight, index) => (
-                          <p className="break-words text-xs text-text-secondary" key={index}>
-                            {insight}
-                          </p>
-                        ))}
-                      </HoverCardContent>
-                    </HoverCardPortal>
-                  </HoverCard>
-                )}
-              </div>
-            )}
             <div
               className="space-y-1.5"
               data-testid={breakdown ? 'context-breakdown' : 'context-estimate'}
             >
               {hasComposition ? (
                 <>
-                  <SegmentedMeter
-                    segments={segments}
-                    max={categoryTotal}
-                    highlightId={activeSegment?.startsWith('provider-') ? null : activeSegment}
-                    aria-label={localize('com_ui_context_input_composition')}
-                  />
                   {segments.map(({ id, label, value, ...segment }) => {
                     const shouldRender = value > 0;
                     if (!shouldRender) {
@@ -558,7 +477,7 @@ export default function Breakdown({
                           <Row
                             label={label}
                             value={value}
-                            max={categoryTotal}
+                            max={maxTokens}
                             segment={segment}
                             id={id}
                             onHoverChange={setHoveredSegment}
@@ -570,7 +489,7 @@ export default function Breakdown({
                           <Row
                             label={label}
                             value={value}
-                            max={categoryTotal}
+                            max={maxTokens}
                             segment={segment}
                             id={id}
                             onHoverChange={setHoveredSegment}
@@ -597,31 +516,19 @@ export default function Breakdown({
                       </Fragment>
                     );
                   })}
+                  {freeTokens != null && (
+                    <Row
+                      label={localize('com_ui_context_free')}
+                      value={freeTokens}
+                      max={maxTokens}
+                      track
+                    />
+                  )}
                 </>
               ) : (
                 <p className="text-xs text-text-secondary">—</p>
               )}
             </div>
-
-            {hasUsage && (
-              <>
-                <div className="border-t border-border-light" role="separator" />
-                <div className="space-y-1.5" data-testid="token-usage-totals">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-text-tertiary">
-                    {localize('com_ui_context_totals')}
-                  </h3>
-                  <Row label={localize('com_ui_input')} value={branchUsage.input} />
-                  <Row label={localize('com_ui_output')} value={branchUsage.output} />
-                  {/** Subagent calls are accumulated per conversation for the session
-                   *  and are not attributed to a response, so they cannot be scoped to
-                   *  the viewed branch like the rows above; label them all-branches
-                   *  rather than imply branch scope. */}
-                  {subagentTokens > 0 && (
-                    <Row label={localize('com_ui_context_subagents_all')} value={subagentTokens} />
-                  )}
-                </div>
-              </>
-            )}
 
             {showCost && hasUsage && branchUsage.costKnown && (
               <>
@@ -653,6 +560,66 @@ export default function Breakdown({
           </div>
         </CollapsibleContent>
       </Collapsible>
+      <div className="mt-2">
+        {(pressure !== 'none' || insights.length > 0) && (
+          <div className="relative flex items-center justify-between gap-2">
+            {pressure !== 'none' ? (
+              <p
+                className={cn(
+                  'flex min-w-0 items-center gap-1.5 text-xs',
+                  pressure === 'danger' ? 'text-text-destructive' : 'text-text-warning',
+                )}
+              >
+                <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+                {localize(
+                  pressure === 'danger'
+                    ? 'com_ui_context_pressure_danger'
+                    : 'com_ui_context_pressure_warn',
+                )}
+              </p>
+            ) : (
+              <span />
+            )}
+            {insights.length > 0 && (
+              <HoverCard open={insightsOpen} onOpenChange={setInsightsOpen}>
+                <HoverCardTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={localize('com_ui_context_insights')}
+                    aria-expanded={insightsOpen}
+                    aria-controls={insightsOpen ? insightsId : undefined}
+                    data-testid="context-insights-toggle"
+                    className="size-6 text-text-secondary"
+                    onFocus={() => setInsightsOpen(true)}
+                    onBlur={() => setInsightsOpen(false)}
+                    onClick={() => setInsightsOpen(true)}
+                  >
+                    <Info className="size-3.5" aria-hidden="true" />
+                  </Button>
+                </HoverCardTrigger>
+                <HoverCardPortal>
+                  <HoverCardContent
+                    id={insightsId}
+                    role="region"
+                    aria-label={localize('com_ui_context_insights')}
+                    data-testid="context-hints"
+                    className="max-w-[calc(100vw-2rem)] motion-reduce:data-[state=closed]:animate-none motion-reduce:data-[state=open]:animate-none"
+                    align="end"
+                  >
+                    {insights.map((insight, index) => (
+                      <p className="break-words text-xs text-text-secondary" key={index}>
+                        {insight}
+                      </p>
+                    ))}
+                  </HoverCardContent>
+                </HoverCardPortal>
+              </HoverCard>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

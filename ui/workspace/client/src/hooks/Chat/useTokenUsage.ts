@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useQueryClient } from '@tanstack/react-query';
-import { Constants, QueryKeys } from 'librechat-data-provider';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Constants, QueryKeys, dataService } from 'librechat-data-provider';
 import type { TMessage, TConversation, TModelTokenomics } from 'librechat-data-provider';
 import type { BranchTotals, BranchUsage } from '~/utils/tokens';
 import type { ContextSnapshot } from '~/store/usage';
@@ -41,7 +41,16 @@ export interface TokenUsageParams {
   isSubmitting: boolean;
 }
 
+export interface RecordedUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheKnownInputTokens: number;
+  calls: number;
+}
+
 export interface TokenUsageView {
+  recordedUsage?: RecordedUsage | null;
   usedTokens: number;
   maxTokens?: number;
   /** 0–100, clamped; 0 when max is unknown */
@@ -109,6 +118,30 @@ export default function useTokenUsage({
 }: TokenUsageParams): TokenUsageView {
   const queryClient = useQueryClient();
   const conversationKey = conversation?.conversationId ?? Constants.NEW_CONVO;
+  const { data: recordedUsage, refetch: refetchUsage } = useQuery(
+    ['recorded-conversation-usage', conversationKey],
+    async () => {
+      const data = await dataService.getConversationById(conversationKey);
+      return (
+        (data as TConversation & { recordedUsage?: RecordedUsage | null }).recordedUsage ?? null
+      );
+    },
+    {
+      enabled:
+        conversationKey !== Constants.NEW_CONVO && conversationKey !== Constants.PENDING_CONVO,
+      refetchInterval: isSubmitting ? 2000 : false,
+      staleTime: 0,
+    },
+  );
+  useEffect(() => {
+    if (
+      !isSubmitting &&
+      conversationKey !== Constants.NEW_CONVO &&
+      conversationKey !== Constants.PENDING_CONVO
+    ) {
+      void refetchUsage();
+    }
+  }, [isSubmitting, conversationKey, refetchUsage]);
 
   const tailId = useLatestMessageId(index);
   const snapshot = useAtomValue(contextSnapshotFamily(conversationKey));
@@ -350,6 +383,7 @@ export default function useTokenUsage({
           : Math.max(0, baseUsed) + liveOutput + completedOutput + retainedToolTokens,
       );
       return {
+        recordedUsage,
         usedTokens,
         maxTokens,
         percent: maxTokens != null ? Math.min((usedTokens / maxTokens) * 100, 100) : 0,
@@ -508,6 +542,7 @@ export default function useTokenUsage({
         normalizeTokenCount(liveTokens),
     );
     return {
+      recordedUsage,
       usedTokens,
       maxTokens,
       percent:
@@ -532,6 +567,7 @@ export default function useTokenUsage({
       rates: limits.rates,
     };
   }, [
+    recordedUsage,
     snapshot,
     isSubmitting,
     branchTotals,

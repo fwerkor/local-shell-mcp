@@ -1248,9 +1248,9 @@ class AgentRunner:
             async for value in response:
                 if isinstance(value, str):
                     chunks.append(value)
-                elif isinstance(value, (ModelUsage, ModelThought)):
-                    # A summarizer's provider metadata must never be inserted into
-                    # user-visible checkpoint text or mistaken for a tool call.
+                elif isinstance(value, ModelUsage):
+                    self._record_model_consumption(value)
+                elif isinstance(value, ModelThought):
                     continue
                 elif isinstance(value, ModelFinish):
                     finish_reason = value.reason.lower()
@@ -1357,8 +1357,16 @@ class AgentRunner:
         limit = (stored.get('model_contexts') or {}).get(state.context.profile.model)
         return limit if type(limit) is int and 0 < limit <= 2_000_000 else None
 
+    def _record_model_consumption(self, usage: ModelUsage) -> None:
+        try:
+            self.store.record_model_consumption(self.owner, self.generation.run_id, usage)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                'Model consumption recording failed (%s)', type(exc).__name__)
+
     async def _observe_model_usage(self, usage: ModelUsage, state: AgentLoopState) -> None:
-        """Update cumulative raw/provider ratio only on genuine usage frames."""
+        """Record each provider call and update the primary context snapshot."""
+        self._record_model_consumption(usage)
         if self.namespace or usage.provider != state.context.profile.provider:
             return
         if usage.input_tokens <= 0:

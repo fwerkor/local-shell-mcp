@@ -117,7 +117,21 @@ class WorkspaceRepository:
     def conversation(self, owner: str, conversation_id: str) -> dict | None:
         with self.database.connect() as db:
             row = db.execute("SELECT * FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
-            return self._convo(row) if row else None
+            if row is None:
+                return None
+            result = self._convo(row)
+            usage = db.execute(
+                'SELECT * FROM webui_conversation_usage WHERE conversation_id=?',
+                (conversation_id,),
+            ).fetchone()
+            result['recordedUsage'] = ({
+                'inputTokens': usage['input_tokens'],
+                'outputTokens': usage['output_tokens'],
+                'cacheReadTokens': usage['cache_read_tokens'],
+                'cacheKnownInputTokens': usage['cache_known_input_tokens'],
+                'calls': usage['calls'],
+            } if usage else None)
+            return result
 
     def conversations(self, owner: str, *, archived: bool = False, pinned: bool = False,
                       project_id: str | None = None, search: str | None = None,

@@ -12,6 +12,13 @@ jest.mock('~/store/usage', () => ({
 }));
 
 const view: TokenUsageView = {
+  recordedUsage: {
+    inputTokens: 1500,
+    outputTokens: 125,
+    cacheReadTokens: 900,
+    cacheKnownInputTokens: 1500,
+    calls: 2,
+  },
   usedTokens: 610,
   maxTokens: 1000,
   percent: 61,
@@ -59,34 +66,41 @@ function panel(next: TokenUsageView) {
   );
 }
 
-describe('unified context usage', () => {
-  it('keeps exact request totals visible while the estimated breakdown expands', () => {
+describe('separate cumulative and context usage', () => {
+  it('shows cumulative usage independently of the window and one persistent meter', () => {
     render(panel(view));
-    const overview = within(screen.getByTestId('context-overview'));
-    expect(overview.getByText('75%')).toBeInTheDocument();
-    expect(overview.getByText('600')).toBeInTheDocument();
+    const totals = within(screen.getByTestId('token-usage-totals'));
+    expect(totals.getByText('60%')).toBeInTheDocument();
+    expect(totals.getByText('125')).toBeInTheDocument();
     expect(screen.queryByText('com_ui_context_messages')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('progressbar')).toHaveLength(1);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '61');
 
     fireEvent.click(screen.getByTestId('context-breakdown-toggle'));
     const detail = within(screen.getByTestId('context-breakdown'));
     expect(detail.getByText('com_ui_context_messages')).toBeInTheDocument();
-    expect(detail.getAllByText('(40%)', { selector: 'span' })).toHaveLength(2);
+    expect(detail.getAllByText('(20%)', { selector: 'span' })).toHaveLength(2);
+    expect(detail.getByText('(39%)')).toBeInTheDocument();
+    expect(detail.getByText('(11%)')).toBeInTheDocument();
+    expect(screen.getAllByRole('progressbar')).toHaveLength(1);
     fireEvent.click(detail.getByRole('button', { name: /com_ui_context_tool_calls/ }));
     expect(detail.getByText('demo')).toBeInTheDocument();
-    expect(overview.getByText('600')).toBeInTheDocument();
+    expect(totals.getByText('60%')).toBeInTheDocument();
   });
 
-  it('distinguishes an explicit zero cache hit from missing telemetry', () => {
-    const { rerender } = render(panel({ ...view, cacheRead: 0 }));
-    expect(within(screen.getByTestId('context-overview')).getByText('0%')).toBeInTheDocument();
-    rerender(panel({ ...view, cacheRead: undefined }));
-    expect(within(screen.getByTestId('context-overview')).getByText('—')).toBeInTheDocument();
+  it('distinguishes explicit zero cache hits from incomplete telemetry', () => {
+    const recordedUsage = { ...view.recordedUsage!, cacheReadTokens: 0 };
+    const { rerender } = render(panel({ ...view, recordedUsage }));
+    expect(within(screen.getByTestId('token-usage-totals')).getByText('0%')).toBeInTheDocument();
+    rerender(panel({ ...view, recordedUsage: { ...recordedUsage, cacheKnownInputTokens: 600 } }));
+    expect(within(screen.getByTestId('token-usage-totals')).getByText('—')).toBeInTheDocument();
   });
 
-  it('retains the overview in the estimate-only fallback', () => {
+  it('never substitutes estimated context counts for missing usage', () => {
     render(
       panel({
         ...view,
+        recordedUsage: null,
         snapshot: null,
         snapshotActive: false,
         isEstimate: true,
@@ -97,9 +111,9 @@ describe('unified context usage', () => {
         messageTokens: 600,
       }),
     );
-    expect(within(screen.getByTestId('context-overview')).getByText('600')).toBeInTheDocument();
-    expect(within(screen.getByTestId('context-overview')).getByText('—')).toBeInTheDocument();
+    expect(within(screen.getByTestId('token-usage-totals')).getAllByText('—')).toHaveLength(3);
     fireEvent.click(screen.getByTestId('context-breakdown-toggle'));
     expect(screen.getByTestId('context-estimate')).toBeInTheDocument();
+    expect(screen.getAllByRole('progressbar')).toHaveLength(1);
   });
 });
