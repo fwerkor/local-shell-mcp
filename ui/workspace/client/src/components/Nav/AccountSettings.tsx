@@ -9,7 +9,6 @@ import {
   CircleHelp,
   CircleUserRound,
   Github,
-  Keyboard,
   LogOut,
   Scale,
   ShieldCheck,
@@ -21,7 +20,6 @@ import { openInNewTab } from '~/utils';
 import { useLocalize } from '~/hooks';
 import { SettingsTabValues } from 'librechat-data-provider';
 import { settingsTabState } from './Settings/state';
-import store from '~/store';
 
 const DOCUMENTATION_URL = 'https://fwerkor.github.io/local-shell-mcp/';
 const SOURCE_REPOSITORY_URL = 'https://github.com/fwerkor/local-shell-mcp';
@@ -29,11 +27,9 @@ const SOURCE_REPOSITORY_URL = 'https://github.com/fwerkor/local-shell-mcp';
 function HelpSubmenu({
   termsOfServiceURL,
   privacyPolicyURL,
-  onShowShortcuts,
 }: {
   termsOfServiceURL?: string;
   privacyPolicyURL?: string;
-  onShowShortcuts: () => void;
 }) {
   const localize = useLocalize();
   const hasTos = !!termsOfServiceURL;
@@ -56,7 +52,10 @@ function HelpSubmenu({
         gutter={12}
         className="account-settings-popover popover-ui popover-from-left z-[126] w-[244px] rounded-lg"
       >
-        <Menu.MenuItem onClick={() => openInNewTab(DOCUMENTATION_URL)} className="select-item text-sm">
+        <Menu.MenuItem
+          onClick={() => openInNewTab(DOCUMENTATION_URL)}
+          className="select-item text-sm"
+        >
           <BookOpen className="icon-md" aria-hidden="true" />
           {localize('com_nav_documentation')}
         </Menu.MenuItem>
@@ -66,10 +65,6 @@ function HelpSubmenu({
         >
           <Github className="icon-md" aria-hidden="true" />
           {localize('com_nav_source_repository')}
-        </Menu.MenuItem>
-        <Menu.MenuItem onClick={onShowShortcuts} className="select-item text-sm">
-          <Keyboard className="icon-md" aria-hidden="true" />
-          {localize('com_shortcut_keyboard_shortcuts')}
         </Menu.MenuItem>
         {(hasTos || hasPrivacy) && <DropdownMenuSeparator />}
         {hasTos && (
@@ -103,7 +98,6 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
     enabled: !!isAuthenticated && startupConfig?.balance?.enabled,
   });
   const setSettingsTab = useSetRecoilState(settingsTabState);
-  const setShowShortcutsDialog = useSetRecoilState(store.showShortcutsDialog);
   const [showArchived, setShowArchived] = useState(false);
   const accountSettingsButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -159,7 +153,6 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
         <HelpSubmenu
           termsOfServiceURL={startupConfig?.interface?.termsOfService?.externalUrl}
           privacyPolicyURL={startupConfig?.interface?.privacyPolicy?.externalUrl}
-          onShowShortcuts={() => setShowShortcutsDialog(true)}
         />
         <Menu.MenuItem onClick={() => setShowArchived(true)} className="select-item text-sm">
           <Archive className="icon-md" aria-hidden="true" />

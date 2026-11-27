@@ -30,7 +30,6 @@ import {
   useFileMap,
 } from '~/hooks';
 import GlobalSettings from '~/components/Nav/Settings/GlobalSettings';
-import KeyboardShortcutsDialog from '~/components/Nav/KeyboardShortcutsDialog';
 import KeyboardDeleteDialog from '~/components/Nav/KeyboardDeleteDialog';
 import { useUserTermsQuery, useGetStartupConfig } from '~/data-provider';
 import { MobileDrawerScrim } from '~/components/UnifiedSidebar/mobile';
@@ -47,12 +46,7 @@ import store from '~/store';
 /** Isolates keyboard shortcut listeners so they only mount after auth. */
 function KeyboardShortcutsProvider() {
   useKeyboardShortcuts();
-  return (
-    <>
-      <KeyboardShortcutsDialog />
-      <KeyboardDeleteDialog />
-    </>
-  );
+  return <KeyboardDeleteDialog />;
 }
 
 export default function Root() {

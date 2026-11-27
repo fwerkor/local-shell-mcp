@@ -1,5 +1,5 @@
 import { createElement } from 'react';
-import { MessageSquare, Info, Server, Layers } from 'lucide-react';
+import { MessageSquare, Info, Server, Layers, Keyboard } from 'lucide-react';
 import { SettingsTabValues } from 'librechat-data-provider';
 import { GearIcon, DataIcon, SpeechIcon } from '@librechat/client';
 import type { ComponentType, ReactNode } from 'react';
@@ -12,6 +12,7 @@ export type SettingsTab =
   | SettingsTabValues.DATA
   | SettingsTabValues.ABOUT
   | 'models'
+  | 'shortcuts'
   | 'controller';
 
 export type SectionId =
@@ -36,6 +37,7 @@ export type SectionId =
   | 'billing'
   | 'about'
   | 'models'
+  | 'shortcuts'
   | 'controller';
 
 export interface SettingsContextValue {
@@ -103,6 +105,12 @@ export const TABS: TabMeta[] = [
       { id: 'conversations', labelKey: 'com_ui_settings_section_conversations' },
       { id: 'prompts', labelKey: 'com_ui_settings_section_prompts' },
     ],
+  },
+  {
+    id: 'shortcuts',
+    labelKey: 'com_shortcut_keyboard_shortcuts',
+    icon: createElement(Keyboard, { className: 'icon-sm', 'aria-hidden': true }),
+    sections: [{ id: 'shortcuts', labelKey: 'com_shortcut_keyboard_shortcuts' }],
   },
   {
     id: SettingsTabValues.SPEECH,

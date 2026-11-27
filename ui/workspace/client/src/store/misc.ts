@@ -57,11 +57,6 @@ const isEditingBadges = atom<boolean>({
   default: false,
 });
 
-const showShortcutsDialog = atom<boolean>({
-  key: 'showShortcutsDialog',
-  default: false,
-});
-
 export type KeyboardDeleteTarget = {
   conversationId: string;
   title: string;
@@ -98,7 +93,6 @@ export default {
   conversationAttachmentsSelector,
   queriesEnabled,
   isEditingBadges,
-  showShortcutsDialog,
   keyboardDeleteTarget,
   customShortcuts,
   shortcutsEnabled,

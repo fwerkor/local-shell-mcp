@@ -1,21 +1,14 @@
-import { memo, useCallback, useId, useMemo, useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { useCallback, useId, useMemo, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { useRecoilState } from 'recoil';
-import {
-  Label,
-  Switch,
-  OGDialog,
-  OGDialogClose,
-  OGDialogTitle,
-  OGDialogContent,
-} from '@librechat/client';
+import { Label, Switch } from '@librechat/client';
 import type { ShortcutActionId, ShortcutBindingInfo } from '~/hooks/useKeyboardShortcuts';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import type { ShortcutBinding } from '~/utils/shortcuts';
-import { RecorderInfo, RecorderPill, useShortcutRecorder } from './ShortcutRecorder';
+import { RecorderInfo, RecorderPill, useShortcutRecorder } from '../ShortcutRecorder';
 import { isMac, useShortcutBindings } from '~/hooks/useKeyboardShortcuts';
 import { bindingDisplayKeys } from '~/utils/shortcuts';
-import ShortcutKeyCombo from './ShortcutKeyCombo';
+import ShortcutKeyCombo from '../ShortcutKeyCombo';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 import store from '~/store';
@@ -256,7 +249,7 @@ function PanelsSection({
 }) {
   const localize = useLocalize();
   return (
-    <section className="mb-6 border-t border-border-light pt-4 last:mb-0 md:col-span-2 lg:col-span-1 lg:border-t-0 lg:pt-0">
+    <section className="mb-6 border-t border-border-light pt-4 last:mb-0">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 px-2">
         <h3 className="text-[12px] font-medium text-text-secondary">
           {localize('com_shortcut_group_panels')}
@@ -265,7 +258,7 @@ function PanelsSection({
           {localize('com_shortcut_group_panels_hint')}
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2 lg:grid-cols-1">
+      <div className="flex flex-col">
         {bindings.map((info) => (
           <ShortcutRow
             key={info.id}
@@ -285,10 +278,9 @@ function PanelsSection({
   );
 }
 
-function KeyboardShortcutsDialog() {
+export default function KeyboardShortcutsSettings() {
   const localize = useLocalize();
   const { bindings, bindingMap, setBinding, resetBinding, resetAll } = useShortcutBindings();
-  const [open, setOpen] = useRecoilState(store.showShortcutsDialog);
   const [enabled, setEnabled] = useRecoilState(store.shortcutsEnabled);
   const [editingId, setEditingId] = useState<ShortcutActionId | null>(null);
   const enableSwitchId = useId();
@@ -337,121 +329,94 @@ function KeyboardShortcutsDialog() {
   const hasAnyCustom = useMemo(() => bindings.some((b) => b.isCustom), [bindings]);
 
   return (
-    <OGDialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          setEditingId(null);
-        }
-        setOpen(next);
-      }}
-    >
-      <OGDialogContent
-        showCloseButton={false}
-        className="flex max-h-[85vh] w-11/12 max-w-3xl flex-col overflow-hidden p-0 lg:max-w-5xl"
-      >
-        <header className="flex shrink-0 items-center justify-between gap-4 px-7 pt-6">
-          <OGDialogTitle className="text-[16px] font-semibold text-text-primary">
+    <>
+      <div className="flex items-center justify-between gap-4 border-b border-border-light pb-3">
+        <div className="min-w-0">
+          <Label
+            htmlFor={enableSwitchId}
+            className="cursor-pointer select-none text-[13px] font-medium text-text-primary"
+          >
             {localize('com_shortcut_keyboard_shortcuts')}
-          </OGDialogTitle>
-          <OGDialogClose className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary dark:hover:bg-surface-secondary-alt">
-            <X className="h-4 w-4" />
-            <span className="sr-only">{localize('com_ui_close')}</span>
-          </OGDialogClose>
-        </header>
+          </Label>
+          <p className="mt-0.5 text-[11.5px] text-text-secondary">
+            {localize('com_shortcut_enable_all_hint')}
+          </p>
+        </div>
+        <Switch
+          id={enableSwitchId}
+          checked={enabled}
+          onCheckedChange={(value) => {
+            const next = value !== false;
+            if (!next) {
+              setEditingId(null);
+            }
+            setEnabled(next);
+          }}
+          aria-label={localize('com_shortcut_keyboard_shortcuts')}
+        />
+      </div>
 
-        <div className="mt-4 flex items-center justify-between gap-4 border-b border-border-light px-7 pb-3">
-          <div className="min-w-0">
-            <Label
-              htmlFor={enableSwitchId}
-              className="cursor-pointer select-none text-[13px] font-medium text-text-primary"
-            >
-              {localize('com_shortcut_keyboard_shortcuts')}
-            </Label>
-            <p className="mt-0.5 text-[11.5px] text-text-secondary">
-              {localize('com_shortcut_enable_all_hint')}
-            </p>
-          </div>
-          <Switch
-            id={enableSwitchId}
-            checked={enabled}
-            onCheckedChange={(value) => {
-              const next = value !== false;
-              if (!next) {
-                setEditingId(null);
-              }
-              setEnabled(next);
-            }}
-            aria-label={localize('com_shortcut_keyboard_shortcuts')}
+      <div className="flex flex-col gap-6 pb-2 pt-5">
+        <div>
+          {leftColumn.map(([groupKey, items]) => (
+            <ShortcutGroup
+              key={groupKey}
+              groupKey={groupKey}
+              bindings={items}
+              editingId={editingId}
+              disabled={!enabled}
+              onStartEdit={handleStartEdit}
+              onStopEdit={handleStopEdit}
+              bindingMap={bindingMap}
+              getActionLabel={getActionLabel}
+              setBinding={setBinding}
+              resetBinding={resetBinding}
+            />
+          ))}
+        </div>
+        <div>
+          {rightColumn.map(([groupKey, items]) => (
+            <ShortcutGroup
+              key={groupKey}
+              groupKey={groupKey}
+              bindings={items}
+              editingId={editingId}
+              disabled={!enabled}
+              onStartEdit={handleStartEdit}
+              onStopEdit={handleStopEdit}
+              bindingMap={bindingMap}
+              getActionLabel={getActionLabel}
+              setBinding={setBinding}
+              resetBinding={resetBinding}
+            />
+          ))}
+        </div>
+        {panelEntries.length > 0 && (
+          <PanelsSection
+            bindings={panelEntries}
+            editingId={editingId}
+            disabled={!enabled}
+            onStartEdit={handleStartEdit}
+            onStopEdit={handleStopEdit}
+            bindingMap={bindingMap}
+            getActionLabel={getActionLabel}
+            setBinding={setBinding}
+            resetBinding={resetBinding}
           />
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          <div className="grid grid-cols-1 gap-x-10 px-5 pb-2 pt-5 md:grid-cols-2 lg:grid-cols-3">
-            <div>
-              {leftColumn.map(([groupKey, items]) => (
-                <ShortcutGroup
-                  key={groupKey}
-                  groupKey={groupKey}
-                  bindings={items}
-                  editingId={editingId}
-                  disabled={!enabled}
-                  onStartEdit={handleStartEdit}
-                  onStopEdit={handleStopEdit}
-                  bindingMap={bindingMap}
-                  getActionLabel={getActionLabel}
-                  setBinding={setBinding}
-                  resetBinding={resetBinding}
-                />
-              ))}
-            </div>
-            <div>
-              {rightColumn.map(([groupKey, items]) => (
-                <ShortcutGroup
-                  key={groupKey}
-                  groupKey={groupKey}
-                  bindings={items}
-                  editingId={editingId}
-                  disabled={!enabled}
-                  onStartEdit={handleStartEdit}
-                  onStopEdit={handleStopEdit}
-                  bindingMap={bindingMap}
-                  getActionLabel={getActionLabel}
-                  setBinding={setBinding}
-                  resetBinding={resetBinding}
-                />
-              ))}
-            </div>
-            {panelEntries.length > 0 && (
-              <PanelsSection
-                bindings={panelEntries}
-                editingId={editingId}
-                disabled={!enabled}
-                onStartEdit={handleStartEdit}
-                onStopEdit={handleStopEdit}
-                bindingMap={bindingMap}
-                getActionLabel={getActionLabel}
-                setBinding={setBinding}
-                resetBinding={resetBinding}
-              />
-            )}
-          </div>
-        </div>
-
-        {hasAnyCustom && (
-          <footer className="flex shrink-0 justify-end border-t border-border-light px-7 py-3">
-            <button
-              type="button"
-              onClick={resetAll}
-              className="text-[12px] text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
-            >
-              {localize('com_shortcut_reset_all')}
-            </button>
-          </footer>
         )}
-      </OGDialogContent>
-    </OGDialog>
+      </div>
+
+      {hasAnyCustom && (
+        <footer className="flex shrink-0 justify-end border-t border-border-light py-3">
+          <button
+            type="button"
+            onClick={resetAll}
+            className="text-[12px] text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
+          >
+            {localize('com_shortcut_reset_all')}
+          </button>
+        </footer>
+      )}
+    </>
   );
 }
-
-export default memo(KeyboardShortcutsDialog);
