@@ -124,7 +124,7 @@ def scheduled_agent_permissions(database, owner: str, run_id: str | None, agent_
                     JOIN ancestry a ON w.run_id=a.id WHERE t.owner=? AND w.owner=?
             )
             SELECT 1 FROM ancestry a JOIN generation_requests g ON g.run_id=a.id
-            WHERE g.owner=? AND g.client_request_id LIKE 'schedule:%' LIMIT 1""",
+            WHERE g.owner=? AND g.client_request_id GLOB 'schedule:*' LIMIT 1""",
             (run_id, owner, owner, owner, owner),
         ).fetchone() is not None
 

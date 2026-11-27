@@ -702,3 +702,20 @@ async def test_schedule_scope_grant_is_durable_and_cannot_be_supplied_by_client(
         assert started[-1][1]['granted_scopes'] == {'shell:read', 'shell:execute'}
         saved = (await client.get('/api/schedules/' + sid)).json()
         assert saved['executionScopes'] == ['shell:execute', 'shell:read']
+
+
+def test_schedule_permission_namespace_is_case_sensitive(state):
+    from local_shell_mcp.webui.generations import GenerationStore
+    from local_shell_mcp.webui.machine_permissions import scheduled_agent_permissions
+
+    _, repo, agent = state
+    store = GenerationStore(repo.database)
+    agent_id = agent['id']
+    ordinary, _ = store.begin('alice', {'text': 'ordinary', 'clientRequestId': 'SCHEDULE:browser'}, agent)
+    assert not scheduled_agent_permissions(repo.database, 'alice', ordinary.run_id, agent_id)
+    with pytest.raises(ValueError, match='Internal schedule'):
+        store.begin('alice', {'text': 'forged', 'clientRequestId': 'schedule:browser'}, agent)
+    with repo.database.connect() as db:
+        internal, _ = store.begin('alice', {'text': 'scheduled', 'clientRequestId': 'schedule:controller'},
+                                  agent, _connection=db)
+    assert scheduled_agent_permissions(repo.database, 'alice', internal.run_id, agent_id)
