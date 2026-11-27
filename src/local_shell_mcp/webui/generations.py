@@ -188,9 +188,16 @@ class GenerationStore:
             prompt = ""
         if not manual_compaction and (not isinstance(prompt, str) or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES):
             raise ValueError("Invalid text message (max 128 KiB)")
+        # Regeneration reuses the persisted user turn, not the browser's
+        # optimistic replay message ID. A new run still gets a fresh identity.
+        replay_user_id = (payload.get("overrideParentMessageId")
+                          if payload.get("isRegenerate") is True and not payload.get("isContinued")
+                          and not payload.get("editedContent") and not new_conversation else None)
+        if replay_user_id is not None and not isinstance(replay_user_id, str):
+            raise ValueError("Invalid regeneration message ID")
         manual_skill_ids = payload.get('manualSkills')
         manual_skill_text = ''
-        if manual_skill_ids is not None:
+        if manual_skill_ids is not None and not replay_user_id:
             from .skill_runtime import manual_context
 
             # Resolve and freeze explicit selections when accepting this turn.
@@ -198,7 +205,8 @@ class GenerationStore:
             manual_skill_text = manual_context(self.database, owner, agent, manual_skill_ids)
         else:
             manual_skill_ids = []
-        user_message_id = str(payload.get('parentMessageId') if manual_compaction else (payload.get('messageId') or uuid.uuid4()))
+        user_message_id = str(payload.get('parentMessageId') if manual_compaction else
+                              (replay_user_id or payload.get('messageId') or uuid.uuid4()))
         response_message_id = str(uuid.uuid4())
         run_id = "run_" + secrets.token_hex(16)
         now = _now()
@@ -302,13 +310,25 @@ class GenerationStore:
                     (conversation_id,),
                 ).fetchone()
                 parent_id = parent["id"] if parent else None
-            if parent_id and parent_id != "00000000-0000-0000-0000-000000000000" and not db.execute(
+            if not replay_user_id and parent_id and parent_id != "00000000-0000-0000-0000-000000000000" and not db.execute(
                 "SELECT 1 FROM messages WHERE conversation_id=? AND id=?", (conversation_id, parent_id),
             ).fetchone():
                 raise KeyError("Message ancestor not found")
             from .attachments import resolve_files
 
-            files = resolve_files(db, owner, payload.get("files", []))
+            replay_user = None
+            if replay_user_id:
+                replay_user = db.execute(
+                    "SELECT * FROM messages WHERE id=? AND conversation_id=? AND role='user'",
+                    (replay_user_id, conversation_id),
+                ).fetchone()
+                if replay_user is None:
+                    raise KeyError("Regeneration user message not found")
+                parent_id = replay_user["parent_id"]
+                prompt = replay_user["text"]
+                files = json.loads(replay_user["metadata"]).get("files", [])
+            else:
+                files = resolve_files(db, owner, payload.get("files", []))
             if not manual_compaction and not prompt.strip() and not files:
                 raise ValueError("A non-empty text message or attachment is required (max 128 KiB)")
             user_metadata = {
@@ -317,7 +337,7 @@ class GenerationStore:
                 "files": files,
                 **({"manualSkills": manual_skill_ids} if manual_skill_ids else {}),
             }
-            if not manual_compaction:
+            if not manual_compaction and replay_user is None:
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",
@@ -352,6 +372,10 @@ class GenerationStore:
             if manual_compaction:
                 created['message'] = {'messageId': user_message_id,
                     'conversationId': conversation_id, 'text': '', 'compact': True}
+            else:
+                user_row = db.execute("SELECT * FROM messages WHERE id=? AND conversation_id=?",
+                                      (user_message_id, conversation_id)).fetchone()
+                created["message"] = WorkspaceRepository._message(user_row)
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(created)))
         return Generation(run_id, conversation_id, stamp_ms, response_message_id,
                           user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id"),
@@ -1924,29 +1948,30 @@ class GenerationStore:
             attachments = visible_response_attachments(verified, attachments)
             response_metadata = {"sender": "Assistant", "isCreatedByUser": False,
                                  "unfinished": status != "complete",
+                                 "model": run_state.get("model", ""),
+                                 "endpoint": run_state.get("provider", ""),
                                  **({"attachments": attachments} if attachments else {})}
             if isinstance(run_state.get('contextUsage'), dict):
                 response_metadata['metadata'] = {'contextUsage': run_state['contextUsage']}
-            response_message = {
-                **({'metadata': response_metadata['metadata']} if 'metadata' in response_metadata else {}),
-                **({"attachments": attachments} if attachments else {}),
-                "messageId": generation.response_message_id,
-                "conversationId": generation.conversation_id,
-                "parentMessageId": generation.user_message_id,
-                "sender": "Assistant", "isCreatedByUser": False,
-                "text": text,
-                "content": content,
-                **({"attachments": attachments} if attachments else {}),
-                "unfinished": status != "complete",
-            }
             if content or attachments or model_steps:
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",
                     (generation.response_message_id, generation.conversation_id, generation.user_message_id,
-                     "assistant", text, _json(response_message["content"]),
+                     "assistant", text, _json(content),
                      _json(response_metadata), now, now),
                 )
+            # Deliver the committed message identities and timestamps to the
+            # browser, so it cannot retain an optimistic assistant placeholder.
+            response_row = db.execute("SELECT * FROM messages WHERE id=? AND conversation_id=?",
+                                      (generation.response_message_id, generation.conversation_id)).fetchone()
+            request_row = db.execute("SELECT * FROM messages WHERE id=? AND conversation_id=?",
+                                     (generation.user_message_id, generation.conversation_id)).fetchone()
+            if response_row is not None:
+                response_message = WorkspaceRepository._message(response_row)
+                response_message.setdefault("content", [])
+            else:
+                response_message = None
             run_state = json.loads(row["state"])
             if model_steps is not None:
                 run_state['modelSteps'] = model_steps
@@ -1969,7 +1994,8 @@ class GenerationStore:
                 "unreadMarker": unread,
                 "generationProtocolVersion": generation.protocol_version,
                 "conversation": {"conversationId": generation.conversation_id},
-                "responseMessage": response_message,
+                **({"responseMessage": response_message} if response_message is not None else {}),
+                **({"requestMessage": WorkspaceRepository._message(request_row)} if request_row is not None else {}),
                 **({"aborted": True} if status == "aborted" else {}),
                 **({"error": error or "Generation failed"} if status in {"error", "interrupted"} else {}),
                 **({"pendingSteers": pending_steers} if pending_steers else {}),
