@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
+<!-- i18n-source-sha256: 0a505e16fea0b2b70ac808a4423986879615fe5f69be5ffbc4972372aa576f70 -->
 # Remote worker
 
 Remote worker memungkinkan `local-shell-mcp` mengontrol mesin yang dapat membuat permintaan HTTP(S) keluar tetapi tidak dapat menerima koneksi SSH masuk.
@@ -11,7 +11,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 1. Buat undangan dengan `remote_manage(action="invite", ...)`.
 2. Jalankan perintah yang dibuat di mesin remote.
-3. Konfirmasikan pendaftaran dengan `remote_manage(action="list")`.
+3. Konfirmasikan pendaftaran dengan `remote_list()`.
 4. Panggil tool biasa dengan `machine="<worker-name>"`, misalnya `environment_get`, `run_shell`, `file_read`, atau `browser_run_script`.
 5. Gunakan `remote_transfer` untuk memulai transfer file/direktori yang dilacak controller-to-worker, worker-to-controller, atau worker-to-worker. Ikuti dengan `job_list` atau `job_tail`; hentikan atau ulangi dengan `job_stop` atau `job_retry`.
 6. Ubah nama atau cabut worker dengan `remote_manage(action="rename", ...)` atau `remote_manage(action="revoke", ...)`.

@@ -99,6 +99,8 @@ async def test_native_mcp_manage_and_remote_manage_dispatch_without_worker_grant
 
     monkeypatch.setattr(tools, "DynamicMCPManager", FakeNestedManager)
     monkeypatch.setattr(tools, "remote_manager", lambda: FakeRemotes())
+    monkeypatch.setattr("local_shell_mcp.webui.machine_permissions._registered_defaults",
+                        lambda: {"local": "write", "worker1": "write"})
     _registry_for_state.cache_clear()
     mcp = json.loads(await call_tool("local", cid,
                                      ModelToolCall("mcp1", "mcp_manage", {"action": "list"}),
@@ -106,7 +108,7 @@ async def test_native_mcp_manage_and_remote_manage_dispatch_without_worker_grant
     assert mcp["ok"] is True
     assert mcp["data"]["servers"][0]["name"] == "sample"
     listed = json.loads(await call_tool("local", cid,
-                                        ModelToolCall("remote1", "remote_manage", {"action": "list"}),
+                                        ModelToolCall("remote1", "remote_list", {}),
                                         granted_scopes=scopes))
     assert listed["ok"] is True
     assert listed["data"]["machines"][0]["name"] == "worker1"
@@ -134,7 +136,7 @@ async def test_management_execution_enforces_scopes_expiry_and_is_owner_fenced(p
     repo, cid = policy
     repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "write"})
     mcp = ModelToolCall("tool", "mcp_manage", {"action": "list"})
-    remote = ModelToolCall("tool", "remote_manage", {"action": "list"})
+    remote = ModelToolCall("tool", "remote_list", {})
     with pytest.raises(PermissionError, match="shell:execute"):
         await call_tool("local", cid, mcp, granted_scopes={"shell:read", "shell:write"})
     with pytest.raises(PermissionError, match="remote:use"):
