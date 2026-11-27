@@ -23,7 +23,7 @@ from .artifact_prompts import artifact_mode
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
 from .sampling import validate_channel_sampling
-from .storage import _json, _now
+from .storage import WorkspaceRepository, _json, _now
 
 log = logging.getLogger(__name__)
 _TERMINAL = frozenset({"complete", "aborted", "error", "interrupted"})
@@ -1664,6 +1664,13 @@ class GenerationStore:
                                 value += "\n\n" + note
                         selected = row["manual_skill_context"]
                         if selected is not None:
+                            from .content_filters import ContentFragment, inspect_content
+                            from .memory_protection import configured_filters
+
+                            blocked = inspect_content([ContentFragment('skill', 'body', selected)],
+                                                      configured_filters(WorkspaceRepository(self.database), owner))
+                            if blocked is not None:
+                                raise blocked
                             # A turn-local user message fragment, never a
                             # mutable leading system instruction. UI text stays
                             # unchanged; historical model prefixes are replayed.

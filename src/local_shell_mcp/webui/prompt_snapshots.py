@@ -33,6 +33,13 @@ def automatic_context(database, owner: str, conversation_id: str, authorization_
         identity = [(agent or {}).get('id'), authorization_id,
                     row['project_id'] if kind == 'memory' else None,
                     agent_partition(agent) if kind == 'memory' else None]
+        if kind == 'skills':
+            selected = (agent or {}).get('skills')
+            selected = selected if isinstance(selected, list) else []
+            skill_scope = ('all' if agent is None else 'none' if agent.get('skills_enabled') is not True
+                           else agent.get('skills_scope') or ('selected' if selected else 'all'))
+            identity.append([skill_scope, sorted({str(item) for item in selected})
+                             if skill_scope == 'selected' else []])
         return identity
 
     repo = WorkspaceRepository(database)

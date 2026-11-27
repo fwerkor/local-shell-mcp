@@ -149,3 +149,43 @@ def test_snapshot_scope_owner_and_project_boundaries(database):
     repo.delete_conversation('alice', cid)
     with database.connect() as conn:
         assert conn.execute('SELECT COUNT(*) FROM webui_prompt_snapshots').fetchone()[0] == 0
+
+
+def test_skill_snapshot_selection_changes_without_crud_invalidation(database):
+    repo = WorkspaceRepository(database)
+    cid = repo.create_conversation('alice', {})['conversationId']
+
+    def read(skills, value):
+        agent = {'id': 'agent', 'skills_enabled': True, 'skills_scope': 'selected', 'skills': skills}
+        return automatic_context(database, 'alice', cid, cid, agent, 'skills', lambda: value)
+
+    assert read(['a'], 'A') == 'A'
+    assert read(['a'], 'edited A') == 'A'
+    assert read(['b'], 'B') == 'B'
+    assert read(['b'], 'edited B') == 'B'
+
+
+def test_manual_snapshot_clone_and_live_policy(database, monkeypatch):
+    from local_shell_mcp.webui import conversation_routes
+    from local_shell_mcp.webui.content_filters import ContentFilterBlocked
+
+    repo = WorkspaceRepository(database)
+    monkeypatch.setattr(conversation_routes, '_repo', lambda: repo)
+    store = GenerationStore(database)
+    add_skill(database, 'manual', 'private_123')
+    run, _ = store.begin('alice', {'text': 'prompt', 'manualSkills': ['manual']})
+    store.finish('alice', run.run_id, status='complete', text='reply')
+    original = store.history('alice', run.conversation_id)
+    clone = conversation_routes._clone('alice', {'conversationId': run.conversation_id})
+    assert store.history('alice', clone['conversationId']) == original
+    fork = conversation_routes._clone('alice', {'conversationId': run.conversation_id},
+                                       only_to_message=run.user_message_id)
+    assert store.history('alice', fork['conversationId']) == original[:1]
+    repo.save_setting('alice', 'webui.filters.config', {'skills': {'pii': {
+        'action': 'block', 'fields': ['body'], 'starterPatterns': [],
+        'customPatterns': [{'id': 'secret', 'label': 'internal-secret', 'regex': r'private_[0-9]+'}],
+    }}})
+    with pytest.raises(ContentFilterBlocked):
+        store.history('alice', run.conversation_id)
+    with pytest.raises(ContentFilterBlocked):
+        store.history('alice', clone['conversationId'])
