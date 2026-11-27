@@ -157,6 +157,8 @@ async def test_runner_publishes_budget_without_triggering_summary(setup):
               if item.get('event') == 'on_context_usage']
     assert len(events) == 1
     assert events[0]['data']['breakdown']['messageCount'] == 1
+    assert events[0]['data']['model'] == 'test'
+    assert events[0]['data']['provider'] == 'openai'
     assert store.finish('alice', job.run_id, status='complete', text='done')
     assert store.events('alice', job.run_id)[-1][1]['responseMessage']['metadata']['contextUsage'] == events[0]['data']
 

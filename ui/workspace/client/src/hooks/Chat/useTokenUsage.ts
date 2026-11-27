@@ -29,6 +29,7 @@ import {
   collectAnchorSeries,
   snapshotConfiguration,
   contextSnapshotInputTokens,
+  contextSnapshotMatchesModel,
   latestExchangeTokens,
   findBranchSnapshotAnchor,
   normalizeTokenCount,
@@ -294,8 +295,12 @@ export default function useTokenUsage({
     /** Precedence: live/active snapshot → persisted branch snapshot →
      *  per-message estimate. The first two are authoritative (real runs with the
      *  feature on); the estimate covers snapshot-less branches (pre-feature
-     *  history, imports, never-generated branches) entirely client-side. */
-    const effective: ContextSnapshot | null = currentActive ? snapshot : branchSnapshot;
+     *  history, imports, never-generated branches, and model changes) entirely client-side. */
+    const candidate = currentActive ? snapshot : branchSnapshot;
+    const effective =
+      candidate != null && contextSnapshotMatchesModel(candidate, limits, conversation?.agent_id)
+        ? candidate
+        : null;
 
     /** Branch analysis: the snapshot series (oldest → newest) drives the runway
      *  projection. Walks use the branch tail, capped at summary markers,
@@ -343,7 +348,9 @@ export default function useTokenUsage({
     if (effective != null) {
       const breakdown = effective.breakdown;
       const configuredMax = normalizeTokenCount(
-        limits.maxContextTokens ?? breakdown.maxContextTokens ?? effective.contextBudget,
+        normalizeTokenCount(breakdown.maxContextTokens) ||
+          limits.maxContextTokens ||
+          effective.contextBudget,
       );
       const maxTokens = configuredMax > 0 ? configuredMax : undefined;
       const providerInputTokens =
@@ -464,7 +471,7 @@ export default function useTokenUsage({
         : normalizeTokenCount(
             getModelOverhead(
               overheadKey(
-                limits.endpoint ?? conversation?.endpoint,
+                limits.channel ?? limits.endpoint ?? conversation?.endpoint,
                 limits.model ?? conversation?.model,
                 conversation?.agent_id,
               ),

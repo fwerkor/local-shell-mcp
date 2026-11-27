@@ -13,6 +13,7 @@ import {
   prunedBranchTokens,
   collectAnchorSeries,
   contextSnapshotInputTokens,
+  contextSnapshotMatchesModel,
   latestExchangeTokens,
   findBranchSnapshotAnchor,
   estimateTokens,
@@ -1111,6 +1112,25 @@ describe('context snapshot input occupancy', () => {
     expect(used).toBe(220450);
     expect(Math.round((used / 1000000) * 100)).toBe(22);
     expect(1000000 - used).toBe(779550);
+  });
+
+  it('rejects a previous model snapshot, including switches with the same window', () => {
+    const measured = { ...snapshot, model: 'previous-model', providerInputTokens: 220450 };
+    expect(
+      contextSnapshotMatchesModel(measured, { model: 'next-model', maxContextTokens: 1000000 }),
+    ).toBe(false);
+    expect(
+      contextSnapshotMatchesModel(measured, { model: 'next-model', maxContextTokens: 256000 }),
+    ).toBe(false);
+    expect(
+      contextSnapshotMatchesModel(measured, { model: 'previous-model', maxContextTokens: 256000 }),
+    ).toBe(true);
+    expect(contextSnapshotMatchesModel(snapshot, { maxContextTokens: 1000000 })).toBe(false);
+    expect(contextSnapshotMatchesModel({ ...measured, channel: 'old' }, { channel: 'new' })).toBe(
+      false,
+    );
+    expect(contextSnapshotMatchesModel({ ...measured, agentId: 'old' }, {}, 'new')).toBe(false);
+    expect(contextSnapshotInputTokens(measured)).toBe(220450);
   });
 
   it('uses the breakdown for older snapshots without a usable budget', () => {
