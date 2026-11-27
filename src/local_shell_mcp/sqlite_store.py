@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS messages (
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at, id);
+-- Server-only, immutable automatic context, initialized on first model use.
+CREATE TABLE IF NOT EXISTS webui_prompt_snapshots (
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    content TEXT NOT NULL,
+    PRIMARY KEY(conversation_id, kind, scope)
+);
+CREATE TABLE IF NOT EXISTS webui_manual_skill_contexts (
+    message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    content TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner, archived, updated_at DESC);
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,

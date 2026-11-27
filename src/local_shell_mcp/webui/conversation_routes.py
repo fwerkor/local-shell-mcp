@@ -224,6 +224,10 @@ def _clone(owner: str, values: dict, *, only_to_message: str | None = None) -> d
                 (ids[row["id"]], new_cid, ids.get(row["parent_id"]), row["role"],
                  row["text"], row["content"], _json(metadata), now + i, now + i),
             )
+        for original_id, copied_id in ids.items():
+            db.execute("INSERT INTO webui_manual_skill_contexts(message_id,content) "
+                       "SELECT ?,content FROM webui_manual_skill_contexts WHERE message_id=?",
+                       (copied_id, original_id))
         # Canonical model steps are stored in runs.state, not React preview
         # messages. Copy only terminal runs whose assistant is in the selected
         # branch; preserve content and provider signatures without aliasing
