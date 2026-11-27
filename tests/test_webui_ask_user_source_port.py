@@ -143,6 +143,10 @@ async def test_original_catalog_is_available_without_machine_grants_and_question
                 internal, _ = store.begin("local", {"text": "Scheduled", "clientRequestId": "schedule:test"},
                                           _connection=db)
                 state = json.loads(db.execute("SELECT state FROM runs WHERE id=?", (internal.run_id,)).fetchone()[0])
+                assert state["askUserEnabled"] is True
+                trigger, _ = store.begin("local", {"text": "Trigger", "clientRequestId": "trigger:test"},
+                                         _connection=db)
+                state = json.loads(db.execute("SELECT state FROM runs WHERE id=?", (trigger.run_id,)).fetchone()[0])
                 assert state["askUserEnabled"] is False
     finally:
         get_settings.cache_clear()
