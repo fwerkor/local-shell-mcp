@@ -129,7 +129,7 @@ finally:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(source)
     env["LOCAL_SHELL_MCP_WORKER_MANAGED"] = "1"
-    supervisor = subprocess.Popen([sys.executable, "-c", script, str(marker)], env=env)
+    supervisor = subprocess.Popen([getattr(sys, "_base_executable", sys.executable), "-c", script, str(marker)], env=env)
     handles = []
     try:
         deadline = time.monotonic() + 15
@@ -146,7 +146,13 @@ finally:
     finally:
         for handle in reversed(handles):
             if _winapi.WaitForSingleObject(handle, 0) == _winapi.WAIT_TIMEOUT:
-                _winapi.TerminateProcess(handle, 1)
+                try:
+                    _winapi.TerminateProcess(handle, 1)
+                except PermissionError:
+                    # Termination can race with the Job Object killing this
+                    # process. Do not suppress errors for a still-live process.
+                    if _winapi.WaitForSingleObject(handle, 10000) != _winapi.WAIT_OBJECT_0:
+                        raise
             _winapi.CloseHandle(handle)
         if supervisor.poll() is None:
             supervisor.terminate()

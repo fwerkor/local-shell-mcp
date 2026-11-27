@@ -490,6 +490,14 @@ def test_process_fallback_start_stop_and_stale_pid(tmp_path, monkeypatch):
     assert popen_calls[0][0][0][-1] == str(service.worker_bootstrap_path())
     assert "PYTHONPATH" in popen_calls[0][1]["env"]
     assert service.service_status()["running"] is True
+    if os.name == "nt":
+        def fake_taskkill(command, **kwargs):
+            assert command[1:] == ["/PID", "123", "/T", "/F"]
+            signals.append((123, "taskkill"))
+            running[123] = False
+
+        monkeypatch.setattr(service, "_run", fake_taskkill)
+        monkeypatch.setattr(service, "_wait_for_windows_worker_unlock", lambda: None)
     service.stop_service()
     assert signals
     assert not service.worker_pid_path().exists()
