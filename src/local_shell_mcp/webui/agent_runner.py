@@ -28,6 +28,7 @@ from .approval_runtime import (
 )
 from .ask_user_tools import ASK_USER_TOOLS, build_ask_user_payload
 from .checkpoints import SQLiteCheckpointSaver
+from .compaction import SummaryResponseError as _SummaryResponseError
 from .handoff import (
     HandoffRouting,
     build_handoff_command,
@@ -68,10 +69,6 @@ from .subagents import (
     invoke_subagent,
     subagent_tools,
 )
-
-
-class _SummaryResponseError(ValueError):
-    """An uncommitted summary response that can safely be requested again."""
 
 
 class AgentRunner:
@@ -1206,6 +1203,7 @@ class AgentRunner:
         # Retrying even a partially received stream is safe: each attempt
         # starts with an empty buffer and only a complete summary is returned.
         delays = agent_runtime._MODEL_RETRY_DELAYS if retry else ()
+        failures = []
         for attempt in range(len(delays) + 1):
             self._check_grant()
             try:
@@ -1215,7 +1213,9 @@ class AgentRunner:
             except Exception as error:
                 if (attempt == len(delays)
                         or not (agent_runtime._retryable_model_error(error) or isinstance(error, _SummaryResponseError))):
+                    error.summary_attempts = tuple(failures)
                     raise
+                failures.append(error)
                 delay = (agent_runtime._model_retry_delay(error, attempt)
                          if agent_runtime._retryable_model_error(error) else delays[attempt])
                 logging.getLogger(__name__).warning(
@@ -1286,7 +1286,7 @@ class AgentRunner:
             if isinstance(content, str) and content.startswith('<summary>\n') and message.get('role') == 'system':
                 continue
             if content is not None and not isinstance(content, str):
-                raise ValueError('Fragmented compaction requires text-only history')
+                raise _SummaryResponseError('Fragmented compaction requires text-only history')
             records.append(json.dumps(message, ensure_ascii=False, default=str))
         source = '\n'.join(records)
         limit = min(max_tokens, max(128, context_limit // 8))
@@ -1303,7 +1303,7 @@ class AgentRunner:
                      {'role': 'user', 'content': prefix}]
             room = capacity - sum(map(message_token_count, fixed))
             if room < 128 or rounds >= 64:
-                raise ValueError('Insufficient bounded summary capacity')
+                raise _SummaryResponseError('Insufficient bounded summary capacity')
             # Binary search by token count; never drop the remainder of a large
             # result, including a single record larger than the model window.
             lo, hi = offset, min(len(source), offset + room * 8)
@@ -1314,7 +1314,7 @@ class AgentRunner:
                 else:
                     hi = mid - 1
             if lo == offset:
-                raise ValueError('Unable to fit a summary fragment')
+                raise _SummaryResponseError('Unable to fit a summary fragment')
             fragment = source[offset:lo]
             request = [{'role': 'user', 'content': prefix + fragment},
                        {'role': 'user', 'content': instruction}]
@@ -1330,7 +1330,7 @@ class AgentRunner:
             offset = lo
             rounds += 1
         if not prior:
-            raise ValueError('No summary fragments')
+            raise _SummaryResponseError('No summary fragments')
         return prior
 
     def _context_limit(self, state: AgentLoopState, settings: dict | None = None) -> int | None:
@@ -1590,7 +1590,19 @@ class AgentRunner:
                 if isinstance(error, RuntimeSafetyError):
                     raise
                 raise CompactionFailed(
-                    'Context compaction failed; model generation stopped. Original history is preserved.'
+                    'Context compaction failed; model generation stopped. Original history is preserved.',
+                    diagnostics=(
+                        f"Provider: {state.context.profile.provider}",
+                        f"Model: {state.context.profile.model}",
+                        f"Context limit: {max_raw}",
+                        f"Summary output limit: {options.get('maxSummaryTokens', 2048) if isinstance(options, dict) else 'invalid configuration'}",
+                        f"Messages to summarize: {len(head)}",
+                        f"Retained messages: {len(tail)}",
+                        *(
+                            (f"Estimated input tokens: {budget.instruction_tokens + budget.tool_schema_tokens + budget.message_tokens}",)
+                            if budget is not None else ()
+                        ),
+                    ),
                 ) from error
 
         except asyncio.CancelledError:
