@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import * as Ariakit from '@ariakit/react';
 import { TooltipAnchor, DropdownPopup, PinIcon, VectorIcon, MCPIcon } from '@librechat/client';
-import { Check, Globe, Settings2, TerminalSquareIcon } from 'lucide-react';
+import { Brain, Check, Globe, Settings2, TerminalSquareIcon } from 'lucide-react';
 import {
   Permissions,
   ArtifactModes,
@@ -9,23 +9,31 @@ import {
   defaultAgentCapabilities,
 } from 'librechat-data-provider';
 import type { MenuItemProps } from '~/common';
-import { useLocalize, useHasAccess, useAgentCapabilities } from '~/hooks';
+import { useLocalize, useHasAccess, useAgentCapabilities, useAuthContext } from '~/hooks';
 import ArtifactsSubMenu from '~/components/Chat/Input/ArtifactsSubMenu';
 import { useBadgeRowContext } from '~/Providers';
+import { useGetStartupConfig } from '~/data-provider';
 import { cn } from '~/utils';
 
 interface ToolsDropdownProps {
   disabled?: boolean;
   showEphemeralTools?: boolean;
+  showMemory?: boolean;
 }
 
 /** Ariakit portals to document.body by default, which puts the menu outside every landmark.
  *  Returning null falls back to that default. */
 const getMainLandmark = () => document.querySelector<HTMLElement>('main');
 
-const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownProps) => {
+const ToolsDropdown = ({
+  disabled,
+  showEphemeralTools = true,
+  showMemory = true,
+}: ToolsDropdownProps) => {
   const localize = useLocalize();
   const context = useBadgeRowContext();
+  const { user } = useAuthContext();
+  const { data: startupConfig } = useGetStartupConfig();
 
   const { codeEnabled, webSearchEnabled, artifactsEnabled, fileSearchEnabled } =
     useAgentCapabilities(context?.agentsConfig?.capabilities ?? defaultAgentCapabilities);
@@ -166,6 +174,26 @@ const ToolsDropdown = ({ disabled, showEphemeralTools = true }: ToolsDropdownPro
                 <PinIcon unpin={isSearchPinned} />
               </div>
             </button>
+          </div>
+        </div>
+      ),
+    });
+  }
+
+  if (showMemory && startupConfig?.interface?.memories === true && features) {
+    const optedOut = user?.personalization?.memories === false;
+    const checked = !optedOut && (features.current?.memory ?? false);
+    dropdownItems.push({
+      onClick: () => features.toggle('memory', !checked),
+      ariaChecked: checked,
+      disabled: optedOut || !features.canEdit,
+      hideOnClick: false,
+      render: (props) => (
+        <div {...props}>
+          <div className="flex items-center gap-2">
+            <Brain className="icon-md" aria-hidden="true" />
+            {checked && <Check className="icon-sm" aria-hidden="true" />}
+            <span>{localize('com_ui_memory')}</span>
           </div>
         </div>
       ),
