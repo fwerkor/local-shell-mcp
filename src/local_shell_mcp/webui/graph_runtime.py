@@ -190,8 +190,6 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
                 child.partial_text = parent.partial_text
                 await parent.on_text(delta)
 
-        from .ask_user_tools import ask_user_requested
-
         foreground_member = not parent.background_deny and '/subagent:' not in parent.namespace
         child = AgentRunner(
             parent.owner, parent.generation, parent.database, parent.store,
@@ -200,7 +198,7 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
             on_text=emit, on_thought=None if hide_intermediate else parent.on_thought,
             agent=member, profile=parent.initial_profile if agent_id == source_id else None,
             parameters=parent.initial_parameters,
-            ask_user_enabled=foreground_member and ask_user_requested(member, {}),
+            ask_user_enabled=foreground_member and parent.ask_user_enabled,
             mcp_enabled=parent.mcp_enabled,
             # LangGraph assigns a durable task UUID per node activation.
             # Revisiting A after A -> B -> A must not load A's old terminal

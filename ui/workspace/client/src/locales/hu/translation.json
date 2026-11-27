@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimális méret 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Egyéni eszköz",
   "com_agents_mcp_trust_subtext": "Az egyéni csatlakozókat a LSM nem ellenőrzi",
-  "com_agents_memory_info": "Ha engedélyezve van, az ügynök a beszélgetés során a set_memory és delete_memory eszközök segítségével mentheti, frissítheti és törölheti a felhasználóval kapcsolatos emlékeket.",
+  "com_agents_memory_info": "Ha engedélyezve van, az ügynök a beszélgetés során a set_memory eszközök segítségével mentheti, frissítheti és törölheti a felhasználóval kapcsolatos emlékeket.",
   "com_agents_memory_scope": "Tartsa külön az emlékeket ehhez az ügynökhöz",
   "com_agents_memory_scope_info": "Ha engedélyezve van, ez az ügynök olvassa és írja saját emlékeit, elkülönítve a közös emlékektől és más ügynököktől. A meglévő megosztott emlékek nem jelennek meg ennek az ügynöknek.",
   "com_agents_missing_name": "Ügynök létrehozása előtt írjon be egy nevet.",

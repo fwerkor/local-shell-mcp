@@ -390,7 +390,7 @@ def test_live_machine_context_is_provider_only(machine_agent):
     )
     history = [{"role": "system", "content": "Custom instructions"},
                {"role": "user", "content": "Inspect"}]
-    state = SimpleNamespace(messages=history, context=SimpleNamespace(agent=agent, fading_tier=None))
+    state = SimpleNamespace(messages=history, context=SimpleNamespace(agent=agent))
     projected = runner._project_model_messages(state)
     assert projected[0]["role"] == "system"
     assert "Read-only: local" in projected[0]["content"]

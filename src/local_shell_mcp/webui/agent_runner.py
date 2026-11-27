@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import logging
+import sqlite3
 import time
 
 from .agent_execution import execute_tool_batch, replay_key
@@ -35,7 +36,7 @@ from .handoff import (
     is_transfer_tool,
 )
 from .memory import (
-    MEMORY_TOOL_USAGE_GUARD,
+    MEMORY_TOOL_INSTRUCTIONS,
     MemoryRepository,
     agent_partition,
     execute_memory_tool,
@@ -156,7 +157,7 @@ class AgentRunner:
             assert_event_lease(self.database, self.owner, self.generation.run_id,
                                self.event_delivery_lease)
 
-    def _memory_context(self, agent: dict | None) -> str:
+    def _memory_context(self, agent: dict | None, query: str | None = None) -> str:
         from .misc_routes import effective_features
         from .storage import WorkspaceRepository
 
@@ -170,11 +171,24 @@ class AgentRunner:
         # the memory capability receives keys and a mutation-tool prompt.
         has_tools = ((agent is None or 'memory' in ((agent or {}).get('tools') or []))
                      and memory_enabled(settings, self.owner, tools=True))
-        formatted = MemoryRepository(self.database).formatted(
-            self.owner, agent_partition(agent), filters=configured_filters(settings, self.owner))
+        filters = configured_filters(settings, self.owner)
+        memory = MemoryRepository(self.database)
+        if query is not None:
+            from .memory_retrieval import recall_context
+
+            try:
+                recalled = recall_context(memory, self.owner, agent_partition(agent),
+                    query=query, conversation_id=self.authorization_conversation_id,
+                    filters=filters, include_keys=has_tools)
+            except sqlite3.Error:
+                logging.getLogger(__name__).warning('Memory recall failed')
+                recalled = ''
+            context = format_memory_context(recalled) if recalled or has_tools else ''
+            return '\n\n'.join(part for part in (context,
+                MEMORY_TOOL_INSTRUCTIONS if has_tools else '') if part)
+        formatted = memory.formatted(self.owner, agent_partition(agent), filters=filters)
         if formatted.get('readFailed'):
-            # Never lose the mutation consent rule when Memory reads fail.
-            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
+            return MEMORY_TOOL_INSTRUCTIONS if has_tools else ''
         explicit_memory_tool = bool(agent and 'memory' in ((agent or {}).get('tools') or []))
         endpoints = settings.setting(self.owner, 'endpoints', {})
         explicit_memory_config = (
@@ -184,11 +198,11 @@ class AgentRunner:
         if (not explicit_memory_tool and not explicit_memory_config
                 and not (formatted.get('withKeys') or formatted.get('withoutKeys'))):
             # An empty default-enabled store needs no memory-list preamble,
-            # but the mutation consent rule must remain visible to the model
+            # but the memory tool guidance must remain visible to the model
             # whenever its Memory tools are offered.
-            return MEMORY_TOOL_USAGE_GUARD if has_tools else ''
+            return MEMORY_TOOL_INSTRUCTIONS if has_tools else ''
         context = format_memory_context(formatted['withKeys'] if has_tools else formatted['withoutKeys'])
-        return (context or '') + ('\n\n' + MEMORY_TOOL_USAGE_GUARD if has_tools else '')
+        return (context or '') + ('\n\n' + MEMORY_TOOL_INSTRUCTIONS if has_tools else '')
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
@@ -256,7 +270,7 @@ class AgentRunner:
                 and memory_enabled(settings, self.owner, tools=True)):
             config = memory_config(settings, self.owner) or {}
             tools += tool_definitions(config.get('validKeys'))
-        if self.ask_user_enabled and (unrestricted or "ask_user_question" in selected):
+        if self.ask_user_enabled and not self.background_deny and self._publishes_tool_steps():
             tools += ASK_USER_TOOLS
         identity = (agent or {}).get("id") or "default"
         configs = self.child_configs if self.child_configs is not None else build_subagent_configs(
@@ -510,7 +524,7 @@ class AgentRunner:
                     },
                 }, actor_lease=self.actor_lease)
             return await invoke_sleep(seconds, self._check_grant)
-        if call.name in {'set_memory', 'delete_memory'}:
+        if call.name in {'set_memory', 'find_memory'}:
             from .storage import WorkspaceRepository
             settings = WorkspaceRepository(self.database)
             from .misc_routes import effective_features
@@ -519,7 +533,8 @@ class AgentRunner:
                     or not memory_enabled(settings, self.owner, tools=True)):
                 raise RuntimeSafetyError('Memory tools are disabled')
             config = {**(memory_config(settings, self.owner) or {}),
-                      'filters': configured_filters(settings, self.owner)}
+                      'filters': configured_filters(settings, self.owner),
+                      'conversation_id': self.authorization_conversation_id}
             result, artifact = execute_memory_tool(MemoryRepository(self.database), self.owner,
                 state.context.agent or {}, call.name, call.arguments, config)
             if artifact is not None:
@@ -1349,7 +1364,6 @@ class AgentRunner:
 
     def _project_model_messages(self, state: AgentLoopState) -> list[dict]:
         from .agents import AgentRepository
-        from .fading_projection import project_faded_provider_messages
         from .machine_permissions import machine_access_context
         from .storage import WorkspaceRepository
 
@@ -1363,40 +1377,10 @@ class AgentRunner:
             scopes=set(self.scopes), expires=self.grant_expires,
             repo=WorkspaceRepository(self.database),
         )
-        projected = [*self._conversation_context(),
-                     *project_faded_provider_messages(state.messages, state.context.fading_tier)]
+        projected = [*self._conversation_context(), *state.messages]
         if restrictions:
             return [{"role": "system", "content": restrictions}, *projected]
         return projected
-
-    def _update_fading_tier(self, state: AgentLoopState, budget, calibration, config, window: int) -> None:
-        from .fading import (
-            resolve_fading_tier,
-            seed_fading_tier,
-        )
-
-        profile = state.context.profile
-        agent_id = (state.context.agent or {}).get('id') or 'default'
-        current = state.context.fading_tier or self.store.fading_tier(
-            self.owner, self.generation.run_id, agent_id, profile.provider, profile.model)
-        seeded = seed_fading_tier(window, current)
-        current_turn = []
-        for message in reversed(state.messages):
-            if message.get('role') == 'user':
-                break
-            current_turn.append(message)
-        width = max((len(message.get('tool_calls') or []) for message in current_turn), default=1)
-        effective = max(0, budget.available_for_messages / calibration.ratio)
-        window_available = max(1, window - budget.reserve_tokens)
-        pressure = (window - budget.reserve_tokens - budget.remaining_context_tokens) / window_available
-        signals = {'contextPressure': pressure, 'effectiveRawTokens': effective,
-                   'summarizationEnabled': config.get('enabled') is not False,
-                   'toolExchangeWidth': max(1, width)}
-        resolved = resolve_fading_tier(seeded, window, signals)
-        state.context.fading_tier = resolved
-        if resolved != current:
-            self.store.record_fading_tier(self.owner, self.generation.run_id,
-                                          agent_id, profile.provider, profile.model, resolved)
 
     async def _before_model(self, state):
         """SDK-style recency + trigger, using the shared SQLite checkpoint."""
@@ -1436,8 +1420,6 @@ class AgentRunner:
             budget = calculate_budget([*conversation_context, *state.messages], state.context.tools, int(max_raw),
                                       reserve_ratio=config.get('reserveRatio', 0.05),
                                       calibration_ratio=calibration.ratio) if max_raw is not None else None
-            if budget is not None:
-                self._update_fading_tier(state, budget, calibration, config, int(max_raw))
             if config.get('enabled') is False:
                 return
             if not request_id:
@@ -1502,21 +1484,6 @@ class AgentRunner:
                 # the next tool batch. Do not suppress that distinct input as
                 # if it were an attempted retry of the old oversized history.
                 self._last_compaction_attempt_size = None
-                # A committed summary replaces the old prefix; restore a
-                # fresh v2 fading tier so past masking doesn't pin this run.
-                from .fading import create_fading_tier
-
-                if max_raw is None:
-                    return
-                state.context.fading_tier = create_fading_tier(int(max_raw))
-                try:
-                    self.store.record_fading_tier(
-                        self.owner, self.generation.run_id,
-                        (state.context.agent or {}).get('id') or 'default',
-                        state.context.profile.provider, state.context.profile.model,
-                        state.context.fading_tier)
-                except Exception as error:
-                    logging.getLogger(__name__).warning('Fading reset failed (%s)', type(error).__name__)
             except Exception as error:
                 self._compaction_status = 'failed'
                 logging.getLogger(__name__).warning('Context compaction failed (%s)', type(error).__name__)
@@ -1568,21 +1535,6 @@ class AgentRunner:
             max_tokens=(config.get('parameters') or {}).get('maxSummaryTokens', 2048),
             prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'),
             semantic_index=self.compaction_semantic_index)
-        # Explicit compaction, like its automatic counterpart, resets the
-        # hysteresis ladder after the checkpoint was safely staged.
-        params = self.initial_parameters or {}
-        raw = params.get('max_context_tokens') or params.get('maxContextTokens') or (settings.get('agents') or {}).get('maxContextTokens')
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and 0 < raw <= 2_000_000:
-            from .fading import create_fading_tier
-
-            try:
-                self.store.record_fading_tier(
-                    self.owner, self.generation.run_id,
-                    (self.root_agent or {}).get('id') or 'default',
-                    self.initial_profile.provider, self.initial_profile.model,
-                    create_fading_tier(int(raw)))
-            except Exception as exc:
-                logging.getLogger(__name__).warning('Manual fading reset failed (%s)', type(exc).__name__)
         return history
 
     async def run(self, history, *, recursion_limit=None):
@@ -1605,7 +1557,15 @@ class AgentRunner:
             skills_text = catalog(self.database, self.owner, self.root_agent)
             # Personal memory remains scoped to the main agent; delegated Agents
             # must independently receive their own selected Skill catalog.
-            memory_text = self._memory_context(self.root_agent) if (
+            user_text = next((message.get('content') for message in reversed(history)
+                              if message.get('role') == 'user'), '')
+            if isinstance(user_text, list):
+                user_text = ' '.join(part.get('text', '') for part in user_text
+                                     if isinstance(part, dict) and part.get('type') in {'text', 'input_text'}
+                                     and isinstance(part.get('text'), str))
+            query = (user_text if isinstance(user_text, str) else '') + '\n' + str(
+                (self.root_agent or {}).get('instructions') or '')
+            memory_text = self._memory_context(self.root_agent, query.strip()) if (
                 not self.namespace or self.graph_node) else ''
             supplementary = []
             if memory_text:
@@ -1836,6 +1796,15 @@ class AgentRunner:
             async for event in self._stream_with_image_fallback(self.stream_text, profile, prepared, **kwargs):
                 yield event
 
+        async def on_model_retry(attempt, maximum, delay, status):
+            self._check_grant()
+            self.store.append(self.owner, self.generation.run_id, {
+                "event": "on_model_retry", "data": {
+                    "attempt": attempt, "maximum": maximum,
+                    "delaySeconds": delay, "httpStatus": status,
+                },
+            }, actor_lease=self.actor_lease)
+
         result = await run_agent_loop(
             state, stream_tools=stream_tools_with_media, stream_text=stream_text_with_media,
             dispatch=self._dispatch, on_text=emit, on_thought=self.on_thought,
@@ -1844,6 +1813,7 @@ class AgentRunner:
             project_messages=self._project_model_messages,
             preflight_calls=self._preflight_model_calls,
             on_boundary=inject_steers, on_stream_chunk=should_seal_stream,
+            on_model_retry=on_model_retry,
             inject_controls=inject if self.task_control_host else None,
             should_preempt=(lambda: self.task_control_host.has_interrupt(self.task_control_id))
             if self.task_control_host and self.task_control_id else None,

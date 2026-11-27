@@ -236,15 +236,3 @@ ASK_USER_MANIFEST = {'name': 'Ask User',
                 'answer.',
  'agentsOnly': True,
  'authConfig': []}
-
-
-def ask_user_requested(agent: dict | None, payload: dict) -> bool:
-    """Port the saved/ephemeral opt-in from agents/load.ts.
-
-    Machine grants never enable this optional tool. Model-spec inheritance
-    remains with the full loadAgent port, not an ad-hoc permission shortcut.
-    """
-    if agent is not None:
-        return ASK_USER_QUESTION_TOOL_NAME in (agent.get("tools") or [])
-    ephemeral = payload.get("ephemeralAgent")
-    return isinstance(ephemeral, dict) and ephemeral.get("ask_user_question") is True

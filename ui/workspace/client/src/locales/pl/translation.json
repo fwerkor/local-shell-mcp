@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimalny rozmiar: 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Niestandardowe Narzędzie",
   "com_agents_mcp_trust_subtext": "Niestandardowe konektory MCP nie są weryfikowane przez LSM",
-  "com_agents_memory_info": "Po włączeniu agent może podczas rozmowy zapisywać, aktualizować i usuwać wspomnienia o użytkowniku za pomocą narzędzi set_memory i delete_memory.",
+  "com_agents_memory_info": "Po włączeniu agent może podczas rozmowy zapisywać, aktualizować i usuwać wspomnienia o użytkowniku za pomocą narzędzi set_memory.",
   "com_agents_memory_scope": "Trzymaj wspomnienia dla tego agenta osobno",
   "com_agents_memory_scope_info": "Po włączeniu ten agent odczytuje i zapisuje własne wspomnienia, odizolowane od wspomnień współdzielonych i innych agentów. Istniejące wspomnienia współdzielone nie są pokazywane temu agentowi.",
   "com_agents_missing_name": "Proszę wpisać nazwę przed utworzeniem agenta.",

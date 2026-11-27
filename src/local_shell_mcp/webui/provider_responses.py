@@ -25,6 +25,64 @@ PROTOCOL = "openai-responses"
 _MAX_ARGUMENTS = 1024 * 1024
 
 
+# Only recognized machine-readable codes are exposed. Upstream free-form
+# messages may contain request data, URLs or credentials.
+_TRANSIENT_ERROR_CODES = frozenset({
+    "server_error", "internal_server_error", "rate_limit_exceeded",
+    "rate_limit_error", "overloaded_error", "overloaded", "service_unavailable",
+    "temporarily_unavailable", "timeout", "request_timeout", "gateway_timeout",
+    "engine_overloaded", "model_overloaded", "internal_error",
+    "cancelled", "canceled",
+})
+_PERMANENT_ERROR_CODES = frozenset({
+    "invalid_request_error", "invalid_request", "invalid_api_key",
+    "authentication_error", "permission_denied", "insufficient_quota",
+    "quota_exceeded", "billing_hard_limit_reached", "model_not_found",
+    "context_length_exceeded", "content_filter", "content_policy_violation",
+    "invalid_prompt", "unsupported_value", "invalid_value",
+    "missing_required_parameter", "invalid_parameter", "usage_limit_reached",
+})
+
+
+class ResponsesStreamError(RuntimeError):
+    """A provider-side SSE failure, with safe diagnostics and retry classification."""
+
+    def __init__(self, event_type: str, code: str | None = None):
+        self.event_type = event_type
+        self.code = code if code in _TRANSIENT_ERROR_CODES | _PERMANENT_ERROR_CODES else (
+            "unrecognized_code" if code else None)
+        # Some providers send bare failed/cancelled events without an error
+        # object. Give these a bounded retry too, but never guess that an
+        # explicit unknown or permanent code is temporary.
+        self.retryable = code in _TRANSIENT_ERROR_CODES or (
+            code is None and event_type in {
+                "error", "response.failed", "response.cancelled", "stream_disconnected"
+            })
+        detail = f"; code={self.code}" if self.code else "; no error code supplied"
+        super().__init__(f"Responses provider generation failed ({event_type}{detail})")
+
+    @classmethod
+    def from_event(cls, event: dict, *, event_type: str | None = None):
+        response = event.get("response")
+        nested_error = response.get("error") if isinstance(response, dict) else None
+        top_error = event.get("error")
+        code = None
+        for source in (nested_error, top_error, event):
+            if isinstance(source, dict):
+                value = source.get("code")
+                if isinstance(value, str) and value:
+                    code = value
+                    break
+        if code is None:
+            for source in (nested_error, top_error):
+                if isinstance(source, dict):
+                    value = source.get("type")
+                    if isinstance(value, str) and value:
+                        code = value
+                        break
+        return cls(event_type or event["type"], code)
+
+
 def _scope(config: ProviderConfig) -> str:
     # Never replay opaque provider state to another endpoint, account or model.
     return hashlib.sha256(json.dumps([config.url, config.model, config.account_id or config.token]).encode()).hexdigest()
@@ -249,7 +307,7 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
             if kind in {"error", "response.failed", "response.cancelled"}:
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Responses provider rejected or cancelled generation")
+                raise ResponsesStreamError.from_event(event)
             if kind in {"response.output_text.delta", "response.refusal.delta"}:
                 delta, index = event.get("delta"), event.get("output_index")
                 if not isinstance(delta, str) or type(index) is not int or index < 0:
@@ -271,13 +329,13 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
                 break
     if terminal is None:
         # A dropped stream must never execute partially observed tool calls.
-        raise RuntimeError("Responses stream ended without a terminal event")
+        raise ResponsesStreamError("stream_disconnected")
     response = terminal.get("response")
     if not isinstance(response, dict):
         raise ValueError("Responses terminal event missing response")
     incomplete = terminal["type"] == "response.incomplete" or response.get("status") == "incomplete"
     if response.get("status") in {"failed", "cancelled"}:
-        raise RuntimeError("Responses provider failed generation")
+        raise ResponsesStreamError.from_event(terminal, event_type=f"response.{response['status']}")
     output = response.get("output")
     if isinstance(output, list):
         items = list(enumerate(output))

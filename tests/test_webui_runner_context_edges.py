@@ -98,8 +98,8 @@ def test_conversation_context_rejects_foreign_metadata(runtime):
 
 def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, monkeypatch):
     db, _, repo, profile, runner = runtime
-    # With default Memory tools, even an empty store must retain consent.
-    assert 'Only use the `set_memory`' in runner._memory_context(None)
+    # With default Memory tools, even an empty store must retain proactive memory guidance.
+    assert 'Use memory proactively' in runner._memory_context(None)
     assert runner._memory_context({'id': 'plain', 'tools': []}) == ''
     repo.save_setting('a', 'endpoints', {'memory': {'tokenLimit': 100},
                                        'agents': {'capabilities': ['memory']}})
@@ -110,7 +110,7 @@ def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, mon
     MemoryRepository(db).write('a', 'style', 'Speak concisely.')
     context = runner._memory_context({'id': 'a', 'tools': ['memory']})
     assert 'Speak concisely.' in context
-    assert 'Only use the `set_memory`' in context
+    assert 'Use memory proactively' in context
     repo.save_setting('a', 'user.memories', False)
     assert runner._memory_context({'id': 'a', 'tools': ['memory']}) == ''
     repo.save_setting('a', 'user.memories', True)
@@ -118,7 +118,7 @@ def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, mon
     assert 'Persistent memory is available' in runner._memory_context({'id': 'a', 'tools': ['memory']})
     # Default-enabled memory tools remain available even if an Agent's other
     # endpoint settings do not spell out its capabilities.
-    assert 'Only use the `set_memory`' in runner._memory_context({'id': 'a', 'tools': ['memory']})
+    assert 'Use memory proactively' in runner._memory_context({'id': 'a', 'tools': ['memory']})
 
 
 @pytest.mark.asyncio

@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Najmanjša velikost 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Orodje po meri",
   "com_agents_mcp_trust_subtext": "Priključkov po meri LSM ne preverja",
-  "com_agents_memory_info": "Ko je omogočeno, lahko agent shranjuje, posodablja in briše spomine o uporabniku med pogovorom z orodji set_memory in delete_memory.",
+  "com_agents_memory_info": "Ko je omogočeno, lahko agent shranjuje, posodablja in briše spomine o uporabniku med pogovorom z orodji set_memory.",
   "com_agents_memory_scope": "Hranite spomine ločeno za tega agenta",
   "com_agents_memory_scope_info": "Ko je ta agent omogočen, bere in zapisuje lastne pomnilnike, ločene od vaših skupnih spominov in drugih agentov. Obstoječi pomnilniki v skupni rabi niso prikazani temu agentu.",
   "com_agents_missing_name": "Pred ustvarjanjem agenta vnesite ime.",

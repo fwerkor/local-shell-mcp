@@ -709,7 +709,14 @@ class SQLiteDatabase:
                        "WHEN NEW.status!='running' "
                        "BEGIN UPDATE subagent_wakeups SET next_attempt_at=NULL "
                        "WHERE task_id=NEW.id AND status='pending'; END")
-            db.execute("PRAGMA user_version=1")
+            # Drop obsolete context compression metadata from existing databases.
+            # Run once on upgrade; never rewrite messages or tool results.
+            if db.execute("PRAGMA user_version").fetchone()[0] < 2:
+                db.execute("UPDATE runs SET state=json_remove(state, '$.fadingTiers') "
+                           "WHERE json_type(state, '$.fadingTiers') IS NOT NULL")
+                db.execute("UPDATE conversations SET metadata=json_remove(metadata, '$.fadingTiers') "
+                           "WHERE json_type(metadata, '$.fadingTiers') IS NOT NULL")
+                db.execute("PRAGMA user_version=2")
 
     @contextlib.contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimumstørrelse 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Brugerdefineret værktøj",
   "com_agents_mcp_trust_subtext": "Brugerdefinerede stik er ikke verificeret af LSM",
-  "com_agents_memory_info": "Når den er aktiveret, kan agenten gemme, opdatere og slette minder om brugeren under samtalen ved hjælp af værktøjerne set_memory og delete_memory.",
+  "com_agents_memory_info": "Når den er aktiveret, kan agenten gemme, opdatere og slette minder om brugeren under samtalen ved hjælp af værktøjerne set_memory.",
   "com_agents_memory_scope": "Hold minderne adskilt for denne agent",
   "com_agents_memory_scope_info": "Når den er aktiveret, læser og skriver denne agent sine egne hukommelser, isoleret fra dine delte hukommelser og fra andre agenter. Eksisterende delte minder vises ikke til denne agent.",
   "com_agents_missing_name": "Indtast venligst et navn, før du opretter en agent.",
