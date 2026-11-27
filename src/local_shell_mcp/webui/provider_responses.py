@@ -19,6 +19,7 @@ from .providers import (
     _usage_frame,
     check_image_response,
     image_input_rejected,
+    model_request_headers,
 )
 
 PROTOCOL = "openai-responses"
@@ -271,7 +272,7 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
     import httpx
 
     scope = _scope(config)
-    headers = {"accept": "text/event-stream", "content-type": "application/json"}
+    headers = model_request_headers(config)
     if config.token:
         headers["Authorization"] = f"Bearer {config.token}"
     body = {"model": config.model, "input": responses_input(config, messages),

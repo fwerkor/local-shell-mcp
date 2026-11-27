@@ -166,7 +166,7 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
         tried.add(key)
         health = _health[key]
         try:
-            actual = provider_config(*key)
+            actual = replace(provider_config(*key), session_id=config.session_id)
         except ValueError as exc:
             health.cooldown = time.monotonic() + 60
             last_error = exc

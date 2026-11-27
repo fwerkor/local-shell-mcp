@@ -10,8 +10,13 @@ import json
 import re
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from hashlib import sha256
 from urllib.parse import quote, urlsplit
+
+from local_shell_mcp import __version__
+
+MODEL_USER_AGENT = f"local-shell-mcp/{__version__}"
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,26 @@ class ProviderConfig:
     auth_method: str | None = None
     virtual_channel: str | None = None
     virtual_session: tuple[str, str] | None = None
+    session_id: str | None = None
+
+
+def bind_model_session(config: ProviderConfig, conversation_id: str, namespace: str = "") -> ProviderConfig:
+    """Keep a stable model session per conversation and independent task."""
+    session_id = (sha256(f"{conversation_id}\0{namespace}".encode()).hexdigest()
+                  if namespace else conversation_id)
+    return replace(config, session_id=session_id)
+
+
+def model_request_headers(config: ProviderConfig) -> dict[str, str]:
+    headers = {"accept": "text/event-stream", "content-type": "application/json",
+               "User-Agent": MODEL_USER_AGENT}
+    url = urlsplit(config.url)
+    if (url.scheme == "https" and url.hostname == "opencode.ai"
+            and url.port in (None, 443) and url.path.startswith("/inference/")):
+        headers["x-opencode-client"] = "local-shell-mcp"
+        if config.session_id:
+            headers["x-opencode-session"] = config.session_id
+    return headers
 
 
 def _require_https_or_loopback(value: str) -> str:
@@ -317,7 +342,7 @@ async def stream_model(
 
     from .mcp_projection import openai_wire_messages, project_artifact_messages
 
-    headers = {"accept": "text/event-stream", "content-type": "application/json"}
+    headers = model_request_headers(config)
     body: dict = {"model": config.model, "stream": True}
     if config.provider == "openai":
         if config.token:
@@ -492,7 +517,7 @@ async def stream_model_with_tools(
     from .mcp_projection import openai_wire_messages, project_artifact_messages
 
     messages = openai_wire_messages(project_artifact_messages(messages, config.provider))
-    headers = {"accept": "text/event-stream", "content-type": "application/json"}
+    headers = model_request_headers(config)
     if config.token:
         headers["Authorization"] = f"Bearer {config.token}"
     body: dict = {

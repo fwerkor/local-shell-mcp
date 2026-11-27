@@ -53,6 +53,7 @@ from .providers import (
     ModelThought,
     ModelToolCall,
     ModelUsage,
+    bind_model_session,
     provider_config,
     selected_provider,
 )
@@ -295,6 +296,7 @@ class AgentRunner:
         from .sampling import merge_sampling
 
         profile = profile or provider_config(selected_provider({}, agent), (agent or {}).get("model"))
+        profile = bind_model_session(profile, self.generation.conversation_id, self.namespace)
         parameters = merge_sampling(profile.sampling, (agent or {}).get('model_parameters') or self.initial_parameters)
         if isinstance(parameters, dict):
             validate_model_parameters({'model_parameters': parameters}, filters)
@@ -1147,6 +1149,7 @@ class AgentRunner:
             raise RuntimeSafetyError('Summary context was blocked by content protection')
         limit = max(128, min(int(max_tokens), 16384))
         profile = profile or self.initial_profile or self._context(self.root_agent).profile
+        profile = bind_model_session(profile, self.generation.conversation_id, self.namespace)
         from .context_budget import message_token_count
 
         # If a large request fails, prefer bounded fragments over repeatedly

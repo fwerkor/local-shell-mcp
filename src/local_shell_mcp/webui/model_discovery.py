@@ -21,6 +21,7 @@ from .provider_profiles import (
     public_profiles,
     validate_connection,
 )
+from .providers import MODEL_USER_AGENT
 from .routes import _body, _repo
 
 logger = logging.getLogger(__name__)
@@ -109,7 +110,7 @@ def _parse_page(kind: str, data: dict, models: dict[str, int | None]) -> dict:
 
 
 async def _fetch_models(kind: str, base: str, token: str, *, allow_empty: bool = False, account: bool = False) -> dict:
-    headers = {'accept': 'application/json'}
+    headers = {'accept': 'application/json', 'User-Agent': MODEL_USER_AGENT}
     if token:
         if kind == 'google':
             headers['x-goog-api-key'] = token
