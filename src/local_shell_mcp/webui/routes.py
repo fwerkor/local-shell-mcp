@@ -179,6 +179,18 @@ async def conversation_messages(request: Request):
         raise HTTPException(409, detail="Duplicate message or conflicting parent") from exc
 
 
+async def delete_message_turn(request: Request):
+    owner = _owner(request)
+    try:
+        removed = _repo().delete_message_turn(
+            owner, request.path_params["conversation_id"], request.path_params["message_id"])
+    except KeyError:
+        _not_found()
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    return _result({"deletedMessageIds": removed})
+
+
 async def projects(request: Request):
     owner = _owner(request)
     repo = _repo()
@@ -258,6 +270,7 @@ def webui_routes() -> list[Route]:
         Route("/api/convos", conversations, methods=["GET", "POST", "PUT", "DELETE"]),
         Route("/api/convos/{conversation_id}", conversation, methods=["GET", "PUT", "PATCH", "DELETE"]),
         Route("/api/messages", messages, methods=["GET"]),
+        Route("/api/messages/{conversation_id}/{message_id}", delete_message_turn, methods=["DELETE"]),
         Route("/api/messages/{conversation_id}", conversation_messages, methods=["GET", "POST"]),
         Route("/api/projects", projects, methods=["GET", "POST"]),
         Route("/api/projects/conversations/{conversation_id}", assign_project, methods=["PUT"]),

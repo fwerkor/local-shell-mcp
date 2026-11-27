@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Eyða þessari umferð",
+  "com_ui_message_turn_delete_confirm": "Eyða þessum notandaskilaboðum og öllum svörum við þeim? Síðari skilaboð verða varðveitt. Ekki er hægt að afturkalla þetta.",
+  "com_ui_message_turn_delete_error": "Ekki tókst að eyða umferðinni",
   "com_ui_tool_approval_mode": "Samþykkishamur verkfæra",
   "com_ui_tool_approval_auto": "Sjálfvirk",
   "com_ui_tool_approval_dangerous": "Farið yfir áhættusaman rekstur",

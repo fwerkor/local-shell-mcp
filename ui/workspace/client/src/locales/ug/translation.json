@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "بۇ سۆھبەت نۆۋىتىنى ئۆچۈرۈش",
+  "com_ui_message_turn_delete_confirm": "بۇ ئىشلەتكۈچى ئۇچۇرى ۋە ئۇنىڭ بارلىق جاۋابلىرى ئۆچۈرۈلسۇنمۇ؟ كېيىنكى ئۇچۇرلار ساقلىنىدۇ. بۇ مەشغۇلاتنى قايتۇرغىلى بولمايدۇ.",
+  "com_ui_message_turn_delete_error": "بۇ سۆھبەت نۆۋىتىنى ئۆچۈرگىلى بولمىدى",
   "com_ui_tool_approval_mode": "قورال تەستىق ھالىتى",
   "com_ui_tool_approval_auto": "ئاپتوماتىك",
   "com_ui_tool_approval_dangerous": "خەتەرلىك مەشغۇلاتلارنى كۆزدىن كەچۈرۈڭ",

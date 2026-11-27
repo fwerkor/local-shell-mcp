@@ -41,6 +41,22 @@ async def test_private_chat_api_end_to_end(tmp_path, monkeypatch) -> None:
         assert (await client.get("/api/messages", params={"conversationId": cid}, headers=bob)).status_code == 404
         assert (await client.get("/api/messages", params={"conversationId": cid}, headers=alice)).json()["messages"][0]["text"] == "你好，世界"
         assert len((await client.get("/api/search/messages", params={"q": "你好，"}, headers=alice)).json()["messages"]) == 1
+        mid = add.json()["messageId"]
+        reply = (await client.post(f"/api/messages/{cid}", json={
+            "role": "assistant", "text": "你好", "parentMessageId": mid,
+        }, headers=alice)).json()["messageId"]
+        followup = (await client.post(f"/api/messages/{cid}", json={
+            "role": "user", "text": "Follow-up", "parentMessageId": reply,
+        }, headers=alice)).json()["messageId"]
+        endpoint = f"/api/messages/{cid}/{reply}"
+        assert (await client.delete(endpoint, headers=bob)).status_code == 404
+        deleted = await client.delete(endpoint, headers=alice)
+        assert deleted.status_code == 200, deleted.text
+        assert set(deleted.json()["deletedMessageIds"]) == {mid, reply}
+        remaining = (await client.get("/api/messages", params={"conversationId": cid}, headers=alice)).json()["messages"]
+        assert [m["messageId"] for m in remaining] == [followup]
+        assert remaining[0]["parentMessageId"] is None
+        assert (await client.delete(endpoint, headers=alice)).status_code == 404
         assert (await client.request("DELETE", "/api/convos", json={"arg": {"conversationId": cid}}, headers=alice)).status_code == 200
         assert (await client.get(f"/api/convos/{cid}", headers=alice)).status_code == 404
 

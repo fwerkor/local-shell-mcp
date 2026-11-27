@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Odstrániť tento ťah",
+  "com_ui_message_turn_delete_confirm": "Odstrániť túto správu používateľa a všetky odpovede na ňu? Neskoršie správy zostanú zachované. Táto akcia sa nedá vrátiť.",
+  "com_ui_message_turn_delete_error": "Tento ťah sa nepodarilo odstrániť",
   "com_ui_tool_approval_mode": "Režim schválenia nástroja",
   "com_ui_tool_approval_auto": "Automaticky",
   "com_ui_tool_approval_dangerous": "Preskúmajte rizikové operácie",

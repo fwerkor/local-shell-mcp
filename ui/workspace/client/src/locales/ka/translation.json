@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "ამ რაუნდის წაშლა",
+  "com_ui_message_turn_delete_confirm": "წაიშალოს მომხმარებლის ეს შეტყობინება და ყველა პასუხი? შემდგომი შეტყობინებები შენარჩუნდება. მოქმედების გაუქმება შეუძლებელია.",
+  "com_ui_message_turn_delete_error": "ამ რაუნდის წაშლა ვერ მოხერხდა",
   "com_ui_tool_approval_mode": "ხელსაწყოს დამტკიცების რეჟიმი",
   "com_ui_tool_approval_auto": "ავტომატური",
   "com_ui_tool_approval_dangerous": "გადახედეთ სარისკო ოპერაციებს",

@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Usuń tę turę",
+  "com_ui_message_turn_delete_confirm": "Usunąć tę wiadomość użytkownika i wszystkie odpowiedzi na nią? Późniejsze wiadomości zostaną zachowane. Tej operacji nie można cofnąć.",
+  "com_ui_message_turn_delete_error": "Nie udało się usunąć tej tury",
   "com_ui_tool_approval_mode": "Tryb zatwierdzania narzędzi",
   "com_ui_tool_approval_auto": "Automatyczny",
   "com_ui_tool_approval_dangerous": "Przejrzyj ryzykowne operacje",

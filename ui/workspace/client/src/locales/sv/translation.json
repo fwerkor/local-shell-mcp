@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Ta bort denna omgång",
+  "com_ui_message_turn_delete_confirm": "Ta bort detta användarmeddelande och alla dess svar? Senare meddelanden behålls. Åtgärden kan inte ångras.",
+  "com_ui_message_turn_delete_error": "Det gick inte att ta bort denna omgång",
   "com_ui_tool_approval_mode": "Verktygsgodkännandeläge",
   "com_ui_tool_approval_auto": "Automatisk",
   "com_ui_tool_approval_dangerous": "Se över riskfyllda verksamheter",

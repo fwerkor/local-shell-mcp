@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Izbriši ta krog",
+  "com_ui_message_turn_delete_confirm": "Izbrisati to uporabnikovo sporočilo in vse odgovore nanj? Poznejša sporočila bodo ohranjena. Tega dejanja ni mogoče razveljaviti.",
+  "com_ui_message_turn_delete_error": "Tega kroga ni bilo mogoče izbrisati",
   "com_ui_tool_approval_mode": "Način odobritve orodja",
   "com_ui_tool_approval_auto": "Samodejno",
   "com_ui_tool_approval_dangerous": "Preglejte tvegane operacije",

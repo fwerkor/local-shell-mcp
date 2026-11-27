@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Xóa lượt này",
+  "com_ui_message_turn_delete_confirm": "Xóa tin nhắn người dùng này và tất cả câu trả lời của nó? Các tin nhắn sau sẽ được giữ lại. Không thể hoàn tác hành động này.",
+  "com_ui_message_turn_delete_error": "Không thể xóa lượt này",
   "com_ui_tool_approval_mode": "Chế độ phê duyệt công cụ",
   "com_ui_tool_approval_auto": "tự động",
   "com_ui_tool_approval_dangerous": "Xem xét các hoạt động rủi ro",

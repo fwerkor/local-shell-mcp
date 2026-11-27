@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Excluir este turno",
+  "com_ui_message_turn_delete_confirm": "Excluir esta mensagem do usuário e todas as suas respostas? As mensagens posteriores serão mantidas. Esta ação não pode ser desfeita.",
+  "com_ui_message_turn_delete_error": "Não foi possível excluir este turno",
   "com_ui_tool_approval_mode": "Modo de aprovação de ferramenta",
   "com_ui_tool_approval_auto": "Automático",
   "com_ui_tool_approval_dangerous": "Revise operações arriscadas",

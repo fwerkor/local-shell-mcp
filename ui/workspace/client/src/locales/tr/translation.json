@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Bu konuşma turunu sil",
+  "com_ui_message_turn_delete_confirm": "Bu kullanıcı mesajı ve tüm yanıtları silinsin mi? Sonraki mesajlar korunacak. Bu işlem geri alınamaz.",
+  "com_ui_message_turn_delete_error": "Bu konuşma turu silinemedi",
   "com_ui_tool_approval_mode": "Takım onay modu",
   "com_ui_tool_approval_auto": "Otomatik",
   "com_ui_tool_approval_dangerous": "Riskli operasyonları gözden geçirin",

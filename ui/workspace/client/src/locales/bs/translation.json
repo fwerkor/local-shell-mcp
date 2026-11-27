@@ -1,4 +1,7 @@
 {
+  "com_ui_message_turn_delete": "Izbriši ovaj krug",
+  "com_ui_message_turn_delete_confirm": "Izbrisati ovu korisničku poruku i sve odgovore na nju? Kasnije poruke će ostati. Ova radnja se ne može poništiti.",
+  "com_ui_message_turn_delete_error": "Nije moguće izbrisati ovaj krug",
   "com_ui_tool_approval_mode": "Način odobrenja alata",
   "com_ui_tool_approval_auto": "Automatski",
   "com_ui_tool_approval_dangerous": "Pregledajte rizične operacije",
