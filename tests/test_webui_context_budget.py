@@ -448,7 +448,7 @@ async def test_default_threshold_compacts_one_long_running_turn(ctx):
                          profile=profile)
     original = [{'role': 'user', 'content': 'Keep monitoring'},
                 *_tool_exchange('old', 700), *_tool_exchange('recent', 10)]
-    budget = calculate_budget(original, [], 1000)
+    budget = calculate_budget([*runner._conversation_context(), *original], [], 1000)
     input_tokens = budget.message_tokens + budget.instruction_tokens + budget.tool_schema_tokens
     below = int(input_tokens / 0.84)
     above = int(input_tokens / 0.86)

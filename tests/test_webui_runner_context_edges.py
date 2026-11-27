@@ -44,6 +44,58 @@ def runtime(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
+
+def test_conversation_context_is_live_and_not_persisted(runtime):
+    db, _, repo, profile, runner = runtime
+    cid = runner.generation.conversation_id
+    history = [{'role': 'user', 'content': 'initial message'}]
+    state = AgentLoopState(AgentContext(profile, []), history)
+
+    def context():
+        projected = runner._project_model_messages(state)
+        assert projected[-1:] == history
+        metadata = [m['content'] for m in projected if m['role'] == 'system'
+                    and m['content'].startswith('Current conversation metadata')]
+        assert len(metadata) == 1
+        assert state.messages == history
+        return metadata[0]
+
+    assert 'Current project:' not in context()
+    assert 'Current conversation: "initial message"' in context()
+    project = repo.create_project('a', '项目 A', 'First description')
+    repo.update_conversation('a', cid, {'projectId': project['id'], 'title': '新标题'})
+    assert 'Current project: "项目 A"' in context()
+    assert 'Project description: "First description"' in context()
+    assert 'Current conversation: "新标题"' in context()
+    repo.update_project('a', project['id'], {'name': 'Renamed', 'description': 'Updated'})
+    assert 'Current project: "Renamed"' in context()
+    assert 'Project description: "Updated"' in context()
+    assert 'First description' not in context()
+    repo.delete_project('a', project['id'])
+    assert 'Current project:' not in context()
+    assert 'Project description:' not in context()
+    runner.namespace = '/subagent:child'
+    assert runner._conversation_context() == []
+    runner.namespace = '/graph:node'
+    runner.graph_node = True
+    assert runner._conversation_context()
+    runner.namespace = '/subagent:child/graph:node'
+    assert runner._conversation_context() == []
+    runner.namespace = ''
+    runner.authorization_conversation_id = 'different-chat'
+    assert runner._conversation_context() == []
+
+
+def test_conversation_context_rejects_foreign_metadata(runtime):
+    _, _, repo, _, runner = runtime
+    foreign = repo.create_project('other', 'Private', 'Secret')
+    repo.update_conversation('a', runner.generation.conversation_id, {'projectId': foreign['id']})
+    assert 'Current project:' not in runner._conversation_context()[0]['content']
+    assert 'Secret' not in runner._conversation_context()[0]['content']
+    runner.owner = 'other'
+    assert runner._conversation_context() == []
+
+
 def test_memory_context_is_agent_opt_in_and_errors_never_fake_empty(runtime, monkeypatch):
     db, _, repo, profile, runner = runtime
     # With default Memory tools, even an empty store must retain proactive memory guidance.

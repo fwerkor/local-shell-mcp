@@ -518,7 +518,10 @@ async def test_graph_members_receive_complete_artifact_prompts_and_root_ephemera
     seen = {}
 
     async def model(profile, history, **kwargs):
-        seen[profile.model] = [m['content'] for m in history if m.get('role') == 'system']
+        system = [m['content'] for m in history if m.get('role') == 'system']
+        assert any(value.startswith('Current conversation metadata') for value in system)
+        seen[profile.model] = [value for value in system
+                               if not value.startswith('Current conversation metadata')]
         yield profile.model + ' done'
 
     actor, generation = runner(context, parent, model)

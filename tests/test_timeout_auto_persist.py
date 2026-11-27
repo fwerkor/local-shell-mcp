@@ -102,13 +102,25 @@ async def test_timeout_has_no_terminal_placeholder_output(isolated_job_workspace
 
 @pytest.mark.asyncio
 async def test_run_python_can_persist_and_keep_script_path(isolated_job_workspace):
-    result = await tools._run_python(
-        "import time; print('start', flush=True); time.sleep(2)", ".", 1, True
+    release = isolated_job_workspace / "release-python"
+    code = (
+        "from pathlib import Path; import time\n"
+        f"release = Path({str(release)!r})\n"
+        "deadline = time.monotonic() + 120\n"
+        "while not release.exists() and time.monotonic() < deadline: time.sleep(0.05)\n"
+        "assert release.exists(), 'test never released the job'\n"
+        "print('finished', flush=True)\n"
     )
-    assert result["timed_out"] is True
-    assert result["job_id"]
-    assert result["script_path"].endswith(".py")
-    await _wait_job(result["job_id"])
+    try:
+        result = await tools._run_python(code, ".", 1, True)
+        assert result["timed_out"] is True, result
+        assert result["job_id"]
+        assert result["script_path"].endswith(".py")
+    finally:
+        release.touch()
+    completed = await _wait_job(result["job_id"], timeout=60)
+    assert completed["job"]["exit_code"] == 0
+    assert "finished" in completed["output"]
 
 
 @pytest.mark.asyncio
