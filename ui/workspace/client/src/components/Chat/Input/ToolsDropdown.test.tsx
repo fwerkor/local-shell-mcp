@@ -49,7 +49,7 @@ jest.mock('@librechat/client', () => ({
         return (
           <div key={index}>
             {item.render ? (
-              (item.render as (props: typeof props) => React.ReactNode)(props)
+              (item.render as (itemProps: typeof props) => React.ReactNode)(props)
             ) : (
               <div {...props}>{item.label}</div>
             )}
