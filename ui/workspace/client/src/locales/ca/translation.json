@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Només ús confirmat de l'API; poden faltar crides anteriors o no notificades.",
   "com_ui_message_turn_delete": "Suprimeix aquest torn",
   "com_ui_message_turn_delete_confirm": "Vols suprimir aquest missatge de l'usuari i totes les seves respostes? Es conservaran els missatges posteriors. Aquesta acció no es pot desfer.",
   "com_ui_message_turn_delete_error": "No s'ha pogut suprimir aquest torn",

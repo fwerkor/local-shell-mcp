@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+-- Confirmed API consumption survives message edits and context compaction.
+CREATE TABLE IF NOT EXISTS webui_conversation_usage (
+    conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_known_input_tokens INTEGER NOT NULL DEFAULT 0,
+    calls INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

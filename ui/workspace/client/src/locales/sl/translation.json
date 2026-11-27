@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Samo potrjena uporaba API-ja; prejšnji ali neprijavljeni klici lahko manjkajo.",
   "com_ui_message_turn_delete": "Izbriši ta krog",
   "com_ui_message_turn_delete_confirm": "Izbrisati to uporabnikovo sporočilo in vse odgovore nanj? Poznejša sporočila bodo ohranjena. Tega dejanja ni mogoče razveljaviti.",
   "com_ui_message_turn_delete_error": "Tega kroga ni bilo mogoče izbrisati",

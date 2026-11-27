@@ -25,7 +25,7 @@ from .memory import (
     tool_definitions,
 )
 from .memory_protection import configured_filters, inspect_memory_content
-from .providers import ModelToolCall, provider_config
+from .providers import ModelToolCall, ModelUsage, provider_config
 from .storage import WorkspaceRepository
 from .tokenizer import count_tokens
 
@@ -151,6 +151,14 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
     try:
         async for event in stream_tools(chosen, messages, tools=tool_definitions(allowed_keys)[:1],
                                         max_tokens=1024, temperature=None):
+            if isinstance(event, ModelUsage):
+                from .generations import GenerationStore
+
+                try:
+                    GenerationStore(database).record_model_consumption(owner, generation.run_id, event)
+                except Exception as exc:
+                    _log.warning('Automatic Memory consumption recording failed (%s)', type(exc).__name__)
+                continue
             if not isinstance(event, ModelToolCall):
                 continue
             if event.name != 'set_memory':

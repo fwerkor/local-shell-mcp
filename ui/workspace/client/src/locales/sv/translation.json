@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Endast bekräftad API-användning; tidigare eller orapporterade anrop kan saknas.",
   "com_ui_message_turn_delete": "Ta bort denna omgång",
   "com_ui_message_turn_delete_confirm": "Ta bort detta användarmeddelande och alla dess svar? Senare meddelanden behålls. Åtgärden kan inte ångras.",
   "com_ui_message_turn_delete_error": "Det gick inte att ta bort denna omgång",

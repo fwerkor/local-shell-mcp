@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Csak a megerősített API-használat; a korábbi vagy nem jelentett hívások hiányozhatnak.",
   "com_ui_message_turn_delete": "Beszélgetési kör törlése",
   "com_ui_message_turn_delete_confirm": "Törli ezt a felhasználói üzenetet és az összes válaszát? A későbbi üzenetek megmaradnak. A művelet nem vonható vissza.",
   "com_ui_message_turn_delete_error": "Nem sikerült törölni a beszélgetési kört",

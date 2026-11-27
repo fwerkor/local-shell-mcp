@@ -255,3 +255,26 @@ def test_provider_snapshot_reports_tool_composition():
     assert event['cacheRead'] == 20
     assert sum(breakdown['toolTokenCounts'].values()) == breakdown['toolSchemaTokens']
     assert 0 < breakdown['toolMessageTokenCounts']['demo'] <= breakdown['toolMessageTokens']
+
+def test_conversation_consumption_survives_compaction_and_message_deletion(setup):
+    db, store, job = setup
+    repo = WorkspaceRepository(db)
+    assert repo.conversation('alice', job.conversation_id)['recordedUsage'] is None
+    with pytest.raises(KeyError):
+        store.record_model_consumption('intruder', job.run_id, ModelUsage('openai', 1, 1))
+    store.record_model_consumption('alice', job.run_id, ModelUsage('openai', 1000, 20, 900))
+    store.record_model_consumption('alice', job.run_id, ModelUsage('anthropic', 2000, 40, 0, 1000))
+    store.record_model_consumption('alice', job.run_id, ModelUsage('openai', 100, 10))
+    store.record_context_usage('alice', job.run_id, _snapshot(job))
+    expected = {'inputTokens': 3100, 'outputTokens': 70, 'cacheReadTokens': 900,
+                'cacheKnownInputTokens': 3000, 'calls': 3}
+    assert repo.conversation('alice', job.conversation_id)['recordedUsage'] == expected
+    assert repo.conversation('intruder', job.conversation_id) is None
+    assert store.finish('alice', job.run_id, status='complete', text='Done')
+    with db.connect() as conn:
+        conn.execute('DELETE FROM messages WHERE conversation_id=?', (job.conversation_id,))
+    reopened = WorkspaceRepository(SQLiteDatabase(db.root))
+    assert reopened.conversation('alice', job.conversation_id)['recordedUsage'] == expected
+    assert reopened.delete_conversation('alice', job.conversation_id)
+    with db.connect() as conn:
+        assert conn.execute('SELECT count(*) FROM webui_conversation_usage').fetchone()[0] == 0

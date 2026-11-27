@@ -407,3 +407,24 @@ async def test_auto_memory_assembled_context_policy_stops_provider_before_any_ca
         store.history('alice', job.conversation_id), root_agent=None, stream_tools=stream) == 0
     assert not called
     assert not MemoryRepository(db).list('alice')
+
+
+@pytest.mark.asyncio
+async def test_automatic_memory_usage_contributes_to_conversation_ledger(memory_run):
+    from local_shell_mcp.webui.providers import ModelUsage
+
+    db, store, settings, job, _ = memory_run
+    enable(settings)
+
+    async def stream(*args, **kwargs):
+        yield ModelToolCall('memory-usage', 'set_memory', {'key': 'style', 'value': 'Concise'})
+        yield ModelUsage('openai', 320, 12, 200)
+
+    assert await memory_agent.run_automatic_memory(
+        'alice', job, db, store.history('alice', job.conversation_id),
+        root_agent=None, stream_tools=stream,
+    ) == 1
+    assert settings.conversation('alice', job.conversation_id)['recordedUsage'] == {
+        'inputTokens': 320, 'outputTokens': 12, 'cacheReadTokens': 200,
+        'cacheKnownInputTokens': 320, 'calls': 1,
+    }

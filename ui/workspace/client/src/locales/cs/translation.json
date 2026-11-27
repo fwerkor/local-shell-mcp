@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Pouze potvrzené využití API; dřívější nebo nenahlášená volání mohou chybět.",
   "com_ui_message_turn_delete": "Smazat tento tah",
   "com_ui_message_turn_delete_confirm": "Smazat tuto zprávu uživatele a všechny její odpovědi? Pozdější zprávy zůstanou zachovány. Tuto akci nelze vrátit.",
   "com_ui_message_turn_delete_error": "Tento tah se nepodařilo smazat",

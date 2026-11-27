@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "يُحتسب فقط استخدام واجهة API المؤكد؛ قد لا تظهر الاستدعاءات السابقة أو التي لم يُبلّغ عنها.",
   "com_ui_message_turn_delete": "حذف هذه الجولة",
   "com_ui_message_turn_delete_confirm": "هل تريد حذف رسالة المستخدم هذه وجميع الردود عليها؟ ستبقى الرسائل اللاحقة. لا يمكن التراجع عن ذلك.",
   "com_ui_message_turn_delete_error": "تعذر حذف هذه الجولة",

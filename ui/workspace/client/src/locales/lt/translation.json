@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Tik patvirtintas API naudojimas; ankstesnių arba nepraneštų iškvietimų gali trūkti.",
   "com_ui_message_turn_delete": "Ištrinti šį pokalbio etapą",
   "com_ui_message_turn_delete_confirm": "Ištrinti šį naudotojo pranešimą ir visus jo atsakymus? Vėlesni pranešimai bus išsaugoti. Šio veiksmo atšaukti negalima.",
   "com_ui_message_turn_delete_error": "Nepavyko ištrinti pokalbio etapo",

@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Samo potvrđena upotreba API-ja; raniji ili neprijavljeni pozivi mogu nedostajati.",
   "com_ui_message_turn_delete": "Izbriši ovaj krug",
   "com_ui_message_turn_delete_confirm": "Izbrisati ovu korisničku poruku i sve odgovore na nju? Kasnije poruke će ostati. Ova radnja se ne može poništiti.",
   "com_ui_message_turn_delete_error": "Nije moguće izbrisati ovaj krug",

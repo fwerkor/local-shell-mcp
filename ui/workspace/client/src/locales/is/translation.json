@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Aðeins staðfest API-notkun; eldri eða ótilkynnt köll kunna að vanta.",
   "com_ui_message_turn_delete": "Eyða þessari umferð",
   "com_ui_message_turn_delete_confirm": "Eyða þessum notandaskilaboðum og öllum svörum við þeim? Síðari skilaboð verða varðveitt. Ekki er hægt að afturkalla þetta.",
   "com_ui_message_turn_delete_error": "Ekki tókst að eyða umferðinni",

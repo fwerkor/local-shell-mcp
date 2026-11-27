@@ -1192,6 +1192,32 @@ class GenerationStore:
             db.execute('UPDATE conversations SET metadata=?,updated_at=? WHERE id=? AND owner=?',
                        (_json(metadata), _now(), row['conversation_id'], owner))
 
+    def record_model_consumption(self, owner: str, run_id: str, usage) -> None:
+        """Accumulate one completed provider call, independently of context snapshots."""
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute(
+                'SELECT r.conversation_id FROM runs r JOIN conversations c '
+                'ON c.id=r.conversation_id WHERE r.id=? AND c.owner=?',
+                (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError('Generation not found or unauthorized')
+            db.execute(
+                'INSERT INTO webui_conversation_usage '
+                '(conversation_id,input_tokens,output_tokens,cache_read_tokens,'
+                'cache_known_input_tokens,calls) VALUES (?,?,?,?,?,1) '
+                'ON CONFLICT(conversation_id) DO UPDATE SET '
+                'input_tokens=input_tokens+excluded.input_tokens, '
+                'output_tokens=output_tokens+excluded.output_tokens, '
+                'cache_read_tokens=cache_read_tokens+excluded.cache_read_tokens, '
+                'cache_known_input_tokens=cache_known_input_tokens+excluded.cache_known_input_tokens, '
+                'calls=calls+1',
+                (row['conversation_id'], usage.input_tokens, usage.output_tokens,
+                 usage.cache_read or 0,
+                 usage.input_tokens if usage.cache_read is not None else 0),
+            )
+
     def record_context_usage(self, owner: str, run_id: str, snapshot: dict) -> int:
         """Commit a visible context snapshot to run state and the SSE replay log.
 
