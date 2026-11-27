@@ -279,3 +279,29 @@ def test_fts_runtime_failure_falls_back_to_scoped_ranking(state):
     found = retrieve(memory, 'alice', '', query='worker restart', include_conversations=True,
                      conversation_id=current)
     assert found['results'][0]['message_id'] == expected
+
+
+@pytest.mark.parametrize('fts', [True, False])
+def test_history_prefilter_keeps_short_ascii_and_normalized_unicode_matches(state, fts):
+    db, workspace, memory = state
+    if fts and not db.fts_enabled:
+        pytest.skip('SQLite FTS5 unavailable')
+    db.fts_enabled = fts
+    current, previous = chat(workspace), chat(workspace)
+    indexed = message(workspace, previous, 'worker restart')
+    short_ascii = message(workspace, previous, 'Go language')
+    short_unicode = message(workspace, previous, 'ＧＯ语言')
+    compatible = message(workspace, previous, 'ＡＰＩ endpoint')
+    folded = message(workspace, previous, 'Straße')
+    message(workspace, previous, 'ongoing apiary')
+
+    def ids(query):
+        return {row['message_id'] for row in retrieve(
+            memory, 'alice', '', query=query, include_conversations=True,
+            conversation_id=current)['results']}
+
+    # The short-token channel must still find ASCII and Unicode rows that
+    # have no indexed match for the longer term.
+    assert ids('worker Go') == {indexed, short_ascii, short_unicode}
+    assert ids('API') == {compatible}
+    assert ids('STRASSE') == {folded}

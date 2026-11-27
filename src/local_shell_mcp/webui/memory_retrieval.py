@@ -9,6 +9,7 @@ import time
 import unicodedata
 from collections import Counter
 from datetime import UTC, datetime
+from functools import lru_cache
 
 from .content_filters import inspect_content, model_message_fragments
 from .memory_protection import inspect_memory_content, project_stored_memories
@@ -61,8 +62,11 @@ class _Query:
     def __init__(self, query: str):
         self.text = normalize(query).strip()
         self.tokens = terms(self.text)
+        self.token_kinds = [(token, bool(_CJK.fullmatch(token))) for token in self.tokens]
+        self.has_word_tokens = any(not is_cjk for _, is_cjk in self.token_kinds)
         self.identifiers = list(dict.fromkeys(_IDENTIFIER.findall(self.text)))[:16]
         self.identifier_patterns = [_identifier_pattern(value) for value in self.identifiers]
+        self.literals = tuple(dict.fromkeys([self.text, *self.tokens, *self.identifiers]))
         if self.text in self.identifiers:
             self.phrase = _identifier_pattern(self.text)
         else:
@@ -77,16 +81,20 @@ class _Query:
         haystack = key + ' ' + (text if normalized else normalize(text))
         if self.text == key:
             return [], 10.0
-        words = set(_WORD.findall(_CJK.sub(' ', haystack)))
-        hits = [token for token in self.tokens
-                if (token in haystack if _CJK.fullmatch(token) else token in words)]
+        words = set(_WORD.findall(_CJK.sub(' ', haystack))) if self.has_word_tokens else set()
+        hits = [token for token, is_cjk in self.token_kinds
+                if (token in haystack if is_cjk else token in words)]
         bonus = 3.0 if self.phrase.search(haystack) else 0.0
         if self.identifier_patterns:
             bonus += 2.0 * sum(bool(pattern.search(haystack)) for pattern in self.identifier_patterns) / len(self.identifier_patterns)
         return hits, bonus
 
     def candidate_score(self, text: str, *, normalized: bool = False) -> float:
-        hits, bonus = self.match(text, normalized=normalized)
+        folded = text if normalized else normalize(text)
+        # A literal must occur before any boundary-aware match can score.
+        if not any(literal in folded for literal in self.literals):
+            return 0.0
+        hits, bonus = self.match(folded, normalized=True)
         return bonus + len(hits) / max(len(self.tokens), 1)
 
 
@@ -229,7 +237,10 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
         long_terms = [term for term in search_terms if len(term) >= 3]
         short_terms = [term for term in search_terms if len(term) < 3]
         fields = 'm.id,m.conversation_id,m.role,m.text,m.content,m.created_at'
-        scope = f"{where} AND m.role IN ('user','assistant') AND m.text<>''"
+        # Eligibility depends only on the conversation. Evaluate it once per
+        # statement rather than repeating the correlated checks for every message.
+        scope = (f"m.conversation_id IN (SELECT c.id FROM conversations c WHERE {where})"
+                 " AND m.role IN ('user','assistant') AND m.text<>''")
         rows = {}
         use_fts = bool(getattr(repo.database, 'fts_enabled', False) and long_terms)
         if use_fts:
@@ -237,7 +248,6 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
                 match = ' OR '.join('"' + term.replace('"', '""') + '"' for term in long_terms)
                 indexed = db.execute(
                     f'SELECT {fields} FROM message_search JOIN messages m ON m.id=message_search.message_id '
-                    'JOIN conversations c ON c.id=m.conversation_id '
                     f'WHERE {scope} AND message_search.text MATCH ? '
                     'ORDER BY bm25(message_search),m.created_at DESC,m.id DESC LIMIT ?',
                     (*params, match, _MAX_CANDIDATES)).fetchall()
@@ -249,6 +259,8 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
         # unavailable FTS, or Unicode compatibility/casefold variants, scan
         # the authorized scope with normalized lexical scoring. Keep the
         # fallback pool bounded and order by relevance, not just recency.
+        # SQLite may evaluate a matching row once for WHERE and again for ORDER BY.
+        @lru_cache(maxsize=1)
         def fallback_score(message_id: str, text: str) -> float:
             if message_id in rows:
                 return 0.0
@@ -258,15 +270,20 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
             return query.candidate_score(folded, normalized=True)
 
         db.create_function('lsm_fallback_score', 2, fallback_score, deterministic=True)
-        # With no short terms, ASCII text cannot add normalization-only hits.
-        compatibility_only = ' AND length(CAST(m.text AS BLOB))<>length(m.text)' if (
-            use_fts and not short_terms) else ''
+        # For ASCII rows, normalization cannot introduce a new match. A
+        # cheap SQL prefilter avoids calling Python for impossible matches.
+        # Every non-ASCII row still follows the full Unicode fallback.
+        fallback_terms = short_terms if use_fts else query.literals
+        ascii_terms = [term for term in fallback_terms if term.isascii()]
+        prefilter = 'length(CAST(m.text AS BLOB))<>length(m.text)'
+        if ascii_terms:
+            prefilter += ' OR ' + ' OR '.join('instr(lower(m.text),?)>0' for _ in ascii_terms)
         fallback = db.execute(
             f'SELECT {fields},lsm_fallback_score(m.id,m.text) AS relevance '
-            'FROM messages m JOIN conversations c ON c.id=m.conversation_id '
-            f'WHERE {scope}{compatibility_only} AND relevance>0 '
+            'FROM messages m '
+            f'WHERE {scope} AND ({prefilter}) AND relevance>0 '
             'ORDER BY relevance DESC,m.created_at DESC,m.id DESC LIMIT ?',
-            (*params, _MAX_CANDIDATES)).fetchall()
+            (*params, *ascii_terms, _MAX_CANDIDATES)).fetchall()
         for row in fallback:
             rows.setdefault(row['id'], row)
     allowed = {}
