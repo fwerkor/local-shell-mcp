@@ -253,16 +253,19 @@ class AgentRunner:
         ):
             selected.update({"skill_list", "skill_load", "skill_read"})
         # Legacy agents retain their per-tool allowlist. Agents configured in
-        # the new builder expose all audited native tools allowed by both ACLs.
-        from .machine_permissions import agent_access_policy
+        # the new builder expose the audited native tools allowed by their effective ACL.
+        from .machine_permissions import agent_access_policy, scheduled_agent_permissions
 
         policy = agent_access_policy(agent or {})
         machine_configured = policy is not None
         machine_policy, machine_default = policy if policy is not None else (None, "write")
+        agent_only = scheduled_agent_permissions(self.database, self.owner, self.generation.run_id,
+                                                (agent or {}).get("id"))
         native = available_tools(self.owner, self.authorization_conversation_id,
                                  scopes=set(self.scopes), expires=self.grant_expires,
                                  agent_permissions=machine_policy,
-                                 agent_default_permission=machine_default)
+                                 agent_default_permission=machine_default,
+                                 agent_only=agent_only)
         machine_exposed = selected_tools is None and machine_configured
         tools = [tool for tool in native
                  if (unrestricted or machine_exposed or tool["function"]["name"] in selected
@@ -1448,7 +1451,7 @@ class AgentRunner:
 
     def _project_model_messages(self, state: AgentLoopState) -> list[dict]:
         from .agents import AgentRepository
-        from .machine_permissions import machine_access_context
+        from .machine_permissions import machine_access_context, scheduled_agent_permissions
         from .storage import WorkspaceRepository
 
         agent = state.context.agent
@@ -1460,6 +1463,8 @@ class AgentRunner:
             self.owner, self.authorization_conversation_id, agent=agent,
             scopes=set(self.scopes), expires=self.grant_expires,
             repo=WorkspaceRepository(self.database),
+            agent_only=scheduled_agent_permissions(self.database, self.owner, self.generation.run_id,
+                                                   (state.context.agent or {}).get("id")),
         )
         projected = [*self._conversation_context(), *state.messages]
         if restrictions:

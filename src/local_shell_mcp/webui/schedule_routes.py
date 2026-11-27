@@ -2,7 +2,8 @@
 
 The worker claims each occurrence under SQLite BEGIN IMMEDIATE, so controller
 restarts and concurrent server processes cannot double-fire one occurrence.
-Unattended runs do not inherit a browser's transient OAuth tool grant.
+Scheduled chats retain the owner-authorized scope names, not a browser token.
+Each occurrence resolves the same live feature and machine policies as chat.
 """
 from __future__ import annotations
 
@@ -30,6 +31,27 @@ _ACTIVE: set[asyncio.Task] = set()
 _LIMITS = {'minIntervalMinutes': 5, 'requireProject': False}
 _DAY_MS = 86_400_000
 _MAX_CONTINUOUS_DELAY_MINUTES = 525_600
+_SCOPE_KEY = 'executionScopes'
+
+
+def _request_execution_scopes(request):
+    from ..oauth import ALL_OAUTH_SCOPES
+    from .generation_routes import _request_grant
+
+    scopes, _ = _request_grant(request)
+    return frozenset(scopes).intersection(ALL_OAUTH_SCOPES)
+
+
+def _execution_scopes(config):
+    from ..oauth import ALL_OAUTH_SCOPES
+    from ..settings import get_settings
+
+    scopes = config.get(_SCOPE_KEY)
+    if scopes is None and get_settings().auth_mode == 'none':
+        return frozenset(ALL_OAUTH_SCOPES)
+    if not isinstance(scopes, list) or any(not isinstance(scope, str) for scope in scopes):
+        return None
+    return frozenset(scopes).intersection(ALL_OAUTH_SCOPES)
 
 
 def _iso(ms: int | None):
@@ -337,6 +359,7 @@ async def schedules(request: Request):
     config = {key: data[key] for key in
               ('name', 'prompt', 'agent_id', 'cadence', 'timezone', 'target', 'file_ids',
                'chatProjectId', 'targetConversationId') if key in data}
+    config[_SCOPE_KEY] = sorted(_request_execution_scopes(request))
     config.setdefault('target', 'new')
     if config['target'] != 'existing':
         config.pop('targetConversationId', None)
@@ -379,6 +402,9 @@ async def schedule(request: Request):
                 'file_ids', 'chatProjectId', 'targetConversationId'):
         if key in payload:
             config[key] = payload[key]
+    # Editing or enabling a schedule is the owner's authorization for future
+    # occurrences. Never accept an execution scope from the JSON payload.
+    config[_SCOPE_KEY] = sorted(_request_execution_scopes(request))
     enabled = payload.get('enabled', bool(row['enabled']))
     if config.get('target', 'new') != 'existing':
         config.pop('targetConversationId', None)
@@ -447,7 +473,7 @@ def _target_conversation(config):
     return None
 
 
-def _claim_due(database, *, owner=None, sid=None, manual=False):
+def _claim_due(database, *, owner=None, sid=None, manual=False, manual_scopes=None):
     now = int(time.time() * 1000)
     with database.connect() as db:
         db.execute('BEGIN IMMEDIATE')
@@ -486,6 +512,16 @@ def _claim_due(database, *, owner=None, sid=None, manual=False):
                                       'AND created_at>?', (row['id'], _now() - 60_000_000)).fetchone()
                 if previous:
                     continue
+            if manual and manual_scopes is not None:
+                saved_scopes = _execution_scopes(config)
+                if _SCOPE_KEY not in config:
+                    # Legacy schedules had no recorded authorization. The
+                    # owner's explicit Run action authorizes future occurrences.
+                    config[_SCOPE_KEY] = sorted(manual_scopes)
+                    db.execute('UPDATE webui_schedules SET config=?,revision=revision+1 WHERE id=?',
+                               (_json(config), row['id']))
+                elif saved_scopes is None or not saved_scopes.issubset(manual_scopes):
+                    raise HTTPException(403, detail='Current authorization does not cover this schedule')
             # Anchor recurrence to the scheduled due minute, never to polling
             # latency. The creation/edit path already enforces the initial delay.
             if config['cadence']['frequency'] == 'continuous':
@@ -615,7 +651,9 @@ async def _dispatch(occurrence, database):
     )
     from .generation_routes import _generation_store, _start_task
     from .generations import GenerationConflict
+    from .machine_permissions import effective_machine_access
     from .memory_protection import configured_filters
+    from .misc_routes import effective_features
     from .providers import provider_config, selected_provider
     from .storage import WorkspaceRepository
 
@@ -633,8 +671,8 @@ async def _dispatch(occurrence, database):
         model = agent.get('model')
         provider = selected_provider({'endpoint': 'agents'}, agent)
         profile = provider_config(provider, model)
-        # No user OAuth grant is persisted or implicitly upgraded into unattended
-        # machine capabilities. Tool execution requires its own explicit grant.
+        # The schedule is an owner-authorized durable task. Ordinary live ACLs
+        # and approval settings still apply to every operation.
         payload = {'text': config['prompt'], 'agent_id': config['agent_id'],
                    'endpoint': 'agents', 'provider': provider, 'model': model,
                    'clientRequestId': 'schedule:' + occurrence_id}
@@ -652,6 +690,11 @@ async def _dispatch(occurrence, database):
             if current is None:
                 return
             current_config = json.loads(current['config'])
+            scopes = _execution_scopes(config)
+            current_scopes = _execution_scopes(current_config)
+            if scopes is None or current_scopes is None:
+                raise ValueError('Schedule authorization required: save or run the schedule once to authorize it')
+            scopes = scopes.intersection(current_scopes)
             cid = _target_conversation(current_config)
             if cid:
                 payload['conversationId'] = cid
@@ -675,9 +718,16 @@ async def _dispatch(occurrence, database):
                 _settle(database, occurrence_id, 'started',
                         conversation_id=generation.conversation_id, run_id=generation.run_id)
                 return
-        started = await _start_task(owner, generation, profile, agent,
-                                    native_file_tools=False, write_tools=False, mcp_enabled=False,
-                                    granted_scopes=frozenset())
+        policy, _ = effective_machine_access(
+            owner, generation.conversation_id, agent=agent, scopes=set(scopes), repo=repo, agent_only=True,
+        )
+        features = effective_features(owner, generation.conversation_id, repo=repo)
+        started = await _start_task(
+            owner, generation, profile, agent,
+            native_file_tools=any(level in {'read', 'write'} for level in policy.values()),
+            write_tools=any(level == 'write' for level in policy.values()),
+            ask_user_enabled=True, mcp_enabled=features['mcp'], granted_scopes=scopes,
+        )
         if started:
             # The first actor lease is persisted before the task is created.
             # After a crash in this gap, recovery observes the lease rather
@@ -758,7 +808,8 @@ async def run_schedule(request: Request):
     sid = request.path_params['id']
     database = _repo().database
     _find(owner, sid, database)
-    claims = _claim_due(database, owner=owner, sid=sid, manual=True)
+    claims = _claim_due(database, owner=owner, sid=sid, manual=True,
+                        manual_scopes=_request_execution_scopes(request))
     if not claims:
         raise HTTPException(409, detail='Schedule already running or recently started')
     occurrence = claims[0]

@@ -15,6 +15,12 @@ from local_shell_mcp.webui.storage import WorkspaceRepository, _json, _now
 
 @pytest.fixture
 def state(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
     database = SQLiteDatabase(tmp_path)
     repo = WorkspaceRepository(database)
     monkeypatch.setattr(schedule_routes, '_repo', lambda: repo)
@@ -23,7 +29,8 @@ def state(tmp_path, monkeypatch):
     agent = AgentRepository(database).create('alice', {
         'name': 'Scheduled Agent', 'provider': 'openAI', 'model': 'mock-model',
     })
-    return Starlette(routes=schedule_routes.schedule_routes()), repo, agent
+    yield Starlette(routes=schedule_routes.schedule_routes()), repo, agent
+    get_settings.cache_clear()
 
 
 def _config(agent, cadence=None):
@@ -31,6 +38,7 @@ def _config(agent, cadence=None):
         'name': 'Daily', 'prompt': 'Run', 'agent_id': agent['id'],
         'cadence': cadence or {'frequency': 'daily', 'hour': 9, 'minute': 0},
         'timezone': 'UTC', 'clientRequestId': 'test-request',
+        'executionScopes': [],
     }
 
 
