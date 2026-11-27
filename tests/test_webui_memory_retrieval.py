@@ -305,3 +305,33 @@ def test_history_prefilter_keeps_short_ascii_and_normalized_unicode_matches(stat
     assert ids('worker Go') == {indexed, short_ascii, short_unicode}
     assert ids('API') == {compatible}
     assert ids('STRASSE') == {folded}
+
+
+def test_fts_substring_false_positives_do_not_exhaust_candidates(state, monkeypatch):
+    from local_shell_mcp.webui import memory_retrieval
+
+    db, workspace, memory = state
+    if not db.fts_enabled:
+        pytest.skip('SQLite FTS5 unavailable')
+    monkeypatch.setattr(memory_retrieval, '_MAX_CANDIDATES', 5)
+    current, previous = chat(workspace), chat(workspace)
+    for _ in range(12):
+        message(workspace, previous, 'apiary')
+    target = message(workspace, previous, 'API configuration ' + 'deployment notes ' * 100)
+    assert [row['message_id'] for row in retrieve(
+        memory, 'alice', '', query='api', include_conversations=True,
+        conversation_id=current)['results']] == [target]
+
+
+@pytest.mark.parametrize('text', [
+    'go restart', 'ongoing go2 go_2', 'restartgo', '中文go测试',
+    'go中文restart', 'égo', 'goé', 'go²', 'GO', 'ＧＯ', 'go\u0301',
+    'Straße, API, job_tail', 'go ' * 1000,
+])
+def test_fast_word_matching_preserves_tokenizer_boundaries(text):
+    from local_shell_mcp.webui.memory_retrieval import _CJK, _WORD, _word_hit, normalize
+
+    text = normalize(text)
+    words = set(_WORD.findall(_CJK.sub(' ', text)))
+    for token in ('go', 'restart', 'strasse', 'api', 'job', 'tail'):
+        assert _word_hit(text, token) == (token in words)

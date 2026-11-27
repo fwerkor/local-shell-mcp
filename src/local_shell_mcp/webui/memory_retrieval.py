@@ -9,7 +9,6 @@ import time
 import unicodedata
 from collections import Counter
 from datetime import UTC, datetime
-from functools import lru_cache
 
 from .content_filters import inspect_content, model_message_fragments
 from .memory_protection import inspect_memory_content, project_stored_memories
@@ -30,7 +29,7 @@ _IDENTIFIER = re.compile(
 
 
 def normalize(text: str) -> str:
-    return unicodedata.normalize('NFKC', text).casefold()
+    return text.lower() if text.isascii() else unicodedata.normalize('NFKC', text).casefold()
 
 
 def terms(query: str) -> list[str]:
@@ -58,12 +57,29 @@ def _identifier_pattern(value: str) -> re.Pattern:
                       + r'(?![a-z0-9_/\\-]|\.[a-z0-9])')
 
 
+def _word_hit(haystack: str, token: str) -> bool:
+    """Match the same whole words as _WORD after separating CJK runs.
+
+    Use the native substring search instead of tokenizing entire messages.
+    For long messages and short queries this only examines actual occurrences.
+    """
+    start = haystack.find(token)
+    while start >= 0:
+        end = start + len(token)
+        if ((start == 0 or not haystack[start - 1].isalnum()
+             or _CJK.fullmatch(haystack[start - 1]))
+                and (end == len(haystack) or not haystack[end].isalnum()
+                     or _CJK.fullmatch(haystack[end]))):
+            return True
+        start = haystack.find(token, start + 1)
+    return False
+
+
 class _Query:
     def __init__(self, query: str):
         self.text = normalize(query).strip()
         self.tokens = terms(self.text)
         self.token_kinds = [(token, bool(_CJK.fullmatch(token))) for token in self.tokens]
-        self.has_word_tokens = any(not is_cjk for _, is_cjk in self.token_kinds)
         self.identifiers = list(dict.fromkeys(_IDENTIFIER.findall(self.text)))[:16]
         self.identifier_patterns = [_identifier_pattern(value) for value in self.identifiers]
         self.literals = tuple(dict.fromkeys([self.text, *self.tokens, *self.identifiers]))
@@ -81,12 +97,14 @@ class _Query:
         haystack = key + ' ' + (text if normalized else normalize(text))
         if self.text == key:
             return [], 10.0
-        words = set(_WORD.findall(_CJK.sub(' ', haystack))) if self.has_word_tokens else set()
         hits = [token for token, is_cjk in self.token_kinds
-                if (token in haystack if is_cjk else token in words)]
-        bonus = 3.0 if self.phrase.search(haystack) else 0.0
+                if (token in haystack if is_cjk else _word_hit(haystack, token))]
+        bonus = 3.0 if self.text in haystack and self.phrase.search(haystack) else 0.0
         if self.identifier_patterns:
-            bonus += 2.0 * sum(bool(pattern.search(haystack)) for pattern in self.identifier_patterns) / len(self.identifier_patterns)
+            bonus += 2.0 * sum(
+                value in haystack and bool(pattern.search(haystack))
+                for value, pattern in zip(self.identifiers, self.identifier_patterns, strict=True)
+            ) / len(self.identifier_patterns)
         return hits, bonus
 
     def candidate_score(self, text: str, *, normalized: bool = False) -> float:
@@ -242,13 +260,18 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
         scope = (f"m.conversation_id IN (SELECT c.id FROM conversations c WHERE {where})"
                  " AND m.role IN ('user','assistant') AND m.text<>''")
         rows = {}
+
+        def lexical_eligible(text: str) -> int:
+            return int(query.candidate_score(text) > 0)
+
+        db.create_function('lsm_lexical_eligible', 1, lexical_eligible, deterministic=True)
         use_fts = bool(getattr(repo.database, 'fts_enabled', False) and long_terms)
         if use_fts:
             try:
                 match = ' OR '.join('"' + term.replace('"', '""') + '"' for term in long_terms)
                 indexed = db.execute(
                     f'SELECT {fields} FROM message_search JOIN messages m ON m.id=message_search.message_id '
-                    f'WHERE {scope} AND message_search.text MATCH ? '
+                    f'WHERE {scope} AND message_search.text MATCH ? AND lsm_lexical_eligible(m.text) '
                     'ORDER BY bm25(message_search),m.created_at DESC,m.id DESC LIMIT ?',
                     (*params, match, _MAX_CANDIDATES)).fetchall()
                 rows.update((row['id'], row) for row in indexed)
@@ -259,8 +282,6 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
         # unavailable FTS, or Unicode compatibility/casefold variants, scan
         # the authorized scope with normalized lexical scoring. Keep the
         # fallback pool bounded and order by relevance, not just recency.
-        # SQLite may evaluate a matching row once for WHERE and again for ORDER BY.
-        @lru_cache(maxsize=1)
         def fallback_score(message_id: str, text: str) -> float:
             if message_id in rows:
                 return 0.0
@@ -279,10 +300,13 @@ def _history(repo, owner: str, conversation_id: str, partition: str,
         if ascii_terms:
             prefilter += ' OR ' + ' OR '.join('instr(lower(m.text),?)>0' for _ in ascii_terms)
         fallback = db.execute(
-            f'SELECT {fields},lsm_fallback_score(m.id,m.text) AS relevance '
-            'FROM messages m '
-            f'WHERE {scope} AND ({prefilter}) AND relevance>0 '
-            'ORDER BY relevance DESC,m.created_at DESC,m.id DESC LIMIT ?',
+            'WITH scored AS MATERIALIZED ('
+            'SELECT m.id,m.created_at,lsm_fallback_score(m.id,m.text) AS relevance '
+            f'FROM messages m WHERE {scope} AND ({prefilter})), '
+            'chosen AS (SELECT id,relevance,created_at FROM scored WHERE relevance>0 '
+            'ORDER BY relevance DESC,created_at DESC,id DESC LIMIT ?) '
+            f'SELECT {fields} FROM chosen JOIN messages m ON m.id=chosen.id '
+            'ORDER BY chosen.relevance DESC,chosen.created_at DESC,chosen.id DESC',
             (*params, *ascii_terms, _MAX_CANDIDATES)).fetchall()
         for row in fallback:
             rows.setdefault(row['id'], row)
