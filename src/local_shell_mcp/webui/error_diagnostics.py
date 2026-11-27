@@ -28,6 +28,14 @@ _KNOWN_SAFETY_REASONS = frozenset({
     "Assembled model context was blocked by content protection",
     "Summary context was blocked by content protection",
     "Generation actor lease expired or was replaced",
+    "Web search is disabled for this conversation",
+    "run_in_background was not enabled for this tool",
+    "Background execution is disabled in this child context",
+    "Agent session authorization has expired",
+    "Agent generation has been cancelled",
+    "Agent authorization is no longer available",
+    "Approved tool checkpoint is missing persisted outcomes",
+    "Handoff commands require an active StateGraph node",
 })
 
 
@@ -72,6 +80,18 @@ def generation_failure(exc: Exception, run_id: str) -> str:
         details += f"\nHTTP status: {status}"
     if stack:
         details += "\nStack (most recent call last):\n" + stack
+    # Preserve wrapped exception locations without exposing arbitrary messages,
+    # locals, arguments, or provider bodies. Only explicit causes are included.
+    cause = exc.__cause__
+    seen = {id(exc)}
+    for _ in range(3):
+        if cause is None or id(cause) in seen:
+            break
+        seen.add(id(cause))
+        details += "\nCaused by: " + type(cause).__name__
+        for frame in traceback.extract_tb(cause.__traceback__)[-12:]:
+            details += f"\n  at {Path(frame.filename).name}:{frame.lineno} in {frame.name}"
+        cause = cause.__cause__
     return json.dumps({
         "type": "lsm_generation_error",
         "message": headline,

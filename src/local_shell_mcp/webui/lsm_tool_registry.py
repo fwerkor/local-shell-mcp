@@ -16,6 +16,7 @@ from typing import Any
 from ..audit import audit
 from .machine_permissions import (
     MachineReadOnlyError,
+    MachineTargetUnavailable,
     agent_access_policy,
     authorize_machine_action,
     effective_machine_access,
@@ -393,6 +394,11 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
 
     try:
         check_authorization()
+    except MachineTargetUnavailable as error:
+        # A missing/malformed target never reaches the native executor. Do
+        # not catch this after dispatch: a disappearing target is a live
+        # authorization change and must still stop the operation.
+        raise ToolPermissionDenied("Target machine is unavailable or invalid; access is not granted. No operation was dispatched.") from error
     except MachineReadOnlyError as error:
         # Only a denial before dispatch is recoverable. Live revocation still
         # interrupts the native task and propagates as a runtime safety error.

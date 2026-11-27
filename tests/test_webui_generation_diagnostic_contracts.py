@@ -105,3 +105,21 @@ def test_browser_grant_rejects_session_revoked_between_reads(monkeypatch):
     assert rejected.value.status_code == 401
     principal.claims['client_id'] = 'external'
     assert routes._webui_grant_cookie(request) is None
+
+
+def test_generation_failure_preserves_cause_location_not_message():
+    from local_shell_mcp.webui.agent_runtime import RuntimeSafetyError
+
+    def inner():
+        raise PermissionError("private-token-never-serialize")
+
+    try:
+        try:
+            inner()
+        except PermissionError as error:
+            raise RuntimeSafetyError(str(error)) from error
+    except RuntimeSafetyError as error:
+        record = json.loads(generation_failure(error, "run-test"))
+    assert "Caused by: PermissionError" in record["details"]
+    assert "in inner" in record["details"]
+    assert "private-token-never-serialize" not in json.dumps(record)
