@@ -783,9 +783,20 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ## Remote worker administration
 
+### `remote_list`
+
+List registered remote workers, including status and capabilities. Set verbose=true for diagnostic telemetry.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved. For list, verbose=true includes diagnostic telemetry.
+Manage remote workers with action=invite, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved. Use remote_list to discover workers.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -796,7 +807,6 @@ Manage remote workers with action=invite, list, reset, revoke, or rename. invite
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

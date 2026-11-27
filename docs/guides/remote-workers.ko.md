@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
+<!-- i18n-source-sha256: 0a505e16fea0b2b70ac808a4423986879615fe5f69be5ffbc4972372aa576f70 -->
 # 원격 workers
 
 Remote worker를 사용하면 outbound HTTP(S) 요청은 보낼 수 있지만 inbound SSH 연결은 받을 수 없는 머신을 `local-shell-mcp`가 제어할 수 있습니다.
@@ -11,7 +11,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 1. `remote_manage(action="invite", ...)`로 초대를 만듭니다.
 2. 생성된 command를 remote machine에서 실행합니다.
-3. `remote_manage(action="list")`로 등록을 확인합니다.
+3. `remote_list()`로 등록을 확인합니다.
 4. `machine="<worker-name>"`을 지정하여 일반 tool을 호출합니다. 예: `environment_get`, `run_shell`, `file_read`, `browser_run_script`.
 5. `remote_transfer`로 controller-to-worker, worker-to-controller 또는 worker-to-worker의 추적되는 file/directory transfer를 시작합니다. `job_list` 또는 `job_tail`로 확인하고 `job_stop` 또는 `job_retry`로 중지하거나 재시도합니다.
 6. `remote_manage(action="rename", ...)` 또는 `remote_manage(action="revoke", ...)`로 worker를 rename/revoke합니다.

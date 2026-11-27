@@ -94,7 +94,7 @@ async def test_removed_remote_surface_points_to_consolidated_tools() -> None:
         "remote_rename_machine",
     ):
         result = await mcp.call_tool(name, {})
-        assert result["data"]["replacement"] == "remote_manage"
+        assert result["data"]["replacement"] == ("remote_list" if name == "remote_list_machines" else "remote_manage")
         assert result["data"]["removed_in"] == "3.3.0"
 
     transfer = await mcp.call_tool("transfer_path", {})

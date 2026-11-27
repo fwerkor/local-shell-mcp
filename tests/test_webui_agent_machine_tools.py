@@ -430,20 +430,60 @@ def test_machine_context_respects_principal_scopes(machine_agent):
 async def test_remote_discovery_reports_effective_machine_access(machine_agent, monkeypatch):
     import json
 
-    _, cid, agents, agent = machine_agent
-    agents.update("local", agent["id"], {"machine_permissions": {"worker1": "write"}})
+    repo, cid, agents, agent = machine_agent
+    monkeypatch.setattr("local_shell_mcp.webui.machine_permissions._registered_defaults",
+                        lambda: {"local": "write", "worker1": "write", "hidden": "write"})
+    agents.update("local", agent["id"], {
+        "machine_default_permission": "read",
+        "machine_permissions": {"local": "none", "hidden": "none"},
+    })
+    current = agents.get("local", agent["id"])
+    tools = registry.available_tools(
+        "local", cid, scopes=SCOPES,
+        agent_permissions=current["machine_permissions"],
+        agent_default_permission=current["machine_default_permission"],
+    )
+    names = {item["function"]["name"] for item in tools}
+    assert "remote_list" in names
+    assert "remote_manage" not in names
+
+    calls = []
 
     async def invoke(*args, **kwargs):
-        return json.dumps({"ok": True, "data": {"machines": [{"name": "worker1"}]}})
+        calls.append(args)
+        return json.dumps({"ok": True, "data": {
+            "machines": [
+                {"name": "worker1", "status": "online"},
+                {"name": "hidden", "status": "offline", "info": {"private": True}},
+                {"name": "unregistered", "status": "offline"},
+            ],
+            "counts": {"online": 1, "offline": 2, "total": 3},
+        }})
 
     monkeypatch.setattr(registry, "_invoke_registered", invoke)
-    result = await registry.call_tool(
-        "local", cid, ModelToolCall("discovery", "remote_manage", {"action": "list"}),
-        granted_scopes=SCOPES, agent_id=agent["id"],
-    )
-    assert json.loads(result)["data"]["machines"] == [
-        {"name": "worker1", "effective_access": "read"},
-    ]
+    async def discover(scopes=SCOPES):
+        return await registry.call_tool(
+            "local", cid, ModelToolCall("discovery", "remote_list", {}),
+            granted_scopes=scopes, agent_id=agent["id"],
+        )
+
+    data = json.loads(await discover())["data"]
+    assert data == {
+        "machines": [{"name": "worker1", "status": "online", "effective_access": "read"}],
+        "counts": {"online": 1, "offline": 0, "total": 1},
+    }
+    with pytest.raises(PermissionError, match="remote:use"):
+        await discover(SCOPES - {"remote:use"})
+    with pytest.raises(PermissionError):
+        await registry.call_tool(
+            "local", cid, ModelToolCall("manage", "remote_manage", {"action": "revoke", "machine": "worker1"}),
+            granted_scopes=SCOPES, agent_id=agent["id"],
+        )
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid,
+                      {"local": "none", "worker1": "none", "hidden": "none"})
+    with pytest.raises(PermissionError, match="No readable machines"):
+        await discover()
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio

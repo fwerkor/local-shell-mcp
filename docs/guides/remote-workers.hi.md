@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
+<!-- i18n-source-sha256: 0a505e16fea0b2b70ac808a4423986879615fe5f69be5ffbc4972372aa576f70 -->
 # Remote workers
 
 Remote workers `local-shell-mcp` को उन machines को control करने देते हैं जो outbound HTTP(S) requests कर सकती हैं लेकिन inbound SSH connections स्वीकार नहीं कर सकतीं।
@@ -11,7 +11,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 1. `remote_manage(action="invite", ...)` से invite बनाएँ।
 2. Generated command remote machine पर चलाएँ।
-3. `remote_manage(action="list")` से registration confirm करें।
+3. `remote_list()` से registration confirm करें।
 4. `machine="<worker-name>"` के साथ सामान्य tools call करें, जैसे `environment_get`, `run_shell`, `file_read` या `browser_run_script`।
 5. `remote_transfer` से tracked controller-to-worker, worker-to-controller या worker-to-worker file/directory transfer शुरू करें। `job_list` या `job_tail` से follow करें; `job_stop` या `job_retry` से stop/retry करें।
 6. `remote_manage(action="rename", ...)` या `remote_manage(action="revoke", ...)` से workers rename या revoke करें।

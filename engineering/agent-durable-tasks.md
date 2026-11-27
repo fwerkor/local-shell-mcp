@@ -12,6 +12,7 @@ The WebUI resolves explicit grants by **global → project → conversation**, w
 | `file_write`, `file_edit`, `file_delete`, `file_patch`, `link_create`, `link_revoke`, `browser_session` mutations | `write` | Native scopes and approval/validation still apply. |
 | `run_shell`, `run_python`, `shell_start`, `shell_send`, `shell_stop`, `job_start`, `job_stop`, `job_retry`, `browser_act`, `browser_run_script`, `gui_action` | `write` | Execution still requires `shell:execute` and any native tool-specific scopes. |
 | `remote_transfer` | Source `read`, destination `write` | Both endpoints checked; tracked as one Controller-managed job. |
+| `remote_list` | Readable machine grants | `remote:use`; results are filtered by effective access. |
 | `mcp_manage`, `remote_manage` | Controller `local=write` only | Their existing management scopes apply; a target Worker does not need `write`. |
 | `session_manage`, `plan_manage` | None | Authentication, logical-session ownership and native operation constraints still apply. |
 

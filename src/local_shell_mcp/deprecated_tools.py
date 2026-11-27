@@ -88,7 +88,7 @@ DEPRECATED_TOOLS: dict[str, DeprecatedTool] = {
     "remote_browser_pdf_tool": DeprecatedTool("browser_run_script"),
     "remote_playwright_run_script_tool": DeprecatedTool("browser_run_script"),
     "remote_invite": DeprecatedTool("remote_manage", removed_in="3.3.0"),
-    "remote_list_machines": DeprecatedTool("remote_manage", removed_in="3.3.0"),
+    "remote_list_machines": DeprecatedTool("remote_list", removed_in="3.3.0"),
     "remote_revoke_machine": DeprecatedTool("remote_manage", removed_in="3.3.0"),
     "remote_rename_machine": DeprecatedTool("remote_manage", removed_in="3.3.0"),
     "transfer_path": DeprecatedTool("remote_transfer", removed_in="3.3.0"),

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
+<!-- i18n-source-sha256: 0a505e16fea0b2b70ac808a4423986879615fe5f69be5ffbc4972372aa576f70 -->
 # 遠端 workers
 
 Remote worker 讓 `local-shell-mcp` 可以控制只能發出對外 HTTP(S) 請求、但無法接受入站 SSH 連線的機器。
@@ -11,7 +11,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 1. 使用 `remote_manage(action="invite", ...)` 建立邀請。
 2. 在遠端機器上執行產生的命令。
-3. 使用 `remote_manage(action="list")` 確認註冊。
+3. 使用 `remote_list()` 確認註冊。
 4. 呼叫一般工具並指定 `machine="<worker-name>"`，例如 `environment_get`、`run_shell`、`file_read` 或 `browser_run_script`。
 5. 使用 `remote_transfer` 啟動受追蹤的 controller-to-worker、worker-to-controller 或 worker-to-worker 檔案/目錄傳輸。接著用 `job_list` 或 `job_tail` 查看進度，並用 `job_stop` 或 `job_retry` 停止或重試。
 6. 使用 `remote_manage(action="rename", ...)` 或 `remote_manage(action="revoke", ...)` 重新命名或撤銷 worker。

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # Riferimento strumenti
 
 Questa pagina è costruita dagli effettivi schema MCP. Esegui `python scripts/generate-tools-reference.py` dopo modifiche alla superficie pubblica degli strumenti per aggiornare il riferimento English.
@@ -787,9 +787,20 @@ Scope OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, r
 Quando viene fornito `machine`, la chiamata richiede inoltre `remote:use` e passa attraverso il protocollo del worker remoto.
 ## Amministrazione remote worker
 
+### `remote_list`
+
+Elenca i remote worker registrati, il loro stato e le loro capacità. verbose=true include la telemetria diagnostica.
+
+| Parametro | Tipo | Obbligatorio/default | Descrizione |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-Gestisce remote worker con action=invite, list, reset, revoke o rename. invite accetta name/workdir/ttl_s/max_uses; revoke richiede machine; rename richiede machine e new_name. max_uses ha valore predefinito 1. reset richiede machine e rimuove le richieste di controllo in coda o attive annullabili in sicurezza senza disconnettere il worker; le operazioni protette già avviate restano inalterate. Per list, verbose=true include la telemetria diagnostica.
+Gestisce remote worker con action=invite, reset, revoke o rename. invite accetta name/workdir/ttl_s/max_uses; revoke richiede machine; rename richiede machine e new_name. max_uses ha valore predefinito 1. reset richiede machine e rimuove le richieste di controllo in coda o attive annullabili in sicurezza senza disconnettere il worker; le operazioni protette già avviate restano inalterate.
 
 | Parametro | Tipo | Obbligatorio/default | Descrizione |
 |---|---|---|---|
@@ -800,7 +811,6 @@ Gestisce remote worker con action=invite, list, reset, revoke o rename. invite a
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

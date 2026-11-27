@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # Referensi tools
 
 Page ini dibangun dari MCP tool schemas yang sebenarnya. Jalankan `python scripts/generate-tools-reference.py` setelah mengubah public tool surface untuk memperbarui English reference.
@@ -788,9 +788,20 @@ Ketika `machine` diberikan, panggilan tersebut juga memerlukan `remote:use` dan 
 
 ## Remote worker administration
 
+### `remote_list`
+
+Menampilkan remote workers terdaftar, status, dan kemampuannya. verbose=true menyertakan telemetri diagnostik.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-Mengelola remote workers dengan action=invite, list, reset, revoke, atau rename. invite menerima name/workdir/ttl_s/max_uses; revoke memerlukan machine; rename memerlukan machine dan new_name. max_uses memiliki nilai default 1. reset memerlukan machine dan menghapus permintaan kontrol dalam antrean atau yang aktif namun aman dibatalkan tanpa memutus worker; operasi terlindungi yang telah dimulai tetap dipertahankan. Untuk list, verbose=true menyertakan telemetri diagnostik.
+Mengelola remote workers dengan action=invite, reset, revoke, atau rename. invite menerima name/workdir/ttl_s/max_uses; revoke memerlukan machine; rename memerlukan machine dan new_name. max_uses memiliki nilai default 1. reset memerlukan machine dan menghapus permintaan kontrol dalam antrean atau yang aktif namun aman dibatalkan tanpa memutus worker; operasi terlindungi yang telah dimulai tetap dipertahankan.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -801,7 +812,6 @@ Mengelola remote workers dengan action=invite, list, reset, revoke, atau rename.
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
