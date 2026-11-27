@@ -283,3 +283,54 @@ async def test_readonly_browser_start_is_a_tool_failure_not_a_run_failure(runner
     obj = runner(runner_parts, model, scopes={"shell:read", "shell:write", "browser:use"})
     messages = await obj.run(store.history("local", generation.conversation_id))
     assert messages[-1]["content"] == "The machine is read-only; the browser was not started."
+
+
+@pytest.mark.asyncio
+async def test_unavailable_machine_does_not_abort_parallel_valid_tool(runner_parts, monkeypatch):
+    from local_shell_mcp.webui import lsm_tool_registry, machine_permissions
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(machine_permissions, "_registered_defaults",
+                        lambda: {"local": "write", "worker": "write"})
+    invoked = []
+
+    async def native(*args, **kwargs):
+        # The only dispatched operation is the valid sibling.
+        invoked.append(kwargs.get("machines"))
+        return '{"ok":true}'
+
+    monkeypatch.setattr(lsm_tool_registry, "_invoke_registered", native)
+
+    async def model(profile, messages, **kwargs):
+        results = {m["tool_call_id"]: m["content"] for m in messages if m.get("role") == "tool"}
+        if not results:
+            yield ModelToolCall("missing", "run_shell", {"machine": "not-registered", "command": "true"})
+            yield ModelToolCall("valid", "run_shell", {"machine": "worker", "command": "true"})
+        else:
+            assert "unavailable or invalid" in results["missing"]
+            assert "No operation was dispatched" in results["missing"]
+            assert json.loads(results["valid"])["ok"]
+            yield "Recovered."
+
+    obj = runner(runner_parts, model, scopes={"shell:read", "shell:write", "shell:execute", "remote:use"})
+    _, store, generation = runner_parts
+    messages = await obj.run(store.history("local", generation.conversation_id))
+    assert messages[-1]["content"] == "Recovered."
+    assert invoked == [["worker"]]
+
+
+@pytest.mark.asyncio
+async def test_invalid_ask_user_arguments_are_a_tool_result(runner_parts):
+    async def model(profile, messages, **kwargs):
+        if not any(m.get("role") == "tool" for m in messages):
+            yield ModelToolCall("invalid-question", "ask_user_question", {"questions": []})
+        else:
+            assert "Invalid Ask User arguments" in messages[-1]["content"]
+            yield "Recovered."
+
+    obj = runner(runner_parts, model, ask=True)
+    _, store, generation = runner_parts
+    messages = await obj.run(store.history("local", generation.conversation_id))
+    assert messages[-1]["content"] == "Recovered."
+    assert store.pending_action("local", generation.run_id) is None

@@ -24,6 +24,10 @@ _PROJECT = "agent.machine_policy.project."
 _CONVERSATION = "agent.machine_policy.conversation."
 
 
+class MachineTargetUnavailable(PermissionError):
+    """A malformed or unavailable target; never a grant to dispatch."""
+
+
 class MachineReadOnlyError(PermissionError):
     """The requested operation exceeds a read-only machine grant."""
 
@@ -227,14 +231,16 @@ def authorize_machine_action(
     if operation not in {"read", "write", "execute"}:
         raise ValueError("Unknown machine operation class")
     if not isinstance(machine, str) or not _NAME_RE.fullmatch(machine):
-        raise PermissionError("Invalid target machine")
+        raise MachineTargetUnavailable("Invalid target machine")
     settings = get_settings()
     if machine == "local" and settings.disable_local:
         raise PermissionError("Local machine is disabled")
     if machine != "local" and not settings.remote_enabled:
         raise PermissionError("Remote machine access is disabled")
-    granted = (resolve_access(owner, conversation_id, repo=repo, agent_only=True).get(machine, "none")
-               if agent_only else access_level(owner, conversation_id, machine, repo=repo))
+    policy = resolve_access(owner, conversation_id, repo=repo, agent_only=agent_only)
+    if machine not in policy:
+        raise MachineTargetUnavailable("Target machine is unavailable in this Controller; access is not granted")
+    granted = policy[machine]
     if granted == "none":
         raise PermissionError(f"Access to machine {machine} is not granted")
     if operation in {"write", "execute"} and granted != "write":
