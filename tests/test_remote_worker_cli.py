@@ -504,6 +504,7 @@ async def test_run_enrolled_worker_rejects_missing_identity(tmp_path, monkeypatc
 
 
 def test_cli_lifecycle_dispatch(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli.sys, "platform", "linux")
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(cli, "service_status", lambda: {"running": True})
     cli.run_worker_cli(["status"])
@@ -519,6 +520,7 @@ def test_cli_lifecycle_dispatch(tmp_path, monkeypatch, capsys):
 
 
 def test_cli_run_prepares_managed_service_environment(monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED", "1")
     calls = []
     monkeypatch.setattr(
         cli, "prepare_worker_service_environment", lambda: calls.append("prepare")
@@ -533,6 +535,7 @@ def test_cli_run_prepares_managed_service_environment(monkeypatch):
 
 
 def test_cli_update_restarts_running_service(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli.sys, "platform", "linux")
     _configure(tmp_path, monkeypatch)
     state.write_worker_config(server="https://example.test", name="worker", workdir=str(tmp_path))
     calls = []
@@ -556,6 +559,7 @@ def test_cli_update_restarts_running_service(tmp_path, monkeypatch, capsys):
 
 
 def test_cli_update_refreshes_stopped_service_definition(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.sys, "platform", "linux")
     _configure(tmp_path, monkeypatch)
     state.write_worker_config(server="https://example.test", name="worker", workdir=str(tmp_path))
     calls = []
@@ -631,6 +635,7 @@ def test_load_config_rejects_non_mapping_legacy_identity(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_connect_enrolls_then_reexecs_without_invite(monkeypatch):
+    monkeypatch.setattr(cli.sys, "platform", "linux")
     calls = []
 
     async def fake_enroll(**kwargs):
@@ -665,6 +670,7 @@ def test_worker_run_reexec_uses_token_free_argv(monkeypatch):
 
 
 def test_prepare_worker_start_installs_runtime_before_launcher(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.sys, "platform", "linux")
     _configure(tmp_path, monkeypatch)
     state.write_worker_config(server="https://example.test", name="worker", workdir=str(tmp_path))
     calls = []
@@ -700,6 +706,7 @@ async def test_connect_rejects_duplicate_before_enrollment(tmp_path, monkeypatch
 
 
 def test_all_remaining_lifecycle_command_branches(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli.sys, "platform", "linux")
     _configure(tmp_path, monkeypatch)
     calls = []
     monkeypatch.setattr(cli.asyncio, "run", lambda value: calls.append(("async", value)) or {"ok": True})
@@ -742,3 +749,115 @@ def test_cli_keyboard_interrupt_is_clean(monkeypatch, capsys):
         cli.run_worker_cli(["status"])
     assert exc.value.code == 130
     assert "disconnected by user" in capsys.readouterr().err
+
+
+def test_windows_supervised_restart_exits_without_spawning(monkeypatch):
+    monkeypatch.setenv(cli._RESTART_PROTOCOL_ENV, "1")
+    monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: pytest.fail("nested supervisor"))
+    with pytest.raises(SystemExit) as exc:
+        cli._restart_windows_worker()
+    assert exc.value.code == cli._WORKER_RESTART_EXIT
+
+
+def test_windows_legacy_supervisor_bridges_once_after_lock_release(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.delenv(cli._RESTART_PROTOCOL_ENV, raising=False)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_LOCK_FD", "99")
+    calls = []
+
+    def bridge(argv, **kwargs):
+        with cli.worker_run_lock():
+            calls.append((argv, kwargs["env"]))
+        return cli.subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", bridge)
+
+    def restart(args):
+        with cli.worker_run_lock():
+            raise cli.WorkerRestartRequested()
+
+    monkeypatch.setattr(cli, "_run_command", restart)
+    # Simulate Windows without changing os.name for pathlib.
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    # Discard legacy fd before attempting the original lock in this test.
+    monkeypatch.delenv("LOCAL_SHELL_MCP_WORKER_LOCK_FD")
+    with pytest.raises(SystemExit) as exc:
+        cli.run_worker_cli(["run"])
+    assert exc.value.code == 0
+    assert calls[0][0][-1] == str(state.worker_bootstrap_path())
+    assert "LOCAL_SHELL_MCP_WORKER_LOCK_FD" not in calls[0][1]
+
+
+def test_windows_restart_recovers_interrupted_trial_before_install(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    state.worker_state_dir().mkdir(parents=True, exist_ok=True)
+    (state.worker_state_dir() / "runtime.attempted").touch()
+    calls = []
+    monkeypatch.setattr(cli, "_wait_for_windows_worker_unlock", lambda: calls.append("unlock"))
+    monkeypatch.setattr(cli, "rollback_pending_runtime", lambda: calls.append("rollback"))
+    monkeypatch.setattr(cli, "install_launcher", lambda: calls.append("launcher"))
+    monkeypatch.setattr(cli, "_load_config_or_migrate", lambda: {"server": "https://s"})
+    monkeypatch.setattr(cli, "install_or_update_runtime", lambda server: calls.append("install"))
+    monkeypatch.setattr(cli, "ensure_user_bin_on_path", lambda: None)
+    monkeypatch.setattr(cli, "refresh_installed_service_definition", lambda: None)
+    monkeypatch.setattr(cli, "stop_service", lambda: calls.append("stop"))
+    monkeypatch.setattr(cli, "start_service", lambda: calls.append("start"))
+    cli._run_command(cli._parser().parse_args(["restart"]))
+    assert calls == ["stop", "unlock", "rollback", "launcher", "install", "launcher", "start"]
+
+
+@pytest.mark.asyncio
+async def test_windows_connect_starts_supervisor_after_unlock(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+
+    async def enroll(**kwargs):
+        return {}
+
+    monkeypatch.setattr(cli, "enroll_worker", enroll)
+    monkeypatch.setattr(cli, "install_launcher", lambda: None)
+    monkeypatch.setattr(cli, "_reexec_worker_run", lambda: pytest.fail("Windows reexec"))
+    calls = []
+
+    def restart():
+        with cli.worker_run_lock():
+            calls.append("restart")
+
+    monkeypatch.setattr(cli, "_restart_windows_worker", restart)
+    args = cli._parser().parse_args(["connect", "--server", "https://s", "--invite", "i"])
+    await cli._connect(args)
+    assert calls == ["restart"]
+
+
+def test_windows_direct_run_starts_supervisor(monkeypatch):
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED", raising=False)
+    calls = []
+    monkeypatch.setattr(cli, "install_launcher", lambda: calls.append("launcher"))
+
+    def restart():
+        calls.append("supervisor")
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "_restart_windows_worker", restart)
+    with pytest.raises(SystemExit):
+        cli._run_command(cli._parser().parse_args(["run"]))
+    assert calls == ["launcher", "supervisor"]
+
+
+def test_frozen_windows_bridge_uses_worker_subcommand(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "is_frozen_app", lambda: True)
+    monkeypatch.delenv(cli._RESTART_PROTOCOL_ENV, raising=False)
+    monkeypatch.setattr(cli, "install_launcher", lambda: pytest.fail("frozen launcher"))
+    monkeypatch.setattr(cli.sys, "executable", "local-shell-mcp.exe")
+    calls = []
+    monkeypatch.setattr(cli.subprocess, "run",
+                        lambda argv, **kwargs: calls.append((argv, kwargs)) or cli.subprocess.CompletedProcess(argv, 0))
+    with pytest.raises(SystemExit) as exc:
+        cli._start_windows_foreground()
+    assert exc.value.code == 0
+    assert calls[0][0] == ["local-shell-mcp.exe", "worker", "_supervise"]
+    assert calls[0][1]["env"]["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] == str(state.worker_state_dir().resolve())
+    assert cli._INITIAL_RUNTIME_ENV not in cli.os.environ

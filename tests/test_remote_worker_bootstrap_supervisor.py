@@ -25,6 +25,7 @@ def _fake_process(code: int = 0):
 def _supervisor(tmp_path, monkeypatch):
     (tmp_path / "runtime").mkdir()
     monkeypatch.setattr(bootstrap, "_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: False)
     monkeypatch.setattr(bootstrap.signal, "signal", lambda *args: None)
     monkeypatch.setattr(bootstrap.time, "sleep", lambda *args: None)
     monkeypatch.delenv("LOCAL_SHELL_MCP_WORKER_LOCK_FD", raising=False)
@@ -231,6 +232,7 @@ def test_restore_metadata_missing_config_is_noop(tmp_path):
 
 
 def test_wait_for_worker_success_and_timeout_kill(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: False)
     proc = _fake_process()
     seen = []
 
@@ -295,7 +297,7 @@ def test_windows_pythonw_can_fallback_to_pythonw_if_python_missing(tmp_path, mon
     assert captured[0][0] == str(pythonw)
 
 
-def test_windows_worker_receives_inherited_lock(tmp_path, monkeypatch):
+def test_windows_worker_ignores_legacy_inherited_lock(tmp_path, monkeypatch):
     _supervisor(tmp_path, monkeypatch)
     read_fd, write_fd = os.pipe()
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_LOCK_FD", str(read_fd))
@@ -304,10 +306,12 @@ def test_windows_worker_receives_inherited_lock(tmp_path, monkeypatch):
     monkeypatch.setattr(bootstrap.subprocess, "Popen", lambda argv, **kwargs: captured.append(kwargs) or _fake_process())
     try:
         assert bootstrap.main() == 0
-        assert captured[0]["close_fds"] is False
-        with pytest.raises(OSError):
-            os.fstat(read_fd)
+        assert "close_fds" not in captured[0]
+        assert "LOCAL_SHELL_MCP_WORKER_LOCK_FD" not in captured[0]["env"]
+        assert "LOCAL_SHELL_MCP_WORKER_LOCK_FD" not in os.environ
+        os.fstat(read_fd)  # Never close an untrusted Windows CRT descriptor.
     finally:
+        os.close(read_fd)
         os.close(write_fd)
 
 
@@ -324,6 +328,7 @@ def test_wait_for_worker_survives_initial_trial_without_timeout(tmp_path, monkey
 
 
 def test_wait_for_worker_kills_stuck_child_after_grace_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: False)
     pending = tmp_path / "runtime.pending.json"
     pending.write_text("{}")
     monkeypatch.setattr(bootstrap, "_TRIAL_START_TIMEOUT_S", 0)
@@ -333,13 +338,13 @@ def test_wait_for_worker_kills_stuck_child_after_grace_timeout(tmp_path, monkeyp
 
     def wait(timeout=None):
         waits.append(timeout)
-        if timeout == 10:
+        if len(waits) == 1:
             raise subprocess.TimeoutExpired("worker", 10)
         return -9
 
     proc.wait = wait
     assert bootstrap._wait_for_worker(proc, pending) == 1
-    assert waits == [10, None]
+    assert waits == [10, 10]
     assert proc.terminated and proc.killed
 
 
@@ -369,3 +374,176 @@ def test_restore_metadata_keeps_writing_if_chmod_is_unsupported(tmp_path, monkey
     monkeypatch.setattr(Path, "chmod", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("unsupported")))
     bootstrap._restore_metadata(tmp_path, {"previous_digest": "proven", "previous_version": "v1"})
     assert json.loads(config.read_text())["runtime_digest"] == "proven"
+
+
+def test_supervisor_restarts_old_worker_then_validates_candidate(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    calls = []
+
+    def spawn(*args, **kwargs):
+        calls.append(kwargs["env"])
+        if len(calls) == 1:
+            _pending_trial(tmp_path)
+            return _fake_process(bootstrap._WORKER_RESTART_EXIT)
+        assert (tmp_path / "runtime.attempted").exists()
+        assert (tmp_path / "runtime" / "version.txt").read_text() == "broken"
+        (tmp_path / "runtime.pending.json").unlink()
+        (tmp_path / "runtime.attempted").unlink()
+        return _fake_process(0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", spawn)
+    assert bootstrap.main() == 0
+    assert len(calls) == 2
+    assert all(env[bootstrap._RESTART_PROTOCOL_ENV] == "1" for env in calls)
+
+
+def test_restart_request_from_unhealthy_trial_rolls_back(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    _pending_trial(tmp_path)
+    versions = []
+
+    def spawn(*args, **kwargs):
+        versions.append((tmp_path / "runtime" / "version.txt").read_text())
+        return _fake_process(bootstrap._WORKER_RESTART_EXIT if len(versions) == 1 else 0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", spawn)
+    assert bootstrap.main() == 0
+    assert versions == ["broken", "proven"]
+
+
+def test_supervisor_does_not_respawn_lock_contender(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(bootstrap.subprocess, "Popen",
+                        lambda *args, **kwargs: calls.append(1) or _fake_process(73))
+    assert bootstrap.main() == 73
+    assert calls == [1]
+
+
+def test_windows_trial_terminates_venv_process_tree(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: True)
+    process = _fake_process(1)
+    process.pid = 123
+    process.poll = lambda: None if not process.terminated else 1
+    calls = []
+
+    def kill_tree(command, **kwargs):
+        calls.append(command)
+        process.terminate()
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", kill_tree)
+    bootstrap._terminate_worker(process)
+    assert calls[0][-4:] == ["/PID", "123", "/T", "/F"]
+    assert process.terminated
+
+
+def test_windows_supervisor_does_not_time_out_old_runtime_staging(tmp_path, monkeypatch):
+    pending = tmp_path / "runtime.pending.json"
+    pending.write_text("{}")
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: True)
+    monkeypatch.setattr(bootstrap, "_TRIAL_START_TIMEOUT_S", 0)
+    process = _fake_process()
+    ticks = []
+    process.poll = lambda: None if len(ticks) < 3 else 0
+    process.wait = lambda timeout=None: ticks.append(1)
+    monkeypatch.setattr(bootstrap, "_terminate_worker", lambda p: pytest.fail("killed old worker"))
+    assert bootstrap._wait_for_worker(process, pending) == 0
+
+
+def test_windows_duplicate_worker_does_not_rollback_trial(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    _pending_trial(tmp_path)
+    monkeypatch.setattr(bootstrap, "_is_windows", lambda: True)
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", lambda *args, **kwargs: _fake_process(73))
+    monkeypatch.setattr(bootstrap, "_rollback", lambda *args: pytest.fail("rolled back another worker"))
+    assert bootstrap.main() == 73
+    assert (tmp_path / "runtime.pending.json").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows region locks")
+def test_duplicate_windows_supervisor_cannot_mutate_pending_journal(tmp_path):
+    with bootstrap._windows_supervisor_lock(tmp_path) as first:
+        assert first
+        with bootstrap._windows_supervisor_lock(tmp_path) as second:
+            assert not second
+    with bootstrap._windows_supervisor_lock(tmp_path) as after:
+        assert after
+
+
+def test_foreground_runtime_remains_selected_after_failed_trial(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    foreground = tmp_path / "foreground"
+    foreground.mkdir()
+    monkeypatch.setenv(bootstrap._INITIAL_RUNTIME_ENV, str(foreground))
+    paths = []
+
+    def spawn(argv, **kwargs):
+        paths.append(kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
+        assert bootstrap._INITIAL_RUNTIME_ENV not in kwargs["env"]
+        if len(paths) == 1:
+            _pending_trial(tmp_path)
+            return _fake_process(75)
+        if len(paths) == 2:
+            return _fake_process(1)
+        return _fake_process(0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", spawn)
+    assert bootstrap.main() == 0
+    assert paths == [str(foreground), str(tmp_path / "runtime"), str(foreground)]
+
+
+def test_foreground_runtime_switches_to_cache_after_successful_trial(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    foreground = tmp_path / "foreground"
+    foreground.mkdir()
+    monkeypatch.setenv(bootstrap._INITIAL_RUNTIME_ENV, str(foreground))
+    paths = []
+
+    def spawn(argv, **kwargs):
+        paths.append(kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
+        if len(paths) == 1:
+            _pending_trial(tmp_path)
+            return _fake_process(75)
+        if len(paths) == 2:
+            (tmp_path / "runtime.pending.json").unlink()
+            (tmp_path / "runtime.attempted").unlink()
+            return _fake_process(1)
+        return _fake_process(0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", spawn)
+    assert bootstrap.main() == 0
+    assert paths == [str(foreground), str(tmp_path / "runtime"), str(tmp_path / "runtime")]
+
+
+def test_frozen_supervisor_launches_frozen_worker_subcommand(tmp_path, monkeypatch):
+    _supervisor(tmp_path, monkeypatch)
+    monkeypatch.setattr(bootstrap.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(bootstrap.sys, "executable", "local-shell-mcp.exe")
+    calls = []
+    monkeypatch.setattr(bootstrap.subprocess, "Popen",
+                        lambda argv, **kwargs: calls.append(argv) or _fake_process())
+    assert bootstrap.main() == 0
+    assert calls == [["local-shell-mcp.exe", "worker", "run"]]
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_foreground_with_pending_candidate_respects_trial_result(tmp_path, monkeypatch, success):
+    _supervisor(tmp_path, monkeypatch)
+    _pending_trial(tmp_path)
+    foreground = tmp_path / "foreground"
+    foreground.mkdir()
+    monkeypatch.setenv(bootstrap._INITIAL_RUNTIME_ENV, str(foreground))
+    paths = []
+
+    def spawn(argv, **kwargs):
+        paths.append(kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
+        if len(paths) == 1:
+            if success:
+                (tmp_path / "runtime.pending.json").unlink()
+                (tmp_path / "runtime.attempted").unlink()
+            return _fake_process(1)
+        return _fake_process(0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "Popen", spawn)
+    assert bootstrap.main() == 0
+    assert paths == [str(tmp_path / "runtime"), str(tmp_path / "runtime" if success else foreground)]

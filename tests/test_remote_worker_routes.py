@@ -158,6 +158,9 @@ async def test_powershell_join_script_supports_persistent_windows_workers(tmp_pa
     assert '"install-service"' in script
     assert "[switch]$Persist" in script
     assert "$Invite | & $PythonExe @EnrollArgs" in script
+    assert 'if (-not $Persistent) {' in script
+    assert '$CachedDigest = ""' in script
+    assert '"--runtime-digest=$CachedDigest"' in script
     assert "-Invite $Invite" not in script
     assert "sys.version_info >= (3, 11)" in script
     assert script.index("sys.version_info >= (3, 11)") < script.index("Downloading worker bundle")

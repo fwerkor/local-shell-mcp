@@ -490,6 +490,14 @@ def test_process_fallback_start_stop_and_stale_pid(tmp_path, monkeypatch):
     assert popen_calls[0][0][0][-1] == str(service.worker_bootstrap_path())
     assert "PYTHONPATH" in popen_calls[0][1]["env"]
     assert service.service_status()["running"] is True
+    if os.name == "nt":
+        def fake_taskkill(command, **kwargs):
+            assert command[1:] == ["/PID", "123", "/T", "/F"]
+            signals.append((123, "taskkill"))
+            running[123] = False
+
+        monkeypatch.setattr(service, "_run", fake_taskkill)
+        monkeypatch.setattr(service, "_wait_for_windows_worker_unlock", lambda: None)
     service.stop_service()
     assert signals
     assert not service.worker_pid_path().exists()
@@ -634,6 +642,7 @@ os._exit(0)
         pass
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX flock inheritance; Windows restarts via supervisor")
 def test_worker_run_lock_survives_reexec(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     script = tmp_path / "reexec-lock.py"
@@ -682,6 +691,7 @@ else:
         capture_output=True,
         text=True,
         check=False,
+        timeout=20,
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -801,6 +811,7 @@ def test_low_level_service_helpers(monkeypatch):
 
 def test_pid_and_command_validation(monkeypatch):
     assert service._pid_is_running(0) is False  # noqa: SLF001
+    monkeypatch.setattr(service.os, "name", "posix")
     monkeypatch.setattr(service.os, "kill", lambda pid, sig: None)
     assert service._pid_is_running(3) is True  # noqa: SLF001
     monkeypatch.setattr(service.os, "kill", lambda pid, sig: (_ for _ in ()).throw(OSError()))
@@ -884,6 +895,7 @@ def test_windows_process_start_branch(tmp_path, monkeypatch):
     assert written == [(77, "verified")]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX termination path")
 def test_stop_process_force_kills_only_verified_pid(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(service, "_read_pid", lambda: 42)
@@ -977,3 +989,52 @@ def test_windows_task_bootstrap_rolls_back_unstartable_new_runtime(tmp_path, mon
     assert json.loads((root / "config.json").read_text())["runtime_digest"] == "original"
     assert not (root / "runtime.pending.json").exists()
     assert "rolled back; reconnecting" in (root / "worker.log").read_text()
+
+
+def test_managed_lock_contention_is_bounded_and_reports_owner(tmp_path, monkeypatch, capsys):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_MANAGED", "1")
+    monkeypatch.setattr(service, "_WORKER_LOCK_WAIT_S", 0.01)
+    with service.worker_run_lock():
+        with pytest.raises(
+            service.WorkerAlreadyRunningError, match=f"holder PID {os.getpid()}"
+        ), service.worker_run_lock():
+            pytest.fail("second worker acquired lock")
+        assert str(os.getpid()) in capsys.readouterr().err
+        assert json.loads(service._lock_owner_path().read_text())["pid"] == os.getpid()
+    assert not service._lock_owner_path().exists()
+
+
+def test_windows_service_refuses_restart_while_old_lock_survives(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(service, "_run_powershell", lambda *args, **kwargs: None)
+    with service.worker_run_lock():
+        ticks = iter([0, 11])
+        monkeypatch.setattr(service.time, "monotonic", lambda: next(ticks))
+        with pytest.raises(service.WorkerAlreadyRunningError, match="still holds its lock"):
+            service._stop_windows_task()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows process APIs")
+def test_windows_liveness_probe_does_not_kill_child():
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert service._pid_is_running(child.pid)
+        assert child.poll() is None
+    finally:
+        child.terminate()
+        child.wait(timeout=10)
+    assert not service._pid_is_running(child.pid)
+
+
+def test_windows_stop_process_targets_only_verified_worker_tree(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(service, "os", SimpleNamespace(name="nt", environ=os.environ))
+    monkeypatch.setattr(service, "_read_pid", lambda: 42)
+    monkeypatch.setattr(service, "_pid_is_running", lambda pid: False)
+    calls = []
+    monkeypatch.setattr(service, "_run", lambda cmd, **kwargs: calls.append(cmd))
+    monkeypatch.setattr(service, "_wait_for_windows_worker_unlock", lambda: calls.append("unlock"))
+    service._stop_process()
+    assert calls[0][-4:] == ["/PID", "42", "/T", "/F"]
+    assert calls[1] == "unlock"

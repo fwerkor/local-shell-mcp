@@ -1056,6 +1056,7 @@ def test_worker_retry_delay_is_capped():
 
 
 def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
     from local_shell_mcp import remote_worker_cli, remote_worker_service
 
     state_dir = tmp_path / "state"
@@ -1083,30 +1084,14 @@ def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkey
     ]
 
 
-def test_reexec_updated_managed_windows_worker_uses_service_launcher(tmp_path, monkeypatch):
-    from local_shell_mcp import remote_worker_cli, remote_worker_service
+def test_reexec_updated_managed_windows_worker_requests_supervisor_restart(monkeypatch):
+    from local_shell_mcp.remote_worker_bootstrap import WorkerRestartRequested
 
-    state_dir = tmp_path / "state"
-    launcher = state_dir / "worker-service.pyw"
-    launcher.parent.mkdir(parents=True)
-    launcher.write_text("# launcher\n", encoding="utf-8")
-    pythonw = tmp_path / "pythonw.exe"
-    pythonw.write_bytes(b"")
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_STATE_DIR", str(state_dir))
     monkeypatch.setattr(remote.sys, "platform", "win32")
-    monkeypatch.setattr(
-        remote_worker_cli,
-        "_worker_run_exec_argv",
-        lambda: [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"],
-    )
-    monkeypatch.setattr(remote_worker_service, "_current_worker_is_managed", lambda: True)
-    monkeypatch.setattr(remote_worker_service, "_windows_pythonw_executable", lambda: pythonw)
-    calls = []
-    monkeypatch.setattr(remote.os, "execv", lambda executable, argv: calls.append((executable, argv)))
-
-    remote._reexec_updated_worker_runtime()  # noqa: SLF001
-
-    assert calls == [(str(pythonw), [str(pythonw), str(launcher.resolve())])]
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_MANAGED", "1")
+    monkeypatch.setattr(remote.os, "execv", lambda *args: pytest.fail("Windows must not reexec"))
+    with pytest.raises(WorkerRestartRequested):
+        remote._reexec_updated_worker_runtime()
 
 
 @pytest.mark.asyncio

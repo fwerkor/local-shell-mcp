@@ -123,3 +123,19 @@ def test_swap_failure_restores_previous_runtime(tmp_path, monkeypatch):
     assert state.read_worker_config()["runtime_digest"] == "previous-digest"
     assert not (state.worker_state_dir() / "runtime.pending.json").exists()
     assert installer.rollback_pending_runtime() is False
+
+
+
+def test_confirm_windows_candidate_refreshes_proven_bootstrap(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    installer.install_or_update_runtime("https://example.test")
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    calls = []
+
+    def refresh():
+        assert not (state.worker_state_dir() / "runtime.pending.json").exists()
+        calls.append("refresh")
+
+    monkeypatch.setattr(state, "refresh_worker_bootstrap", refresh)
+    installer.confirm_runtime_healthy()
+    assert calls == ["refresh"]

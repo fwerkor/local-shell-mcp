@@ -30,6 +30,7 @@ def test_worker_lock_windows_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     worker_service._unlock_worker_file(handle)
     assert calls == [(7, 1, 1), (7, 2, 1)]
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX lock inheritance")
 def test_worker_lock_reexec_prepare_and_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     handle = _FakeHandle(11)
     calls: list[tuple[int, bool]] = []
@@ -51,6 +52,7 @@ def test_adopt_worker_lock_handle_rejects_bad_descriptor(
     assert worker_service._adopt_worker_lock_handle() is None
     assert worker_service._WORKER_LOCK_FD_ENV not in os.environ
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX lock inheritance")
 def test_adopt_worker_lock_handle_accepts_inherited_descriptor(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -152,3 +154,17 @@ def test_start_service_launchd_bootstraps_after_failed_kickstart(
     monkeypatch.setattr(worker_service, "service_status", lambda: {"running": True})
     assert worker_service.start_service() == {"running": True}
     assert any("bootstrap" in command for command in commands)
+
+
+def test_windows_does_not_export_or_adopt_legacy_lock_fd(monkeypatch):
+    monkeypatch.setattr(worker_service.os, "name", "nt")
+    monkeypatch.setattr(worker_service, "_active_worker_lock_handle", _FakeHandle(11))
+    monkeypatch.setattr(worker_service.os, "set_inheritable",
+                        lambda *args: pytest.fail("exported Windows lock"))
+    assert worker_service.prepare_worker_lock_reexec() is None
+    monkeypatch.setenv(worker_service._WORKER_LOCK_FD_ENV, "11")
+    with monkeypatch.context() as scoped:
+        scoped.setattr(worker_service.os, "fstat",
+                       lambda *args: pytest.fail("trusted a stale Windows CRT fd"))
+        assert worker_service._adopt_worker_lock_handle() is None
+    assert worker_service._WORKER_LOCK_FD_ENV not in os.environ

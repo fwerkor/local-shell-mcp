@@ -3388,15 +3388,16 @@ def _worker_poll_payload(
 
 
 def _reexec_updated_worker_runtime() -> None:
+    from .remote_worker_bootstrap import WorkerRestartRequested
     from .remote_worker_cli import _worker_run_exec_argv
-    from .remote_worker_service import (
-        _current_worker_is_managed,
-        _windows_pythonw_executable,
-        _windows_task_launcher_path,
-        cancel_worker_lock_reexec,
-        prepare_worker_lock_reexec,
-    )
+    from .remote_worker_service import cancel_worker_lock_reexec, prepare_worker_lock_reexec
     from .remote_worker_state import worker_bootstrap_path, worker_runtime_dir
+
+    # Windows process replacement can detach the real worker from its
+    # supervisor, especially through the venv redirector. Unwind the asyncio
+    # tasks and worker_run_lock before starting another process.
+    if sys.platform == "win32":
+        raise WorkerRestartRequested()
 
     runtime = worker_runtime_dir()
     preferred = [str(runtime)]
@@ -3406,20 +3407,9 @@ def _reexec_updated_worker_runtime() -> None:
     )
     argv = _worker_run_exec_argv()
     if not os.environ.get("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED"):
-        # Foreground workers need their own supervisor; managed workers already
-        # have a systemd/launchd/task restart path.
         bootstrap = worker_bootstrap_path()
         if bootstrap.is_file():
             argv = [sys.executable, str(bootstrap)]
-    if (
-        sys.platform == "win32"
-        and _current_worker_is_managed()
-        and not os.environ.get("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED")
-    ):
-        service_launcher = _windows_task_launcher_path()
-        if service_launcher.is_file():
-            pythonw = str(_windows_pythonw_executable())
-            argv = [pythonw, str(service_launcher.resolve())]
     lock_fd = prepare_worker_lock_reexec()
     try:
         os.execv(argv[0], argv)
@@ -3428,6 +3418,7 @@ def _reexec_updated_worker_runtime() -> None:
 
 
 async def _upgrade_worker_runtime(server: str, target_version: str) -> None:
+    from .remote_worker_bootstrap import WorkerRestartRequested
     from .remote_worker_installer import install_or_update_runtime, rollback_pending_runtime
     from .remote_worker_state import install_launcher
 
@@ -3460,6 +3451,9 @@ async def _upgrade_worker_runtime(server: str, target_version: str) -> None:
             flush=True,
         )
         _reexec_updated_worker_runtime()
+    except WorkerRestartRequested:
+        # The supervisor will launch and validate the pending candidate.
+        raise
     except BaseException:
         await asyncio.to_thread(rollback_pending_runtime)
         raise

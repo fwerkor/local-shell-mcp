@@ -53,7 +53,7 @@ _LAUNCHD_SYSTEM_DIRS = (
 )
 _WORKER_LOCK_FD_ENV = "LOCAL_SHELL_MCP_WORKER_LOCK_FD"
 _WORKER_LOCK_RETRY_S = 5.0
-_WORKER_LOCK_HANDOFF_RETRY_S = 0.1
+_WORKER_LOCK_WAIT_S = 30.0
 _active_worker_lock_handle: Any | None = None
 
 
@@ -130,6 +130,10 @@ def _current_worker_is_managed() -> bool:
 
 
 def prepare_worker_lock_reexec() -> int | None:
+    # Windows byte-range locks belong to the locking process. Never pass a
+    # CRT descriptor through a venv redirector or pretend it transfers ownership.
+    if os.name == "nt":
+        return None
     handle = _active_worker_lock_handle
     if handle is None:
         return None
@@ -149,7 +153,7 @@ def cancel_worker_lock_reexec(fd: int | None) -> None:
 
 def _adopt_worker_lock_handle() -> Any | None:
     raw_fd = os.environ.pop(_WORKER_LOCK_FD_ENV, "")
-    if not raw_fd:
+    if not raw_fd or os.name == "nt":
         return None
     try:
         fd = int(raw_fd)
@@ -159,6 +163,31 @@ def _adopt_worker_lock_handle() -> Any | None:
     return os.fdopen(fd, "r+b", buffering=0)
 
 
+def _lock_owner_path() -> Path:
+    return worker_lock_path().with_suffix(".owner.json")
+
+
+def _lock_owner_description() -> str:
+    # Advisory only: a crash can leave stale metadata. The OS lock, not the
+    # PID file, is the authority; never terminate a process based on this file.
+    try:
+        owner = json.loads(_lock_owner_path().read_text(encoding="utf-8"))
+        return f" (last recorded holder PID {int(owner['pid'])})"
+    except (OSError, ValueError, TypeError, KeyError):
+        return " (holder PID unknown)"
+
+
+def _record_lock_owner() -> None:
+    path = _lock_owner_path()
+    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        temp.write_text(json.dumps({"pid": os.getpid(), "acquired_at": time.time()}),
+                        encoding="utf-8")
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 @contextlib.contextmanager
 def worker_run_lock():  # noqa: ANN201
     global _active_worker_lock_handle
@@ -166,15 +195,13 @@ def worker_run_lock():  # noqa: ANN201
     path = worker_lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = _adopt_worker_lock_handle()
-    inherited = handle is not None
-    windows_handoff = inherited and os.name == "nt"
-    locked = inherited and not windows_handoff
+    locked = handle is not None
     if handle is None:
-        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_BINARY", 0), 0o600)
         handle = os.fdopen(fd, "r+b", buffering=0)
+    owner_recorded = False
     try:
-        if path.stat().st_size == 0:
-            handle.write(b"\0")
+        deadline = time.monotonic() + _WORKER_LOCK_WAIT_S
         waiting = False
         while not locked:
             try:
@@ -183,31 +210,40 @@ def worker_run_lock():  # noqa: ANN201
             except OSError as exc:
                 if not _worker_lock_is_contended(exc):
                     raise
-                managed = _current_worker_is_managed()
-                if not managed and not windows_handoff:
+                remaining = deadline - time.monotonic()
+                if not _current_worker_is_managed() or remaining <= 0:
                     raise WorkerAlreadyRunningError(
-                        "remote worker is already running; stop the existing process or use "
+                        "remote worker is already running" + _lock_owner_description()
+                        + "; stop the existing process or use "
                         "`local-shell-mcp worker restart`"
                     ) from exc
-                if managed and not waiting:
+                if not waiting:
                     print(
-                        "Status: another worker process is active; managed worker is waiting...",
+                        "Status: another worker process is active" + _lock_owner_description()
+                        + "; managed worker is waiting (bounded)...",
                         file=sys.stderr,
                         flush=True,
                     )
                     waiting = True
-                retry_s = (
-                    _WORKER_LOCK_HANDOFF_RETRY_S if windows_handoff else _WORKER_LOCK_RETRY_S
-                )
-                time.sleep(retry_s)
+                time.sleep(min(_WORKER_LOCK_RETRY_S, remaining))
+        # Windows can lock a byte beyond EOF. Initialize only after acquiring
+        # the lock so a competing process never writes into a locked region.
+        if path.stat().st_size == 0:
+            handle.write(b"\0")
         with contextlib.suppress(OSError):
             os.chmod(path, 0o600)
+        with contextlib.suppress(OSError):
+            _record_lock_owner()
+            owner_recorded = True
         _active_worker_lock_handle = handle
         yield
     finally:
         if _active_worker_lock_handle is handle:
             _active_worker_lock_handle = None
         if locked:
+            if owner_recorded:
+                with contextlib.suppress(OSError):
+                    _lock_owner_path().unlink(missing_ok=True)
             with contextlib.suppress(OSError):
                 _unlock_worker_file(handle)
         handle.close()
@@ -534,12 +570,94 @@ def _start_windows_task() -> None:
     )
 
 
+def _wait_for_windows_worker_unlock() -> None:
+    path = worker_lock_path()
+    if not path.exists():
+        return
+    deadline = time.monotonic() + 10.0
+    with path.open("r+b", buffering=0) as handle:
+        while True:
+            try:
+                _lock_worker_file(handle)
+            except OSError as exc:
+                if not _worker_lock_is_contended(exc):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise WorkerAlreadyRunningError(
+                        "Windows worker still holds its lock after service stop"
+                        + _lock_owner_description()
+                        + "; stop the remaining worker before restarting the service"
+                    ) from exc
+                time.sleep(0.2)
+            else:
+                _unlock_worker_file(handle)
+                return
+
+
 def _stop_windows_task() -> None:
-    _run_powershell(
-        f"Stop-ScheduledTask -TaskName {_powershell_literal(_WINDOWS_TASK_NAME)} "
-        "-ErrorAction SilentlyContinue",
-        check=False,
-    )
+    # Capture the exact service launcher and its descendants *before* stopping
+    # the task. Older venv/re-exec chains can otherwise lose their parent PID.
+    # Open process handles before Stop-ScheduledTask, so cleanup cannot target
+    # an unrelated process that reuses a PID after the task is stopped.
+    launcher = _powershell_literal(str(_windows_task_launcher_path().resolve()))
+    task = _powershell_literal(_WINDOWS_TASK_NAME)
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$launcher = """ + launcher + r"""
+$pattern = '^\s*(?:"[^"]+"|\S+)\s+"?' + [regex]::Escape($launcher) + '"?\s*$'
+try {
+    $processes = @(Get-CimInstance Win32_Process)
+} catch {
+    Write-Warning "Could not enumerate Windows worker descendants: $_"
+    $processes = @()
+}
+$owned = @{}
+foreach ($p in $processes) {
+    if ($p.Name -in @('python.exe', 'pythonw.exe') -and $p.CommandLine -match $pattern) {
+        $owned[[int]$p.ProcessId] = $p
+    }
+}
+do {
+    $changed = $false
+    foreach ($p in $processes) {
+        $id = [int]$p.ProcessId
+        $parent = [int]$p.ParentProcessId
+        if (!$owned.ContainsKey($id) -and $owned.ContainsKey($parent) -and
+            $p.CreationDate -ge $owned[$parent].CreationDate) {
+            $owned[$id] = $p
+            $changed = $true
+        }
+    }
+} while ($changed)
+$handles = @()
+try {
+    foreach ($p in $owned.Values) {
+        $process = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+        if ($null -eq $process) { continue }
+        try {
+            # Retain a handle to the verified instance, not just its PID.
+            $null = $process.Handle
+            if ([math]::Abs(($process.StartTime - $p.CreationDate).TotalSeconds) -lt 0.1) {
+                $handles += $process
+            } else {
+                $process.Dispose()
+            }
+        } catch { $process.Dispose() }
+    }
+    Stop-ScheduledTask -TaskName """ + task + r""" -ErrorAction Stop
+    foreach ($process in $handles) {
+        try {
+            if (!$process.HasExited) { $process.Kill() }
+        } catch {
+            Write-Warning "Could not terminate verified worker descendant: $_"
+        }
+    }
+} finally {
+    foreach ($process in $handles) { $process.Dispose() }
+}
+"""
+    _run_powershell(script)
+    _wait_for_windows_worker_unlock()
 
 
 def _unregister_windows_task() -> None:
@@ -578,9 +696,25 @@ def prepare_worker_service_environment() -> Path | None:
     return _write_launchd_plist(launcher)
 
 
+def _windows_pid_is_running(pid: int) -> bool:
+    import _winapi
+
+    # os.kill(pid, 0) is TerminateProcess on Windows, not a liveness probe.
+    try:
+        handle = _winapi.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    except OSError:
+        return False
+    try:
+        return _winapi.WaitForSingleObject(handle, 0) == _winapi.WAIT_TIMEOUT
+    finally:
+        _winapi.CloseHandle(handle)
+
+
 def _pid_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        return _windows_pid_is_running(pid)
     try:
         os.kill(pid, 0)
     except OSError:
@@ -751,6 +885,15 @@ def _stop_process() -> None:
     if not pid:
         worker_pid_path().unlink(missing_ok=True)
         return
+    if os.name == "nt":
+        windows = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
+        executable = str(Path(windows) / "System32" / "taskkill.exe") if windows else "taskkill"
+        _run([executable, "/PID", str(pid), "/T", "/F"], check=False)
+        _wait_for_windows_worker_unlock()
+        if _pid_is_running(pid):
+            raise RuntimeError(f"Windows worker process {pid} did not stop")
+        worker_pid_path().unlink(missing_ok=True)
+        return
     os.kill(pid, signal.SIGTERM)
     for _ in range(50):
         if not _pid_is_running(pid):
@@ -791,6 +934,7 @@ def install_service(*, start: bool = True) -> dict[str, Any]:
         _stop_process()
         if _windows_task_status() is not None:
             _stop_windows_task()
+        _wait_for_windows_worker_unlock()
         service_file = _write_windows_task_launcher()
         _register_windows_task(service_file)
         if start:
@@ -841,8 +985,10 @@ def start_service() -> dict[str, Any]:
         result = _run(["launchctl", "kickstart", "-k", f"{domain}/{_LAUNCHD_LABEL}"], check=False)
         if result.returncode:
             _run(["launchctl", "bootstrap", domain, str(_launchd_plist_path())])
-    elif kind == "scheduled-task" and _windows_task_status() is not None:
-        _start_windows_task()
+    elif kind == "scheduled-task" and (task := _windows_task_status()) is not None:
+        if task["state"] != _WINDOWS_TASK_STATE_RUNNING:
+            _wait_for_windows_worker_unlock()
+            _start_windows_task()
     else:
         _start_process()
     return service_status()

@@ -120,14 +120,19 @@ def update_runtime_metadata(digest: str, version: str) -> dict[str, Any]:
     return data
 
 
-def install_launcher() -> Path:
-    launcher = worker_launcher_path()
+def refresh_worker_bootstrap() -> Path:
     bootstrap = worker_bootstrap_path()
     # Keep the proven supervisor during a trial upgrade. A broken new bundle
     # must not be allowed to overwrite its own recovery mechanism.
     if not (worker_state_dir() / "runtime.pending.json").exists() or not bootstrap.is_file():
         source = Path(__file__).with_name("remote_worker_bootstrap.py")
         _atomic_write_text(bootstrap, source.read_text(encoding="utf-8"))
+    return bootstrap
+
+
+def install_launcher() -> Path:
+    launcher = worker_launcher_path()
+    bootstrap = refresh_worker_bootstrap()
     state_home = str(worker_state_dir().resolve())
     python = str(Path(sys.executable).resolve())
     if _is_windows():
