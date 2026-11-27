@@ -170,20 +170,14 @@ export function clearUsageFolded(conversationId: string): void {
  */
 const modelOverhead = new Map<string, number>();
 
-/** Stable cache key the writer (usage handler) and reader (estimate) build
- *  identically. An agent resolves to its real provider/model only after its data
- *  loads, so the reader (resolved) and writer (raw `agents` submission) would key
- *  differently — key by `agentId` when present so both agree; non-agent configs
- *  key by endpoint:model. */
+/** Cache overhead for a specific agent, channel and model, not just the agent
+ * id: a model change must not reuse an old tokenizer's overhead estimate. */
 export function overheadKey(
   endpoint?: string | null,
   model?: string | null,
   agentId?: string | null,
 ): string {
-  if (agentId != null && agentId !== '') {
-    return `agent:${agentId}`;
-  }
-  return `${endpoint ?? ''}::${model ?? ''}`;
+  return JSON.stringify([agentId ?? '', endpoint ?? '', model ?? '']);
 }
 
 export function setModelOverhead(key: string, tokens: number): void {

@@ -1364,12 +1364,8 @@ class AgentRunner:
             return int(raw)
         from .provider_profiles import profile
 
-        channel = (state.context.agent or {}).get('provider')
+        channel = self._context_channel(state)
         if not channel:
-            with self.database.connect() as db:
-                row = db.execute('SELECT state FROM runs WHERE id=?', (self.generation.run_id,)).fetchone()
-            channel = (json.loads(row['state']).get('provider') if row else None)
-        if not isinstance(channel, str) or not channel:
             return None
         try:
             stored = profile(channel)
@@ -1377,6 +1373,14 @@ class AgentRunner:
             return None
         limit = (stored.get('model_contexts') or {}).get(state.context.profile.model)
         return limit if type(limit) is int and 0 < limit <= 2_000_000 else None
+
+    def _context_channel(self, state: AgentLoopState) -> str | None:
+        channel = (state.context.agent or {}).get('provider')
+        if not channel:
+            with self.database.connect() as db:
+                row = db.execute('SELECT state FROM runs WHERE id=?', (self.generation.run_id,)).fetchone()
+            channel = (json.loads(row['state']).get('provider') if row else None)
+        return channel if isinstance(channel, str) and channel else None
 
     def _record_model_consumption(self, usage: ModelUsage) -> None:
         try:
@@ -1425,6 +1429,9 @@ class AgentRunner:
                 snapshot['physicalChannel'] = usage.channel
                 snapshot['physicalModel'] = usage.model
                 snapshot['physicalProvider'] = usage.provider
+            channel = self._context_channel(state)
+            if channel:
+                snapshot['channel'] = channel
             if self._compaction_status:
                 snapshot['compactionStatus'] = self._compaction_status
             self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
@@ -1656,6 +1663,11 @@ class AgentRunner:
             [*self._conversation_context(), *state.messages], state.context.tools, max_context, reserve_ratio=config.get('reserveRatio', 0.05),
             run_id=self.generation.run_id, agent_id=(state.context.agent or {}).get('id'),
             calibration_ratio=calibration.ratio)
+        snapshot['model'] = state.context.profile.model
+        snapshot['provider'] = state.context.profile.provider
+        channel = self._context_channel(state)
+        if channel:
+            snapshot['channel'] = channel
         if self._compaction_status:
             snapshot['compactionStatus'] = self._compaction_status
         self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
