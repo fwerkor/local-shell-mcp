@@ -5,8 +5,7 @@ import { Permissions, PermissionTypes, AgentCapabilities } from 'librechat-data-
 import { LayoutGrid, ListFilter, Wrench, Server, Workflow, Star, Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { AgentItemKind, ItemFilter } from './items/types';
-import { useLocalize, useHasAccess } from '~/hooks';
-import { useAgentPanelContext } from '~/Providers';
+import { useLocalize, useHasAccess, useGetAgentsConfig } from '~/hooks';
 import { cn } from '~/utils';
 
 type View = NonNullable<ItemFilter['view']>;
@@ -20,6 +19,7 @@ interface MarketplaceSidebarProps {
   counts: Record<AgentItemKind, number>;
   totalCount: number;
   onCreateNew?: (kind: 'mcp' | 'action') => void;
+  chatMode?: boolean;
 }
 
 interface SidebarEntry {
@@ -39,6 +39,7 @@ function useMarketplaceNav({
   onSelectKind,
   counts,
   totalCount,
+  chatMode,
 }: MarketplaceSidebarProps) {
   const localize = useLocalize();
   const selectKind = (kind: Kind) => {
@@ -103,12 +104,15 @@ function useMarketplaceNav({
     },
   ];
 
-  return { kindEntries, viewEntries };
+  return {
+    kindEntries: chatMode ? kindEntries.filter((entry) => entry.id !== 'action') : kindEntries,
+    viewEntries: chatMode ? [] : viewEntries,
+  };
 }
 
 function useCreateItems(onCreateNew?: (kind: 'mcp' | 'action') => void) {
   const localize = useLocalize();
-  const { agentsConfig } = useAgentPanelContext();
+  const { agentsConfig } = useGetAgentsConfig();
   const hasMcpCreateAccess = useHasAccess({
     permissionType: PermissionTypes.MCP_SERVERS,
     permission: Permissions.CREATE,
@@ -120,6 +124,7 @@ function useCreateItems(onCreateNew?: (kind: 'mcp' | 'action') => void) {
 
   return useMemo(() => {
     const items: Array<{ label: string; icon: ReactNode; onClick: () => void }> = [];
+    if (!onCreateNew) return items;
     if (hasMcpCreateAccess) {
       items.push({
         label: localize('com_ui_tools_kind_mcp'),
@@ -229,7 +234,7 @@ export default function MarketplaceSidebar(props: MarketplaceSidebarProps) {
         <SidebarItem key={entry.id} {...entry} />
       ))}
 
-      <div className="mx-2 my-3 h-px bg-border-light" />
+      {viewEntries.length > 0 && <div className="mx-2 my-3 h-px bg-border-light" />}
 
       {viewEntries.map((entry) => (
         <SidebarItem key={entry.id} {...entry} />
@@ -284,7 +289,9 @@ export function MarketplaceFilterBar(props: MarketplaceSidebarProps) {
       {kindEntries.map((entry) => (
         <SidebarChip key={entry.id} {...entry} />
       ))}
-      <span className="h-4 w-px shrink-0 bg-border-light" aria-hidden="true" />
+      {viewEntries.length > 0 && (
+        <span className="h-4 w-px shrink-0 bg-border-light" aria-hidden="true" />
+      )}
       {viewEntries.map((entry) => (
         <SidebarChip key={entry.id} {...entry} />
       ))}

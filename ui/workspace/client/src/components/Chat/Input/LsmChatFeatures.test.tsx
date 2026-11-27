@@ -34,11 +34,12 @@ beforeEach(() => {
 });
 
 function FeatureControls({ conversationId }: { conversationId: string }) {
-  const { current, registered, canEdit, toggle, toggleServer } = useLsmChatFeatures(conversationId);
+  const { current, registered, selected, canEdit, toggle, toggleServer, inheritServers } =
+    useLsmChatFeatures(conversationId);
   return (
     <>
-      <button disabled={!canEdit} onClick={() => toggle('mcp', !current?.mcp)}>
-        External MCP
+      <button disabled={!canEdit} onClick={inheritServers}>
+        Allow all servers
       </button>
       <button disabled={!canEdit} onClick={() => toggle('web', !current?.web)}>
         Web search
@@ -49,8 +50,10 @@ function FeatureControls({ conversationId }: { conversationId: string }) {
       {registered.map((server) => (
         <button
           key={server.name}
-          disabled={!canEdit || !current?.mcp}
-          onClick={() => toggleServer(server.name, false)}
+          disabled={!canEdit || !server.enabled}
+          onClick={() =>
+            toggleServer(server.name, !(selected == null || selected.includes(server.name)))
+          }
         >
           MCP server {server.name}
         </button>
@@ -74,17 +77,20 @@ test('selects one MCP server without globally disabling registered services', as
   await waitFor(() => expect(blocked).not.toBeDisabled());
   fireEvent.click(blocked);
   await waitFor(() =>
-    expect(put).toHaveBeenCalledWith('/api/lsm/preferences/chat-123', { mcpServers: ['allowed'] }),
+    expect(put).toHaveBeenCalledWith('/api/lsm/preferences/chat-123', {
+      mcp: true,
+      mcpServers: ['allowed'],
+    }),
   );
 });
 
 test('offers new-chat defaults without trying to save a nonexistent conversation', async () => {
   mount('new');
-  const toggle = await screen.findByRole('button', { name: 'External MCP' });
+  const toggle = await screen.findByRole('button', { name: 'Allow all servers' });
   await waitFor(() => expect(toggle).not.toBeDisabled());
   fireEvent.click(toggle);
   await waitFor(() =>
-    expect(put).toHaveBeenCalledWith('/api/lsm/feature-defaults', { mcp: false }),
+    expect(put).toHaveBeenCalledWith('/api/lsm/feature-defaults', { mcp: true, mcpServers: null }),
   );
 });
 
@@ -101,5 +107,40 @@ test.each(['new', 'new_conversation'])('saves web and memory defaults for %s', a
   fireEvent.click(memory);
   await waitFor(() =>
     expect(put).toHaveBeenCalledWith('/api/lsm/feature-defaults', { memory: false }),
+  );
+});
+
+test('legacy MCP-off settings can enable exactly one server without granting the rest', async () => {
+  const preferences = { web: true, mcp: false, memory: true, mcpServers: null };
+  get.mockImplementation((url: string) =>
+    Promise.resolve(
+      url.includes('/mcp/servers')
+        ? {
+            servers: [
+              { name: 'allowed', enabled: true, tool_count: 1 },
+              { name: 'blocked', enabled: true, tool_count: 1 },
+            ],
+          }
+        : preferences,
+    ),
+  );
+  put.mockImplementation((_url, change) => Promise.resolve(Object.assign(preferences, change)));
+  mount('chat-123');
+  const allowed = await screen.findByRole('button', { name: 'MCP server allowed' });
+  await waitFor(() => expect(allowed).not.toBeDisabled());
+  fireEvent.click(allowed);
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith('/api/lsm/preferences/chat-123', {
+      mcp: true,
+      mcpServers: ['allowed'],
+    }),
+  );
+  await waitFor(() => expect(allowed).not.toBeDisabled());
+  fireEvent.click(allowed);
+  await waitFor(() =>
+    expect(put).toHaveBeenLastCalledWith('/api/lsm/preferences/chat-123', {
+      mcp: false,
+      mcpServers: [],
+    }),
   );
 });

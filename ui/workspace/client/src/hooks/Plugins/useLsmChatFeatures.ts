@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
+import { useLsmExternalMcpServers } from './useLsmExternalMcpServers';
 
 type Features = {
   web: boolean;
@@ -8,7 +9,6 @@ type Features = {
   /** null selects all registered and enabled servers; [] selects none. */
   mcpServers: string[] | null;
 };
-type Server = { name: string; enabled: boolean; tool_count: number };
 
 export default function useLsmChatFeatures(conversationId?: string | null) {
   const client = useQueryClient();
@@ -20,11 +20,7 @@ export default function useLsmChatFeatures(conversationId?: string | null) {
     ? ['lsm', 'chat-permissions', conversationId!]
     : ['lsm', 'feature-defaults'];
   const features = useQuery<Features>({ queryKey, queryFn: () => request.get(url), retry: false });
-  const servers = useQuery<{ servers: Server[] }>({
-    queryKey: ['lsm', 'registered-mcp-servers'],
-    queryFn: () => request.get('/api/lsm/mcp/servers'),
-    retry: false,
-  });
+  const servers = useLsmExternalMcpServers();
   const mutation = useMutation<
     Features,
     Error,
@@ -45,28 +41,28 @@ export default function useLsmChatFeatures(conversationId?: string | null) {
   });
   const current = features.data;
   const registered = servers.data?.servers ?? [];
-  const selected = current?.mcpServers;
+  const selected = !current || current.mcp === false ? [] : current.mcpServers;
   const canEdit = !!current && !mutation.isLoading;
-  const toggle = (name: keyof Pick<Features, 'web' | 'mcp' | 'memory'>, enabled: boolean) => {
+  const toggle = (name: keyof Pick<Features, 'web' | 'memory'>, enabled: boolean) => {
     if (canEdit) mutation.mutate({ url, queryKey, change: { [name]: enabled } });
   };
   const toggleServer = (server: string, enabled: boolean) => {
-    if (
-      !canEdit ||
-      !current?.mcp ||
-      !registered.some((item) => item.name === server && item.enabled)
-    )
-      return;
+    if (!canEdit || !registered.some((item) => item.name === server && item.enabled)) return;
     const all = registered.filter((item) => item.enabled).map((item) => item.name);
     const existing = selected === null ? all : (selected ?? []);
     const next = enabled
       ? [...new Set([...existing, server])]
       : existing.filter((item) => item !== server);
-    mutation.mutate({ url, queryKey, change: { mcpServers: next } });
+    mutation.mutate({ url, queryKey, change: { mcp: next.length > 0, mcpServers: next } });
   };
   return {
     current,
     registered,
+    servers,
+    selected,
+    inheritServers: () => {
+      if (canEdit) mutation.mutate({ url, queryKey, change: { mcp: true, mcpServers: null } });
+    },
     canEdit,
     toggle,
     toggleServer,

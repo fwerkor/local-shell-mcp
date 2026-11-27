@@ -14,7 +14,7 @@ import type { LucideIcon } from 'lucide-react';
 import type { BadgeItem } from '~/common';
 import CodeInterpreter from './CodeInterpreter';
 import { BadgeRowProvider } from '~/Providers';
-import ToolsDropdown from './ToolsDropdown';
+import ChatToolManagement from './ChatToolManagement';
 import { useChatBadges } from '~/hooks';
 import ToolDialogs from './ToolDialogs';
 import FileSearch from './FileSearch';
@@ -25,6 +25,8 @@ import store from '~/store';
 interface BadgeRowProps {
   showEphemeralBadges?: boolean;
   showTools?: boolean;
+  projectId?: string | null;
+  index?: number;
   onChange: (badges: Pick<BadgeItem, 'id'>[]) => void;
   onToggle?: (badgeId: string, currentActive: boolean) => void;
   conversationId?: string | null;
@@ -143,6 +145,8 @@ const dragReducer = (state: DragState, action: DragAction): DragState => {
 function BadgeRow({
   showEphemeralBadges,
   showTools,
+  projectId,
+  index,
   conversationId,
   specName,
   isSubmitting,
@@ -330,9 +334,12 @@ function BadgeRow({
     >
       <div ref={containerRef} className="relative flex flex-wrap items-center gap-2">
         {(showTools || showEphemeralBadges) && (
-          <ToolsDropdown
+          <ChatToolManagement
             showEphemeralTools={showEphemeralBadges === true}
-            showMemory={showTools === true}
+            showConversationTools={showTools === true}
+            conversationId={conversationId}
+            projectId={projectId}
+            index={index}
           />
         )}
         {tempBadges.map((badge, index) => (
