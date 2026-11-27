@@ -47,11 +47,9 @@ jest.mock('@librechat/client', () => ({
         };
         return (
           <div key={index}>
-            {item.render ? (
-              Reflect.apply(item.render, undefined, [props])
-            ) : (
-              <div {...props}>{item.label}</div>
-            )}
+            {typeof item.render === 'function'
+              ? item.render(props)
+              : (item.render ?? <div {...props}>{item.label}</div>)}
           </div>
         );
       })}
