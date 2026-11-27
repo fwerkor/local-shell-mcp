@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
+<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
 # Hızlı başlangıç
 
 Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar. [unified web workspace](web-workspace.md) önerilen günlük deneyimdir; ayrı olarak konuşlandırılmış, isteğe bağlı bir sohbet yığınıdır. ChatGPT, Gemini ve diğer harici MCP istemcileri aynı Denetleyiciye bağlanabilir. Bkz. [runtime choices and deployment model](../guides/deployment.md).
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | release binary ile çalıştırma | [Standalone binary runtime](../installation/binary.md) |
 | Python veya source checkout ile çalıştırma | [Python runtimes](../installation/python.md) |
 | Birleşik sohbet ve kontrol arayüzünü kullanın | [Unified web workspace](web-workspace.md) |
-| Gemini Spark'ı istemci olarak ekleyin | [Gemini Custom Apps](gemini-spark.md) |
+| Gemini Task'ı istemci olarak ekleyin | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT’yi client olarak ekleme | [ChatGPT connector](chatgpt-connector.md) |
 | tools seçme ve daha iyi prompt yazma | [Kullanım kalıpları](../guides/usage-patterns.md) |
 | HPC, NPU/GPU veya NAT makinesi bağlama | [Uzak workers](../guides/remote-workers.md) |

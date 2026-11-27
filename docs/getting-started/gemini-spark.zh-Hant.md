@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: b7c3dfd7dc21a498f8410a88a8a52094ca0349856dfa43d267e3fe7bb273685a -->
-# 連接 Gemini Spark/自訂應用程式
+<!-- i18n-source-sha256: 0d50677fe8bd21dbf6f3fff366adea800f15d50fdbc67ed3b77abf84437f73eb -->
+# 連接 Gemini Task / 自訂應用程式
 
-Gemini 的 **自訂連線應用程式** 功能（之前稱為 **Spark**）允許符合條件的 Gemini 使用者連接遠端 MCP 伺服器。 LSM 可以提供 MCP 端點。這是到 [unified web workspace](web-workspace.md)、[ChatGPT](chatgpt-connector.md) 和其他 MCP 客戶端的**替代客戶端連接**；它不會替換或部署 LSM 控制器。
+Gemini 的 **自訂連線應用程式** 功能允許符合條件的 Gemini 使用者連接遠端 MCP 伺服器。 LSM 可以提供 MCP 端點。這是到 [unified web workspace](web-workspace.md)、[ChatGPT](chatgpt-connector.md) 和其他 MCP 客戶端的**替代客戶端連接**；它不會替換或部署 LSM 控制器。
 
 Google 目前將自訂應用程式限制為**年滿 18 歲的美國用戶**、使用**個人 Google 帳戶**登入並**保持活動啟用**。該功能以**英語**提供。連接必須在 Gemini Web 應用程式上創建，儘管連接的應用程式稍後可以在行動裝置上使用。可用性和 UI 標籤可能會變更；請參閱 [official Gemini custom apps instructions](https://support.google.com/gemini/answer/17209137)。
 
@@ -30,6 +30,16 @@ https://your-public-host.example.com/mcp
 6. 在 Gemini 對話中，輸入 `@` 並選擇連接的自訂應用程式以請求 LSM 工具。
 
 首先：「使用連接的 LSM 應用程式檢查環境並列出工作區文件。請勿修改任何內容。」在嘗試寫入操作之前檢查工具結果和控制器審核。
+
+## 使用 Task 模式（原 Spark）
+
+對於多步驟程式開發、除錯或伺服器維護，建議優先使用 **Task**：它可以規劃工作、反覆呼叫已連接的工具，並在任務對話中展示進度。這是工作流程建議，不代表經實測的速度或品質保證。
+
+在 Gemini 首頁輸入框下方選擇 **Task**，依提示完成首次設定。輸入 `@`，若顯示 LSM 自訂應用程式則選取它，並提交明確目標、目標機器或工作區及完成條件。
+
+範例：「使用 LSM 檢查儲存庫、重現失敗測試、修正根因並重新執行測試。回報修改的檔案及測試結果。」
+
+查看任務進度並按需確認操作。透過 Controller 稽核記錄確認 LSM 工具確實被呼叫：Gemini 自身的雲端電腦並非你的 LSM 工作區。保持 Controller 與必要 Worker 上線。Task 與自訂應用程式的開放條件不同；若任一入口缺失，請查看 [Task 官方指南](https://support.google.com/gemini/answer/17094507)。
 
 ## 限制和故障排除
 

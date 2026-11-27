@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
+<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Kendi kendine barındırılan yapay zeka çalışma alanı · MCP kontrol düzlemi</span>
 
@@ -55,7 +55,7 @@ Amaçlanan isolation boundary, service’in çalıştığı container veya VM’
 | Birincil tarayıcı çalışma alanı | [Unified web workspace](getting-started/web-workspace.md) | Paylaşılan oturum açmayla sohbet, projeler ve LSM kontrol sayfaları |
 | İlk Denetleyici dağıtımı | [Quickstart](getting-started/quickstart.md) | Önerilen ikili, OAuth ve ilk tarayıcı oturumu |
 | runtime layer seçimi | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python ve stdio’yu ayrı runtime options olarak açıklar |
-| Gemini Spark'ı Bağlama | [Gemini Custom Apps](getting-started/gemini-spark.md) | Uygunluk, HTTPS MCP URL'si, OAuth ve test |
+| Gemini Task'ı Bağlama | [Gemini Custom Apps](getting-started/gemini-spark.md) | Uygunluk, HTTPS MCP URL'si, OAuth ve test |
 | ChatGPT’yi client olarak ekleme | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, ilk güvenli prompt, tool discovery |
 | LSM’yi DeepSeek Harness’a eklemek | [DeepSeek Harness plugin](clients/deepseek-harness.md) | Bu repository’yi DSH bundle olarak kurarken tam LSM tool ve remote-worker surface’i koru |
 | VS Code’dan çalıştırma | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime ve host safety notları |

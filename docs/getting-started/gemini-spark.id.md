@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: b7c3dfd7dc21a498f8410a88a8a52094ca0349856dfa43d267e3fe7bb273685a -->
-# Hubungkan Gemini Spark / Aplikasi Khusus
+<!-- i18n-source-sha256: 0d50677fe8bd21dbf6f3fff366adea800f15d50fdbc67ed3b77abf84437f73eb -->
+# Hubungkan Gemini Task / aplikasi khusus
 
-Fitur **aplikasi terhubung khusus** Gemini (sebelumnya dijelaskan sebagai **Spark**) memungkinkan pengguna Gemini yang memenuhi syarat menghubungkan server MCP jarak jauh. LSM dapat menyediakan titik akhir MCP. Ini adalah **koneksi klien alternatif** ke [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md), dan klien MCP lainnya; itu tidak menggantikan atau menyebarkan Pengontrol LSM.
+Fitur **aplikasi terhubung khusus** Gemini memungkinkan pengguna Gemini yang memenuhi syarat menghubungkan server MCP jarak jauh. LSM dapat menyediakan titik akhir MCP. Ini adalah **koneksi klien alternatif** ke [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md), dan klien MCP lainnya; itu tidak menggantikan atau menyebarkan Pengontrol LSM.
 
 Google saat ini membatasi aplikasi khusus untuk **pengguna berusia 18 tahun ke atas di Amerika Serikat**, masuk dengan **Akun Google pribadi** dan **Tetap aktifkan Aktivitas**. Fitur ini tersedia dalam **Bahasa Inggris**. Koneksi harus dibuat di aplikasi web Gemini, meskipun aplikasi yang terhubung nantinya dapat digunakan di perangkat seluler. Ketersediaan dan label UI dapat berubah; konsultasikan dengan [official Gemini custom apps instructions](https://support.google.com/gemini/answer/17209137).
 
@@ -30,6 +30,16 @@ Jangan memasukkan UI web (`/ui`), URL LibreChat, atau situs asal tanpa `/mcp`. P
 6. Dalam percakapan Gemini, ketik `@` dan pilih aplikasi khusus yang terhubung untuk meminta alat LSM.
 
 Mulailah dengan: "Gunakan aplikasi LSM yang terhubung untuk memeriksa lingkungan dan membuat daftar file ruang kerja. Jangan mengubah apa pun." Periksa hasil alat dan audit Pengendali sebelum mencoba operasi tulis.
+
+## Gunakan mode Task (sebelumnya Spark)
+
+Untuk pengembangan bertahap, debugging, dan pemeliharaan server, gunakan **Task** alih-alih chat biasa: mode ini memungkinkan perencanaan, penggunaan alat berulang kali, dan pemantauan progres. Ini bukan jaminan kecepatan atau kualitas terukur.
+
+Pada beranda Gemini, pilih **Task** di bawah kotak teks dan selesaikan penyiapan jika diminta. Ketik `@`, pilih LSM jika tersedia, lalu sebutkan tujuan, mesin atau ruang kerja, dan kriteria penyelesaian.
+
+Contoh: “Gunakan LSM untuk memeriksa repositori, mereproduksi tes yang gagal, memperbaiki penyebabnya, dan menjalankan ulang tes. Laporkan berkas yang berubah dan hasilnya.”
+
+Pantau progres dan setujui tindakan yang diperlukan. Periksa panggilan LSM di log audit Controller: komputer cloud Gemini bukan ruang kerja LSM Anda. Pastikan Controller dan Worker yang diperlukan tetap online. Task dan aplikasi khusus memiliki persyaratan akses berbeda; jika opsi tidak ada, lihat [panduan resmi Task](https://support.google.com/gemini/answer/17094507).
 
 ## Batasan dan pemecahan masalah
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
+<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
 # クイックスタート
 
 このガイドでは、LSM コントローラーを起動し、そのブラウザー インターフェイスを開きます。 [unified web workspace](web-workspace.md) は、毎日の推奨エクスペリエンスです。これは、個別にデプロイされるオプションのチャット スタックです。 ChatGPT、Gemini、およびその他の外部 MCP クライアントは、同じコントローラーに接続できます。 [runtime choices and deployment model](../guides/deployment.md)を参照してください。
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | release binary で実行する | [Standalone binary runtime](../installation/binary.md) |
 | Python または source checkout で実行する | [Python runtimes](../installation/python.md) |
 | 統合されたチャットと制御インターフェイスを使用する | [Unified web workspace](web-workspace.md) |
-| Gemini Spark をクライアントとして追加する | [Gemini Custom Apps](gemini-spark.md) |
+| Gemini Task をクライアントとして追加する | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT を client として追加する | [ChatGPT connector](chatgpt-connector.md) |
 | tool を選び、より良い prompt を書く | [Usage patterns](../guides/usage-patterns.md) |
 | HPC、NPU/GPU、NAT machine を接続する | [Remote workers](../guides/remote-workers.md) |
