@@ -171,3 +171,46 @@ async def test_openai_stream_stop_reason_is_available_only_when_requested(monkey
     assert await _collect(stream_model(profile, messages)) == ['Partial summary']
     assert await _collect(stream_model(profile, messages, emit_finish_reason=True)) == [
         'Partial summary', ModelFinish('openai', 'length')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_tools", [False, True])
+@pytest.mark.parametrize("base, expected", [
+    ("https://opencode.ai/inference/go/openai/v1", "conversation-1"),
+    ("https://opencode.ai/inference/openai/v1", "conversation-1"),
+    ("https://opencode.ai.example.invalid/inference/go/openai/v1", None),
+    ("https://example.invalid/v1", None),
+])
+async def test_model_session_headers(monkeypatch, with_tools, base, expected):
+    from local_shell_mcp.webui.providers import (
+        MODEL_USER_AGENT, bind_model_session, stream_model_with_tools,
+    )
+
+    captured = {}
+    _mock_client(monkeypatch, ['data: {"choices":[{"delta":{"content":"OK"}}]}',
+                               'data: [DONE]'], captured)
+    config = bind_model_session(
+        ProviderConfig("openai", "test", base + "/chat/completions", "key"), "conversation-1")
+    messages = [{"role": "user", "content": "Hi"}]
+    if with_tools:
+        tools = [{"type": "function", "function": {"name": "test", "parameters": {"type": "object"}}}]
+        await _collect(stream_model_with_tools(config, messages, tools=tools))
+    else:
+        await _collect(stream_model(config, messages))
+    headers = captured["request"].headers
+    assert headers["user-agent"] == MODEL_USER_AGENT
+    assert headers.get("x-opencode-session") == expected
+
+
+def test_model_session_binding_is_stable_and_isolates_tasks():
+    from local_shell_mcp.webui.providers import bind_model_session, model_request_headers
+
+    config = ProviderConfig("openai", "test", "https://opencode.ai/inference/go/openai/v1/chat/completions", "key")
+    parent = bind_model_session(config, "conversation-1")
+    child = bind_model_session(parent, "conversation-1", "/subagent:call-1")
+    assert child.session_id == bind_model_session(config, "conversation-1", "/subagent:call-1").session_id
+    assert child.session_id != parent.session_id
+    assert child.session_id != bind_model_session(config, "conversation-1", "automatic-memory").session_id
+    assert child.session_id != bind_model_session(config, "conversation-2", "/subagent:call-1").session_id
+    assert config.session_id is None
+    assert "x-opencode-session" not in model_request_headers(config)
