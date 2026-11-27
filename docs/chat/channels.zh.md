@@ -15,8 +15,8 @@
 |---|---|---|
 | OpenAI Chat Completions | `https://api.openai.com/v1` | OpenAI 兼容网关与本地推理服务 |
 | OpenAI Responses | `https://api.openai.com/v1` | 提供 Responses API 的网关 |
-| Anthropic 原生协议 | `https://api.anthropic.com/v1` | 兼容 Anthropic Messages 的 API |
-| Google Gemini 原生协议 | `https://generativelanguage.googleapis.com/v1beta` | 兼容 Gemini generateContent 的 API |
+| 人为原住民 | `https://api.anthropic.com/v1` | 兼容 Anthropic Messages 的 API |
+| 谷歌双子座原生 | `https://generativelanguage.googleapis.com/v1beta` | 兼容 Gemini generateContent 的 API |
 
 按照提供方要求填写基础地址，而不是以 `/chat/completions` 等结尾的完整生成请求 URL。兼容 OpenAI 的网关不一定支持 Responses、工具调用、流式用量、多模态输入或推理参数。选择实际受支持的协议。上述地址只是协议示例，并不表示免费或保证可用。
 

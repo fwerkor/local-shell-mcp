@@ -28,8 +28,8 @@ A scheduled run with a named Agent uses that Agent's machine policy and saved ex
 | Mode | Behavior |
 |---|---|
 | Automatic | Authorized tool calls proceed without an extra approval prompt unless a separate explicit policy requires it |
-| Dangerous | The Controller requests review for operations classified as dangerous, including arbitrary shell commands and many external calls |
-| All | Requests approval for ordinary tool calls |
+| Review risky operations | The Controller requests review for operations classified as dangerous, including arbitrary shell commands and many external calls |
+| Review all tools | Requests approval for ordinary tool calls |
 
 Chat approval settings can inherit the Agent and global defaults. Existing explicit denial or approval rules remain applicable. A child Agent cannot weaken the parent's approval mode. Approval is independent of permissions: approving a denied machine action does not grant machine access.
 

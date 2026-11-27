@@ -24,6 +24,8 @@ The external MCP client Goal mechanism is separate; see [Human interface](../gui
 
 ## Create a scheduled chat
 
+![Scheduled chats sidebar with a disabled example schedule](../assets/chat/scheduled-chats.png)
+
 Open scheduled chat management. Create a schedule with a descriptive name, a saved Agent, prompt, timezone and cadence. Choose its conversation target, optionally select a project for a new conversation, save and enable the schedule. Use the manual run control to validate the configuration before depending on it.
 
 Supported cadence includes hourly, daily, weekdays, weekly, five-field cron and continuous execution. Continuous execution starts subsequent occurrences after the configured delay; a zero delay can generate sustained provider and machine load. Ordinary recurring schedules enforce a minimum interval of five minutes. Use an explicit IANA timezone such as `Asia/Shanghai` or `UTC`; inspect the displayed next run after saving.
@@ -38,9 +40,9 @@ This uses the selected timezone, not necessarily the Controller's system timezon
 
 ## Conversation targets
 
-- **New chat:** start a separate conversation for each occurrence; useful for independent reports.
-- **Reuse chat:** create a conversation on the first run and reuse it for subsequent occurrences; useful for cumulative monitoring.
-- **Existing chat:** choose an existing conversation that will receive scheduled turns.
+- **New conversation each run:** start a separate conversation for each occurrence; useful for independent reports.
+- **Reuse one conversation:** create a conversation on the first run and reuse it for subsequent occurrences; useful for cumulative monitoring.
+- **Use an existing conversation:** choose an existing conversation that will receive scheduled turns.
 
 A reused or existing conversation can grow and require compaction. Choose independent chats when historical context is unnecessary. Scheduled runs depend on the selected Agent and model channel still existing and being usable.
 

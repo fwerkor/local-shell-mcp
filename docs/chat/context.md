@@ -12,6 +12,8 @@ A long saved conversation can exceed the model's context window without losing a
 
 ## Manage memory
 
+![Memory management sidebar with a demonstration entry](../assets/chat/memory-management.png)
+
 Memory is enabled by default unless disabled by the user's settings, the chat toggle or deployment/Agent capability restrictions. Use the memory management page to inspect and edit stored entries. Ask the Agent to remember useful facts, project conventions or preferences, and verify the result in the memory interface.
 
 When editing a memory entry, use a key containing lowercase letters and underscores only (for example, `repository_conventions`). The default value length limit is 10,000 characters; an installation can configure its memory storage limits. If an entry is rejected, inspect the error rather than splitting secrets across keys.
