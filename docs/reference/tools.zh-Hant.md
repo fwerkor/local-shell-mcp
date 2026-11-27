@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # 工具參考
 
 本頁由實際 MCP tool schema 產生。公開工具介面變更後，執行 `python scripts/generate-tools-reference.py` 更新 English 參考頁。
@@ -787,9 +787,20 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 指定 `machine` 時，本次呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
 ## 遠端 worker 管理
 
+### `remote_list`
+
+列出已註冊的遠端 Worker、狀態與能力。verbose=true 時包含診斷遙測資料。
+
+| 參數 | 類型 | 必填/預設值 | 說明 |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-使用 action=invite、list、reset、revoke 或 rename 管理 remote workers。invite 接受 name/workdir/ttl_s/max_uses；revoke 需要 machine；rename 需要 machine 與 new_name。max_uses 預設為 1。reset 需要 machine，會在不斷開 worker 連線的情況下清除排隊中與可安全取消的執行中控制請求；已開始的受保護操作會保留。 list 操作使用 verbose=true 時包含診斷遙測資料。
+使用 action=invite、reset、revoke 或 rename 管理 remote workers。invite 接受 name/workdir/ttl_s/max_uses；revoke 需要 machine；rename 需要 machine 與 new_name。max_uses 預設為 1。reset 需要 machine，會在不斷開 worker 連線的情況下清除排隊中與可安全取消的執行中控制請求；已開始的受保護操作會保留。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -800,7 +811,6 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # مرجع الأدوات
 
 تُبنى هذه الصفحة من MCP tool schemas الفعلية. شغّل `python scripts/generate-tools-reference.py` بعد تغيير public tool surface لتحديث English reference.
@@ -787,9 +787,20 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 عند توفير `machine` يحتاج الاستدعاء أيضاً إلى `remote:use` ويعمل عبر بروتوكول worker البعيد.
 ## إدارة remote workers
 
+### `remote_list`
+
+يعرض remote workers المسجلين وحالتهم وقدراتهم. استخدم verbose=true للحصول على بيانات القياس عن بعد للتشخيص.
+
+| المعامل | النوع | مطلوب/default | الوصف |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-يدير remote workers عبر action=invite أو list أو reset أو revoke أو rename. invite يقبل name/workdir/ttl_s/max_uses؛ revoke يحتاج machine؛ rename يحتاج machine وnew_name. القيمة الافتراضية لـ max_uses هي 1. يتطلب reset المعامل machine، ويمسح طلبات التحكم المنتظرة والقابلة للإلغاء بأمان دون فصل العامل؛ وتبقى العمليات المحمية التي بدأت بالفعل كما هي. في list، يتضمن verbose=true بيانات القياس عن بعد للتشخيص.
+يدير remote workers عبر action=invite أو reset أو revoke أو rename. invite يقبل name/workdir/ttl_s/max_uses؛ revoke يحتاج machine؛ rename يحتاج machine وnew_name. القيمة الافتراضية لـ max_uses هي 1. يتطلب reset المعامل machine، ويمسح طلبات التحكم المنتظرة والقابلة للإلغاء بأمان دون فصل العامل؛ وتبقى العمليات المحمية التي بدأت بالفعل كما هي.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -800,7 +811,6 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

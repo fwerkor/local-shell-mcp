@@ -189,6 +189,8 @@ async def test_remote_manage_remaining_validation_paths(
     assert missing_rename_machine.isError is True
     invalid = await tool(action="unknown")
     assert invalid.isError is True
+    removed = await tool(action="list")
+    assert removed.isError is True
 
 def test_tools_transport_security_ipv6_and_invalid_host(
     monkeypatch: pytest.MonkeyPatch,

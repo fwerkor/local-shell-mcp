@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d8e6672f6c99c2e2cd003f6e8e64ca5f51a43600079134ef2dcbac773d160c59 -->
+<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
 # Tools reference
 
 このページは実際の MCP tool schema から構成されます。Public tool surface を変更した後は `python scripts/generate-tools-reference.py` を実行して English reference を更新します。
@@ -787,9 +787,20 @@ OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:s
 `machine` を指定した場合、この呼び出しには `remote:use` も必要で、リモート worker プロトコルを経由します。
 ## Remote worker administration
 
+### `remote_list`
+
+登録済みの remote workers とその状態・機能を一覧表示します。verbose=true を指定すると診断テレメトリも含まれます。
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
+| `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
 ### `remote_manage`
 
-action=invite、list、reset、revoke、rename で remote workers を管理します。invite は name/workdir/ttl_s/max_uses、revoke は machine、rename は machine と new_name が必要です。 max_uses の既定値は 1 です。reset には machine が必要で、worker を切断せずに待機中および安全にキャンセルできる実行中の制御リクエストを消去します。開始済みの保護対象操作は維持されます。 list で verbose=true を指定すると診断テレメトリも含まれます。
+action=invite、reset、revoke、rename で remote workers を管理します。invite は name/workdir/ttl_s/max_uses、revoke は machine、rename は machine と new_name が必要です。 max_uses の既定値は 1 です。reset には machine が必要で、worker を切断せずに待機中および安全にキャンセルできる実行中の制御リクエストを消去します。開始済みの保護対象操作は維持されます。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -800,7 +811,6 @@ action=invite、list、reset、revoke、rename で remote workers を管理し�
 | `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
-| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

@@ -12,6 +12,7 @@ import traceback
 from pathlib import Path
 
 from .agent_runtime import RuntimeSafetyError
+from .compaction import CompactionFailed
 from .provider_responses import ResponsesStreamError
 
 _KNOWN_SAFETY_REASONS = frozenset({
@@ -39,6 +40,9 @@ def generation_failure(exc: Exception, run_id: str) -> str:
             headline = "WebUI authorization expired or was revoked. Sign in again to continue."
         else:
             headline = f"LSM stopped this operation: {reason}."
+    elif isinstance(exc, CompactionFailed):
+        reason = "Context compaction did not complete; the original history is preserved"
+        headline = "Context compaction failed. Model generation stopped; retry to continue."
     elif isinstance(exc, ResponsesStreamError):
         reason = str(exc)  # Typed exception contains only classified fields.
         headline = reason

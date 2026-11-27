@@ -92,7 +92,7 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "gui_action",
         ),
     ),
-    ("Remote worker administration", ("remote_manage",)),
+    ("Remote worker administration", ("remote_list", "remote_manage")),
 )
 
 
