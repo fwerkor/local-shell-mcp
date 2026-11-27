@@ -260,3 +260,89 @@ async def test_live_compaction_http_is_owner_scoped_and_obeys_settings(database,
         assert (await client.get(status_url, headers=alice)).json() == {'status': 'complete'}
         assert store.finish('alice', run.run_id, status='complete', text='Done')
         assert (await client.post(url, json=body, headers=alice)).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_can_retry_with_current_channel_and_continue(database, monkeypatch):
+    from local_shell_mcp.webui import provider_profiles
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
+    store = GenerationStore(database)
+    repo = WorkspaceRepository(database)
+    monkeypatch.setattr(generation_routes, "_database", lambda: database)
+    monkeypatch.setattr(generation_routes, "_owner", lambda request: "alice")
+    channel = {"provider": "openai", "base_url": "https://old.invalid/v1",
+               "api_key": "old-key", "models": ["free-model"]}
+    monkeypatch.setattr(provider_profiles, "profile", lambda name: dict(channel))
+    profiles = []
+
+    async def finish_run(owner, generation, profile, agent, **kwargs):
+        profiles.append(profile)
+        if len(profiles) == 1:
+            store.finish(owner, generation.run_id, status="error", error="HTTP 429")
+        else:
+            store.finish(owner, generation.run_id, status="complete", text="Recovered")
+
+    monkeypatch.setattr(generation_routes, "_start_task", finish_run)
+    app = Starlette(routes=generation_routes.generation_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        url = "/api/agents/chat/Custom"
+        first = await client.post(url, json={"text": "Original prompt", "model": "free-model",
+                                            "clientRequestId": "original"})
+        assert first.status_code == 202, first.text
+        cid = first.json()["conversationId"]
+        failed = store.latest("alice", cid)
+        terminal = store.events("alice", failed.run_id)[-1][1]
+        assert terminal["error"] == "HTTP 429"
+        assert terminal["requestMessage"]["messageId"] == failed.user_message_id
+        assert terminal["responseMessage"]["messageId"] == failed.response_message_id
+        assert terminal["responseMessage"]["model"] == "free-model"
+        assert terminal["responseMessage"]["createdAt"]
+        assert terminal["requestMessage"]["createdAt"]
+
+        channel.update(base_url="https://new.invalid/v1", api_key="new-key", models=["go-model"])
+        retry = await client.post(url, json={
+            "conversationId": cid, "text": "Original prompt", "model": "go-model",
+            "clientRequestId": "retry", "messageId": "optimistic-retry",
+            "overrideParentMessageId": failed.user_message_id, "isRegenerate": True,
+        })
+        assert retry.status_code == 202, retry.text
+        recovered = store.latest("alice", cid)
+        assert recovered.run_id != failed.run_id
+        assert recovered.user_message_id == failed.user_message_id
+        assert recovered.status == "complete"
+        retry_terminal = store.events("alice", recovered.run_id)[-1][1]
+        assert retry_terminal["responseMessage"]["parentMessageId"] == failed.user_message_id
+        assert retry_terminal["requestMessage"]["messageId"] == failed.user_message_id
+        assert retry_terminal["responseMessage"]["model"] == "go-model"
+        history = repo.messages("alice", cid)["messages"]
+        assert sum(m["role"] == "user" for m in history) == 1
+        assert len(history) == 3
+
+        followup = await client.post(url, json={
+            "conversationId": cid, "text": "Next turn", "model": "go-model",
+            "clientRequestId": "next", "parentMessageId": recovered.response_message_id,
+        })
+        assert followup.status_code == 202, followup.text
+        assert store.latest("alice", cid).status == "complete"
+
+    assert [(p.model, p.url, p.token) for p in profiles] == [
+        ("free-model", "https://old.invalid/v1/chat/completions", "old-key"),
+        ("go-model", "https://new.invalid/v1/chat/completions", "new-key"),
+        ("go-model", "https://new.invalid/v1/chat/completions", "new-key"),
+    ]
+
+
+def test_empty_aborted_terminal_has_no_uncommitted_assistant(database):
+    store = GenerationStore(database)
+    job, _ = store.begin("alice", {"text": "Stop immediately"})
+    assert store.finish("alice", job.run_id, status="aborted")
+    final = store.events("alice", job.run_id)[-1][1]
+    assert final["requestMessage"]["messageId"] == job.user_message_id
+    assert final.get("responseMessage") is None
+    assert final["aborted"] is True
+    followup, fresh = store.begin("alice", {
+        "conversationId": job.conversation_id, "text": "Continue chatting",
+        "parentMessageId": final["requestMessage"]["messageId"],
+    })
+    assert fresh and followup.run_id != job.run_id

@@ -2153,7 +2153,9 @@ export default function useResumableSSE(
               startedAsNewConvo: optimisticStreamIdsRef.current.has(currentStreamId),
             });
             let finalOutcome: 'completed' | 'aborted' | 'error' = 'error';
-            if (data.aborted === true || data.responseMessage?.unfinished === true) {
+            if (data.error != null) {
+              finalOutcome = 'error';
+            } else if (data.aborted === true || data.responseMessage?.unfinished === true) {
               finalOutcome = 'aborted';
             } else if (finalHandled) {
               finalOutcome = 'completed';
@@ -2181,6 +2183,10 @@ export default function useResumableSSE(
             setStreamId(null);
             optimisticStreamIdsRef.current.delete(currentStreamId);
             createdStreamIdsRef.current.delete(currentStreamId);
+            // A terminal run is no longer a submission. Leaving it in Recoil
+            // allows dependency changes (such as selecting another model) to
+            // start the same idempotency key again.
+            setSubmission(null);
             return;
           }
 
@@ -3564,6 +3570,7 @@ export default function useResumableSSE(
           optimisticStreamIdsRef.current.delete(currentStreamId);
           createdStreamIdsRef.current.delete(currentStreamId);
           reconnectAttemptRef.current = 0;
+          setSubmission(null);
           return;
         }
 
