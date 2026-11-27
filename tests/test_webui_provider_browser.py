@@ -73,6 +73,23 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 await page.get_by_role("heading", name="Channels & models").wait_for()
                 await page.get_by_text("No channels added yet", exact=False).wait_for()
                 await page.get_by_role("button", name="Add channel").click()
+                menu = page.get_by_role("menu")
+                await menu.wait_for()
+                # The entire menu must be visible and hit-testable, not just its
+                # center (which was still clickable when the left edge was clipped).
+                await page.wait_for_function("""() => {
+                    const menu = document.querySelector('[role="menu"]');
+                    if (!menu) return false;
+                    const rect = menu.getBoundingClientRect();
+                    if (!rect.width || !rect.height || rect.left < 0 || rect.right > innerWidth ||
+                        rect.top < 0 || rect.bottom > innerHeight) return false;
+                    return [...menu.querySelectorAll('[role="menuitem"]')].every(item => {
+                        const box = item.getBoundingClientRect();
+                        const y = (box.top + box.bottom) / 2;
+                        return [box.left + 2, box.right - 2].every(x =>
+                            item.contains(document.elementFromPoint(x, y)));
+                    });
+                }""")
                 await page.get_by_role("menuitem", name="Manual configuration").click()
                 await page.get_by_label("Channel name").fill("Primary Research")
                 await page.get_by_label("Model provider", exact=True).select_option("openai")
