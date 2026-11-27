@@ -6,6 +6,8 @@ Open the model selector in Chat and enter channel management. Select **Add chann
 
 Channels are Controller-owned rather than personal chat settings. In authenticated deployments, channel management requires the `admin:config` scope. An administrator can configure shared channels without distributing API keys to chat users.
 
+![Add a model channel in the actual channel configuration dialog](../assets/chat/channel-settings.png)
+
 A normal API channel has a name, provider protocol, base URL, credentials and model identifiers. Use an API key issued for the selected endpoint, not the password of your LSM account. LSM makes requests from the Controller; a URL that works from your laptop may not work from the Controller.
 
 | Protocol | Example API base URL | Use |

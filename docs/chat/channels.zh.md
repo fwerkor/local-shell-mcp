@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1ae8eb8721f33a8ea3b4af13daa70bdc7c4a6f751bf32d0c3e895be3c8a39323 -->
+<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
 # 渠道与模型
 
 ## 配置渠道
@@ -6,6 +6,8 @@
 打开聊天页面的模型选择器，进入渠道管理。选择**添加渠道**，选择连接类型，填写必要信息后保存。从该渠道选择一个模型并新建会话；使用自定义智能体时，则在智能体配置中选择渠道和模型。
 
 渠道由 Controller 管理，而非个人聊天设置。启用认证的部署中，渠道管理需要 `admin:config` Scope。管理员可以配置共享渠道，无需将 API Key 分发给聊天用户。
+
+![实际渠道配置对话框中的添加渠道界面](../assets/chat/channel-settings.png)
 
 普通 API 渠道包含名称、提供方协议、Base URL、凭证及模型标识。使用该端点签发的 API Key，不要填写 LSM 登录密码。模型请求由 Controller 发出，因此电脑上可访问的 URL 未必能被 Controller 访问。
 

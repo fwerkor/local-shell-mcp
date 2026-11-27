@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 6c9270cab0f3c147ed3790b5042770b1c949119bd63f60b171b4647fb16850ef -->
+<!-- i18n-source-sha256: 01cf883cb71925e93fabc21d32315ef8c869ee2ea548e54a0347e2f6b730a327 -->
 # WebUI Chat 快速入門
 
 統一 LSM Web 工作區整合 AI 聊天、專案、智慧體與 Controller 運維頁面，由 Python Controller 提供服務，共享其認證和 SQLite 資料庫，無需獨立聊天伺服器。仍支援 [ChatGPT](chatgpt-connector.md)、[Gemini](gemini-spark.md) 等外部 MCP 客戶端。
@@ -41,6 +41,10 @@ local-shell-mcp --mode mcp
 ```
 
 檢視實際工具結果。如果工具缺失，檢查聊天工具開關、智慧體設定及機器許可權。重複任務可使用已儲存的智慧體，並明確配置其訪問許可權。參見[工具與許可權](../chat/permissions.md)。
+
+![WebUI Chat 示例會話](../assets/chat/chat-workspace.png)
+
+本指南及後續頁面的截圖採自使用示例模型的隔離 Controller，不包含生產憑證或會話。英文介面標籤可能與所選語言不同。
 
 ## 5. 探索工作區
 

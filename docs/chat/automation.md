@@ -48,6 +48,8 @@ A reused or existing conversation can grow and require compaction. Choose indepe
 
 Scheduled execution is Controller-owned, with saved authorized scope names rather than a retained browser login token. Save or manually run a schedule to authorize it when required. The named Agent's machine permissions apply; ordinary project/chat machine overrides are not the schedule's machine policy. Controller restrictions, saved authorization, tool capabilities and tool approval remain relevant.
 
+For external MCP servers requiring authentication, interactive login does not automatically imply an unattended renewable grant. If the schedule UI reports that reauthentication or unattended access is required, resolve the server-specific credentials or remove that dependency before enabling the schedule. Do not reuse browser tokens as a substitute.
+
 Use a read-only Agent for monitoring. Explicitly describe the allowed targets, desired output and actions to avoid. If a scheduled task needs human input or approval, inspect pending interactions; do not assume that unattended execution implies unrestricted access. A monitoring prompt example:
 
 ```text
@@ -64,5 +66,7 @@ The Controller persists schedules and run state and claims occurrences transacti
 Disable a schedule to prevent future automatic occurrences. Inspect an already running occurrence separately; stopping future scheduling is not a guarantee of cancelling a live generation or shell job. Remove schedules no longer needed and revoke unneeded Agent permissions.
 
 A tracked Job or terminal created by a WebUI Agent can survive normal model-response completion, and a Controller restart alone does not necessarily terminate it. Explicit abort, loss of machine permission or grant expiry can trigger cancellation of Agent-owned work. If the Worker is offline, cancellation may remain pending until it can be delivered. Inspect the job or terminal itself before declaring that execution has stopped. The Agent can only send to or stop its own conversation-owned jobs/shells through the guarded WebUI tool path. External MCP clients retain their native semantics.
+
+Agent background tools and subagent tasks have their own lifecycle. A result may be pending delivery even after execution finishes; check the conversation’s background-task panel and collect the result or let the configured wakeup resume the parent. Do not start a duplicate task simply because a result is not yet visible.
 
 For commands that should outlive an individual tool request, use LSM tracked jobs or persistent terminals. Save output to a log file, record job identifiers, and check real progress. See [Usage patterns](../guides/usage-patterns.md).

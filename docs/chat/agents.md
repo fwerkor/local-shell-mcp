@@ -8,6 +8,8 @@ A direct model chat is useful for a one-off question or task. An Agent is a save
 
 Open Agent management from the WebUI, create an Agent, give it a recognizable name and choose its model. Write its instructions to describe the task, desired output, constraints and verification requirements. Configure the capabilities it needs, then save and start a new conversation with it.
 
+![Agent Builder with instructions, tools, approval and Skill settings](../assets/chat/agent-builder.png)
+
 For example, a repository reviewer might have these instructions:
 
 ```text
@@ -36,6 +38,12 @@ Agents can delegate bounded work to subagents when that capability is available.
 Use delegation for separable tasks such as independent reviews, separate file areas or investigation of different hypotheses. Provide the child with a concrete objective, scope and expected result. Avoid concurrent writes to the same files unless the work is explicitly coordinated.
 
 Delegation must remain within the parent's authorized execution boundaries. It does not grant access to a machine or MCP service that the parent cannot use; child approval policy cannot weaken the parent's policy. Child tasks can consume model tokens and time independently, so inspect their activity and results when evaluating cost and progress.
+
+## Tools, actions and artifacts
+
+The Agent Builder exposes its available tool library and advanced configuration. Select only capabilities you need. For an HTTP Action described by an OpenAPI schema, review the endpoint, authentication requirements and permitted operations before connecting the Action. Actions can have their own authentication; a machine permission does not authorize or revoke a third-party API credential. Inspect the Action response before treating a remote mutation as complete.
+
+For generated UI content, configure artifact rendering as described in [Conversations and projects](conversations.md). Generated code is not a trusted extension of the Controller.
 
 ## Practical Agent templates
 

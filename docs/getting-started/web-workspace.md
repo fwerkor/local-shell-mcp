@@ -41,6 +41,10 @@ Do not modify files or run any writes.
 
 Inspect the actual tool result. If a tool is missing, check the chat's tool toggles, Agent settings and machine permissions. Use a saved Agent for recurring tasks and configure its access explicitly. See [Tools and permissions](../chat/permissions.md).
 
+![WebUI Chat with a demonstration conversation](../assets/chat/chat-workspace.png)
+
+The screenshots in this guide and the following pages were captured in an isolated Controller with a demonstration model. They contain no production credentials or conversations. The English UI labels may differ from the selected language.
+
 ## 5. Explore the workspace
 
 | Area | What to use it for |

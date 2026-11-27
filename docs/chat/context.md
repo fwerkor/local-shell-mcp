@@ -14,6 +14,8 @@ A long saved conversation can exceed the model's context window without losing a
 
 Memory is enabled by default unless disabled by the user's settings, the chat toggle or deployment/Agent capability restrictions. Use the memory management page to inspect and edit stored entries. Ask the Agent to remember useful facts, project conventions or preferences, and verify the result in the memory interface.
 
+When editing a memory entry, use a key containing lowercase letters and underscores only (for example, `repository_conventions`). The default value length limit is 10,000 characters; an installation can configure its memory storage limits. If an entry is rejected, inspect the error rather than splitting secrets across keys.
+
 Memory can use a shared personal pool or an Agent-specific scope, depending on Agent configuration. Do not store API keys, passwords or unnecessary sensitive data in memory. Turning memory off prevents its use in the relevant scope; it is not the same as deleting existing stored entries or removing mentions from conversation history.
 
 When exposed, the model uses `set_memory` to create or update an entry; an empty value removes it. `find_memory` retrieves entries by query or exact key, and an empty query lists saved memories. The optional `include_conversations` flag searches text from other conversations as well. Pagination uses `page` (default 1) and `limit` (default 10, maximum 50). This history retrieval searches conversation text rather than raw tool invocation records. Retrieval is relevance-ranked, so use precise names or terms and refine the query if necessary.

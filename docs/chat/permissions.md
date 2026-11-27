@@ -15,6 +15,8 @@ Registered machines, including the local Controller target when enabled, default
 | Read/write | Allows authorized read and modifying/execution operations, subject to other limits |
 | Inherit | Use the applicable higher-level default rather than an explicit override |
 
+![Machine permissions and approval mode in a conversation](../assets/chat/machine-permissions.png)
+
 Set global defaults, project overrides and per-chat overrides in the machine permission controls. Specific conversation overrides take precedence over project overrides, which take precedence over global defaults. An Agent can further cap access per machine or by its default policy; explicit Agent permissions do not bypass the authenticated principal or Controller restrictions.
 
 Example: a global read/write policy with a project read-only override and an Agent read/write grant yields read-only access in that project's chat unless the conversation policy explicitly overrides it. A conversation read/write override still cannot exceed an Agent's read-only ceiling.
