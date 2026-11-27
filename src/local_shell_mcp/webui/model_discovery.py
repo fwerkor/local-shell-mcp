@@ -21,8 +21,8 @@ from .provider_profiles import (
     public_profiles,
     validate_connection,
 )
-from .routes import _body, _repo
 from .providers import MODEL_USER_AGENT
+from .routes import _body, _repo
 
 logger = logging.getLogger(__name__)
 

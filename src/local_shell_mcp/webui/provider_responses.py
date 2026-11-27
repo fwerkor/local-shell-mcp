@@ -14,12 +14,12 @@ from .providers import (
     ModelToolCall,
     ModelUsage,
     ProviderConfig,
-    model_request_headers,
     UnsupportedImageInput,
     _data_frames,
     _usage_frame,
     check_image_response,
     image_input_rejected,
+    model_request_headers,
 )
 
 PROTOCOL = "openai-responses"

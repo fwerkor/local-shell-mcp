@@ -48,11 +48,11 @@ from .memory import (
 )
 from .memory_protection import configured_filters
 from .providers import (
-    bind_model_session,
     ModelFinish,
     ModelThought,
     ModelToolCall,
     ModelUsage,
+    bind_model_session,
     provider_config,
     selected_provider,
 )

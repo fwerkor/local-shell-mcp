@@ -183,7 +183,9 @@ async def test_openai_stream_stop_reason_is_available_only_when_requested(monkey
 ])
 async def test_model_session_headers(monkeypatch, with_tools, base, expected):
     from local_shell_mcp.webui.providers import (
-        MODEL_USER_AGENT, bind_model_session, stream_model_with_tools,
+        MODEL_USER_AGENT,
+        bind_model_session,
+        stream_model_with_tools,
     )
 
     captured = {}
