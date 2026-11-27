@@ -368,7 +368,9 @@ async def stream_model(
             if "error" in event:
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Model provider rejected the generation request")
+                from .provider_responses import ResponsesStreamError
+
+                raise ResponsesStreamError.from_event(event, event_type="error")
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "openai":
                 for choice in event.get("choices", []):
@@ -515,7 +517,9 @@ async def stream_model_with_tools(
             if "error" in event:
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Model provider rejected the generation request")
+                from .provider_responses import ResponsesStreamError
+
+                raise ResponsesStreamError.from_event(event, event_type="error")
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             for choice in event.get("choices", []):
                 delta = choice.get("delta") or {}

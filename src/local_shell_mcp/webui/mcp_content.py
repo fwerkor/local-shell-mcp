@@ -51,7 +51,7 @@ def _resource_body(resource):
 
 
 def format_tool_content(result: dict, provider: str = "openai") -> tuple[str, dict | None]:
-    recognized = provider in {"openai", "openai-responses", "azureopenai", "openrouter", "xai", "deepseek", "ollama", "bedrock", "anthropic", "google"}
+    recognized = provider in {"virtual", "openai", "openai-responses", "azureopenai", "openrouter", "xai", "deepseek", "ollama", "bedrock", "anthropic", "google"}
     blocks = result.get("content") or []
     if not blocks:
         return "(No response)", None

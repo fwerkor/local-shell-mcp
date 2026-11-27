@@ -126,7 +126,7 @@ async def test_provider_error_does_not_echo_secrets(monkeypatch):
     captured: dict = {}
     _mock_client(monkeypatch, ['data: {"error":{"message":"secret rejected"}}'], captured)
     config = ProviderConfig("openai", "test", "https://api.example.invalid/v1/chat/completions", "very-private")
-    with pytest.raises(RuntimeError, match="Model provider rejected") as exc:
+    with pytest.raises(RuntimeError, match="provider generation failed") as exc:
         await _collect(stream_model(config, [{"role": "user", "content": "Hello"}]))
     assert "very-private" not in str(exc.value)
 

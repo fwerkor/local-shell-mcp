@@ -85,8 +85,9 @@ def choose(value, model, candidates, session=None):
 
 def cooldown_for(error):
     import httpx
-    from .provider_responses import ResponsesStreamError
+
     from .agent_runtime import _retryable_model_error
+    from .provider_responses import ResponsesStreamError
 
     if isinstance(error, httpx.HTTPStatusError):
         status = error.response.status_code
@@ -136,10 +137,17 @@ def scoped_messages(messages, scope):
 
 
 async def stream_virtual(config, messages, *, tools=None, **kwargs):
-    from .providers import ModelThought, ModelToolCall, ModelUsage, provider_config, stream_model, stream_model_with_tools
     from .provider_profiles import profile
     from .provider_responses import _scope
     from .provider_tool_protocols import stream_native_tools
+    from .providers import (
+        ModelThought,
+        ModelToolCall,
+        ModelUsage,
+        provider_config,
+        stream_model,
+        stream_model_with_tools,
+    )
 
     value = profile(config.virtual_channel)
     tried = set()

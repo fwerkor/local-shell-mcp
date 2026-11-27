@@ -175,6 +175,7 @@ def _validate_virtual(body: dict) -> dict:
     if strategy not in STRATEGIES or type(affinity) is not bool or not isinstance(routes, dict) or not 1 <= len(routes) <= 128:
         raise ValueError("Invalid virtual channel configuration")
     normalized = {}
+    member_providers = {}
     for model, members in routes.items():
         if not isinstance(model, str) or not model.strip() or model != model.strip() or len(model) > 200 or any(ord(c) < 32 for c in model):
             raise ValueError("Invalid virtual model identifier")
@@ -182,6 +183,7 @@ def _validate_virtual(body: dict) -> dict:
             raise ValueError("Every virtual model requires members")
         seen = set()
         normalized[model] = []
+        member_providers[model] = set()
         for member in members:
             if not isinstance(member, dict):
                 raise ValueError("Invalid virtual model member")
@@ -196,11 +198,13 @@ def _validate_virtual(body: dict) -> dict:
                 raise ValueError("Duplicate or recursive virtual model member")
             seen.add((channel, target))
             normalized[model].append({"channel": channel, "model": target, "weight": weight})
+            member_providers[model].add(stored["provider"])
     sampling = body.get("model_sampling")
     if sampling is not None:
         if not isinstance(sampling, dict) or sampling.keys() - normalized.keys():
             raise ValueError("Sampling defaults must belong to configured models")
-        sampling = {model: validate_sampling(v) for model, v in sampling.items()}
+        sampling = {model: validate_sampling(v, provider="anthropic" if "anthropic" in member_providers[model] else None)
+                    for model, v in sampling.items()}
     return {"name": name, "provider": "virtual", "base_url": "", "api_key": None,
             "models": list(normalized), "routes": normalized, "strategy": strategy,
             "session_affinity": affinity, "auto_discover": False, "model_contexts": {},

@@ -231,7 +231,9 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
             if "error" in event or event.get("type") == "error":
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Model provider rejected the generation request")
+                from .provider_responses import ResponsesStreamError
+
+                raise ResponsesStreamError.from_event(event, event_type="error")
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "anthropic":
                 kind = event.get("type")
