@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useLocalize from '~/hooks/useLocalize';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import { useQueryClient } from '@tanstack/react-query';
@@ -75,6 +75,12 @@ export default function ModelProviders() {
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [addMenu, setAddMenu] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (addMenu) {
+      addMenuRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
+  }, [addMenu]);
   const [authorization, setAuthorization] = useState<Authorization | null>(null);
   const [callback, setCallback] = useState('');
   const [oauthBusy, setOauthBusy] = useState(false);
@@ -408,18 +414,15 @@ export default function ModelProviders() {
       onClick={() => void submitCallback()}>{callbackSent ? localize('com_lsm_channel_oauth_completing') : localize('com_lsm_channel_oauth_complete')}</button>
   </>;
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="space-y-1">
-        
-        <p className="text-sm text-text-secondary">{localize('com_lsm_channel_description')}</p>
-      </div>
-      <div className="relative">
+    <div className="space-y-3">
+      <p className="text-sm text-text-secondary">{localize('com_lsm_channel_description')}</p>
+      <div>
         <button type="button" disabled={busy || authorization != null} onClick={() => setAddMenu((value) => !value)}
           aria-label={localize('com_lsm_channel_add')} aria-expanded={addMenu} aria-haspopup="menu" className={button}>{localize('com_lsm_channel_add')} ▾</button>
-        {addMenu && <div role="menu" className="absolute right-0 z-20 mt-1 min-w-52 rounded-lg border border-border-medium bg-surface-primary p-1 shadow-lg">
-          <button role="menuitem" type="button" onClick={beginAdd} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize('com_lsm_channel_manual_config')}</button>
+        {addMenu && <div ref={addMenuRef} role="menu" aria-label={localize('com_lsm_channel_add')} className="mt-1 w-max min-w-0 max-w-full rounded-lg border border-border-medium bg-surface-primary p-1 shadow-lg">
+          <button role="menuitem" type="button" onClick={beginAdd} className="block w-full break-words rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize('com_lsm_channel_manual_config')}</button>
           {accountMethods.map((method) => <button role="menuitem" type="button" key={method.id}
-            onClick={() => selectAccount(method)} className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize(method.label)}</button>)}
+            onClick={() => selectAccount(method)} className="block w-full break-words rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize(method.label)}</button>)}
         </div>}
       </div>
     </div>
