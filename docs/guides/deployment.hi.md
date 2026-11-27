@@ -52,7 +52,7 @@ Local MCP client
 | इंटरफ़ेस | सार्वजनिक HTTPS की आवश्यकता है | `/mcp` का उपयोग करता है | OAuth की आवश्यकता है | विशिष्ट रनटाइम |
 |---|---:|---:|---:|---|
 | एकीकृत एलएसएम वेब कार्यक्षेत्र | दूरस्थ पहुँच के लिए हाँ; स्थानीय प्रॉक्सी भी संभव है | आंतरिक रूप से | एलएसएम लॉगिन | नियंत्रक प्लस अलग वेब स्टैक |
-| जेमिनी स्पार्क/कस्टम ऐप्स | हाँ | हाँ | हाँ सार्वजनिक उपयोग के लिए | कोई HTTP नियंत्रक |
+| Gemini Task/कस्टम ऐप्स | हाँ | हाँ | हाँ सार्वजनिक उपयोग के लिए | कोई HTTP नियंत्रक |
 | ChatGPT custom MCP connector | हाँ | हाँ | Public use में हाँ | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | नहीं | नहीं | नहीं | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | localhost पर आमतौर पर नहीं; network पर हाँ | हाँ | localhost के बाहर अनुशंसित | Any HTTP runtime |

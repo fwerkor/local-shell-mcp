@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | release binary से चलाएँ | [Standalone binary runtime](../installation/binary.md) |
 | Python या source checkout से चलाएँ | [Python runtimes](../installation/python.md) |
 | एकीकृत चैट और नियंत्रण इंटरफ़ेस का उपयोग करें | [Unified web workspace](web-workspace.md) |
-| जेमिनी स्पार्क को ग्राहक के रूप में जोड़ें | [Gemini Custom Apps](gemini-spark.md) |
+| Gemini Task को ग्राहक के रूप में जोड़ें | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT को client के रूप में जोड़ें | [ChatGPT connector](chatgpt-connector.md) |
 | tools चुनें और बेहतर prompts लिखें | [Usage patterns](../guides/usage-patterns.md) |
 | HPC, NPU/GPU या NAT machine जोड़ें | [Remote workers](../guides/remote-workers.md) |

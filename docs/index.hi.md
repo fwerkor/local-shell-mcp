@@ -55,7 +55,7 @@ Optional remote workers: outbound machine connections
 | प्राथमिक ब्राउज़र कार्यक्षेत्र | [Unified web workspace](getting-started/web-workspace.md) | साझा लॉगिन के साथ चैट, प्रोजेक्ट और एलएसएम नियंत्रण पृष्ठ |
 | प्रथम नियंत्रक परिनियोजन | [Quickstart](getting-started/quickstart.md) | अनुशंसित बाइनरी, OAuth और पहला ब्राउज़र सत्र |
 | runtime layer चुनना | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python और stdio को अलग runtime options के रूप में समझाता है |
-| जेमिनी स्पार्क को जोड़ना | [Gemini Custom Apps](getting-started/gemini-spark.md) | पात्रता, HTTPS MCP URL, OAuth और परीक्षण |
+| Gemini Task को जोड़ना | [Gemini Custom Apps](getting-started/gemini-spark.md) | पात्रता, HTTPS MCP URL, OAuth और परीक्षण |
 | ChatGPT को client के रूप में जोड़ना | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, पहला safe prompt, tool discovery |
 | LSM को DeepSeek Harness में जोड़ना | [DeepSeek Harness plugin](clients/deepseek-harness.md) | इस repository को DSH bundle के रूप में install करें और पूर्ण LSM tool/remote-worker surface बनाए रखें |
 | VS Code से चलाना | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime और host safety notes |
