@@ -147,7 +147,7 @@ def test_diagnostic_preserves_implicit_chain_and_all_frames():
         try:
             deep(40)
         except TimeoutError:
-            raise ValueError("another secret")
+            raise ValueError("another secret")  # noqa: B904 - exercise implicit exception context
     except ValueError as error:
         detail = json.loads(generation_failure(error, "run-test"))["details"]
     assert "During handling of:" in detail
@@ -171,3 +171,21 @@ async def test_streaming_http_error_body_available_to_diagnostics():
     detail = json.loads(generation_failure(error.value, "run-test"))["details"]
     assert "Provider code: insufficient_quota" in detail
     assert "Provider message: Quota exhausted" in detail
+
+
+def test_generation_failure_preserves_cause_location_not_message():
+    from local_shell_mcp.webui.agent_runtime import RuntimeSafetyError
+
+    def inner():
+        raise PermissionError("private-token-never-serialize")
+
+    try:
+        try:
+            inner()
+        except PermissionError as error:
+            raise RuntimeSafetyError(str(error)) from error
+    except RuntimeSafetyError as error:
+        record = json.loads(generation_failure(error, "run-test"))
+    assert "Caused by:\nException: PermissionError" in record["details"]
+    assert "in inner" in record["details"]
+    assert "private-token-never-serialize" not in json.dumps(record)

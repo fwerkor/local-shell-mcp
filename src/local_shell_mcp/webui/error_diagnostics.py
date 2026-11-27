@@ -29,6 +29,14 @@ _KNOWN_SAFETY_REASONS = frozenset({
     "Assembled model context was blocked by content protection",
     "Summary context was blocked by content protection",
     "Generation actor lease expired or was replaced",
+    "Web search is disabled for this conversation",
+    "run_in_background was not enabled for this tool",
+    "Background execution is disabled in this child context",
+    "Agent session authorization has expired",
+    "Agent generation has been cancelled",
+    "Agent authorization is no longer available",
+    "Approved tool checkpoint is missing persisted outcomes",
+    "Handoff commands require an active StateGraph node",
 })
 
 

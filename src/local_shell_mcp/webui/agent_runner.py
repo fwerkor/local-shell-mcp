@@ -968,7 +968,18 @@ class AgentRunner:
         elif questions:
             if len(calls) != 1:
                 raise ValueError("Ask User cannot run in parallel with another tool")
-            await self._pause(build_ask_user_payload(questions[0].arguments, questions[0].call_id), state)
+            question = questions[0]
+            try:
+                payload = build_ask_user_payload(question.arguments, question.call_id)
+            except ValueError:
+                # Invalid model input is not a human interrupt. Record it
+                # without creating an approval/checkpoint or calling a tool.
+                record = {"proposal": {"name": question.name, "args": copy.deepcopy(question.arguments)},
+                          "output": "Tool failed (ValueError): Invalid Ask User arguments. Supply one to four valid questions with unique IDs."}
+                await self._completed(question, record, executed=False)
+                self.cache[replay_key(question, calls.index(question))] = record
+            else:
+                await self._pause(payload, state)
         await self._prepare_oauth(
             [call for call in unresolved if replay_key(call, calls.index(call)) not in self.cache], state,
         )

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit
 
@@ -116,10 +116,8 @@ async def check_image_response(response) -> None:
         # Keep the HTTP status even if the error body cannot be read.
         import httpx
 
-        try:
+        with suppress(httpx.RequestError):
             await response.aread()
-        except httpx.RequestError:
-            pass
     response.raise_for_status()
 
 
