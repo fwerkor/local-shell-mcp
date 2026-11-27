@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Spinner } from '@librechat/client';
 import { MenuItem } from '@headlessui/react';
-import { BookmarkFilledIcon, BookmarkIcon } from '@radix-ui/react-icons';
+import { Tag } from 'lucide-react';
 import type { FC } from 'react';
 
 type MenuItemProps = {
@@ -15,7 +15,7 @@ type MenuItemProps = {
 const BookmarkItem: FC<MenuItemProps> = ({ tag, selected, handleSubmit, icon, ...rest }) => {
   const [isLoading, setIsLoading] = useState(false);
   const clickHandler = async () => {
-    if (tag === 'New Bookmark') {
+    if (icon != null) {
       handleSubmit();
       return;
     }
@@ -40,10 +40,10 @@ const BookmarkItem: FC<MenuItemProps> = ({ tag, selected, handleSubmit, icon, ..
     }
 
     if (selected) {
-      return <BookmarkFilledIcon aria-hidden="true" className="size-4" />;
+      return <Tag fill="currentColor" aria-hidden="true" className="size-4" />;
     }
 
-    return <BookmarkIcon aria-hidden="true" className="size-4" />;
+    return <Tag aria-hidden="true" className="size-4" />;
   };
 
   return (

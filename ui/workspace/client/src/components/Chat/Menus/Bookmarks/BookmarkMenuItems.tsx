@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookmarkPlusIcon } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { OGDialogTrigger } from '@librechat/client';
 import type { FC } from 'react';
 import { BookmarkEditDialog, BookmarkItems, BookmarkItem } from '~/components/Bookmarks';
@@ -34,7 +34,7 @@ export const BookmarkMenuItems: FC<{
               data-testid="bookmark-item-new"
               handleSubmit={handleToggleOpen}
               selected={false}
-              icon={<BookmarkPlusIcon className="size-4" aria-label="Add Bookmark" />}
+              icon={<Plus className="size-4" aria-hidden="true" />}
             />
           </OGDialogTrigger>
         </BookmarkEditDialog>

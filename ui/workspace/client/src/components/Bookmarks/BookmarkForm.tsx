@@ -80,7 +80,12 @@ const BookmarkForm = ({
   };
 
   return (
-    <form ref={formRef} aria-label="Bookmark form" method="POST" onSubmit={handleSubmit(onSubmit)}>
+    <form
+      ref={formRef}
+      aria-label={localize('com_ui_bookmarks')}
+      method="POST"
+      onSubmit={handleSubmit(onSubmit)}
+    >
       <div className="space-y-4">
         {/* Tag name input */}
         <div className="space-y-2">
