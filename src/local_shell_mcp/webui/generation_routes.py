@@ -517,15 +517,15 @@ async def _run_model(
                 check_wakeup_lease()
             except Exception:
                 return
-        # Preserve the precise failure class and safe stack locations for
-        # expandable UI diagnostics, never upstream headers or secret values.
+        # Preserve the exception chain and provider diagnostics without
+        # serializing request headers or local variables.
         from .error_diagnostics import generation_failure
 
         log.warning("Model generation failed for %s: %s", generation.run_id, type(exc).__name__)
         from .chat_goal import pause as pause_goal
 
         repo.finish(owner, generation.run_id, status="error", text="".join(text_parts),
-                    error=generation_failure(exc, generation.run_id),
+                    error=generation_failure(exc, generation.run_id, credentials=(profile.token,)),
                     model_steps=_recovered_terminal_steps(repo, owner, generation.run_id,
                                                              "".join(text_parts)), actor_lease=actor_lease)
         pause_goal(repo.database, owner, generation.run_id, "Generation failed. Resume after resolving the error.")
