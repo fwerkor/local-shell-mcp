@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
+<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">セルフホスト型 AI ワークスペース · MCP コントロール プレーン</span>
 
@@ -53,6 +53,7 @@ Optional remote workers: outbound machine connections
 | シナリオ | 開始ページ | 理由 |
 |---|---|---|
 | プライマリブラウザワークスペース | [Unified web workspace](getting-started/web-workspace.md) | 共有ログインを使用したチャット、プロジェクト、LSM コントロール ページ |
+| 内蔵 AI エージェントを使う | [WebUI Chat](chat/index.md) | チャネル、エージェント、権限、コンテキスト、自動化 |
 | 最初のコントローラーの導入 | [Quickstart](getting-started/quickstart.md) | 推奨バイナリ、OAuth、初回ブラウザー起動 |
 | runtime layer を選ぶ | [Runtime choices](guides/deployment.md) | Docker、VS Code、binary、Python、stdio を別々の runtime option として説明 |
 | ジェミニスパークを接続する | [Gemini Custom Apps](getting-started/gemini-spark.md) | 資格、HTTPS MCP URL、OAuth、およびテスト |

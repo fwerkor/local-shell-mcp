@@ -5,7 +5,7 @@
 1. **Runtime**: how the server process runs and what workspace it controls.
 2. **Interface**: use the optional [unified web workspace](../getting-started/web-workspace.md), or connect an external MCP client such as Gemini or ChatGPT.
 
-The recommended daily interface is the self-hosted web workspace (chat, projects and LSM control pages). It is deployed separately from the Controller. **The standalone single-file release executable is the recommended Controller runtime.** It does not require an installed Python interpreter, Docker, or a source checkout. Docker Compose, the VS Code extension, Python installs, source checkout, and stdio are alternatives; external chat apps remain optional clients.
+The recommended daily interface is the self-hosted web workspace (chat, projects and LSM control pages). The Controller serves it directly. **The standalone single-file release executable is the recommended Controller runtime.** It does not require an installed Python interpreter, Docker, or a source checkout. Docker Compose, the VS Code extension, Python installs, source checkout, and stdio are alternatives; external chat apps remain optional clients.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -50,7 +50,7 @@ Local MCP client
 
 | Interface | Requires public HTTPS | Uses `/mcp` | Requires OAuth | Typical runtime |
 |---|---:|---:|---:|---|
-| Unified LSM web workspace | Yes for remote access; local proxy also possible | Internally | LSM login | Controller plus separate web stack |
+| Unified LSM web workspace | Yes for remote access; local proxy also possible | Internally | LSM login | Controller |
 | Gemini Spark / Custom Apps | Yes | Yes | Yes for public use | Any HTTP Controller |
 | ChatGPT custom MCP connector | Yes | Yes | Yes for public use | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | No | No | No | `local-shell-mcp --mode stdio` |

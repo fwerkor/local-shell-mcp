@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
+<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Không gian làm việc AI tự lưu trữ · Mặt phẳng điều khiển MCP</span>
 
@@ -53,6 +53,7 @@ Isolation boundary dự kiến là container hoặc VM chạy service.
 | Kịch bản | Bắt đầu ở đây | Lý do |
 |---|---|---|
 | Không gian làm việc của trình duyệt chính | [Unified web workspace](getting-started/web-workspace.md) | Các trang trò chuyện, dự án và kiểm soát LSM có thông tin đăng nhập chung |
+| Dùng Agent AI tích hợp | [WebUI Chat](chat/index.md) | Kênh, Agent, quyền, ngữ cảnh và tự động hóa |
 | Triển khai bộ điều khiển đầu tiên | [Quickstart](getting-started/quickstart.md) | Binary khuyến nghị, OAuth và phiên trình duyệt đầu tiên |
 | Chọn runtime layer | [Runtime choices](guides/deployment.md) | Giải thích Docker, VS Code, binary, Python và stdio là các runtime option riêng |
 | Kết nối Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Tính đủ điều kiện, URL HTTPS MCP, OAuth và thử nghiệm |

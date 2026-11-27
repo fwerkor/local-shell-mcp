@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
+<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
 # Choix du runtime et modèle de déploiement
 
 `local-shell-mcp` a deux décisions complémentaires :
@@ -51,7 +51,7 @@ Local MCP client
 
 | Interface | Nécessite HTTPS public | Utilise `/mcp` | Nécessite OAuth | Durée d'exécution typique |
 |---|---:|---:|---:|---|
-| Espace de travail Web LSM unifié | Oui pour l'accès à distance ; proxy local également possible | En interne | Connexion LSM | Contrôleur et pile Web séparée |
+| Espace de travail Web LSM unifié | Oui pour l'accès à distance ; proxy local également possible | En interne | Connexion LSM | Controller |
 | Gemini Spark / Applications personnalisées | Oui | Oui | Oui pour un usage public | N'importe quel contrôleur HTTP |
 | ChatGPT custom MCP connector | Oui | Oui | Oui pour usage public | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Non | Non | Non | `local-shell-mcp --mode stdio` |

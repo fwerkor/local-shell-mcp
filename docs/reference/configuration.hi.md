@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # Configuration
 
 Repository एक copyable starter file देता है: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)। Docker Compose उससे बने `.env` को automatically पढ़ता है, और अन्य runtimes वही `LOCAL_SHELL_MCP_` environment variables उपयोग कर सकते हैं। YAML binary/source deployments के लिए optional advanced input रहता है; file explicitly बनाएँ और `LOCAL_SHELL_MCP_CONFIG` या `--config` से चुनें। Environment variables YAML values को override करती हैं, इसलिए intentional override के अलावा वही setting दोनों जगह define न करें। YAML keys नीचे दिखाए field names उपयोग करती हैं।
@@ -44,7 +44,7 @@ Local-only testing के लिए `auth_bypass_localhost` default enabled ह�
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | True होने पर workspace/path restrictions disable करता है; केवल disposable boundaries में उपयोग करें। |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | Controller host को shell/file/browser execution target के रूप में disable करता है। Remote workers और control-plane services उपलब्ध रहते हैं। |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | Controller को ephemeral/serverless instances के लिए उपयुक्त बनाता है: `disable_local` imply करता है, local file links/wallpaper caching बंद करता है और default `state_backend=memory` रखता है। Default `auth_mode=oauth` में strong `oauth_jwt_secret` explicitly configure करें। |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file`, `memory` या `redis`। Serverless controller state को cold starts के बाद रखना हो तो Redis उपयोग करें। |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file`, `memory` या `redis`। Serverless controller state को cold starts के बाद रखना हो तो Redis उपयोग करें। |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | `state_backend=redis` पर Redis connection URL। Diagnostics में redacted। |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Memory/Redis control-plane state namespace। |
 

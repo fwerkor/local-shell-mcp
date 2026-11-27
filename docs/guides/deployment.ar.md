@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
+<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
 # خيارات Runtime ونموذج النشر
 
 يحتوي `local-shell-mcp` على قرارين متكاملين:
@@ -51,7 +51,7 @@ Local MCP client
 
 | واجهة | يتطلب HTTPS العام | يستخدم `/mcp` | يتطلب OAuth | وقت التشغيل النموذجي |
 |---|---:|---:|---:|---|
-| مساحة عمل الويب LSM الموحدة | نعم للوصول عن بعد؛ الوكيل المحلي ممكن أيضا | داخليا | تسجيل دخول LSM | وحدة تحكم بالإضافة إلى مكدس ويب منفصل |
+| مساحة عمل الويب LSM الموحدة | نعم للوصول عن بعد؛ الوكيل المحلي ممكن أيضا | داخليا | تسجيل دخول LSM | Controller |
 | الجوزاء سبارك / تطبيقات مخصصة | نعم | نعم | نعم للاستخدام العام | أي وحدة تحكم HTTP |
 | ChatGPT custom MCP connector | نعم | نعم | نعم للاستخدام العام | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | لا | لا | لا | `local-shell-mcp --mode stdio` |

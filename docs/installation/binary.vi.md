@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Runtime binary độc lập
 
 Khuyến nghị **tệp thực thi Controller duy nhất** từ GitHub Releases, không cần Python, Docker hay mã nguồn.
@@ -108,7 +108,7 @@ Cài những gì task của bạn cần:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Binary chứa Controller; công cụ bên ngoài và trình duyệt là tùy chọn. Chat và lịch sử cần [không gian web](../getting-started/web-workspace.md) với cơ sở dữ liệu riêng.
+Binary chứa Controller; công cụ bên ngoài và trình duyệt là tùy chọn. Chat và lịch sử có trong [không gian web](../getting-started/web-workspace.md) tích hợp với SQLite.
 
 ## Dịch vụ chạy lâu dài
 

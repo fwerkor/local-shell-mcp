@@ -34,6 +34,4 @@ Python-only environments may deliberately lack the JavaScript toolchain.
 
 Backend integration is implemented by `src/local_shell_mcp/webui/`. The
 corresponding API contract inventory is in
-`ui/workspace/API_CONTRACT.md`. **Until the full Agent
-and control API parity tests pass, this tree remains a work-in-progress and
-must not be deployed in place of the production Controller.**
+`ui/workspace/API_CONTRACT.md`. For end-user configuration and operation, see the [WebUI Chat guide](../../docs/chat/index.md).

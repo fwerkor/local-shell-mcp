@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # मानव इंटरफ़ेस
 
-[unified web workspace](../getting-started/web-workspace.md) अनुशंसित ब्राउज़र इंटरफ़ेस है। यह समान एलएसएम प्राधिकरण और टूल एपीआई का उपयोग करके एआई चैट, प्रोजेक्ट्स और एलएसएम कंट्रोलर पेजों को एक संशोधित लिब्रेचैट यूआई में जोड़ता है। यह एक अलग से तैनात वैकल्पिक सेवा है।
+[unified web workspace](../getting-started/web-workspace.md) अनुशंसित ब्राउज़र इंटरफ़ेस है। यह समान एलएसएम प्राधिकरण और टूल एपीआई का उपयोग करके एआई चैट, प्रोजेक्ट्स और एलएसएम कंट्रोलर पेजों को एक संशोधित लिब्रेचैट यूआई में जोड़ता है। Controller इसे सीधे उपलब्ध कराता है।
 
 लाइटवेट कंट्रोलर एक ही एपीआई, वर्कस्पेस, लगातार टर्मिनल रजिस्ट्री, रिमोट-वर्कर रजिस्ट्री और एमसीपी ऑडिट लॉग के शीर्ष पर दो संगत फ़ॉलबैक मानव इंटरफेस भी बनाए रखता है:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 वैकल्पिक `plan_manage` Plan Session के लिए Goal mode चालू करता है। यदि Plan active है और 15 मिनट तक agent activity नहीं होती, तो जुड़ा हुआ Live Workspace ChatGPT से जारी रखने को कह सकता है। Continuation उसी explicit `session_id` को resume करता है और accepted/rejected दोनों को मिलाकर अधिकतम 10 attempts तक सीमित है। blocked, completed और cancelled Plan auto-continue नहीं होते; ऐसा active Plan जिसके सभी steps completed या skipped हैं, cleanup continuation के लिए eligible रहता है ताकि resumed agent Plan को finish कर सके। Human pause/resume/cancel controls अस्थायी Live Workspace state की जगह Session-owned Plan को update करते हैं।
 
-वैकल्पिक स्व-होस्टेड मॉडल होस्ट और एमसीपी ऐप्स क्लाइंट के लिए [होस्टेड चैट] (होस्टेड-चैट.एमडी) देखें। [Hosted Chat](hosted-chat.md)
+एकीकृत मॉडल और एजेंट कार्यक्षेत्र के लिए [WebUI Chat](hosted-chat.md) देखें।
 
 ## Browser interface
 

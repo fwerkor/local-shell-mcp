@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # Benutzeroberfläche
 
-Der [unified web workspace](../getting-started/web-workspace.md) ist die empfohlene Browseroberfläche. Es kombiniert KI-Chat, Projekte und LSM-Controller-Seiten in einer modifizierten LibreChat-Benutzeroberfläche und verwendet dabei dieselben LSM-Autorisierungs- und Tool-APIs. Es handelt sich um einen separat bereitgestellten optionalen Dienst.
+Der [unified web workspace](../getting-started/web-workspace.md) ist die empfohlene Browseroberfläche. Es kombiniert KI-Chat, Projekte und LSM-Controller-Seiten in einer modifizierten LibreChat-Benutzeroberfläche und verwendet dabei dieselben LSM-Autorisierungs- und Tool-APIs. Der Controller stellt sie direkt bereit.
 
 Der leichtgewichtige Controller verfügt außerdem über zwei kompatible Fallback-Benutzerschnittstellen zusätzlich zu derselben API, demselben Arbeitsbereich, derselben persistenten Terminalregistrierung, derselben Remote-Worker-Registrierung und demselben MCP-Überwachungsprotokoll:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 Ein optionaler `plan_manage`-Plan aktiviert den Goal mode der Session. Ist der Plan active und gibt es 15 Minuten lang keine agent activity, kann ein zugeordnetes Live Workspace ChatGPT zur Fortsetzung auffordern. Die Fortsetzung nimmt dieselbe explizite `session_id` wieder auf und ist auf 10 Versuche begrenzt, unabhängig davon, ob sie angenommen oder abgelehnt werden. blocked, completed und cancelled Plans werden nicht automatisch fortgesetzt; ein active Plan, dessen steps alle completed oder skipped sind, bleibt für eine abschließende continuation geeignet, damit der resumed agent den Plan beenden kann. Menschliche pause/resume/cancel-Steuerungen aktualisieren den Session-eigenen Plan statt flüchtigen Live-Workspace-Zustand.
 
-Siehe [Hosted Chat](hosted-chat.md) für den optionalen selbstgehosteten Modellhost und MCP Apps-Client.
+Siehe [WebUI Chat](hosted-chat.md) für die integrierte Modell- und Agenten-Arbeitsumgebung.
 
 ## Browseroberfläche
 

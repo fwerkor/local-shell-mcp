@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # Giao diện người dùng
 
-[unified web workspace](../getting-started/web-workspace.md) là giao diện trình duyệt được đề xuất. Nó kết hợp trò chuyện AI, các dự án và các trang Bộ điều khiển LSM trong một giao diện người dùng LibreChat đã được sửa đổi, sử dụng cùng các API công cụ và ủy quyền LSM. Đây là một dịch vụ tùy chọn được triển khai riêng biệt.
+[unified web workspace](../getting-started/web-workspace.md) là giao diện trình duyệt được đề xuất. Nó kết hợp trò chuyện AI, các dự án và các trang Bộ điều khiển LSM trong một giao diện người dùng LibreChat đã được sửa đổi, sử dụng cùng các API công cụ và ủy quyền LSM. Controller trực tiếp cung cấp giao diện này.
 
 Bộ điều khiển nhẹ cũng giữ lại hai giao diện dự phòng tương thích của con người trên cùng một API, không gian làm việc, sổ đăng ký thiết bị đầu cuối liên tục, sổ đăng ký nhân viên từ xa và nhật ký kiểm tra MCP:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 Plan `plan_manage` tùy chọn bật Goal mode cho Session. Nếu Plan active và không có agent activity trong 15 phút, Live Workspace liên kết có thể yêu cầu ChatGPT tiếp tục. Continuation resume cùng `session_id` rõ ràng đó và giới hạn ở 10 lần thử, dù được chấp nhận hay từ chối. Plan blocked, completed và cancelled không được tự động tiếp tục; Plan active có mọi steps completed hoặc skipped vẫn đủ điều kiện cho continuation kết thúc để agent được resume có thể hoàn tất Plan. Điều khiển pause/resume/cancel của con người cập nhật Plan thuộc Session thay vì state tạm thời của Live Workspace.
 
-Xem [Hosted Chat](hosted-chat.md) để biết máy chủ mô hình tự lưu trữ và ứng dụng khách Ứng dụng MCP tùy chọn.
+Xem [WebUI Chat](hosted-chat.md) để biết không gian mô hình và Agent tích hợp.
 
 ## Giao diện trình duyệt
 

@@ -75,13 +75,13 @@ export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
 
 Check `http://127.0.0.1:8765/healthz` and open the native UI at `http://127.0.0.1:8765/ui`. For remote access, prefer a public HTTPS server or reverse proxy; Cloudflare Tunnel is not recommended for file-heavy transfers. Keep OAuth enabled on publicly accessible endpoints.
 
-The one-file executable is the **Controller distribution**, not an all-inclusive operating-system image. It uses host-installed task tools and optional external Playwright/browser dependencies. Integrated **chat and projects** use the separately deployed [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/) (Node.js, MongoDB, Meilisearch, and SearXNG); the remote **Worker** is distributed separately. No chat backend or database is claimed to be embedded in the Controller binary.
+The one-file executable is the **Controller distribution**, not an all-inclusive operating-system image. It uses host-installed task tools and optional external Playwright/browser dependencies. Integrated **chat and projects** are served by the Controller through the [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/) with a Python backend and SQLite storage; the remote **Worker** is distributed separately.
 
 Other deployment methods remain supported: [Docker Compose](https://fwerkor.github.io/local-shell-mcp/installation/docker/), [Python/pipx/source](https://fwerkor.github.io/local-shell-mcp/installation/python/), and the [VS Code extension](https://fwerkor.github.io/local-shell-mcp/installation/vscode-extension/). See [platform-specific binary installation](https://fwerkor.github.io/local-shell-mcp/installation/binary/) for Windows, macOS, ARM64 and updates.
 
 ## Human interface
 
-The **recommended interface** is the [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/), which integrates chat and LSM Controller pages directly into a modified LibreChat React application. It uses the LSM login, stores chat projects and history on the server, and manages external tools through LSM's nested MCP registry. Its Node.js, MongoDB, Meilisearch and SearXNG services are **optional**, deployed separately from the lightweight Controller and Worker bundles.
+The **recommended interface** is the [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/), which integrates chat and LSM Controller pages directly into a modified LibreChat React application. It uses the LSM login, stores chat projects and history on the server, and manages external tools through LSM's nested MCP registry. It is included with the Controller; Node.js, MongoDB, Meilisearch and a separate LibreChat backend are not required at runtime. Read the [complete WebUI Chat guide](https://fwerkor.github.io/local-shell-mcp/chat/) for model channels, Agents, permissions, memory and automation.
 
 The Controller also retains two lightweight fallback interfaces backed by the same authenticated API and state:
 

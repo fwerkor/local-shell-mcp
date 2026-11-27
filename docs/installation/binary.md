@@ -105,7 +105,7 @@ Install what your tasks need:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Install task-specific host tools only when needed. The single-file binary is self-contained **for the Controller**, not for shell commands invoked on the managed machine. Optional browser automation uses external Playwright/browser dependencies. For integrated chat and history, deploy the [unified web workspace](../getting-started/web-workspace.md) separately (including its Node.js and database services). For a disposable pre-isolated workspace, Docker Compose remains an alternative.
+Install task-specific host tools only when needed. The single-file binary is self-contained **for the Controller**, not for shell commands invoked on the managed machine. Optional browser automation uses external Playwright/browser dependencies. The Controller includes the [unified web workspace](../getting-started/web-workspace.md) for chat and history, backed by SQLite. For a disposable pre-isolated workspace, Docker Compose remains an alternative.
 
 ## Long-running service
 

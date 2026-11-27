@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
+<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
 # Runtime seçenekleri ve deployment modeli
 
 `local-shell-mcp`'in iki tamamlayıcı kararı vardır:
@@ -51,7 +51,7 @@ Local MCP client
 
 | Arayüz | Genel HTTPS gerektirir | `/mcp`'i kullanır | OAuth gerektirir | Tipik çalışma zamanı |
 |---|---:|---:|---:|---|
-| Birleşik LSM web çalışma alanı | Uzaktan erişim için evet; yerel proxy de mümkün | Dahili olarak | LSM'ye giriş | Denetleyici artı ayrı web yığını |
+| Birleşik LSM web çalışma alanı | Uzaktan erişim için evet; yerel proxy de mümkün | Dahili olarak | LSM'ye giriş | Controller |
 | Gemini Spark / Özel Uygulamalar | Evet | Evet | Evet genel kullanım için | Herhangi bir HTTP Denetleyicisi |
 | ChatGPT custom MCP connector | Evet | Evet | Public kullanımda evet | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Hayır | Hayır | Hayır | `local-shell-mcp --mode stdio` |

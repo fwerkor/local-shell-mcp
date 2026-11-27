@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
+<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Selbstgehosteter KI-Arbeitsbereich · MCP-Steuerungsebene</span>
 
@@ -53,6 +53,7 @@ Die vorgesehene Isolationsgrenze ist der Container oder die VM, in der der Diens
 | Szenario | Startpunkt | Warum |
 |---|---|---|
 | Primärer Browser-Arbeitsbereich | [Unified web workspace](getting-started/web-workspace.md) | Chat, Projekte und LSM-Kontrollseiten mit einem gemeinsamen Login |
+| Den integrierten KI-Agenten nutzen | [WebUI Chat](chat/index.md) | Kanäle, Agenten, Berechtigungen, Kontext und Automatisierung |
 | Erste Controller-Bereitstellung | [Quickstart](getting-started/quickstart.md) | Empfohlene Binärbereitstellung, OAuth und erster Browserstart |
 | Runtime-Ebene auswählen | [Runtime choices](guides/deployment.md) | Erklärt Docker, VS Code, binary, Python und stdio als getrennte Runtime-Optionen |
 | Zwillinge Spark verbinden | [Gemini Custom Apps](getting-started/gemini-spark.md) | Berechtigung, HTTPS-MCP-URL, OAuth und Tests |

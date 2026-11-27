@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # Antarmuka pengguna
 
-[unified web workspace](../getting-started/web-workspace.md) adalah antarmuka browser yang direkomendasikan. Ini menggabungkan obrolan AI, proyek, dan halaman Pengontrol LSM dalam satu UI LibreChat yang dimodifikasi, menggunakan otorisasi LSM dan API alat yang sama. Ini adalah layanan opsional yang diterapkan secara terpisah.
+[unified web workspace](../getting-started/web-workspace.md) adalah antarmuka browser yang direkomendasikan. Ini menggabungkan obrolan AI, proyek, dan halaman Pengontrol LSM dalam satu UI LibreChat yang dimodifikasi, menggunakan otorisasi LSM dan API alat yang sama. Controller menyediakannya secara langsung.
 
 Pengontrol ringan ini juga mempertahankan dua antarmuka manusia cadangan yang kompatibel di atas API, ruang kerja, registri terminal persisten, registri pekerja jarak jauh, dan log audit MCP yang sama:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 Plan `plan_manage` opsional mengaktifkan Goal mode untuk Session. Jika Plan active dan tidak ada agent activity selama 15 menit, Live Workspace yang terkait dapat meminta ChatGPT melanjutkan. Continuation me-resume `session_id` eksplisit yang sama dan dibatasi 10 percobaan, baik diterima maupun ditolak. Plan blocked, completed, dan cancelled tidak dilanjutkan otomatis; Plan active dengan semua steps completed atau skipped tetap memenuhi syarat untuk continuation penutup agar agent yang di-resume dapat menyelesaikan Plan. Kontrol manusia pause/resume/cancel memperbarui Plan milik Session, bukan state Live Workspace yang sementara.
 
-Lihat [Hosted Chat](hosted-chat.md) untuk host model opsional yang dihosting sendiri dan klien Aplikasi MCP.
+Lihat [WebUI Chat](hosted-chat.md) untuk ruang kerja model dan agen terintegrasi.
 
 ## Antarmuka browser
 

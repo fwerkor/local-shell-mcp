@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # 구성
 
 Repository에는 복사 가능한 시작 파일 [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)이 포함됩니다. Docker Compose는 생성된 `.env`를 자동으로 읽고, 다른 runtime도 동일한 `LOCAL_SHELL_MCP_` environment variables를 사용할 수 있습니다. YAML은 binary 또는 source deployment를 위한 optional advanced input입니다. 파일을 명시적으로 만들고 `LOCAL_SHELL_MCP_CONFIG` 또는 `--config`로 선택합니다. Environment variables가 YAML values를 override하므로 의도적인 override가 아니라면 같은 setting을 두 곳에 정의하지 마십시오. YAML keys는 아래 field names를 사용합니다.
@@ -44,7 +44,7 @@ Local-only testing에서는 `auth_bypass_localhost`가 기본 활성화됩니다
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | True이면 workspace/path restrictions를 비활성화합니다. Disposable boundary 안에서만 사용하십시오. |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | Controller host를 shell/file/browser execution target으로 비활성화합니다. Remote workers와 control-plane services는 계속 사용할 수 있습니다. |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | Controller를 ephemeral/serverless instances에 적합하게 합니다. `disable_local`을 포함하고 local file links/wallpaper caching을 비활성화하며 `state_backend`를 기본 `memory`로 둡니다. Default `auth_mode=oauth`에서는 강한 `oauth_jwt_secret`을 명시 설정하십시오. |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file`, `memory`, `redis`. Serverless controller state가 cold start 이후에도 유지되어야 하면 Redis를 사용합니다. |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file`, `memory`, `redis`. Serverless controller state가 cold start 이후에도 유지되어야 하면 Redis를 사용합니다. |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | `state_backend=redis`의 Redis connection URL. Diagnostics에서는 redacted됩니다. |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Memory/Redis control-plane state namespace. |
 

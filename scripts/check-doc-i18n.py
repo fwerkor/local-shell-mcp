@@ -13,6 +13,24 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 MKDOCS = REPO / "mkdocs.yml"
 DOCS = REPO / "docs"
+# The v6 WebUI documentation was rewritten from the obsolete Hosted Chat
+# guides. Until reviewed translations are contributed, these explicitly listed
+# pages use MkDocs' English fallback in languages other than zh and zh-Hant.
+# Existing localized files are still checked strictly, including source hashes.
+ENGLISH_FALLBACK_PAGES = frozenset({
+    "docs/chat/administration.md",
+    "docs/chat/agents.md",
+    "docs/chat/automation.md",
+    "docs/chat/channels.md",
+    "docs/chat/context.md",
+    "docs/chat/conversations.md",
+    "docs/chat/index.md",
+    "docs/chat/permissions.md",
+    "docs/getting-started/web-workspace.md",
+    "docs/guides/hosted-chat.md",
+})
+REQUIRED_CHAT_LOCALES = frozenset({"zh", "zh-Hant"})
+
 SOURCE_MARKER_RE = re.compile(r"^<!-- i18n-source-sha256: ([0-9a-f]{64}) -->$")
 
 # Exact English fragments from old generated placeholder pages. Technical
@@ -127,6 +145,7 @@ def main() -> int:
     )
     sources = sorted(path for path in DOCS.rglob("*.md") if not localized_suffix.search(path.name))
 
+    fallback_count = 0
     for source in sources:
         source_text = source.read_text(encoding="utf-8")
         source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -143,6 +162,9 @@ def main() -> int:
             localized = localized_name(source, locale)
             rel = localized.relative_to(REPO).as_posix()
             if not localized.exists():
+                if source_rel in ENGLISH_FALLBACK_PAGES and locale not in REQUIRED_CHAT_LOCALES:
+                    fallback_count += 1
+                    continue
                 errors.append(f"{rel}: missing localized page for {source_rel}")
                 continue
 
@@ -204,7 +226,8 @@ def main() -> int:
             print(f"- {error}")
         return 1
 
-    print(f"Documentation i18n check passed: {len(sources)} pages x {len(locales)} locales.")
+    print(f"Documentation i18n check passed: {len(sources)} pages x {len(locales)} locales; "
+          f"{fallback_count} explicitly allowed English fallbacks.")
     return 0
 
 

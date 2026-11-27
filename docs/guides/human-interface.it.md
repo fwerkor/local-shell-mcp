@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # Interfaccia umana
 
-[unified web workspace](../getting-started/web-workspace.md) è l'interfaccia del browser consigliata. Combina chat AI, progetti e pagine del controller LSM in un'unica interfaccia utente LibreChat modificata, utilizzando la stessa autorizzazione LSM e le stesse API degli strumenti. È un servizio opzionale distribuito separatamente.
+[unified web workspace](../getting-started/web-workspace.md) è l'interfaccia del browser consigliata. Combina chat AI, progetti e pagine del controller LSM in un'unica interfaccia utente LibreChat modificata, utilizzando la stessa autorizzazione LSM e le stesse API degli strumenti. Il Controller la serve direttamente.
 
 Il controller leggero conserva inoltre due interfacce umane di fallback compatibili sulla stessa API, area di lavoro, registro terminale persistente, registro dei lavoratori remoti e registro di controllo MCP:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 Un Plan `plan_manage` opzionale abilita il Goal mode della Session. Se il Plan è active e non vi è agent activity per 15 minuti, un Live Workspace associato può chiedere a ChatGPT di continuare. La continuation riprende lo stesso `session_id` esplicito ed è limitata a 10 tentativi, accettati o rifiutati. I Plan blocked, completed e cancelled non vengono continuati automaticamente; un Plan active con tutti gli steps completed o skipped resta idoneo a una continuation di chiusura affinché l’agent ripreso possa terminare il Plan. I controlli umani pause/resume/cancel aggiornano il Plan posseduto dalla Session, non uno stato effimero del Live Workspace.
 
-Consulta [Hosted Chat](hosted-chat.md) per l'host del modello self-hosted opzionale e il client MCP Apps.
+Vedi [WebUI Chat](hosted-chat.md) per lo spazio di lavoro integrato di modelli e agenti.
 
 ## Interfaccia browser
 

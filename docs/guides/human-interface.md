@@ -1,6 +1,6 @@
 # Human interface
 
-The [unified web workspace](../getting-started/web-workspace.md) is the recommended browser interface. It combines AI chat, projects and LSM Controller pages in one modified LibreChat UI, using the same LSM authorization and tool APIs. It is a separately deployed optional service.
+The [unified web workspace](../getting-started/web-workspace.md) is the recommended browser interface. It combines AI chat, projects and LSM Controller pages in one modified LibreChat UI, using the same LSM authorization and tool APIs. The Python Controller serves it directly.
 
 The lightweight Controller also retains two compatible fallback human interfaces on top of the same API, workspace, persistent terminal registry, remote-worker registry, and MCP audit log:
 
@@ -40,7 +40,7 @@ workspace_open(session_id=...)
 
 An optional `plan_manage` Plan enables Goal mode for the Session. If the Plan is active and no agent activity occurs for 15 minutes, an attached Live Workspace can ask ChatGPT to continue. The continuation resumes the same explicit `session_id` and is limited to 10 continuation attempts (accepted or rejected). Blocked, completed, and cancelled Plan statuses are not auto-continued; an active Plan whose steps are all completed or skipped remains eligible for cleanup continuation so the resumed agent can finish the Plan. Human pause/resume/cancel controls update the Session-owned Plan rather than ephemeral Live Workspace state.
 
-See [Hosted Chat](hosted-chat.md) for the optional self-hosted model host and MCP Apps client.
+See [WebUI Chat](hosted-chat.md) for the integrated model and Agent workspace.
 
 ## Browser interface
 

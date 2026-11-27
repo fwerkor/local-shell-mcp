@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
+<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
 # 运行时选择与部署模型
 
 `local-shell-mcp` 有两个互补的决定：
@@ -51,7 +51,7 @@ pipx / 源码 checkout             远程 worker 出站加入           REST 风
 
 | 接口 | 需要公共 HTTPS | 使用 `/mcp` | 需要 OAuth | 典型运行时间 |
 |---|---:|---:|---:|---|
-| 统一 LSM Web 工作区 | 是的，用于远程访问；也可以使用本地代理 | 内部 | LSM登录 | 控制器加上独立的网络堆栈 |
+| 统一 LSM Web 工作区 | 是的，用于远程访问；也可以使用本地代理 | 内部 | LSM登录 | Controller |
 | Gemini Spark / 自定义应用程序 | 是的 | 是的 | 是的，供公众使用 | 任何 HTTP 控制器 |
 | ChatGPT 自定义 MCP 连接器 | 是 | 是 | 公网使用时需要 | Docker、VS Code 扩展、二进制或 Python |
 | 通过 stdio 的通用本地 MCP 客户端 | 否 | 否 | 否 | `local-shell-mcp --mode stdio` |

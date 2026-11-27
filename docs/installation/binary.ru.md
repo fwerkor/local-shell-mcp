@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Автономный binary runtime
 
 Рекомендуется **один исполняемый файл Controller** из GitHub Releases: Python, Docker и исходники не нужны.
@@ -108,7 +108,7 @@ Binary включает Python application, но не все developer tools. MC
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Бинарник содержит Controller; внешние инструменты и браузеры устанавливаются при необходимости. Чат и история требуют отдельного [веб-пространства](../getting-started/web-workspace.md) с базой данных.
+Бинарник содержит Controller; внешние инструменты и браузеры устанавливаются при необходимости. Чат и история доступны во встроенном [веб-пространстве](../getting-started/web-workspace.md) с SQLite.
 
 ## Долгоживущий сервис
 

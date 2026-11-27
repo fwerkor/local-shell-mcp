@@ -1,73 +1,62 @@
-<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
-# 统一 Web 工作区
+<!-- i18n-source-sha256: 6c9270cab0f3c147ed3790b5042770b1c949119bd63f60b171b4647fb16850ef -->
+# WebUI Chat 快速入门
 
-**统一的 LSM Web 工作区**是日常使用 local-shell-mcp 的推荐入口。它将 AI 聊天、项目历史记录和 LSM 控制面结合在一个响应式界面中，基于经过定制并内置的 LibreChat 前端。您仍然可以连接外部 MCP 客户端，例如 [ChatGPT](chatgpt-connector.md) 或 [Gemini](gemini-spark.md)。
+统一 LSM Web 工作区集成 AI 聊天、项目、智能体与 Controller 运维页面，由 Python Controller 提供服务，共享其认证和 SQLite 数据库，无需独立聊天服务器。仍支持 [ChatGPT](chatgpt-connector.md)、[Gemini](gemini-spark.md) 等外部 MCP 客户端。
 
-现在 Web 工作区集成在 LSM Controller 中，不再另行部署 LibreChat 服务。全部业务数据统一存储于 Python/SQLite 后端。
+## 1. 启动 Controller
 
-## 工作区里有什么？
-
-| 模块 | 你能做什么 |
-|---|---|
-| 聊天和项目 | 选择配置的模型、创建对话、组织项目、查找过去的聊天记录并存档对话。历史记录保留在服务器上。 |
-| Controller 总览 | 查看运行状况、最近的活动和连接的机器。 |
-| 文件 | 浏览和管理本地或远程文件。 |
-| 终端 | 使用Controller 或 Worker上的持久终端。 |
-| 桌面 | 检查和控制远程 GUI 会话。 |
-| 会议 | 检查持久的 LSM 任务及其生命周期。 |
-| 遥控器 | 连接和管理外派员工。 |
-| 审计 | 检查模型发起的工具活动。 |
-| 嵌套MCP | 注册、编辑、启用、禁用、刷新和删除 LSM 后面的外部 MCP 服务器。 |
-
-Controller 页面路由包括 `/control/overview`、`/control/files`、`/control/terminals`、`/control/desktop`、`/control/sessions`、`/control/remotes` 和 `/control/audit`。聊天页面地址为 `/c/new`。 LSM MCP 管理器控制 **LSM 的嵌套 MCP 注册表**；它不会在 LibreChat 中创建第二个注册表。
-
-## 部署可选的聊天服务
-
-1. 通过[快速入门](quickstart.md)安装 LSM Controller，默认启用 SQLite；原始状态会自动迁移，旧文件保留作为回滚来源。
-2. 用户只需一个 HTTP/HTTPS 入口：`https://lsm.example.org`。聊天、终端、文件及远程控制都由同一个 Python Controller 提供。
-3. 如需修改默认配置，可以在 Controller 服务环境中设置：
+按照[安装快速入门](quickstart.md)选择部署方式。确认 WebUI 已启用并使用持久化存储。以下为正常默认值：
 
 ```env
 LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
 LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. 使用源码部署或独立可执行文件启动 Controller：
+导出服务环境变量后，启动 Controller：
 
 ```sh
 local-shell-mcp --mode mcp
 ```
 
-5. React 前端源码位于 `ui/workspace/`。仅在开发与打包时需要 Bun；参见[前端构建与安全说明](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md)。
+单文件发行版使用下载的可执行文件。已安装的 Controller 提供编译好的前端，仅源码构建需要 JavaScript 工具链。参见[WebUI 构建说明](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md)。
 
-Node.js、MongoDB、Meilisearch 和独立的 LibreChat Compose 服务都不再是运行时依赖。Worker 仍然是普通 Python 包。
+## 2. 打开浏览器工作区
 
-**重构状态：** Python Agent 推理、SSE 恢复及工具协议仍在迁移，草稿 PR 暂不可替换生产部署。
+在 Controller 主机访问 `http://127.0.0.1:8765/ui`，远程访问时使用已配置的 HTTPS 地址及 `/ui` 路径。通过部署中配置的 LSM 认证登录。远程访问应使用经过认证的 HTTPS。聊天与控制面页面共享同一源地址。
 
-## 登录并使用聊天功能
+## 3. 添加模型渠道
 
-1. 打开 LSM Controller 的 `/ui` 入口，用原有 PIN 或 OAuth 完成认证；React 与控制面共享身份。
-2. 在 LSM 中配置实际模型端点/API 凭证。Python Agent 后端仍在迁移中，草稿分支尚未完全支持生成。
-3. 待 Python Agent 与 SSE 协议通过验收测试后即可正常新建对话；MCP、LSM 工具与文件上传继续沿用 Controller 权限。
-4. 先进行只读请求：“检查 Controller 状态并列出工作区根目录，不修改文件。”
-5. 通过文件、终端、桌面、会话、远程和审计页面直接查看与管理运行环境。
+打开模型选择器及渠道管理。添加 API 渠道或连接受支持的账户。对于典型 OpenAI 兼容端点，填写渠道名称、选择 Chat Completions 协议、填写 API Base URL 和凭证，再自动发现模型或手动填写已知模型 ID。保存配置并选择模型。
 
-聊天上传（最多 32 MiB）存储在控制器工作区下，并且它们的绝对路径提供给模型。浏览器上传不会授予额外的文件权限。面向模型的工具调用通过 LSM 授权、审计和远程 Worker 路由器。
+本地推理服务的地址必须能被 Controller 访问，而非仅浏览器可访问。例如，若推理服务在 Controller 网络命名空间内监听对应地址，则可填写 `http://127.0.0.1:8080/v1`。协议、账户授权、自动发现和窗口限制详见[渠道与模型](../chat/channels.md)。
 
-## 外部 MCP、安全和数据
+## 4. 运行第一个任务
 
-使用工作区 MCP 侧边栏管理嵌套的外部 MCP 服务器。这支持本地 stdio 服务器和 HTTP 服务器，包括单独的私有环境变量和请求标头。秘密不会返回到浏览器。 **外部 MCP** 聊天切换允许搜索、检查和调用嵌套工具；当禁用本机 LSM 工具时，它不会授予模型 `mcp_manage`。 UI 管理受到正常控制器授权的保护。
+新建会话并提出简单问题，验证模型连接。随后尝试只读工具请求：
 
-聊天、项目、Agent、会话、审计及 Worker 状态统一使用 `.local-shell-mcp/lsm.sqlite3`，并使用 SQLite FTS5 搜索；文件产物仍在同目录下管理。
+```text
+列出 Controller 工作区根目录中的文件。
+告诉我检查的是哪台机器，并总结结果。
+不要修改文件或执行任何写操作。
+```
 
-工作区是原生 React 页面，不使用 iframe 或独立 Web 服务；Worker 与外部 MCP 客户端保持兼容。
+查看实际工具结果。如果工具缺失，检查聊天工具开关、智能体设置及机器权限。重复任务可使用已保存的智能体，并明确配置其访问权限。参见[工具与权限](../chat/permissions.md)。
 
-## 故障排除
+## 5. 探索工作区
 
-- **WebUI 无法启动：** 查看 Python Controller 日志、SQLite 初始化和打包前端；紧急情况下可通过 `LOCAL_SHELL_MCP_STATE_BACKEND=file` 恢复文件存储。
-- **登录失败：** 使用现有 Controller PIN/OAuth 认证，不再需要 LibreChat 独立账户或桥接密钥。
-- **聊天界面可打开但无法应答：** 草稿分支的 Python Agent 与 SSE 迁移尚未完成，请勿部署到生产。
-- **MCP 工具缺失：** 核对 Controller 权限与嵌套 MCP 注册表；仅外部 MCP 模式不暴露 `mcp_manage`。
-- **文件或会话为空：** 检查 Controller 工作区、SQLite 数据迁移及认证身份。
+| 区域 | 用途 |
+|---|---|
+| 聊天与项目 | 新建和搜索会话、整理项目、标签和消息书签 |
+| 智能体 | 复用模型、指令及工具配置 |
+| 记忆与 Skill | 管理可复用知识与指令 |
+| 定时会话 | 使用周期性提示词运行已保存智能体 |
+| 文件与终端 | 检查或操作 Controller 和 Worker 环境 |
+| 桌面 | 检查和控制支持的远程 GUI 会话 |
+| Session、Job 与审计 | 查看持久任务、执行进度及工具活动 |
+| 机器与外部 MCP | 管理 Worker 与嵌套 MCP 服务器 |
 
-有关实现详细信息和更新，请参阅 [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) 和 [human interface guide](../guides/human-interface.md)。
+具体控件取决于部署、账户和启用能力。关闭浏览器不会自动取消服务端推理；需要中断时应使用停止控件。
+
+## 后续阅读
+
+完整工作流程参见 [WebUI Chat 指南](../chat/index.md)，生产部署、备份与错误恢复参见[管理与故障排查](../chat/administration.md)。

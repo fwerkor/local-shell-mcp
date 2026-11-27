@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
+<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Własny obszar roboczy AI · Płaszczyzna kontroli MCP</span>
 
@@ -53,6 +53,7 @@ Docelową isolation boundary jest container lub VM uruchamiający service.
 | Scenariusz | Zacznij tutaj | Dlaczego |
 |---|---|---|
 | Podstawowy obszar roboczy przeglądarki | [Unified web workspace](getting-started/web-workspace.md) | Czat, projekty i strony kontrolne LSM ze wspólnym loginem |
+| Korzystanie z wbudowanego agenta AI | [WebUI Chat](chat/index.md) | Kanały, agenci, uprawnienia, kontekst i automatyzacja |
 | Pierwsze wdrożenie kontrolera | [Quickstart](getting-started/quickstart.md) | Zalecana wersja binarna, OAuth i pierwsza sesja |
 | Wybór runtime layer | [Runtime choices](guides/deployment.md) | Opisuje Docker, VS Code, binary, Python i stdio jako osobne runtime options |
 | Łączenie Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Kwalifikowalność, adres URL HTTPS MCP, OAuth i testowanie |
