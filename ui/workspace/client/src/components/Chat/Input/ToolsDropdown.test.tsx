@@ -1,4 +1,3 @@
-import type React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { MenuItemProps } from '~/common';
 import ToolsDropdown from './ToolsDropdown';
@@ -49,7 +48,7 @@ jest.mock('@librechat/client', () => ({
         return (
           <div key={index}>
             {item.render ? (
-              (item.render as (itemProps: typeof props) => React.ReactNode)(props)
+              Reflect.apply(item.render, undefined, [props])
             ) : (
               <div {...props}>{item.label}</div>
             )}
