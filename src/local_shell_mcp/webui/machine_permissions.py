@@ -83,9 +83,13 @@ def _registered_defaults() -> dict[str, str]:
 
 
 def resolve_access(owner: str, conversation_id: str | None = None, *, project_id: str | None = None,
-                   repo: Any = None) -> dict[str, str]:
+                   repo: Any = None, agent_only: bool = False) -> dict[str, str]:
     repository = repo or _repo()
     policy = _registered_defaults()
+    if agent_only:
+        if conversation_id is not None and repository.conversation(owner, conversation_id) is None:
+            raise KeyError("Conversation not found")
+        return policy
     policy.update(_stored(repository, owner, _GLOBAL))
     if conversation_id is not None:
         convo = repository.conversation(owner, conversation_id)
@@ -101,6 +105,30 @@ def resolve_access(owner: str, conversation_id: str | None = None, *, project_id
     return policy
 
 
+def scheduled_agent_permissions(database, owner: str, run_id: str | None, agent_id: str | None) -> bool:
+    """Identify controller-admitted schedule runs, including delegated continuations.
+
+    The reserved request namespace cannot be supplied by ordinary chat clients.
+    Ordinary chat and unnamed subagents retain their conversation ACLs.
+    """
+    if not run_id or not agent_id:
+        return False
+    with database.connect() as db:
+        return db.execute(
+            """WITH RECURSIVE ancestry(id) AS (
+                SELECT ?
+                UNION SELECT t.parent_run_id FROM subagent_tasks t
+                    JOIN ancestry a ON t.child_run_id=a.id WHERE t.owner=?
+                UNION SELECT t.parent_run_id FROM subagent_wakeups w
+                    JOIN subagent_tasks t ON t.id=w.task_id
+                    JOIN ancestry a ON w.run_id=a.id WHERE t.owner=? AND w.owner=?
+            )
+            SELECT 1 FROM ancestry a JOIN generation_requests g ON g.run_id=a.id
+            WHERE g.owner=? AND g.client_request_id LIKE 'schedule:%' LIMIT 1""",
+            (run_id, owner, owner, owner, owner),
+        ).fetchone() is not None
+
+
 def resolve_agent_ceiling(owner: str, overrides: dict[str, str], default: str, *,
                           repo: Any = None) -> tuple[dict[str, str], str]:
     """Resolve inherited global defaults live; explicit Agent exceptions win."""
@@ -111,11 +139,11 @@ def resolve_agent_ceiling(owner: str, overrides: dict[str, str], default: str, *
 
 def effective_machine_access(owner: str, conversation_id: str, *, agent: dict | None,
                              scopes: set[str], expires: int | None = None,
-                             repo: Any = None) -> tuple[dict[str, str], str]:
+                             repo: Any = None, agent_only: bool = False) -> tuple[dict[str, str], str]:
     """Resolve the machine ACL subject to the Agent and principal ceilings."""
     from ..settings import get_settings
 
-    policy = resolve_access(owner, conversation_id, repo=repo)
+    policy = resolve_access(owner, conversation_id, repo=repo, agent_only=agent_only)
     agent_policy, default = agent_access_policy(agent or {}) or ({}, "write")
     agent_policy, fallback = resolve_agent_ceiling(owner, agent_policy, default, repo=repo)
     rank = {"none": 0, "read": 1, "write": 2}
@@ -142,10 +170,10 @@ def effective_machine_access(owner: str, conversation_id: str, *, agent: dict | 
 
 def machine_access_context(owner: str, conversation_id: str, *, agent: dict | None,
                            scopes: set[str], expires: int | None = None,
-                           repo: Any = None) -> str:
+                           repo: Any = None, agent_only: bool = False) -> str:
     """Render the live native-machine ACL, not a grant or a history message."""
     effective, default = effective_machine_access(
-        owner, conversation_id, agent=agent, scopes=scopes, expires=expires, repo=repo,
+        owner, conversation_id, agent=agent, scopes=scopes, expires=expires, repo=repo, agent_only=agent_only,
     )
     groups: dict[str, list[str]] = {"none": [], "read": [], "write": []}
     for name, level in effective.items():
@@ -186,7 +214,7 @@ def require_machine_scope(scopes: set[str], machine: str, level: str, *, expires
 
 def authorize_machine_action(
     owner: str, conversation_id: str, machine: str, operation: str, *,
-    scopes: set[str], expires: int | None = None, repo: Any = None,
+    scopes: set[str], expires: int | None = None, repo: Any = None, agent_only: bool = False,
 ) -> None:
     """The single policy gate for every model-initiated machine operation.
 
@@ -205,7 +233,8 @@ def authorize_machine_action(
         raise PermissionError("Local machine is disabled")
     if machine != "local" and not settings.remote_enabled:
         raise PermissionError("Remote machine access is disabled")
-    granted = access_level(owner, conversation_id, machine, repo=repo)
+    granted = (resolve_access(owner, conversation_id, repo=repo, agent_only=True).get(machine, "none")
+               if agent_only else access_level(owner, conversation_id, machine, repo=repo))
     if granted == "none":
         raise PermissionError(f"Access to machine {machine} is not granted")
     if operation in {"write", "execute"} and granted != "write":

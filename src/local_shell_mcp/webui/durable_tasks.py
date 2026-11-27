@@ -20,6 +20,7 @@ from .machine_permissions import (
     agent_access_policy,
     authorize_machine_action,
     resolve_agent_ceiling,
+    scheduled_agent_permissions,
 )
 
 log = logging.getLogger(__name__)
@@ -298,11 +299,13 @@ def _revoked(row: Any) -> bool:
             elif "tools" in agent and row["tool"] not in agent["tools"]:
                 # Agents predating machine ACLs retain their explicit tool list.
                 return True
+        agent_only = scheduled_agent_permissions(_repo().database, row["owner"], row["run_id"], agent_id)
         for machine, operation in json.loads(row["requirements"]).items():
             if agent_policy is not None and not _agent_allows(agent_policy, machine, operation, default):
                 return True
             authorize_machine_action(row["owner"], permission_conversation_id, machine, operation,
-                                     scopes=set(json.loads(row["scopes"])), expires=row["grant_expires"])
+                                     scopes=set(json.loads(row["scopes"])), expires=row["grant_expires"],
+                                     agent_only=agent_only)
         return False
     except (PermissionError, KeyError, ValueError):
         return True

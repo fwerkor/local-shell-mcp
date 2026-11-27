@@ -651,7 +651,7 @@ async def _dispatch(occurrence, database):
     )
     from .generation_routes import _generation_store, _start_task
     from .generations import GenerationConflict
-    from .machine_permissions import resolve_access
+    from .machine_permissions import effective_machine_access
     from .misc_routes import effective_features
     from .memory_protection import configured_filters
     from .providers import provider_config, selected_provider
@@ -718,7 +718,9 @@ async def _dispatch(occurrence, database):
                 _settle(database, occurrence_id, 'started',
                         conversation_id=generation.conversation_id, run_id=generation.run_id)
                 return
-        policy = resolve_access(owner, generation.conversation_id, repo=repo)
+        policy, _ = effective_machine_access(
+            owner, generation.conversation_id, agent=agent, scopes=set(scopes), repo=repo, agent_only=True,
+        )
         features = effective_features(owner, generation.conversation_id, repo=repo)
         started = await _start_task(
             owner, generation, profile, agent,

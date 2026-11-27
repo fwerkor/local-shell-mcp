@@ -20,6 +20,7 @@ from .machine_permissions import (
     authorize_machine_action,
     resolve_access,
     resolve_agent_ceiling,
+    scheduled_agent_permissions,
 )
 from .providers import ModelToolCall
 
@@ -147,11 +148,12 @@ def _agent_allows(policy: dict[str, str], machine: str, operation: str, default:
 def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
                     expires: int | None = None,
                     agent_permissions: dict[str, str] | None = None,
-                    agent_default_permission: str = "write") -> list[dict]:
+                    agent_default_permission: str = "write", agent_only: bool = False) -> list[dict]:
     """Advertise registered tool schemas filtered by effective machine policy."""
-    policy = resolve_access(owner, conversation_id)
+    policy = resolve_access(owner, conversation_id, agent_only=agent_only)
     if agent_permissions is not None:
-        # An Agent is an additional ceiling; it cannot expand its chat grant.
+        # Scheduled Agents use their own machine policy; other Agents remain
+        # bounded by their conversation ACL.
         from .machine_permissions import validate_access_map
 
         agent_policy, fallback = resolve_agent_ceiling(
@@ -177,22 +179,22 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
             pass
         elif tool.name in _CONTROLLER_MANAGEMENT:
             if not _agent_allows(policy, "local", "write") or not _can_authorize(
-                owner, conversation_id, "local", "write", scopes, expires,
+                owner, conversation_id, "local", "write", scopes, expires, agent_only=agent_only,
             ):
                 continue
         elif tool.name == "remote_transfer":
             # Transfer requires a writable destination and a readable source;
             # no model-defined endpoint can bypass either machine's policy.
             if not any(level == "write" and _can_authorize(
-                owner, conversation_id, machine, "write", scopes, expires,
+                owner, conversation_id, machine, "write", scopes, expires, agent_only=agent_only,
             ) for machine, level in policy.items()):
                 continue
         elif "machine" not in properties:
             if not _agent_allows(policy, "local", operation) or not _can_authorize(
-                owner, conversation_id, "local", operation, scopes, expires,
+                owner, conversation_id, "local", operation, scopes, expires, agent_only=agent_only,
             ):
                 continue
-        elif not any(_can_authorize(owner, conversation_id, machine, operation, scopes, expires)
+        elif not any(_can_authorize(owner, conversation_id, machine, operation, scopes, expires, agent_only=agent_only)
                      for machine, level in policy.items()
                      if _agent_allows(policy, machine, operation)):
             continue
@@ -215,7 +217,7 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
             )
         if tool.name == "browser_session":
             writable = any(level == "write" and _can_authorize(
-                owner, conversation_id, machine, "write", scopes, expires,
+                owner, conversation_id, machine, "write", scopes, expires, agent_only=agent_only,
             ) for machine, level in policy.items())
             if not writable:
                 params["properties"]["action"] = {"type": "string", "enum": ["list"]}
@@ -231,10 +233,10 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
 
 
 def _can_authorize(owner: str, conversation_id: str, machine: str, operation: str,
-                   scopes: set[str], expires: int | None) -> bool:
+                   scopes: set[str], expires: int | None, *, agent_only: bool = False) -> bool:
     try:
         authorize_machine_action(owner, conversation_id, machine, operation,
-                                 scopes=scopes, expires=expires)
+                                 scopes=scopes, expires=expires, agent_only=agent_only)
         return True
     except (PermissionError, ValueError, KeyError):
         return False
@@ -278,12 +280,15 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     durable_tasks.reserve requires the run to belong to the owned task scope.
     """
     from . import durable_tasks
+    from .routes import _repo
 
     tool = _tool(call.name)
     arguments = call.arguments
     _validate_arguments(arguments)
     intent = None
     permission_conversation_id = authorization_conversation_id or conversation_id
+    agent_only = (scheduled_agent_permissions(_repo().database, owner, run_id, agent_id)
+                  if run_id and agent_id else False)
 
     def check_authorization():
         if run_id is not None and durable_tasks.is_run_cancelled(run_id):
@@ -295,7 +300,6 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
             # Re-fetch each time a long-running native action is rechecked;
             # changing or deleting an Agent revokes its in-flight privileges.
             from .agents import AgentRepository
-            from .routes import _repo
 
             agent = AgentRepository(_repo().database).get(owner, agent_id)
             if agent is None:
@@ -321,8 +325,6 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
                         raise PermissionError(f"Agent has no {required} access to machine {machine}")
         if tool.name in _AGENT_CONTROL:
             # Session ownership is still checked; this bypasses machine ACLs only.
-            from .routes import _repo
-
             if _repo().conversation(owner, conversation_id) is None:
                 raise KeyError("Conversation not found")
             if grant_expires is not None:
@@ -336,13 +338,13 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
             if not isinstance(source, str) or not isinstance(destination, str):
                 raise ValueError("Invalid transfer machines")
             authorize_machine_action(owner, permission_conversation_id, source, "read",
-                                     scopes=granted_scopes, expires=grant_expires)
+                                     scopes=granted_scopes, expires=grant_expires, agent_only=agent_only)
             authorize_machine_action(owner, permission_conversation_id, destination, "write",
-                                     scopes=granted_scopes, expires=grant_expires)
+                                     scopes=granted_scopes, expires=grant_expires, agent_only=agent_only)
         else:
             for machine in _targets(tool, arguments):
                 authorize_machine_action(owner, permission_conversation_id, machine, operation,
-                                         scopes=granted_scopes, expires=grant_expires)
+                                         scopes=granted_scopes, expires=grant_expires, agent_only=agent_only)
         if tool.name == "job_retry" and arguments.get("machine") in {None, "", "local"}:
             # Controller-managed transfer jobs retain remote endpoints in their
             # payload. Retrying by job ID must never bypass those endpoint ACLs.
@@ -350,7 +352,7 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
 
             for machine, required in job_retry_machine_requirements(arguments.get("job_id")):
                 authorize_machine_action(owner, permission_conversation_id, machine, required,
-                                         scopes=granted_scopes, expires=grant_expires)
+                                         scopes=granted_scopes, expires=grant_expires, agent_only=agent_only)
         extra_scope = _ADDITIONAL_SCOPES.get(tool.name)
         if extra_scope and extra_scope not in granted_scopes:
             raise PermissionError(f"{extra_scope} permission is required")
@@ -382,7 +384,6 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     session_kwargs = {}
     if run_id is not None and tool.name not in _AGENT_CONTROL:
         from .chat_goal import active_plan
-        from .routes import _repo
 
         active = active_plan(_repo().database, owner, run_id)
         if active:
@@ -399,7 +400,6 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
         if tool.name == "remote_manage" and arguments.get("action", "").strip().lower() == "list":
             from .agents import AgentRepository
             from .machine_permissions import effective_machine_access
-            from .routes import _repo
 
             payload = json.loads(result)
             if isinstance(payload, dict) and payload.get("ok", True):
@@ -411,7 +411,7 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
                         agent = {"machine_default_permission": "none"}
                     access, _ = effective_machine_access(
                         owner, permission_conversation_id, agent=agent,
-                        scopes=granted_scopes, expires=grant_expires, repo=repo,
+                        scopes=granted_scopes, expires=grant_expires, repo=repo, agent_only=agent_only,
                     )
                     for row in data["machines"]:
                         if isinstance(row, dict):
