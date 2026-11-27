@@ -1,3 +1,4 @@
+import { KeyboardShortcutsSettings } from '../KeyboardShortcutsDialog';
 import ModelProviders from './ModelProviders';
 import ControllerSettings from './ControllerSettings';
 import { SettingsTabValues } from 'librechat-data-provider';
@@ -53,6 +54,14 @@ import store from '~/store';
 const { GENERAL, CHAT, SPEECH, DATA, ABOUT } = SettingsTabValues;
 
 export const registry: SettingEntry[] = [
+  {
+    id: 'keyboardShortcuts',
+    tab: 'shortcuts',
+    section: 'shortcuts',
+    labelKey: 'com_shortcut_keyboard_shortcuts',
+    keywords: ['keyboard', 'hotkey', 'shortcut', 'ctrl', 'enter', '快捷键', '换行'],
+    Component: KeyboardShortcutsSettings,
+  },
   {
     id: 'displayName',
     tab: GENERAL,
