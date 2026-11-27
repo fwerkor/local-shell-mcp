@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontextové okno: {{0}} z použitých tokenov {{1}} ({{2}} %)",
   "com_ui_context_usage_label_unknown": "Použitie kontextu: Použité tokeny {{0}}",
   "com_ui_context_window": "Kontextové okno",
+  "com_ui_goal_continuation": "Cieľ · Automatické pokračovanie",
   "com_ui_continue": "Pokračovať",
   "com_ui_continue_chat": "Pokračovať v tomto rozhovore",
   "com_ui_continue_chat_error": "Pri kopírovaní tejto konverzácie sa vyskytla chyba",

@@ -1,6 +1,6 @@
 import { ContentTypes } from 'librechat-data-provider';
 import type { TMessageContentParts } from 'librechat-data-provider';
-import { rewindStreamContent } from './useStepHandler';
+import { insertGoalContinuation, rewindStreamContent } from './useStepHandler';
 
 describe('rewindStreamContent', () => {
   it('retains the edited response prefix while rewinding only current-generation text', () => {
@@ -65,5 +65,27 @@ describe('rewindStreamContent', () => {
     expect(0 in rewound).toBe(false);
     expect(rewound[1]).toEqual(tool);
     expect(rewound[2]).toEqual({ type: ContentTypes.TEXT, text: '🚀' });
+  });
+});
+
+describe('insertGoalContinuation', () => {
+  it('places the marker at its server slot and ignores duplicate SSE replay', () => {
+    const prose = { type: ContentTypes.TEXT, text: 'Still working.' } as const;
+    const marker = { type: ContentTypes.GOAL_CONTINUATION, id: 'goal:run:3' } as const;
+    const content = [prose];
+    const updated = insertGoalContinuation(content, marker.id, 1);
+    expect(updated).toEqual([prose, marker]);
+    expect(insertGoalContinuation(updated, marker.id, 1)).toBe(updated);
+    expect(insertGoalContinuation(updated, 'stale', 0)).toBe(updated);
+    expect(rewindStreamContent(updated, 'Still working.')).toEqual(updated);
+  });
+
+  it('preserves absolute content indexes and replaces only empty reservations', () => {
+    const blank = { type: ContentTypes.TEXT, text: '' } as const;
+    const updated = insertGoalContinuation([blank], 'goal:run:4', 0);
+    expect(updated).toEqual([{ type: ContentTypes.GOAL_CONTINUATION, id: 'goal:run:4' }]);
+    const sparse = insertGoalContinuation([], 'goal:run:5', 2);
+    expect(0 in sparse).toBe(false);
+    expect(sparse[2]?.type).toBe(ContentTypes.GOAL_CONTINUATION);
   });
 });

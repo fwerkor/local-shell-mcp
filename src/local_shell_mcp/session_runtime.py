@@ -80,6 +80,7 @@ class PlanState:
     last_continuation_at: float | None = None
     continuation_retry_after: float | None = None
     last_agent_activity: float = 0.0
+    chat_run_id: str | None = None
 
     def has_unfinished_steps(self) -> bool:
         return any(step.status in {"pending", "active"} for step in self.steps)
@@ -109,8 +110,10 @@ class PlanState:
             "in_flight_calls": in_flight_calls,
             "execution_lease_s": PLAN_EXECUTION_LEASE_S,
             "continuation_due_at": due_at,
+            **({"continuation_driver": "chat"} if self.chat_run_id else {}),
             "continuation_due": (
-                self.status == "active"
+                not self.chat_run_id
+                and self.status == "active"
                 and session_active
                 and not self.continuation_pending
                 and in_flight_calls == 0
@@ -333,6 +336,7 @@ class SessionRuntimeManager:
             "last_continuation_at": plan.last_continuation_at,
             "continuation_retry_after": plan.continuation_retry_after,
             "last_agent_activity": plan.last_agent_activity,
+            "chat_run_id": plan.chat_run_id,
         }
 
     @staticmethod
@@ -398,6 +402,7 @@ class SessionRuntimeManager:
                 else float(payload["continuation_retry_after"])
             ),
             last_agent_activity=float(payload.get("last_agent_activity") or 0.0),
+            chat_run_id=payload.get("chat_run_id") or None,
         )
 
     @classmethod
@@ -1403,6 +1408,21 @@ class SessionRuntimeManager:
             elif normalized_action == "resume":
                 if plan.status != "blocked":
                     raise ValueError("Only a blocked plan can be resumed")
+                if actor == "human" and plan.chat_run_id:
+                    # An externally resumed goal must not remain bound to a
+                    # terminal Chat actor. Preserve a live or human-paused run
+                    # so the legacy timer cannot compete with its owner.
+                    from .sqlite_store import shared_database
+
+                    database = shared_database(self._state_dir_override or get_settings().state_dir)
+                    with database.connect() as db:
+                        live = db.execute(
+                            "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                            "WHERE r.id=? AND c.owner=? AND r.status IN ('running','requires_action')",
+                            (plan.chat_run_id, logical.subject),
+                        ).fetchone()
+                    if live is None:
+                        plan.chat_run_id = None
                 plan.status = "active"
                 plan.note = None
                 plan.revision += 1
@@ -1471,6 +1491,48 @@ class SessionRuntimeManager:
             ),
         }
 
+    def adopt_chat_plan(
+        self, session_id: str, plan_id: str, run_id: str, *, subject: str,
+    ) -> bool:
+        """Give an exact plan to Chat's generation actor, not the timer driver."""
+        with self._lock, self._shared_session_locks_locked([session_id]):
+            logical = self._require_session_locked(session_id, subject)
+            plan = logical.plan
+            if (logical.status != "active" or plan is None or plan.plan_id != plan_id
+                    or plan.status != "active" or plan.continuation_pending):
+                return False
+            snapshot = copy.deepcopy(logical)
+            try:
+                plan.chat_run_id = run_id
+                self._save_locked(logical)
+            except Exception as exc:
+                self._restore_snapshot_locked(snapshot, exc, context="Chat plan adoption")
+                raise
+            return True
+
+    def chat_plan_state(
+        self, session_id: str, run_id: str, *, subject: str,
+    ) -> dict[str, Any] | None:
+        with self._lock, self._shared_session_locks_locked([session_id]):
+            logical = self._require_session_locked(session_id, subject)
+            self._mark_stale_locked(logical, time.time())
+            plan = logical.plan
+            if (logical.status != "active" or plan is None or plan.status != "active"
+                    or plan.chat_run_id != run_id):
+                return None
+            return plan.public_state(in_flight_calls=self._in_flight_count_locked(session_id))
+
+    def pause_chat_plan(self, session_id: str, run_id: str, *, subject: str, note: str) -> bool:
+        """Pause only the plan still owned by the terminating Chat generation."""
+        with self._lock, self._shared_session_locks_locked([session_id]):
+            logical = self._require_session_locked(session_id, subject)
+            plan = logical.plan
+            if (logical.status != "active" or plan is None or plan.status != "active"
+                    or plan.chat_run_id != run_id):
+                return False
+            self._manage_plan_transaction_locked(logical, action="block", note=note, actor="system")
+            return True
+
     def claim_plan_continuation(
         self,
         session_id: str,
@@ -1492,7 +1554,8 @@ class SessionRuntimeManager:
             now = time.time()
             self._mark_stale_locked(logical, now)
             plan = logical.plan
-            if logical.status != "active" or plan is None or plan.status != "active":
+            if (logical.status != "active" or plan is None or plan.status != "active"
+                    or plan.chat_run_id):
                 return None
             requested_claim_id = str(claim_id or "").strip() or None
             if requested_claim_id is not None and len(requested_claim_id) > PLAN_CONTINUATION_CLAIM_ID_LIMIT:

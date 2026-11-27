@@ -82,7 +82,26 @@ type TStepEvent =
   | { event: StepEvents.ON_SUBAGENT_UPDATE; data: SubagentUpdateEvent }
   | { event: StepEvents.ON_SANDBOX_STARTING; data: SandboxStartingEvent }
   | { event: StepEvents.ON_PTC_TOOL_CALL; data: PtcToolCallEvent }
+  | { event: 'on_goal_continuation'; data: { id: string; index: number; runId: string } }
   | { event: 'on_content_rewind'; data: { preserveText: string; runId?: string } };
+
+/** Keep absolute server slots stable, including duplicate SSE replay. */
+export function insertGoalContinuation(
+  content: TMessageContentParts[],
+  id: string,
+  index: number,
+): TMessageContentParts[] {
+  if (content.some((part) => part?.type === ContentTypes.GOAL_CONTINUATION && part.id === id)) {
+    return content;
+  }
+  const existing = content[index];
+  if (existing && !(existing.type === ContentTypes.TEXT && !existing.text)) {
+    return content;
+  }
+  const next = [...content];
+  next[index] = { type: ContentTypes.GOAL_CONTINUATION, id };
+  return next;
+}
 
 type MessageDeltaUpdate = {
   type: ContentTypes.TEXT;
@@ -961,6 +980,19 @@ export default function useStepHandler({
       if (submission?.editedContent != null && submission?.editPrefixCleared !== true) {
         initialContent = submission?.initialResponse?.content ?? initialContent;
         editPrefixOffset = submission?.editPrefixLength ?? initialContent.length;
+      }
+
+      if (stepEvent.event === 'on_goal_continuation') {
+        const { id, index, runId } = stepEvent.data;
+        const response = messageMap.current.get(runId) ??
+          messages.find((message) => message.messageId === runId);
+        if (!response || !Number.isInteger(index) || index < 0) return;
+        const content = insertGoalContinuation(response.content ?? [], id, index + editPrefixOffset);
+        if (content === response.content) return;
+        const updated = { ...response, content };
+        messageMap.current.set(runId, updated);
+        setMessages(mergeResponseMessage(messages, updated, runId, { ensureUserMessage: true }));
+        return;
       }
 
       if (stepEvent.event === 'on_content_rewind') {

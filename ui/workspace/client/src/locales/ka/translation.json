@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "კონტექსტური ფანჯარა: გამოყენებული {{0}} {{1}} ჟეტონებიდან ({{2}}%)",
   "com_ui_context_usage_label_unknown": "კონტექსტის გამოყენება: გამოყენებულია {{0}} ჟეტონები",
   "com_ui_context_window": "კონტექსტური ფანჯარა",
+  "com_ui_goal_continuation": "მიზანი · ავტომატური გაგრძელება",
   "com_ui_continue": "განაგრძეთ",
   "com_ui_continue_chat": "განაგრძეთ ეს ჩატი",
   "com_ui_continue_chat_error": "ამ მიმოწერის კოპირებისას მოხდა შეცდომა",

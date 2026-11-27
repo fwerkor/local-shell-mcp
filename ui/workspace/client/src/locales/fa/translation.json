@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "پنجره زمینه: {{0}} از نشانه های {{1}} استفاده شده ({{2}}%)",
   "com_ui_context_usage_label_unknown": "استفاده از زمینه: توکن های {{0}} استفاده شده است",
   "com_ui_context_window": "پنجره زمینه",
+  "com_ui_goal_continuation": "هدف · ادامهٔ خودکار",
   "com_ui_continue": "ادامه دهید",
   "com_ui_continue_chat": "این چت را ادامه دهید",
   "com_ui_continue_chat_error": "هنگام کپی کردن این مکالمه خطایی روی داد",

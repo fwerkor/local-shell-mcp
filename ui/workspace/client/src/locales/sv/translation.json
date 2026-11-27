@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontextfönster: {{0}} av {{1}}-tokens som används ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Kontextanvändning: {{0}}-tokens används",
   "com_ui_context_window": "Kontextfönster",
+  "com_ui_goal_continuation": "Mål · Fortsätter automatiskt",
   "com_ui_continue": "Fortsätt",
   "com_ui_continue_chat": "Fortsätt den här chatten",
   "com_ui_continue_chat_error": "Det gick inte att kopiera den här konversationen",

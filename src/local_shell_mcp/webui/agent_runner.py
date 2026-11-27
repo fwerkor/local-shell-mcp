@@ -708,11 +708,17 @@ class AgentRunner:
             if call.name == "mcp_tool_call":
                 return await approved_call(self.owner, self.authorization_conversation_id, set(self.scopes), call,
                                            agent_id=(state.context.agent or {}).get("id"))
-            return await call_tool(self.owner, self.generation.conversation_id, call,
-                                   granted_scopes=set(self.scopes), grant_expires=self.grant_expires,
-                                   run_id=self.generation.run_id,
-                                   authorization_conversation_id=self.authorization_conversation_id,
-                                   agent_id=(state.context.agent or {}).get("id"))
+            result = await call_tool(self.owner, self.generation.conversation_id, call,
+                                     granted_scopes=set(self.scopes), grant_expires=self.grant_expires,
+                                     run_id=self.generation.run_id,
+                                     authorization_conversation_id=self.authorization_conversation_id,
+                                     agent_id=(state.context.agent or {}).get("id"))
+            if not self.namespace and call.name == "plan_manage":
+                from .chat_goal import observe_result
+
+                result = observe_result(self.database, self.owner, self.generation.run_id,
+                                        call.name, call.arguments, result)
+            return result
         except ToolPermissionDenied as error:
             return "Blocked: " + str(error)
         except PermissionError as error:
@@ -1759,6 +1765,31 @@ class AgentRunner:
             if (boundary == "terminal" and not self.namespace and not (recovered or applied)
                     and self.store.live_compaction_request(self.owner, self.generation.run_id)):
                 await self._before_model(current)
+            if ((boundary == "terminal" or (boundary == "post_tools" and current.context.tool_end))
+                    and not self.namespace and not (recovered or applied)
+                    and not self.task_control_host):
+                from .chat_goal import continuation
+
+                # The actor/grant checks above fence this against abort and
+                # revocation; the next model turn uses the same durable run.
+                prompt = continuation(self.database, self.owner,
+                                      self.generation.run_id, current.messages)
+                if prompt is not None:
+                    current.messages.append(prompt)
+                    snapshot, _ = self.store.resume_snapshot(self.owner, self.generation.run_id)
+                    marker_id = f"goal:{self.generation.run_id}:{current.model_turn}"
+                    parts = snapshot["aggregatedContent"]
+                    if not any(part.get("type") == "goal_continuation" and part.get("id") == marker_id
+                               for part in parts):
+                        self.store.append(self.owner, self.generation.run_id, {
+                            "event": "on_goal_continuation", "data": {
+                                "id": marker_id, "index": len(parts),
+                                "runId": self.generation.response_message_id,
+                            },
+                        }, actor_lease=self.actor_lease)
+                    if self.on_injected is not None:
+                        await self.on_injected()
+                    return True
             return bool(recovered or applied)
 
         async def should_seal_stream():

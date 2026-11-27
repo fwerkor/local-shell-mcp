@@ -115,7 +115,7 @@ def format_agent_messages(payload: list[dict]) -> list[dict]:
                 output.append({"role": "user", "content": copy.deepcopy(media) if media else part.get("steer", "") or EMPTY_MESSAGE_PLACEHOLDER,
                                "source": "steer"})
                 anchor = None
-            elif kind in {"error", "agent_update", "activity_label"}:
+            elif kind in {"error", "agent_update", "activity_label", "goal_continuation"}:
                 continue
             elif kind == "think":
                 # Reasoning is retained separately, never accidentally turned

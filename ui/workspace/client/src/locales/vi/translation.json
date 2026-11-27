@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Cửa sổ ngữ cảnh: {{0}} của mã thông báo {{1}} được sử dụng ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Sử dụng theo ngữ cảnh: Đã sử dụng mã thông báo {{0}}",
   "com_ui_context_window": "Cửa sổ ngữ cảnh",
+  "com_ui_goal_continuation": "Mục tiêu · Tự động tiếp tục",
   "com_ui_continue": "Tiếp tục",
   "com_ui_continue_chat": "Tiếp tục cuộc trò chuyện này",
   "com_ui_continue_chat_error": "Đã xảy ra lỗi khi sao chép cuộc trò chuyện này",

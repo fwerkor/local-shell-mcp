@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Samhengisgluggi: {{0}} af {{1}} tókum notaðir ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Notkun samhengis: {{0}} tókar notaðir",
   "com_ui_context_window": "Samhengisgluggi",
+  "com_ui_goal_continuation": "Markmið · Heldur sjálfkrafa áfram",
   "com_ui_continue": "Halda áfram",
   "com_ui_continue_chat": "Halda þessu spjalli áfram",
   "com_ui_continue_chat_error": "Villa kom upp við að afrita þetta samtal",

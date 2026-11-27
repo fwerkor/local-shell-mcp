@@ -213,6 +213,7 @@ describe("live workspace utilities", () => {
     expect(formatCountdown(600)).toBe("10:00")
     expect(continuationCountdownState({ ...plan, continuation_retry_after: 2_000 }, 1_300).remainingSeconds).toBe(700)
     expect(continuationCountdownState({ ...plan, in_flight_calls: 1 }, 1_500).visible).toBeFalse()
+    expect(continuationCountdownState({ ...plan, continuation_driver: "chat" }, 2_000).visible).toBeFalse()
   })
 
   test("continuation dispatch invalidates on plan changes or newer agent activity", () => {

@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Finestra de context: {{0}} de fitxes {{1}} utilitzades ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Ús del context: fitxes {{0}} utilitzades",
   "com_ui_context_window": "Finestra de context",
+  "com_ui_goal_continuation": "Objectiu · Continuació automàtica",
   "com_ui_continue": "Continua",
   "com_ui_continue_chat": "Continua amb aquest xat",
   "com_ui_continue_chat_error": "S'ha produït un error en copiar aquesta conversa",

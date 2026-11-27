@@ -72,6 +72,7 @@ type PlanState = {
   revision: number
   note?: string | null
   continuation_count: number
+  continuation_driver?: string
   continuation_pending: boolean
   continuation_claim_id?: string | null
   last_agent_activity: number
@@ -765,6 +766,7 @@ function sessionProgressPanel(): string {
 function planAutoStatus(): string {
   if (!plan) return ""
   if (plan.status === "blocked") return "Auto paused"
+  if (plan.continuation_driver === "chat") return "Managed by Chat"
   if (plan.auto_continue_exhausted) return `Auto stopped · ${plan.continuation_count}/${plan.max_continuations}`
   if (plan.continuation_pending) return "Auto continuing"
   if (Number(plan.in_flight_calls || 0) > 0) return `Auto armed · ${plan.continuation_count}/${plan.max_continuations}`

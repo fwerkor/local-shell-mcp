@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Bağlam penceresi: {{1}} tokenden {{0}} tanesi kullanıldı (%{{2}})",
   "com_ui_context_usage_label_unknown": "Bağlam kullanımı: {{0}} token kullanıldı",
   "com_ui_context_window": "Bağlam penceresi",
+  "com_ui_goal_continuation": "Hedef · Otomatik olarak devam ediliyor",
   "com_ui_continue": "Devam et",
   "com_ui_continue_chat": "Bu sohbete devam et",
   "com_ui_continue_chat_error": "Bu görüşme kopyalanırken bir hata oluştu",

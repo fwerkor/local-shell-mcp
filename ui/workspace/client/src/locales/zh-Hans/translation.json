@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "上下文窗口：已用 {{0}} / {{1}} 个 token（{{2}}%）",
   "com_ui_context_usage_label_unknown": "上下文用量：已使用 {{0}} Token",
   "com_ui_context_window": "上下文窗口",
+  "com_ui_goal_continuation": "Goal · 自动继续执行",
   "com_ui_continue": "继续",
   "com_ui_continue_chat": "继续此聊天",
   "com_ui_continue_chat_error": "复制此对话时出错",

@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "نافذة السياق: {{0}} من الرموز المميزة {{1}} المستخدمة ({{2}}%)",
   "com_ui_context_usage_label_unknown": "استخدام السياق: الرموز المميزة {{0}} المستخدمة",
   "com_ui_context_window": "نافذة السياق",
+  "com_ui_goal_continuation": "الهدف · المتابعة تلقائيًا",
   "com_ui_continue": "استمر",
   "com_ui_continue_chat": "مواصلة هذه الدردشة",
   "com_ui_continue_chat_error": "حدث خطأ أثناء نسخ هذه المحادثة",

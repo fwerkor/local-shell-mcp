@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "脈絡視窗：已使用 {{0}} / {{1}} 個 Token（{{2}}%）",
   "com_ui_context_usage_label_unknown": "脈絡使用量：已使用 {{0}} 個 Token",
   "com_ui_context_window": "上下文視窗",
+  "com_ui_goal_continuation": "Goal · 自動繼續執行",
   "com_ui_continue": "繼續",
   "com_ui_continue_chat": "繼續此對話",
   "com_ui_continue_chat_error": "複製此對話時發生錯誤",

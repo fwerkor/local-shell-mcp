@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontekstvindue: {{0}} af brugte {{1}}-tokens ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Kontekstbrug: {{0}} brugte tokens",
   "com_ui_context_window": "Kontekstvindue",
+  "com_ui_goal_continuation": "Mål · Fortsætter automatisk",
   "com_ui_continue": "Fortsæt",
   "com_ui_continue_chat": "Fortsæt denne chat",
   "com_ui_continue_chat_error": "Der opstod en fejl under kopiering af denne samtale",

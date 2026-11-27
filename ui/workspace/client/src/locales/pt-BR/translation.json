@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Janela de contexto: {{0}} de {{1}} tokens usados ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Uso do contexto: {{0}} tokens usados",
   "com_ui_context_window": "Janela de contexto",
+  "com_ui_goal_continuation": "Objetivo · Continuando automaticamente",
   "com_ui_continue": "Continuar",
   "com_ui_continue_chat": "Continuar este chat",
   "com_ui_continue_chat_error": "Houve um erro ao copiar esta conversa",

@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontekstikaken: kasutatud {{1}} žetoonidest {{0}} ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Kontekstikasutus: kasutatud {{0}} märke",
   "com_ui_context_window": "Konteksti aken",
+  "com_ui_goal_continuation": "Eesmärk · Automaatne jätkamine",
   "com_ui_continue": "Jätka",
   "com_ui_continue_chat": "Jätkake seda vestlust",
   "com_ui_continue_chat_error": "Selle vestluse kopeerimisel ilmnes viga",

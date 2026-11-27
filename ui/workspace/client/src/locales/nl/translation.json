@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Context venster: {{0}} of {{1}} tokens verbruikt ({{2}}%)",
   "com_ui_context_usage_label_unknown": "Context gebruik: {{0}} tokens verbruikt",
   "com_ui_context_window": "Context venster",
+  "com_ui_goal_continuation": "Doel · Automatisch doorgaan",
   "com_ui_continue": "Doorgaan",
   "com_ui_continue_chat": "Ga door met dit gesprek",
   "com_ui_continue_chat_error": "Er is een fout opgetreden bij het kopiëren van dit gesprek",

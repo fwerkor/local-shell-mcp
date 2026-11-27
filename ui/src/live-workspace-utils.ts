@@ -185,6 +185,7 @@ export function continuationCountdownState(
     status: string
     continuation_pending: boolean
     auto_continue_exhausted: boolean
+    continuation_driver?: string
     in_flight_calls?: number
     last_agent_activity: number
     execution_lease_s: number
@@ -194,7 +195,7 @@ export function continuationCountdownState(
   nowSeconds = Date.now() / 1000,
   revealAfterSeconds = 5 * 60,
 ): ContinuationCountdownState {
-  if (!plan || plan.status !== "active" || plan.continuation_pending || plan.auto_continue_exhausted || Number(plan.in_flight_calls || 0) > 0) {
+  if (!plan || plan.status !== "active" || plan.continuation_driver === "chat" || plan.continuation_pending || plan.auto_continue_exhausted || Number(plan.in_flight_calls || 0) > 0) {
     return { visible: false, remainingSeconds: 0, idleSeconds: 0, progress: 0 }
   }
   const idleSeconds = Math.max(0, nowSeconds - Number(plan.last_agent_activity))

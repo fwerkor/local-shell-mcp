@@ -1229,6 +1229,7 @@
   "com_ui_context_usage_label": "Kontextfenster: {{0}} von {{1}} Tokens verwendet ({{2}} %)",
   "com_ui_context_usage_label_unknown": "Kontextnutzung: {{0}} Tokens verwendet",
   "com_ui_context_window": "Kontextfenster",
+  "com_ui_goal_continuation": "Ziel · Automatische Fortsetzung",
   "com_ui_continue": "Fortfahren",
   "com_ui_continue_chat": "Diesen Chat fortsetzen",
   "com_ui_continue_chat_error": "Beim Kopieren dieser Unterhaltung ist ein Fehler aufgetreten.",
