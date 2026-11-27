@@ -208,9 +208,14 @@ class GenerationStore:
             "memoryScope": "agent" if (agent or {}).get("memory_scope") == "agent" else "shared",
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
-            # Internal transactional deliveries (schedules, triggers, wakeups)
-            # and reserved child conversations are not interactive turns.
-            "askUserEnabled": _connection is None and trusted_new_conversation_id is None,
+            # Scheduled chats can pause for an explicit Ask User or tool approval
+            # just like normal chats. External triggers and child deliveries cannot.
+            "askUserEnabled": (
+                trusted_new_conversation_id is None and (
+                    _connection is None or (isinstance(client_request_id, str)
+                                            and client_request_id.startswith("schedule:"))
+                )
+            ),
             "webSearchEnabled": _web_search_requested(agent, payload),
             'manualCompaction': manual_compaction,
             "artifactsMode": artifact_mode(payload, agent),
