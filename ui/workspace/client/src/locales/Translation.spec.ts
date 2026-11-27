@@ -46,6 +46,22 @@ describe('WebUI locales', () => {
     }
   });
 
+  it.each([
+    ['en', 'Tags', 'No tags yet', 'No tags match your search', 'Bookmarks'],
+    ['zh-Hans', '标签', '还没有标签', '没有标签符合您的搜索', '书签'],
+    ['zh-Hant', '標籤', '尚無標籤', '沒有符合搜尋條件的標籤', '書籤'],
+  ])(
+    'distinguishes conversation tags from message bookmarks in %s',
+    async (locale, tags, empty, noMatch, bookmarks) => {
+      await changeLanguageSafely(locale);
+      expect(i18n.t('com_ui_bookmarks')).toBe(tags);
+      expect(i18n.t('com_ui_no_bookmarks_title')).toBe(empty);
+      expect(i18n.t('com_ui_no_bookmarks_match')).toBe(noMatch);
+      expect(i18n.t('com_shortcut_open_bookmarks')).toBe(tags);
+      expect(i18n.t('com_ui_message_bookmarks')).toBe(bookmarks);
+    },
+  );
+
   it('sets RTL direction when loading Arabic', async () => {
     await changeLanguageSafely('ar');
     expect(document.documentElement.dir).toBe('rtl');
