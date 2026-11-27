@@ -20,7 +20,6 @@ import ToolDialogs from './ToolDialogs';
 import FileSearch from './FileSearch';
 import Artifacts from './Artifacts';
 import WebSearch from './WebSearch';
-import Memory from './Memory';
 import store from '~/store';
 
 interface BadgeRowProps {
@@ -331,7 +330,10 @@ function BadgeRow({
     >
       <div ref={containerRef} className="relative flex flex-wrap items-center gap-2">
         {(showTools || showEphemeralBadges) && (
-          <ToolsDropdown showEphemeralTools={showEphemeralBadges === true} />
+          <ToolsDropdown
+            showEphemeralTools={showEphemeralBadges === true}
+            showMemory={showTools === true}
+          />
         )}
         {tempBadges.map((badge, index) => (
           <React.Fragment key={badge.id}>
@@ -372,7 +374,6 @@ function BadgeRow({
             />
           </div>
         )}
-        {showTools && <Memory />}
         {showEphemeralBadges === true && (
           <>
             <WebSearch />
