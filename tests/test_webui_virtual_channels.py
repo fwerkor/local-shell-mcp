@@ -295,11 +295,12 @@ async def test_virtual_routes_preserve_only_originating_signed_metadata(pool, mo
     from local_shell_mcp.webui.providers import ModelThought, ModelToolCall
 
     primary_scope = _scope(provider_config("Primary", "flash-free"))
-    config = replace(provider_config("Pool", "alias"), virtual_session=("owner", "session"))
+    config = replace(provider_config("Pool", "alias"), virtual_session=("owner", "session"), session_id="stable-session")
     seen = []
 
     async def stream(actual, messages, **kwargs):
         seen.append(actual.model)
+        assert actual.session_id == "stable-session"
         assert messages[0]["role"] == "user"
         assert messages[1]["reasoning"] == [{"type": "thinking", "route_scope": primary_scope}]
         yield ModelThought("thinking", text="thought", provider_data={"signature": "signed"})
