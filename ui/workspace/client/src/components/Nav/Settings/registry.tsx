@@ -1,4 +1,4 @@
-import { KeyboardShortcutsSettings } from '../KeyboardShortcutsDialog';
+import KeyboardShortcutsSettings from './KeyboardShortcuts';
 import ModelProviders from './ModelProviders';
 import ControllerSettings from './ControllerSettings';
 import { SettingsTabValues } from 'librechat-data-provider';

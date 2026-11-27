@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { RecoilRoot } from 'recoil';
-import { KeyboardShortcutsSettings } from './KeyboardShortcutsDialog';
+import KeyboardShortcutsSettings from './KeyboardShortcuts';
 import { useShortcutBindings } from '~/hooks/useKeyboardShortcuts';
 
 jest.mock('~/hooks', () => ({

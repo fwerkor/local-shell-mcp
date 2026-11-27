@@ -20,6 +20,7 @@ import useSidebarToggle from '~/hooks/Nav/useSidebarToggle';
 import { useArchiveConvoMutation } from '~/data-provider';
 import { useHasAccess, useLocalize } from '~/hooks';
 import useNewChat from '~/hooks/Chat/useNewChat';
+import { settingsTabState } from '~/components/Nav/Settings/state';
 import store from '~/store';
 
 const isMac = isMacPlatform;
@@ -494,7 +495,7 @@ export function useShortcutActions(): ShortcutAction[] {
   const isSubmitting = useRecoilValue(store.isSubmittingFamily(0));
   const sidebarExpanded = useRecoilValue(store.sidebarExpanded);
   const { setSidebarOpen, toggleSidebar } = useSidebarToggle();
-  const setShowShortcutsDialog = useSetRecoilState(store.showShortcutsDialog);
+  const setSettingsTab = useSetRecoilState(settingsTabState);
   const setIsTemporary = useSetRecoilState(store.isTemporary);
   const setDeleteTarget = useSetRecoilState(store.keyboardDeleteTarget);
   const hasAccessToTemporaryChat = useHasAccess({
@@ -505,9 +506,9 @@ export function useShortcutActions(): ShortcutAction[] {
   const archiveMutation = useArchiveConvoMutation();
 
   const handleShowShortcuts = useCallback(() => {
-    setShowShortcutsDialog((prev) => !prev);
+    setSettingsTab('shortcuts');
     return true;
-  }, [setShowShortcutsDialog]);
+  }, [setSettingsTab]);
 
   const handleNewChat = useCallback(() => {
     startNewChat();
@@ -1016,7 +1017,6 @@ export function useShortcutBindings(): {
 export default function useKeyboardShortcuts() {
   const actions = useShortcutActions();
   const overrides = useRecoilValue(store.customShortcuts);
-  const shortcutsDialogOpen = useRecoilValue(store.showShortcutsDialog);
   const shortcutsEnabled = useRecoilValue(store.shortcutsEnabled);
 
   const actionMap = useMemo(() => new Map(actions.map((action) => [action.id, action])), [actions]);
@@ -1060,11 +1060,7 @@ export default function useKeyboardShortcuts() {
 
       const target = e.target as HTMLElement | null;
 
-      if (shortcutsDialogOpen) {
-        if (matchedId !== 'showShortcuts') {
-          return;
-        }
-      } else if (anyModalOpen() || isWithinOpenMenu(target)) {
+      if (anyModalOpen() || isWithinOpenMenu(target)) {
         return;
       }
 
@@ -1091,7 +1087,7 @@ export default function useKeyboardShortcuts() {
         e.preventDefault();
       }
     },
-    [actionMap, bindingMap, shortcutsDialogOpen, shortcutsEnabled],
+    [actionMap, bindingMap, shortcutsEnabled],
   );
 
   useEffect(() => {

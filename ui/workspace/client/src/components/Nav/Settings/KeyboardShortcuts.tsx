@@ -1,21 +1,14 @@
-import { memo, useCallback, useId, useMemo, useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { useCallback, useId, useMemo, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { useRecoilState } from 'recoil';
-import {
-  Label,
-  Switch,
-  OGDialog,
-  OGDialogClose,
-  OGDialogTitle,
-  OGDialogContent,
-} from '@librechat/client';
+import { Label, Switch } from '@librechat/client';
 import type { ShortcutActionId, ShortcutBindingInfo } from '~/hooks/useKeyboardShortcuts';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import type { ShortcutBinding } from '~/utils/shortcuts';
-import { RecorderInfo, RecorderPill, useShortcutRecorder } from './ShortcutRecorder';
+import { RecorderInfo, RecorderPill, useShortcutRecorder } from '../ShortcutRecorder';
 import { isMac, useShortcutBindings } from '~/hooks/useKeyboardShortcuts';
 import { bindingDisplayKeys } from '~/utils/shortcuts';
-import ShortcutKeyCombo from './ShortcutKeyCombo';
+import ShortcutKeyCombo from '../ShortcutKeyCombo';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 import store from '~/store';
@@ -234,7 +227,6 @@ function ShortcutGroup({
 }
 
 function PanelsSection({
-  embedded,
   bindings,
   editingId,
   disabled,
@@ -245,7 +237,6 @@ function PanelsSection({
   setBinding,
   resetBinding,
 }: {
-  embedded: boolean;
   bindings: ShortcutBindingInfo[];
   editingId: ShortcutActionId | null;
   disabled: boolean;
@@ -258,12 +249,7 @@ function PanelsSection({
 }) {
   const localize = useLocalize();
   return (
-    <section
-      className={cn(
-        'mb-6 border-t border-border-light pt-4 last:mb-0',
-        !embedded && 'md:col-span-2 lg:col-span-1 lg:border-t-0 lg:pt-0',
-      )}
-    >
+    <section className="mb-6 border-t border-border-light pt-4 last:mb-0">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 px-2">
         <h3 className="text-[12px] font-medium text-text-secondary">
           {localize('com_shortcut_group_panels')}
@@ -272,9 +258,7 @@ function PanelsSection({
           {localize('com_shortcut_group_panels_hint')}
         </p>
       </div>
-      <div
-        className={cn('grid grid-cols-1 gap-x-10', !embedded && 'md:grid-cols-2 lg:grid-cols-1')}
-      >
+      <div className="flex flex-col">
         {bindings.map((info) => (
           <ShortcutRow
             key={info.id}
@@ -294,7 +278,7 @@ function PanelsSection({
   );
 }
 
-export function KeyboardShortcutsSettings({ embedded = true }: { embedded?: boolean }) {
+export default function KeyboardShortcutsSettings() {
   const localize = useLocalize();
   const { bindings, bindingMap, setBinding, resetBinding, resetAll } = useShortcutBindings();
   const [enabled, setEnabled] = useRecoilState(store.shortcutsEnabled);
@@ -346,12 +330,7 @@ export function KeyboardShortcutsSettings({ embedded = true }: { embedded?: bool
 
   return (
     <>
-      <div
-        className={cn(
-          'flex items-center justify-between gap-4 border-b border-border-light pb-3',
-          !embedded && 'mt-4 px-7',
-        )}
-      >
+      <div className="flex items-center justify-between gap-4 border-b border-border-light pb-3">
         <div className="min-w-0">
           <Label
             htmlFor={enableSwitchId}
@@ -377,51 +356,13 @@ export function KeyboardShortcutsSettings({ embedded = true }: { embedded?: bool
         />
       </div>
 
-      <div className={cn(!embedded && 'flex-1 overflow-y-auto')}>
-        <div
-          className={cn(
-            'grid grid-cols-1 gap-x-10 pb-2 pt-5',
-            !embedded && 'px-5 md:grid-cols-2 lg:grid-cols-3',
-          )}
-        >
-          <div>
-            {leftColumn.map(([groupKey, items]) => (
-              <ShortcutGroup
-                key={groupKey}
-                groupKey={groupKey}
-                bindings={items}
-                editingId={editingId}
-                disabled={!enabled}
-                onStartEdit={handleStartEdit}
-                onStopEdit={handleStopEdit}
-                bindingMap={bindingMap}
-                getActionLabel={getActionLabel}
-                setBinding={setBinding}
-                resetBinding={resetBinding}
-              />
-            ))}
-          </div>
-          <div>
-            {rightColumn.map(([groupKey, items]) => (
-              <ShortcutGroup
-                key={groupKey}
-                groupKey={groupKey}
-                bindings={items}
-                editingId={editingId}
-                disabled={!enabled}
-                onStartEdit={handleStartEdit}
-                onStopEdit={handleStopEdit}
-                bindingMap={bindingMap}
-                getActionLabel={getActionLabel}
-                setBinding={setBinding}
-                resetBinding={resetBinding}
-              />
-            ))}
-          </div>
-          {panelEntries.length > 0 && (
-            <PanelsSection
-              embedded={embedded}
-              bindings={panelEntries}
+      <div className="flex flex-col gap-6 pb-2 pt-5">
+        <div>
+          {leftColumn.map(([groupKey, items]) => (
+            <ShortcutGroup
+              key={groupKey}
+              groupKey={groupKey}
+              bindings={items}
               editingId={editingId}
               disabled={!enabled}
               onStartEdit={handleStartEdit}
@@ -431,17 +372,42 @@ export function KeyboardShortcutsSettings({ embedded = true }: { embedded?: bool
               setBinding={setBinding}
               resetBinding={resetBinding}
             />
-          )}
+          ))}
         </div>
+        <div>
+          {rightColumn.map(([groupKey, items]) => (
+            <ShortcutGroup
+              key={groupKey}
+              groupKey={groupKey}
+              bindings={items}
+              editingId={editingId}
+              disabled={!enabled}
+              onStartEdit={handleStartEdit}
+              onStopEdit={handleStopEdit}
+              bindingMap={bindingMap}
+              getActionLabel={getActionLabel}
+              setBinding={setBinding}
+              resetBinding={resetBinding}
+            />
+          ))}
+        </div>
+        {panelEntries.length > 0 && (
+          <PanelsSection
+            bindings={panelEntries}
+            editingId={editingId}
+            disabled={!enabled}
+            onStartEdit={handleStartEdit}
+            onStopEdit={handleStopEdit}
+            bindingMap={bindingMap}
+            getActionLabel={getActionLabel}
+            setBinding={setBinding}
+            resetBinding={resetBinding}
+          />
+        )}
       </div>
 
       {hasAnyCustom && (
-        <footer
-          className={cn(
-            'flex shrink-0 justify-end border-t border-border-light py-3',
-            !embedded && 'px-7',
-          )}
-        >
+        <footer className="flex shrink-0 justify-end border-t border-border-light py-3">
           <button
             type="button"
             onClick={resetAll}
@@ -454,30 +420,3 @@ export function KeyboardShortcutsSettings({ embedded = true }: { embedded?: bool
     </>
   );
 }
-
-function KeyboardShortcutsDialog() {
-  const localize = useLocalize();
-  const [open, setOpen] = useRecoilState(store.showShortcutsDialog);
-  return (
-    <OGDialog open={open} onOpenChange={setOpen}>
-      <OGDialogContent
-        showCloseButton={false}
-        className="flex max-h-[85vh] w-11/12 max-w-3xl flex-col overflow-hidden p-0 lg:max-w-5xl"
-      >
-        <header className="flex shrink-0 items-center justify-between gap-4 px-7 pt-6">
-          <OGDialogTitle className="text-[16px] font-semibold text-text-primary">
-            {localize('com_shortcut_keyboard_shortcuts')}
-          </OGDialogTitle>
-          <OGDialogClose className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary dark:hover:bg-surface-secondary-alt">
-            <X className="h-4 w-4" />
-            <span className="sr-only">{localize('com_ui_close')}</span>
-          </OGDialogClose>
-        </header>
-
-        {open && <KeyboardShortcutsSettings embedded={false} />}
-      </OGDialogContent>
-    </OGDialog>
-  );
-}
-
-export default memo(KeyboardShortcutsDialog);
