@@ -57,6 +57,7 @@ APP_ONLY_TOOL_NAMES = {
 }
 
 REMOTE_DEPENDENT_TOOL_NAMES = {
+    "remote_list",
     "remote_manage",
     "remote_transfer",
 }

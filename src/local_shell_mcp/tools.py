@@ -4573,6 +4573,11 @@ def _register_browser_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnn
 def _register_remote_admin_tools(mcp: FastMCP) -> None:
     remote_meta = _oauth_meta(["remote:use"])
 
+    @mcp.tool(structured_output=True, meta=remote_meta, annotations=ToolAnnotations(readOnlyHint=True))
+    async def remote_list(verbose: bool = False) -> ToolResult:
+        """List registered remote workers, including status and capabilities. Set verbose=true for diagnostic telemetry."""
+        return await _tool_call(lambda: remote_manager().list_machines())
+
     @mcp.tool(structured_output=True, meta=remote_meta)
     async def remote_manage(
         action: str,
@@ -4582,17 +4587,14 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
         max_uses: int = 1,
         machine: str | None = None,
         new_name: str | None = None,
-        verbose: bool = False,
     ) -> ToolResult:
-        """Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved. For list, verbose=true includes diagnostic telemetry."""
+        """Manage remote workers with action=invite, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved. Use remote_list to discover workers."""
 
         async def run() -> Any:
             manager = remote_manager()
             normalized = action.strip().lower()
             if normalized == "invite":
                 return await manager.create_invite(name, workdir, ttl_s, max_uses=max_uses)
-            if normalized == "list":
-                return manager.list_machines()
             if normalized == "reset":
                 if not machine:
                     raise ValueError("machine is required for action=reset")
@@ -4607,7 +4609,7 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
                 if not new_name:
                     raise ValueError("new_name is required for action=rename")
                 return manager.rename(machine, new_name)
-            raise ValueError("action must be one of: invite, list, reset, revoke, rename")
+            raise ValueError("action must be one of: invite, reset, revoke, rename")
 
         return await _tool_call(run)
 

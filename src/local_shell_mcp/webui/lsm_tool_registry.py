@@ -18,6 +18,7 @@ from .machine_permissions import (
     MachineReadOnlyError,
     agent_access_policy,
     authorize_machine_action,
+    effective_machine_access,
     resolve_access,
     resolve_agent_ceiling,
     scheduled_agent_permissions,
@@ -40,7 +41,7 @@ _SEPARATE_TOOLS = frozenset({
 # Explicit classification is intentional: MCP safety annotations are hints,
 # not an authorization contract. New native tools stay denied until audited.
 _READ_TOOLS = frozenset({
-    "environment_get", "skill_list", "skill_load", "skill_read",
+    "remote_list", "environment_get", "skill_list", "skill_load", "skill_read",
     "shell_read", "shell_list", "job_list", "job_get", "job_tail",
     "file_list", "file_tree", "file_glob", "file_grep", "file_read",
     "image_view", "gui_list", "gui_state", "link_list", "secret_scan",
@@ -61,7 +62,7 @@ _ADDITIONAL_SCOPES = {
     "browser_session": "browser:use", "browser_snapshot": "browser:use",
     "browser_act": "browser:use", "browser_run_script": "browser:use",
     "link_create": "file:share", "link_list": "file:share", "link_revoke": "file:share",
-    "mcp_manage": "shell:execute", "remote_manage": "remote:use",
+    "mcp_manage": "shell:execute", "remote_manage": "remote:use", "remote_list": "remote:use",
 }
 _AUTHORIZATION_RECHECK_SECONDS = 0.5
 
@@ -116,7 +117,7 @@ def _operation(tool: Any, arguments: dict | None = None) -> str:
 
 
 def _targets(tool: Any, arguments: dict[str, Any]) -> list[str]:
-    if getattr(tool, "name", None) in _AGENT_CONTROL:
+    if getattr(tool, "name", None) in _AGENT_CONTROL | {"remote_list"}:
         return []
     if getattr(tool, "name", None) in _CONTROLLER_MANAGEMENT:
         return ["local"]
@@ -177,6 +178,14 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
         if tool.name in _AGENT_CONTROL:
             # No local/remote machine grant or shell OAuth scope is needed.
             pass
+        elif tool.name == "remote_list":
+            from ..settings import get_settings
+
+            if not get_settings().remote_enabled or not any(
+                _can_authorize(owner, conversation_id, machine, "read", scopes, expires, agent_only=agent_only)
+                for machine, level in policy.items() if level in {"read", "write"}
+            ):
+                continue
         elif tool.name in _CONTROLLER_MANAGEMENT:
             if not _agent_allows(policy, "local", "write") or not _can_authorize(
                 owner, conversation_id, "local", "write", scopes, expires, agent_only=agent_only,
@@ -290,6 +299,27 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     agent_only = (scheduled_agent_permissions(_repo().database, owner, run_id, agent_id)
                   if run_id and agent_id else False)
 
+    def remote_list_access():
+        from ..settings import get_settings
+        from .agents import AgentRepository
+        from .routes import _repo
+
+        if "remote:use" not in granted_scopes:
+            raise PermissionError("remote:use permission is required")
+        if not get_settings().remote_enabled:
+            raise PermissionError("Remote machine access is disabled")
+        repo = _repo()
+        agent = AgentRepository(repo.database).get(owner, agent_id) if agent_id else None
+        if agent_id and agent is None:
+            raise PermissionError("Agent no longer exists")
+        access, _ = effective_machine_access(
+            owner, permission_conversation_id, agent=agent,
+            scopes=granted_scopes, expires=grant_expires, repo=repo, agent_only=agent_only,
+        )
+        if not any(level in {"read", "write"} for level in access.values()):
+            raise PermissionError("No readable machines are authorized")
+        return access
+
     def check_authorization():
         if run_id is not None and durable_tasks.is_run_cancelled(run_id):
             raise PermissionError("Agent generation has been cancelled")
@@ -323,7 +353,9 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
                         if required != "read" and agent_policy.get(machine, default) == "read":
                             raise MachineReadOnlyError(f"Machine {machine} is read-only for this Agent")
                         raise PermissionError(f"Agent has no {required} access to machine {machine}")
-        if tool.name in _AGENT_CONTROL:
+        if tool.name == "remote_list":
+            remote_list_access()
+        elif tool.name in _AGENT_CONTROL:
             # Session ownership is still checked; this bypasses machine ACLs only.
             if _repo().conversation(owner, conversation_id) is None:
                 raise KeyError("Conversation not found")
@@ -397,25 +429,24 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
         )
         if run_id is not None and json.loads(result).get("ok", True) is not False:
             durable_tasks.mark_stopped(owner, conversation_id, tool.name, arguments)
-        if tool.name == "remote_manage" and arguments.get("action", "").strip().lower() == "list":
-            from .agents import AgentRepository
-            from .machine_permissions import effective_machine_access
-
+        if tool.name == "remote_list":
+            access = remote_list_access()
             payload = json.loads(result)
             if isinstance(payload, dict) and payload.get("ok", True):
                 data = payload.get("data")
                 if isinstance(data, dict) and isinstance(data.get("machines"), list):
-                    repo = _repo()
-                    agent = AgentRepository(repo.database).get(owner, agent_id) if agent_id else None
-                    if agent_id and agent is None:
-                        agent = {"machine_default_permission": "none"}
-                    access, _ = effective_machine_access(
-                        owner, permission_conversation_id, agent=agent,
-                        scopes=granted_scopes, expires=grant_expires, repo=repo, agent_only=agent_only,
-                    )
-                    for row in data["machines"]:
-                        if isinstance(row, dict):
-                            row["effective_access"] = access.get(row.get("name"), "none")
+                    rows = [
+                        {**row, "effective_access": access[row["name"]]}
+                        for row in data["machines"]
+                        if isinstance(row, dict) and isinstance(row.get("name"), str)
+                        and access.get(row["name"]) in {"read", "write"}
+                    ]
+                    data["machines"] = rows
+                    data["counts"] = {
+                        "online": sum(row.get("status") == "online" for row in rows),
+                        "offline": sum(row.get("status") == "offline" for row in rows),
+                        "total": len(rows),
+                    }
                     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         return result
     except PermissionError:

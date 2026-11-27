@@ -338,7 +338,10 @@ async def test_calibration_storage_failure_does_not_abort_model_answer(tmp_path,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('finish', ['length', 'max_tokens', 'MAX_TOKENS', 'max_output_tokens'])
-async def test_summary_refuses_provider_truncation(tmp_path, finish):
+async def test_summary_refuses_provider_truncation(tmp_path, finish, monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0,) * 8)
     db = SQLiteDatabase(tmp_path / 'state')
     run, _ = GenerationStore(db).begin('alice', {'text': 'Summarize'})
     profile = ProviderConfig('openai', 'model', 'https://provider.test', '')

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
+<!-- i18n-source-sha256: 0a505e16fea0b2b70ac808a4423986879615fe5f69be5ffbc4972372aa576f70 -->
 # Uzak workers
 
 Remote workers, `local-shell-mcp`’nin dışarıya HTTP(S) isteği gönderebilen ancak gelen SSH bağlantısı kabul edemeyen makineleri kontrol etmesini sağlar.
@@ -11,7 +11,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 1. `remote_manage(action="invite", ...)` ile davet oluşturun.
 2. Oluşturulan komutu uzak makinede çalıştırın.
-3. `remote_manage(action="list")` ile kaydı doğrulayın.
+3. `remote_list()` ile kaydı doğrulayın.
 4. `machine="<worker-name>"` ile normal araçları çağırın; örneğin `environment_get`, `run_shell`, `file_read` veya `browser_run_script`.
 5. `remote_transfer` ile izlenen controller-to-worker, worker-to-controller veya worker-to-worker dosya/dizin aktarımı başlatın. `job_list` ya da `job_tail` ile takip edin; `job_stop` veya `job_retry` ile durdurun ya da yeniden deneyin.
 6. `remote_manage(action="rename", ...)` veya `remote_manage(action="revoke", ...)` ile worker’ı yeniden adlandırın veya iptal edin.

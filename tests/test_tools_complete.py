@@ -328,7 +328,8 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "browser_act": {"session_id": "missing", "actions": [{"action": "wait"}]},
         "browser_run_script": {"script": "print(1)"},
         "audit_tail": {},
-        "remote_manage": {"action": "list"},
+        "remote_list": {},
+        "remote_manage": {"action": "reset", "machine": "node"},
     }
     assert set(local_cases) == set(mcp._tool_manager._tools)
     for name, kwargs in local_cases.items():

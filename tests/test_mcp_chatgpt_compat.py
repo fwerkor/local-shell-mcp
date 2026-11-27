@@ -221,6 +221,8 @@ async def test_tool_annotations_are_conservative_and_mode_independent(tmp_path, 
     assert tools["file_delete"].annotations.destructiveHint is True
     assert tools["remote_transfer"].annotations.destructiveHint is True
     assert tools["remote_transfer"].annotations.openWorldHint is True
+    assert tools["remote_list"].annotations.readOnlyHint is True
+    assert tools["remote_list"].annotations.destructiveHint is False
     assert tools["remote_manage"].annotations.destructiveHint is True
     assert tools["remote_manage"].annotations.openWorldHint is True
     assert tools["file_write"].annotations.openWorldHint is True

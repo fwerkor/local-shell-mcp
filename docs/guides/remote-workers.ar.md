@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
+<!-- i18n-source-sha256: 0a505e16fea0b2b70ac808a4423986879615fe5f69be5ffbc4972372aa576f70 -->
 # Workers بعيدة
 
 تسمح remote workers لـ `local-shell-mcp` بالتحكم في أجهزة تستطيع إرسال طلبات HTTP(S) صادرة لكنها لا تستطيع قبول اتصالات SSH واردة.
@@ -11,7 +11,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 1. أنشئ دعوة باستخدام `remote_manage(action="invite", ...)`.
 2. شغّل الأمر المُنشأ على الجهاز البعيد.
-3. أكد التسجيل باستخدام `remote_manage(action="list")`.
+3. أكد التسجيل باستخدام `remote_list()`.
 4. استدعِ الأدوات العادية مع `machine="<worker-name>"`، مثل `environment_get` أو `run_shell` أو `file_read` أو `browser_run_script`.
 5. استخدم `remote_transfer` لبدء نقل متتبع controller-to-worker أو worker-to-controller أو worker-to-worker لملف أو مجلد. تابعه عبر `job_list` أو `job_tail`، وأوقفه أو أعده عبر `job_stop` أو `job_retry`.
 6. أعد تسمية workers أو ألغها عبر `remote_manage(action="rename", ...)` أو `remote_manage(action="revoke", ...)`.

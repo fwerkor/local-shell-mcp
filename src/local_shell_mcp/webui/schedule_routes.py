@@ -652,8 +652,8 @@ async def _dispatch(occurrence, database):
     from .generation_routes import _generation_store, _start_task
     from .generations import GenerationConflict
     from .machine_permissions import effective_machine_access
-    from .misc_routes import effective_features
     from .memory_protection import configured_filters
+    from .misc_routes import effective_features
     from .providers import provider_config, selected_provider
     from .storage import WorkspaceRepository
 

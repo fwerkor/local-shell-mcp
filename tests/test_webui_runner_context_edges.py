@@ -171,7 +171,10 @@ async def test_summary_skips_manual_disabled_and_handles_update_prompt(runtime):
 
 
 @pytest.mark.asyncio
-async def test_summarization_invalid_tool_reply_is_not_checkpointed(runtime):
+async def test_summarization_invalid_tool_reply_is_not_checkpointed(runtime, monkeypatch):
+    from local_shell_mcp.webui import agent_runtime
+
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0,) * 8)
     db, store, repo, profile, runner = runtime
 
     async def tool_instead_of_text(*args, **kwargs):

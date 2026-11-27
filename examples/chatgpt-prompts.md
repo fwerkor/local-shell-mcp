@@ -14,7 +14,7 @@ Use local-shell-mcp. Open `https://example.com` with Playwright, save a screensh
 
 ## One-command remote worker onboarding
 
-Use local-shell-mcp. Call `remote_manage(action="invite", name="npu-4card", workdir="/home/cyh/FrameDiff")`. Show me only the pasteable join command and then, after I say it has run, call `remote_manage(action="list")` to confirm it is online.
+Use local-shell-mcp. Call `remote_manage(action="invite", name="npu-4card", workdir="/home/cyh/FrameDiff")`. Show me only the pasteable join command and then, after I say it has run, call `remote_list()` to confirm it is online.
 
 ## Remote machine diagnostics
 
