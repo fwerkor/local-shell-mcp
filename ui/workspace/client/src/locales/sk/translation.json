@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimálna veľkosť 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Vlastný nástroj",
   "com_agents_mcp_trust_subtext": "Vlastné konektory nie sú overené LSM",
-  "com_agents_memory_info": "Ak je aktivovaný, agent môže počas konverzácie ukladať, aktualizovať a odstraňovať spomienky o používateľovi pomocou nástrojov set_memory a delete_memory.",
+  "com_agents_memory_info": "Ak je aktivovaný, agent môže počas konverzácie ukladať, aktualizovať a odstraňovať spomienky o používateľovi pomocou nástrojov set_memory.",
   "com_agents_memory_scope": "Udržujte spomienky pre tohto agenta oddelené",
   "com_agents_memory_scope_info": "Keď je aktivovaný, tento agent číta a zapisuje svoje vlastné spomienky, izolované od vašich zdieľaných spomienok a od ostatných agentov. Tomuto agentovi sa nezobrazujú existujúce zdieľané spomienky.",
   "com_agents_missing_name": "Pred vytvorením agenta zadajte meno.",

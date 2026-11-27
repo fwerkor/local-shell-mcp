@@ -101,13 +101,12 @@ def test_batch_answers_resume_after_restart_without_losing_question_ids(tmp_path
         recreated.answer_question("alice", job.run_id, "action", {"answers": {"file": "a", "format": "json"}})
 
 
-async def test_original_catalog_is_available_without_machine_grants_and_is_optional(tmp_path, monkeypatch):
+async def test_original_catalog_is_available_without_machine_grants_and_questions_default_on(tmp_path, monkeypatch):
     import httpx
     from starlette.applications import Starlette
 
     from local_shell_mcp.settings import get_settings
     from local_shell_mcp.webui import agent_routes, generation_routes
-    from local_shell_mcp.webui.ask_user_tools import ask_user_requested
     from local_shell_mcp.webui.providers import ProviderConfig
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -129,19 +128,21 @@ async def test_original_catalog_is_available_without_machine_grants_and_is_optio
             assert (await client.get("/api/agents/tools/web_fetch/auth")).status_code == 404
             assert (await client.get("/api/agents/tools/ask_user_question/auth")).json() == {"authenticated": True}
             assert (await client.get("/api/agents/tools/unknown/auth")).status_code == 404
-            for enabled in [False, True]:
+            for legacy in ({}, {"ask_user_question": False}, {"ask_user_question": True}):
                 result = await client.post("/api/agents/chat", json={"text": "Choose", "endpoint": "openAI",
-                    "ephemeralAgent": {"ask_user_question": enabled}})
+                    "ephemeralAgent": legacy})
                 assert result.status_code == 202
                 store = generation_routes._generation_store()
                 cid = result.json()["conversationId"]
                 with store.database.connect() as db:
                     state = json.loads(db.execute("SELECT state FROM runs WHERE conversation_id=?", (cid,)).fetchone()[0])
-                assert state["askUserEnabled"] is enabled
-            assert launched == [False, True]
-            assert not ask_user_requested({"tools": []}, {"ephemeralAgent": {"ask_user_question": True}})
-            assert ask_user_requested({"tools": ["ask_user_question"]}, {})
-            assert not ask_user_requested(None, {"ephemeralAgent": {"ask_user_question": "true"}})
-            assert not ask_user_requested(None, {})
+                assert state["askUserEnabled"] is True
+            assert launched == [True, True, True]
+
+            with store.database.connect() as db:
+                internal, _ = store.begin("local", {"text": "Scheduled", "clientRequestId": "schedule:test"},
+                                          _connection=db)
+                state = json.loads(db.execute("SELECT state FROM runs WHERE id=?", (internal.run_id,)).fetchone()[0])
+                assert state["askUserEnabled"] is False
     finally:
         get_settings.cache_clear()

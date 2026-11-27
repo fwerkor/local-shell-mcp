@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Taille minimale de 128 x 128 pixels",
   "com_agents_mcp_name_placeholder": "Outil personnalisé",
   "com_agents_mcp_trust_subtext": "Connecteurs personnalisés non vérifiés par LSM",
-  "com_agents_memory_info": "Lorsqu'il est activé, l'agent peut enregistrer, mettre à jour et supprimer des souvenirs sur l'utilisateur pendant la conversation à l'aide des outils set_memory et delete_memory.",
+  "com_agents_memory_info": "Lorsqu'il est activé, l'agent peut enregistrer, mettre à jour et supprimer des souvenirs sur l'utilisateur pendant la conversation à l'aide des outils set_memory.",
   "com_agents_memory_scope": "Gardez les souvenirs séparés pour cet agent",
   "com_agents_memory_scope_info": "Lorsqu'il est activé, cet agent lit et écrit ses propres mémoires, isolés de vos mémoires partagées et des autres agents. Les mémoires partagées existantes ne sont pas affichées à cet agent.",
   "com_agents_missing_name": "Merci de renseigner un nom avant de créer un agent.",

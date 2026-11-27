@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimum formaat 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Aangepast hulpmiddel",
   "com_agents_mcp_trust_subtext": "Aangepaste verbindingen zijn niet geverifieerd door LSM",
-  "com_agents_memory_info": "Indien ingeschakeld, kan de agent tijdens het gesprek herinneringen over de gebruiker opslaan, bijwerken en verwijderen met behulp van de tools set_memory en delete_memory.",
+  "com_agents_memory_info": "Indien ingeschakeld, kan de agent tijdens het gesprek herinneringen over de gebruiker opslaan, bijwerken en verwijderen met behulp van de tools set_memory.",
   "com_agents_memory_scope": "Houd herinneringen gescheiden voor deze agent",
   "com_agents_memory_scope_info": "Indien ingeschakeld, leest en schrijft deze agent zijn eigen herinneringen, geïsoleerd van uw gedeelde herinneringen en van andere agenten. Bestaande gedeelde herinneringen worden niet aan deze agent getoond.",
   "com_agents_missing_name": "Voer een naam in voordat je een agent aanmaakt",

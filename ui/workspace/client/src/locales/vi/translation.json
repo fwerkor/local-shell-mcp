@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Kích thước tối thiểu 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Công cụ tùy chỉnh",
   "com_agents_mcp_trust_subtext": "Các kết nối tùy chỉnh LSM chưa xác minh",
-  "com_agents_memory_info": "Khi được bật, tác nhân có thể lưu, cập nhật và xóa ký ức về người dùng trong cuộc trò chuyện bằng cách sử dụng công cụ set_memory và delete_memory.",
+  "com_agents_memory_info": "Khi được bật, tác nhân có thể lưu, cập nhật và xóa ký ức về người dùng trong cuộc trò chuyện bằng cách sử dụng công cụ set_memory.",
   "com_agents_memory_scope": "Giữ kỷ niệm riêng cho đại lý này",
   "com_agents_memory_scope_info": "Khi được bật, tác nhân này sẽ đọc và ghi ký ức của chính nó, tách biệt với ký ức được chia sẻ của bạn và với các tác nhân khác. Những kỷ niệm được chia sẻ hiện tại không được hiển thị cho nhân viên hỗ trợ này.",
   "com_agents_missing_name": "Vui lòng nhập tên trước khi tạo đại lý.",

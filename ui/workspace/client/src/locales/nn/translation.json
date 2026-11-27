@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimumsstorleik 128 x 128 pikslar",
   "com_agents_mcp_name_placeholder": "Egendefinert verktøy",
   "com_agents_mcp_trust_subtext": "Eigendefinerte tilkoplingar er ikkje verifiserte av LSM.",
-  "com_agents_memory_info": "Når han er aktivert, kan agenten lagra, oppdatera og sletta minne om brukaren under samtalen ved å bruka verktøya set_memory og delete_memory",
+  "com_agents_memory_info": "Når han er aktivert, kan agenten lagra, oppdatera og sletta minne om brukaren under samtalen ved å bruka verktøya set_memory",
   "com_agents_memory_scope": "Hald minna skilt for denne agenten",
   "com_agents_memory_scope_info": "Når han er aktivert, les og skriv denne agenten sine eigne minne, isolert frå dine delte minne og frå andre agentar. Eksisterande delte minne blir ikkje viste til denne agenten",
   "com_agents_missing_name": "Ver venleg og skriv inn eit namn før du opprettar ein agent.",

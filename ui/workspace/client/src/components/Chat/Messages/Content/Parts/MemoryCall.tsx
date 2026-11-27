@@ -6,7 +6,7 @@ import ProgressText from '~/components/Chat/Messages/Content/ProgressText';
 import { toolPanelSpacingClassName } from '../disclosure';
 import useToolCallState from './useToolCallState';
 import { AttachmentGroup } from './Attachment';
-import parseJsonField from './parseJsonField';
+import parseJsonField, { areToolCallArgsComplete } from './parseJsonField';
 import MemoryInfo from '../MemoryInfo';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
@@ -19,7 +19,7 @@ export function isMemoryFailureOutput(toolName: MemoryToolName, output: string):
     return false;
   }
   return toolName === 'set_memory'
-    ? !/^(?:Memory set for key|Memory saved\b)/i.test(trimmed)
+    ? !/^(?:Memory set for key|Memory saved\b|Memory deleted for key)/i.test(trimmed)
     : !/^Memory deleted(?: for key|\.)/i.test(trimmed);
 }
 
@@ -47,9 +47,12 @@ export default function MemoryCall({
   onExpand?: () => void;
 }) {
   const localize = useLocalize();
-  const isSave = toolName === 'set_memory';
   const memoryKey = useMemo(() => parseJsonField(args, 'key'), [args]);
   const memoryValue = useMemo(() => parseJsonField(args, 'value'), [args]);
+  const isSave =
+    toolName === 'set_memory' &&
+    !(areToolCallArgsComplete(args) && memoryValue === '') &&
+    !/^Memory deleted for key/i.test(output);
   const hasPanel = !!memoryKey || !!memoryValue;
   const memoryErrors = useMemo(() => {
     const errors: MemoryArtifact[] = [];

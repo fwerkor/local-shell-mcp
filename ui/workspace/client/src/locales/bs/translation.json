@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minimalna veličina 128 x 128 px",
   "com_agents_mcp_name_placeholder": "Prilagođeni alat",
   "com_agents_mcp_trust_subtext": "LSM ne verificira prilagođene konektore",
-  "com_agents_memory_info": "Kada je omogućeno, agent može sačuvati, ažurirati i izbrisati uspomene o korisniku tokom razgovora koristeći set_memory i delete_memory alate.",
+  "com_agents_memory_info": "Kada je omogućeno, agent može sačuvati, ažurirati i izbrisati uspomene o korisniku tokom razgovora koristeći set_memory alate.",
   "com_agents_memory_scope": "Čuvajte uspomene odvojeno za ovog agenta",
   "com_agents_memory_scope_info": "Kada je omogućeno, ovaj agent čita i upisuje vlastita sjećanja, izolirana od vaših zajedničkih sjećanja i od drugih agenata. Postojeća zajednička sjećanja se ne prikazuju ovom agentu.",
   "com_agents_missing_name": "Molimo unesite ime prije kreiranja agenta.",

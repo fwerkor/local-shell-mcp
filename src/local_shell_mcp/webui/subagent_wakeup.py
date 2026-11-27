@@ -311,7 +311,6 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
     its deterministic generation id instead of creating another turn.
     """
     from .agents import AgentRepository
-    from .ask_user_tools import ask_user_requested
     from .machine_permissions import resolve_access
     from .providers import provider_config, selected_provider
     from .storage import WorkspaceRepository
@@ -531,7 +530,7 @@ async def process_wakeups(database: Any, *, dispatch: Callable | None = None) ->
                     await dispatch(owner, generation, profile, agent,
                                    native_file_tools=any(v in {"read", "write"} for v in policy.values()),
                                    write_tools=any(v == "write" for v in policy.values()),
-                                   ask_user_enabled=ask_user_requested(agent, {}),
+                                   ask_user_enabled=False,
                                    mcp_enabled=flags["mcp"] and (not ordinary_chat or bool(options.get("mcp_enabled"))),
                                    resume_history=None if new_turn else store.history(
                                        owner, generation.conversation_id,

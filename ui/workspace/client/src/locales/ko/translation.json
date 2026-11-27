@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "최소 크기 128 x 128 픽셀",
   "com_agents_mcp_name_placeholder": "커스텀 툴",
   "com_agents_mcp_trust_subtext": "사용자 지정 커넥터는 LSM에서 확인되지 않습니다.",
-  "com_agents_memory_info": "활성화되면 에이전트는 set_memory 및 delete_memory 도구를 사용하여 대화 중에 사용자에 대한 추억을 저장, 업데이트 및 삭제할 수 있습니다.",
+  "com_agents_memory_info": "활성화되면 에이전트는 set_memory 도구를 사용하여 대화 중에 사용자에 대한 추억을 저장, 업데이트 및 삭제할 수 있습니다.",
   "com_agents_memory_scope": "이 에이전트에 대한 메모리를 별도로 보관하세요.",
   "com_agents_memory_scope_info": "활성화되면 이 에이전트는 공유 메모리 및 다른 에이전트와 격리된 자체 메모리를 읽고 씁니다. 기존 공유 메모리는 이 에이전트에 표시되지 않습니다.",
   "com_agents_missing_name": "에이전트를 생성하기 전에 이름을 입력하십시오.",

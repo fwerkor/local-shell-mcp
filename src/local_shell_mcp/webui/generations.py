@@ -20,7 +20,6 @@ from typing import Any
 
 from .approval_runtime import ApprovalBatch, prepare_approval_batch
 from .artifact_prompts import artifact_mode
-from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
 from .sampling import validate_channel_sampling
@@ -206,9 +205,12 @@ class GenerationStore:
             "generationCreatedAt": stamp_ms,
             "clientRequestId": client_request_id,
             "generationProtocolVersion": protocol_version,
+            "memoryScope": "agent" if (agent or {}).get("memory_scope") == "agent" else "shared",
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
-            "askUserEnabled": ask_user_requested(agent, payload),
+            # Internal transactional deliveries (schedules, triggers, wakeups)
+            # and reserved child conversations are not interactive turns.
+            "askUserEnabled": _connection is None and trusted_new_conversation_id is None,
             "webSearchEnabled": _web_search_requested(agent, payload),
             'manualCompaction': manual_compaction,
             "artifactsMode": artifact_mode(payload, agent),
@@ -1110,61 +1112,6 @@ class GenerationStore:
                 (owner, run_id),
             )
             return [json.loads(row[0]) for row in rows]
-
-    def fading_tier(self, owner: str, run_id: str, agent_id: str,
-                    provider: str, model: str) -> dict | None:
-        """Read the source v2 hysteresis tier, owned and scoped by Agent/model."""
-        import hashlib
-
-        from .fading import is_fading_tier
-
-        key = hashlib.sha256((agent_id + '\x00' + provider + '\x00' + model).encode()).hexdigest()
-        with self.database.connect() as db:
-            row = db.execute('SELECT r.state,c.metadata FROM runs r '
-                             'JOIN conversations c ON c.id=r.conversation_id '
-                             'WHERE r.id=? AND c.owner=?', (run_id, owner)).fetchone()
-        if row is None:
-            raise KeyError('Generation not found or unauthorized')
-        state = json.loads(row['state'])
-        metadata = json.loads(row['metadata'])
-        for source in (state, metadata):
-            values = source.get('fadingTiers') if isinstance(source, dict) else None
-            if isinstance(values, dict) and key in values:
-                value = values[key]
-                return dict(value) if is_fading_tier(value) else None
-        return None
-
-    def record_fading_tier(self, owner: str, run_id: str, agent_id: str,
-                           provider: str, model: str, tier: dict) -> None:
-        """Save a bounded tier in the run and conversation in one transaction."""
-        import hashlib
-
-        from .fading import is_fading_tier
-
-        if not is_fading_tier(tier):
-            raise ValueError('Expected a valid source fading tier')
-        key = hashlib.sha256((agent_id + '\x00' + provider + '\x00' + model).encode()).hexdigest()
-        with self.database.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT r.state,c.id AS conversation_id,c.metadata '
-                             'FROM runs r JOIN conversations c ON c.id=r.conversation_id '
-                             "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner)).fetchone()
-            if row is None:
-                raise KeyError('Generation not active or unauthorized')
-            run_state = json.loads(row['state'])
-            conversation = json.loads(row['metadata'])
-            for state in (run_state, conversation):
-                entries = state.get('fadingTiers')
-                entries = dict(entries) if isinstance(entries, dict) else {}
-                entries[key] = dict(tier)
-                if len(entries) > 32:
-                    for stale in list(entries)[:-32]:
-                        entries.pop(stale, None)
-                state['fadingTiers'] = entries
-            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
-                       (_json(run_state), _now(), run_id))
-            db.execute('UPDATE conversations SET metadata=?,updated_at=? WHERE id=? AND owner=?',
-                       (_json(conversation), _now(), row['conversation_id'], owner))
 
     def token_calibration(self, owner: str, run_id: str, provider: str, model: str):
         """Read source-style calibration by owner, model and active run.

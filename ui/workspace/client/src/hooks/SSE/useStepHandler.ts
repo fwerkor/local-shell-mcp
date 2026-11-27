@@ -45,6 +45,7 @@ import {
 } from '~/store';
 import { isAskUserQuestionPart, isAnsweredAskUserQuestionPart } from '~/utils/approval';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
+import { isMemoryToolMutation } from '~/utils/memory';
 
 type TUseStepHandler = {
   announcePolite: (options: AnnounceOptions) => void;
@@ -59,6 +60,7 @@ type TUseStepHandler = {
    * invalidation) so this hook stays free of query-client coupling.
    */
   onSkillAuthoringComplete?: () => void;
+  onMemoryChange?: () => void;
   onSubagentIndexChange?: (conversationId: string) => void;
 };
 
@@ -229,6 +231,7 @@ export default function useStepHandler({
   announcePolite,
   lastAnnouncementTimeRef,
   onSkillAuthoringComplete,
+  onMemoryChange,
   onSubagentIndexChange,
 }: TUseStepHandler) {
   const subagentStore = useStore();
@@ -998,7 +1001,8 @@ export default function useStepHandler({
         const latestStepId = [...stepMap.current.values()].at(-1)?.runId;
         const responseId = runId || latestStepId || submission.initialResponse?.messageId;
         if (!responseId) return;
-        const response = messageMap.current.get(responseId) ??
+        const response =
+          messageMap.current.get(responseId) ??
           messages.find((message) => message.messageId === responseId);
         if (!response) return;
 
@@ -1022,7 +1026,9 @@ export default function useStepHandler({
           ),
         };
         messageMap.current.set(responseId, updated);
-        setMessages(mergeResponseMessage(messages, updated, responseId, { ensureUserMessage: true }));
+        setMessages(
+          mergeResponseMessage(messages, updated, responseId, { ensureUserMessage: true }),
+        );
         return;
       }
 
@@ -1540,6 +1546,12 @@ export default function useStepHandler({
       } else if (stepEvent.event === StepEvents.ON_RUN_STEP_COMPLETED) {
         const { result } = stepEvent.data;
 
+        // A normal memory tool returns its artifact on the completed step,
+        // independently of the attachment stream and message reconstruction.
+        if (isMemoryToolMutation(result.tool_call)) {
+          onMemoryChange?.();
+        }
+
         const { id: stepId } = result;
         const completedCallId = result.tool_call?.id;
         if (
@@ -1825,6 +1837,7 @@ export default function useStepHandler({
       clearSandboxStarting,
       applyPtcToolCall,
       onSkillAuthoringComplete,
+      onMemoryChange,
     ],
   );
 

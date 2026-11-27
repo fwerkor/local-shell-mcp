@@ -214,7 +214,7 @@
   "com_agents_mcp_icon_size": "Minsta storlek är 128 x 128 px.",
   "com_agents_mcp_name_placeholder": "Anpassat verktyg",
   "com_agents_mcp_trust_subtext": "Anpassade anslutningar verifieras inte av LSM.",
-  "com_agents_memory_info": "När den är aktiverad kan agenten spara, uppdatera och ta bort minnen om användaren under konversationen med hjälp av verktygen set_memory och delete_memory.",
+  "com_agents_memory_info": "När den är aktiverad kan agenten spara, uppdatera och ta bort minnen om användaren under konversationen med hjälp av verktygen set_memory.",
   "com_agents_memory_scope": "Håll minnen åtskilda för den här agenten",
   "com_agents_memory_scope_info": "När den är aktiverad läser och skriver denna agent sina egna minnen, isolerade från dina delade minnen och från andra agenter. Befintliga delade minnen visas inte för den här agenten.",
   "com_agents_missing_name": "Skriv in ett namn innan du skapar en agent.",

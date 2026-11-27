@@ -404,7 +404,12 @@ async def test_continuous_rearms_from_persisted_completion(state, monkeypatch, d
         assert edited.status_code == 200 and edited.json()['nextRunAt'] is None
         schedule_routes._settle(reopened, second[0][0], 'success')
         row = schedule_routes._find('alice', sid, reopened)
-        assert row['next_run'] >= schedule_routes._now() // 1000 + 419_900
+        with reopened.connect() as db:
+            second_finished = db.execute(
+                'SELECT updated_at FROM webui_schedule_runs WHERE id=?',
+                (second[0][0],),
+            ).fetchone()[0] // 1000
+        assert row['next_run'] == second_finished + 7 * 60_000
 
         # Editing a waiting schedule anchors its new delay to the same completion.
         edited = await c.patch('/api/schedules/' + sid, json={

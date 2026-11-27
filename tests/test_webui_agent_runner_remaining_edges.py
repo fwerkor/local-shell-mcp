@@ -1,11 +1,10 @@
 """Source-level negative and recovery branches in AgentRunner.
 
 Covers owner revocation, policy deny, malformed tool batch, failed checkpoint,
-compaction/fading publication and child-no-SSE cases using real SQLite.
+compaction and child-no-SSE cases using real SQLite.
 """
 from __future__ import annotations
 
-import json
 import time
 
 import pytest
@@ -50,10 +49,10 @@ def test_context_read_failure_fails_closed_not_empty_memory(runner_state, monkey
     settings.save_setting('local', 'endpoints', {'memory': {}, 'agents': {'capabilities': ['memory']}})
     MemoryRepository(db).write('local', 'private_note', 'A private memory.')
     monkeypatch.setattr(MemoryRepository, 'formatted', lambda *_args, **kwargs: {'readFailed': True})
-    from local_shell_mcp.webui.memory import MEMORY_TOOL_USAGE_GUARD
+    from local_shell_mcp.webui.memory import MEMORY_TOOL_INSTRUCTIONS
 
-    assert runner._memory_context({'tools': ['memory']}) == MEMORY_TOOL_USAGE_GUARD
-    assert runner._memory_context(None) == MEMORY_TOOL_USAGE_GUARD
+    assert runner._memory_context({'tools': ['memory']}) == MEMORY_TOOL_INSTRUCTIONS
+    assert runner._memory_context(None) == MEMORY_TOOL_INSTRUCTIONS
     with pytest.raises(RuntimeSafetyError, match='expired'):
         runner.grant_expires = int(time.time()) - 1
         runner._check_grant()
@@ -124,67 +123,18 @@ async def test_pause_failure_and_approval_batch_rejection(runner_state, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_manual_compaction_fading_publication_failure_keeps_checkpoint(runner_state, monkeypatch):
-    db, store, job, profile, runner = runner_state
-    settings = WorkspaceRepository(db)
-    settings.save_setting('local', 'endpoints', {'summarization': {'enabled': True},
-                                               'agents': {'maxContextTokens': 400}})
-
-    async def summarize(*args, **kwargs):
-        yield '## Checkpoint\nThe conversation was about tests.'
-
-    runner.stream_text = summarize
-    monkeypatch.setattr(store, 'record_fading_tier', lambda *a, **kw: (_ for _ in ()).throw(OSError('Disk failure')))
-    history = store.history('local', job.conversation_id)
-    assert await runner._manual_compact(history) == history
-    with db.connect() as connection:
-        state = json.loads(connection.execute('SELECT state FROM runs WHERE id=?', (job.run_id,)).fetchone()[0])
-    assert 'summaryCheckpoint' in state
-
-
-@pytest.mark.asyncio
-async def test_automatic_compaction_fading_publication_failure_preserves_summarized_state(runner_state, monkeypatch):
-    db, store, job, profile, runner = runner_state
-    WorkspaceRepository(db).save_setting('local', 'endpoints', {'summarization': {
-        'enabled': True, 'retainRecent': {'turns': 1}}, 'agents': {'maxContextTokens': 300}})
-    many = [{'role': 'user', 'content': 'large request ' * 80},
-            {'role': 'assistant', 'content': 'large response ' * 80},
-            {'role': 'user', 'content': 'continue'}]
-
-    async def summarize(*args, **kwargs):
-        yield '## Checkpoint\nStored contextual facts.'
-
-    runner.stream_text = summarize
-    original = store.record_fading_tier
-    attempts = 0
-
-    def broken_once(*args, **kw):
-        nonlocal attempts
-        attempts += 1
-        if attempts >= 2:
-            raise OSError('Cannot save reset tier')
-        return original(*args, **kw)
-
-    monkeypatch.setattr(store, 'record_fading_tier', broken_once)
-    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 300}), many)
-    await runner._before_model(state)
-    assert any(item.get('role') == 'system' and '<summary>' in str(item.get('content'))
-               for item in state.messages)
-    assert attempts >= 2
-
-
-@pytest.mark.asyncio
 async def test_non_dict_summarization_configuration_uses_safe_defaults(runner_state):
     db, store, job, profile, runner = runner_state
     settings = WorkspaceRepository(db)
     settings.save_setting('local', 'endpoints', {
         'summarization': True, 'agents': {'maxContextTokens': 300}})
-    history = [{'role': 'user', 'content': 'message ' * 100},
-               {'role': 'assistant', 'content': 'reply ' * 100},
+    history = [{'role': 'user', 'content': 'message ' * 300},
+               {'role': 'assistant', 'content': 'reply ' * 300},
                {'role': 'user', 'content': 'continue'}]
     state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 300}), history)
     await runner._before_model(state)
-    assert store.fading_tier('local', job.run_id, 'default', 'openai', 'mock') is not None
+    assert any(item.get('role') == 'system' and '<summary>' in str(item.get('content'))
+               for item in state.messages)
 
 
 def test_native_skill_tools_follow_normal_registry(runner_state, monkeypatch):

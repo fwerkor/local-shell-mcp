@@ -234,11 +234,12 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await builder.locator("#instructions").fill("You are the configured Research Agent.")
                     await builder.get_by_text("Manage", exact=True).first.click(timeout=8000)
                     marketplace = page.get_by_role("dialog").last
-                    await marketplace.get_by_role("button", name=re.compile(r"^Ask User\b")).first.click()
+                    await marketplace.get_by_text("Tool Library", exact=True).first.wait_for()
+                    assert await marketplace.get_by_role("button", name=re.compile(r"^Ask User\b")).count() == 0
                     await page.keyboard.press("Escape")
                     await marketplace.wait_for(state="hidden")
                     # The retained Builder must submit the real Agent payload,
-                    # including selected native tool and named provider.
+                    # with Ask User implicit rather than manually selected.
                     async with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/api/agents")) as created:
                         await builder.get_by_role("button", name="Create", exact=True).click()
                     agent_response = await created.value
@@ -248,7 +249,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     assert agent_value["provider"] == "Secondary Research"
                     assert agent_value["model"] == "independent-model"
                     assert agent_value["instructions"] == "You are the configured Research Agent."
-                    assert "ask_user_question" in agent_value["tools"]
+                    assert "ask_user_question" not in agent_value["tools"]
                     assert "secondary-private-token" not in str(agent_value)
                     agent_id = agent_value["id"]
                     # Editing through the same retained React form must preserve
@@ -261,7 +262,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     patched = await saved_again.value
                     assert patched.status == 200, await patched.text()
                     assert (await patched.json())["description"] == "Saved again in React Agent Builder"
-                    assert "ask_user_question" in (await patched.json())["tools"]
+                    assert "ask_user_question" not in (await patched.json())["tools"]
                     # Update through API as a second persistence path while the
                     # Builder's own creation/edit and refresh are verified above.
                     updated = await page.request.patch(f"http://127.0.0.1:{port}/api/agents/{agent_id}", data={
@@ -271,7 +272,7 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.reload()
                     saved_agent = await page.request.get(f"http://127.0.0.1:{port}/api/agents/{agent_id}")
                     assert (await saved_agent.json())["model_parameters"] == {"maxTokens": 128, "topP": 0.75}
-                    assert "ask_user_question" in (await saved_agent.json())["tools"]
+                    assert "ask_user_question" not in (await saved_agent.json())["tools"]
                     assert (await saved_agent.json())["description"] == "Saved again in React Agent Builder"
                     versions = await page.request.get(f"http://127.0.0.1:{port}/api/agents/{agent_id}/versions")
                     assert versions.status == 200
