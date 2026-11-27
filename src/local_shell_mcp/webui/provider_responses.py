@@ -17,6 +17,7 @@ from .providers import (
     UnsupportedImageInput,
     _data_frames,
     _usage_frame,
+    apply_model_cache_options,
     check_image_response,
     image_input_rejected,
     model_request_headers,
@@ -286,6 +287,7 @@ async def stream_responses(config: ProviderConfig, messages: list[dict], *, tool
     for key, value in (("max_output_tokens", max_tokens), ("temperature", temperature), ("top_p", top_p)):
         if value is not None and config.auth_method != "chatgpt":
             body[key] = value
+    apply_model_cache_options(config, body)
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     done: dict[int, dict] = {}
     seen_text: dict[int, str] = {}
