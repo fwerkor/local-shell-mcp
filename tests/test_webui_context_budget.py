@@ -6,8 +6,8 @@ import httpx
 import pytest
 
 from local_shell_mcp.sqlite_store import SQLiteDatabase
-from local_shell_mcp.webui.agent_runner import AgentRunner
 from local_shell_mcp.webui import agent_runtime
+from local_shell_mcp.webui.agent_runner import AgentRunner
 from local_shell_mcp.webui.agent_runtime import AgentContext, AgentLoopState, run_agent_loop
 from local_shell_mcp.webui.compaction import CompactionFailed, build_summary_carrier_text
 from local_shell_mcp.webui.context_budget import (
