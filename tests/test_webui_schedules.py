@@ -545,8 +545,13 @@ async def test_schedule_conversation_targets(state, monkeypatch, target):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mcp_enabled', [True, False])
-async def test_scheduled_model_uses_live_tool_permissions(state, monkeypatch, mcp_enabled):
+@pytest.mark.parametrize('mcp_enabled,agent_level,expected_level', [
+    (True, 'read', 'read'), (False, 'read', 'read'),
+    (True, 'write', 'write'), (False, 'none', 'none'), (False, 'inherit', 'read'),
+])
+async def test_scheduled_model_uses_live_tool_permissions(
+    state, monkeypatch, mcp_enabled, agent_level, expected_level,
+):
     import asyncio
 
     from local_shell_mcp.webui import generation_routes, nested_mcp, providers
@@ -564,10 +569,14 @@ async def test_scheduled_model_uses_live_tool_permissions(state, monkeypatch, mc
                         lambda: {'local': 'write'})
     agent = AgentRepository(repo.database).create('alice', {
         'name': 'QQBot', 'provider': 'openAI', 'model': 'mock-model',
-        'machine_default_permission': 'read', 'machine_permissions': {}, 'mcp_servers': None,
+        'machine_default_permission': agent_level, 'machine_permissions': {}, 'mcp_servers': None,
     })
     cid = repo.create_conversation('alice', {'title': 'Existing chat'})['conversationId']
     repo.save_setting('alice', 'conversation.permissions.' + cid, {'mcp': mcp_enabled})
+    # Ordinary chat denies access entirely. The scheduled Agent's explicit
+    # policy takes precedence, or inherits global defaults only when requested.
+    repo.save_setting('alice', 'agent.machine_policy.global', {'local': 'read'})
+    repo.save_setting('alice', 'agent.machine_policy.conversation.' + cid, {'local': 'none'})
     repo.save_setting('alice', 'approval.mode', 'automatic')
     called = []
     model_tool_lists = []
@@ -581,15 +590,22 @@ async def test_scheduled_model_uses_live_tool_permissions(state, monkeypatch, mc
     async def model(profile, history, *, tools, **kwargs):
         names = {tool['function']['name'] for tool in tools}
         model_tool_lists.append(names)
-        assert 'file_read' in names and 'run_shell' not in names
+        assert ('file_read' in names) == (expected_level != 'none')
+        assert ('run_shell' in names) == (expected_level == 'write')
+        assert ('file_write' in names) == (expected_level == 'write')
         assert 'ask_user_question' in names
+        count = sum(message.get('role') == 'tool' for message in history)
+        if expected_level == 'write':
+            if count == 0:
+                yield ModelToolCall('write', 'file_write', {'path': 'scheduled-write.txt', 'content': 'ok'})
+                return
+            count -= 1
         mcp_names = {'mcp_tool_search', 'mcp_tool_inspect', 'mcp_tool_call'}
         if not mcp_enabled:
             assert not names.intersection(mcp_names)
             yield 'Done'
             return
         assert mcp_names.issubset(names)
-        count = sum(message.get('role') == 'tool' for message in history)
         if count == 0:
             yield ModelToolCall('search', 'mcp_tool_search', {'query': 'echo'})
         elif count == 1:
@@ -615,6 +631,12 @@ async def test_scheduled_model_uses_live_tool_permissions(state, monkeypatch, mc
         generation = store.latest('alice', cid)
         assert generation.status == 'complete', store.events('alice', generation.run_id)[-1]
         assert model_tool_lists
+        from local_shell_mcp.settings import get_settings
+        written = get_settings().workspace_root / 'scheduled-write.txt'
+        if expected_level == 'write':
+            assert written.read_text() == 'ok'
+        else:
+            assert not written.exists()
         assert called == (['mcp_tool_search', 'mcp_tool_call'] if mcp_enabled else [])
         with repo.database.connect() as db:
             assert db.execute("SELECT json_extract(state,'$.askUserEnabled') FROM runs WHERE id=?",
