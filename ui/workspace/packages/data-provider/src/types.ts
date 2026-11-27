@@ -680,6 +680,8 @@ export type TConfig = {
   };
   /** Effective subagents-per-agent cap served from `endpoints.agents.maxSubagents`. */
   maxSubagents?: number;
+  /** Explicit server-side context limit for Agent requests. */
+  maxContextTokens?: number;
   fileSharing?: TAgentsEndpoint['fileSharing'];
   /** Concurrent Code API uploads allowed per route and authenticated principal. */
   codeApiUploadConcurrency?: number;
