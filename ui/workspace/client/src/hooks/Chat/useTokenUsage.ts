@@ -28,6 +28,7 @@ import {
   prunedBranchTokens,
   collectAnchorSeries,
   snapshotConfiguration,
+  contextSnapshotInputTokens,
   latestExchangeTokens,
   findBranchSnapshotAnchor,
   normalizeTokenCount,
@@ -355,24 +356,10 @@ export default function useTokenUsage({
         effective.providerOutputTokens! >= 0
           ? effective.providerOutputTokens
           : undefined;
-      const instructionTokens = normalizeTokenCount(
-        effective.effectiveInstructionTokens ?? breakdown.instructionTokens,
-      );
-      const remainingContextTokens =
-        effective.remainingContextTokens != null
-          ? normalizeTokenCount(effective.remainingContextTokens)
-          : null;
-      const breakdownUsed =
-        instructionTokens +
-        normalizeTokenCount(breakdown.summaryTokens) +
-        normalizeTokenCount(breakdown.messageTokens);
-      /** A remaining count measured against a smaller instruction total than the
-       *  snapshot publishes would put used below the instruction and summary
-       *  shares the breakdown subtracts, hiding the Messages row. */
-      const baseUsed =
-        remainingContextTokens != null && maxTokens != null
-          ? Math.max(maxTokens - remainingContextTokens, breakdownUsed)
-          : breakdownUsed;
+      // Recover occupancy from the original snapshot, then compare it with
+      // the currently configured window. Never subtract an old remaining
+      // budget from the new model's context length.
+      const baseUsed = contextSnapshotInputTokens(effective);
       /** The snapshot is pre-invoke: in-flight output rides on `liveTokens` (0
        *  unless streaming this branch), the last call's finalized output on
        *  `completedOutputTokens`, and retained tool results on

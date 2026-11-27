@@ -558,6 +558,21 @@ export interface AnchorReading {
   configuration?: string;
 }
 
+/** Recover prompt occupancy from the budget that produced the snapshot.
+ * The current model's window may differ, and the output reserve is not input. */
+export function contextSnapshotInputTokens(snapshot: TContextUsageEvent): number {
+  const breakdown = snapshot.breakdown;
+  const counted =
+    normalizeTokenCount(snapshot.effectiveInstructionTokens ?? breakdown.instructionTokens) +
+    normalizeTokenCount(breakdown.summaryTokens) +
+    normalizeTokenCount(breakdown.messageTokens);
+  const budget = normalizeTokenCount(snapshot.contextBudget);
+  if (budget > 0 && snapshot.remainingContextTokens != null) {
+    return Math.max(counted, budget - normalizeTokenCount(snapshot.remainingContextTokens));
+  }
+  return counted;
+}
+
 /** Compare the measured call configuration, including fixed prompt overhead.
  * Older snapshots without call identity cannot establish comparability. */
 export function snapshotConfiguration(
