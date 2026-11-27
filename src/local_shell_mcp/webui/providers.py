@@ -44,9 +44,11 @@ def model_request_headers(config: ProviderConfig) -> dict[str, str]:
     headers = {"accept": "text/event-stream", "content-type": "application/json",
                "User-Agent": MODEL_USER_AGENT}
     url = urlsplit(config.url)
-    if (config.session_id and url.scheme == "https" and url.hostname == "opencode.ai"
+    if (url.scheme == "https" and url.hostname == "opencode.ai"
             and url.port in (None, 443) and url.path.startswith("/inference/")):
-        headers["x-opencode-session"] = config.session_id
+        headers["x-opencode-client"] = "local-shell-mcp"
+        if config.session_id:
+            headers["x-opencode-session"] = config.session_id
     return headers
 
 

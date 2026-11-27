@@ -200,6 +200,7 @@ async def test_model_session_headers(monkeypatch, with_tools, base, expected):
     headers = captured["request"].headers
     assert headers["user-agent"] == MODEL_USER_AGENT
     assert headers.get("x-opencode-session") == expected
+    assert headers.get("x-opencode-client") == ("local-shell-mcp" if expected else None)
 
 
 def test_model_session_binding_is_stable_and_isolates_tasks():
@@ -214,3 +215,4 @@ def test_model_session_binding_is_stable_and_isolates_tasks():
     assert child.session_id != bind_model_session(config, "conversation-2", "/subagent:call-1").session_id
     assert config.session_id is None
     assert "x-opencode-session" not in model_request_headers(config)
+    assert model_request_headers(config)["x-opencode-client"] == "local-shell-mcp"
