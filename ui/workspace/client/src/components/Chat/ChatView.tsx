@@ -123,7 +123,10 @@ function ChatView({ index = 0, project }: { index?: number; project?: TChatProje
    *  carried that answer, so this is the same value before and after the config
    *  resolves. */
   const footerBelow = isLandingPage || configuredFooter;
-  const isNavigating = (!messagesTree || messagesTree.length === 0) && conversationId != null;
+  // An existing conversation can be empty after deleting its final turn.
+  // A successfully loaded empty array is not an in-flight navigation.
+  const isNavigating =
+    (!messagesTree || messagesTree.length === 0) && conversationId != null && messages == null;
   const isProjectLandingPage = isLandingPage && project != null;
 
   if (isLoading && conversationId !== Constants.NEW_CONVO) {

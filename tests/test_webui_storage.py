@@ -151,3 +151,32 @@ def test_delete_generated_turn_and_block_active_run(repo):
         first.user_message_id, first.response_message_id}
     assert store.latest("alice", cid) is None
     assert store.history("alice", cid) == []
+
+
+def test_delete_turn_preserves_descendant_live_checkpoint_steps(repo):
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    store = GenerationStore(repo.database)
+    first, _ = store.begin("alice", {"text": "old prompt"})
+    store.finish("alice", first.run_id, status="complete", text="old answer")
+    second, _ = store.begin("alice", {"text": "keep prompt", "conversationId": first.conversation_id,
+                                     "parentMessageId": first.response_message_id})
+    call = {"id": "kept", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+    retained = [
+        {"role": "assistant", "content": None, "tool_calls": [call]},
+        {"role": "tool", "tool_call_id": "kept", "content": "canonical full result"},
+        {"role": "user", "source": "steer", "steerId": "kept-steer", "content": "keep steering"},
+    ]
+    store.stage_summary(
+        "alice", second.run_id, "old secret summary", 10, live=True,
+        retained_tail=[{"role": "user", "content": "old prompt"},
+                       {"role": "assistant", "content": "old answer"},
+                       {"role": "user", "content": "keep prompt"}, *retained],
+        visible_text_boundary=0, model_history_start=7,
+    )
+    final = {"role": "assistant", "content": "keep answer"}
+    store.finish("alice", second.run_id, status="complete", text="keep answer", model_steps=[final])
+    repo.delete_message_turn("alice", first.conversation_id, first.user_message_id)
+    assert store.history("alice", first.conversation_id, message_id=second.response_message_id) == [
+        {"role": "user", "content": "keep prompt"}, *retained, final,
+    ]

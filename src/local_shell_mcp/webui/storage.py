@@ -211,7 +211,7 @@ class WorkspaceRepository:
             if not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                               (conversation_id, owner)).fetchone():
                 raise KeyError("Conversation not found")
-            rows = db.execute("SELECT id,parent_id,role,content,metadata FROM messages WHERE conversation_id=?",
+            rows = db.execute("SELECT id,parent_id,role,text,content,metadata FROM messages WHERE conversation_id=?",
                               (conversation_id,)).fetchall()
             by_id = {row["id"]: row for row in rows}
             selected = by_id.get(message_id)
@@ -261,9 +261,49 @@ class WorkspaceRepository:
                         metadata.pop(key, None)
                     db.execute("UPDATE messages SET content=?,metadata=? WHERE id=?",
                                (_json(filtered), _json(metadata), ident))
-                    db.execute("UPDATE runs SET state=json_remove(state,'$.summaryCheckpoint') "
-                               "WHERE conversation_id=? AND json_extract(state,'$.responseMessageId')=?",
-                               (conversation_id, ident))
+                    from .compaction import find_checkpoint_summary_part
+
+                    checkpoint = find_checkpoint_summary_part(content)
+                    for run in db.execute(
+                        "SELECT id,state FROM runs WHERE conversation_id=? "
+                        "AND json_extract(state,'$.responseMessageId')=?",
+                        (conversation_id, ident),
+                    ).fetchall():
+                        state = json.loads(run["state"])
+                        # A live checkpoint stores canonical steps from AFTER
+                        # its retained tail. Restore just this turn's suffix,
+                        # never earlier user turns that the deletion invalidated.
+                        if checkpoint and type(state.get("postCompactionHistoryStart")) is int:
+                            tail = checkpoint.get("retainedTail")
+                            if isinstance(tail, list):
+                                current = []
+                                for message in tail:
+                                    if not isinstance(message, dict):
+                                        continue
+                                    role = message.get("role")
+                                    if role == "user" and message.get("source") != "steer":
+                                        current = []
+                                    elif role in {"assistant", "tool"} or (
+                                        role == "user" and message.get("source") == "steer"
+                                    ):
+                                        current.append(message)
+                                steps = state.get("modelSteps")
+                                if isinstance(steps, list):
+                                    restored = [*current, *steps]
+                                    # Earlier summarized assistant prose can
+                                    # still be recovered from the visible text.
+                                    visible = row["text"] or ""
+                                    replayed = "".join(
+                                        message["content"] for message in restored
+                                        if isinstance(message, dict) and message.get("role") == "assistant"
+                                        and isinstance(message.get("content"), str)
+                                    )
+                                    if visible and visible.endswith(replayed) and len(visible) > len(replayed):
+                                        restored.insert(0, {"role": "assistant",
+                                                            "content": visible[:len(visible)-len(replayed)]})
+                                    state["modelSteps"] = restored
+                        state.pop("summaryCheckpoint", None)
+                        db.execute("UPDATE runs SET state=? WHERE id=?", (_json(state), run["id"]))
             return sorted(removed)
 
     def messages(self, owner: str, conversation_id: str, *, limit: int = 100, cursor: str | None = None) -> dict:
