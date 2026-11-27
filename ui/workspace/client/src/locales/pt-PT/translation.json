@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Apenas utilização confirmada da API; podem faltar chamadas anteriores ou não comunicadas.",
   "com_ui_message_turn_delete": "Eliminar este turno",
   "com_ui_message_turn_delete_confirm": "Eliminar esta mensagem do utilizador e todas as suas respostas? As mensagens posteriores serão mantidas. Esta ação não pode ser anulada.",
   "com_ui_message_turn_delete_error": "Não foi possível eliminar este turno",

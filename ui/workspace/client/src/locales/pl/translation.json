@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Tylko potwierdzone użycie API; wcześniejsze lub niezgłoszone wywołania mogą być pominięte.",
   "com_ui_message_turn_delete": "Usuń tę turę",
   "com_ui_message_turn_delete_confirm": "Usunąć tę wiadomość użytkownika i wszystkie odpowiedzi na nią? Późniejsze wiadomości zostaną zachowane. Tej operacji nie można cofnąć.",
   "com_ui_message_turn_delete_error": "Nie udało się usunąć tej tury",

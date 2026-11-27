@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Chỉ tính mức sử dụng API đã xác nhận; các lệnh gọi trước đó hoặc chưa được báo cáo có thể bị thiếu.",
   "com_ui_message_turn_delete": "Xóa lượt này",
   "com_ui_message_turn_delete_confirm": "Xóa tin nhắn người dùng này và tất cả câu trả lời của nó? Các tin nhắn sau sẽ được giữ lại. Không thể hoàn tác hành động này.",
   "com_ui_message_turn_delete_error": "Không thể xóa lượt này",

@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "فقط مصرف تأییدشدهٔ API؛ فراخوانی‌های قبلی یا گزارش‌نشده ممکن است موجود نباشند.",
   "com_ui_message_turn_delete": "حذف این نوبت",
   "com_ui_message_turn_delete_confirm": "این پیام کاربر و همه پاسخ‌های آن حذف شوند؟ پیام‌های بعدی حفظ می‌شوند. این کار قابل بازگشت نیست.",
   "com_ui_message_turn_delete_error": "حذف این نوبت ممکن نشد",

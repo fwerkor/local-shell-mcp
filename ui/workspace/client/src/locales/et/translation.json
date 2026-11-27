@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Ainult kinnitatud API kasutus; varasemad või teatamata päringud võivad puududa.",
   "com_ui_message_turn_delete": "Kustuta see vestlusvoor",
   "com_ui_message_turn_delete_confirm": "Kas kustutada see kasutaja sõnum ja kõik selle vastused? Hilisemad sõnumid säilivad. Seda ei saa tagasi võtta.",
   "com_ui_message_turn_delete_error": "Vestlusvooru ei õnnestunud kustutada",

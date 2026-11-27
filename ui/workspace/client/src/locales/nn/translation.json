@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Berre stadfesta API-bruk; tidlegare eller urapporterte kall kan mangle.",
   "com_ui_message_turn_delete": "Slett denne runden",
   "com_ui_message_turn_delete_confirm": "Vil du slette denne brukarmeldinga og alle svara på henne? Seinare meldingar blir tekne vare på. Dette kan ikkje gjerast om.",
   "com_ui_message_turn_delete_error": "Klarte ikkje å slette denne runden",

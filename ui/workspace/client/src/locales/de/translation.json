@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Nur bestätigte API-Nutzung; frühere oder nicht gemeldete Aufrufe können fehlen.",
   "com_ui_message_turn_delete": "Diesen Gesprächsschritt löschen",
   "com_ui_message_turn_delete_confirm": "Diese Nutzernachricht und alle zugehörigen Antworten löschen? Spätere Nachrichten bleiben erhalten. Dies kann nicht rückgängig gemacht werden.",
   "com_ui_message_turn_delete_error": "Gesprächsschritt konnte nicht gelöscht werden",

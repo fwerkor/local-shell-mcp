@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "確認済みの API 使用量のみ。以前の呼び出しや未報告の呼び出しが含まれない場合があります。",
   "com_ui_message_turn_delete": "このターンを削除",
   "com_ui_message_turn_delete_confirm": "このユーザーメッセージとそれに対するすべての返信を削除しますか？以降のメッセージは保持されます。この操作は取り消せません。",
   "com_ui_message_turn_delete_error": "このターンを削除できませんでした",

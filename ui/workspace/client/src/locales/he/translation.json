@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "רק שימוש מאומת ב-API; ייתכן שחסרות קריאות קודמות או שלא דווחו.",
   "com_ui_message_turn_delete": "מחיקת סבב זה",
   "com_ui_message_turn_delete_confirm": "למחוק את הודעת המשתמש הזו ואת כל התשובות לה? הודעות מאוחרות יותר יישמרו. לא ניתן לבטל פעולה זו.",
   "com_ui_message_turn_delete_error": "לא ניתן למחוק סבב זה",

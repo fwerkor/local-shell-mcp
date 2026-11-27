@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Tikai apstiprināts API lietojums; iepriekšējie vai neziņotie izsaukumi var nebūt iekļauti.",
   "com_ui_message_turn_delete": "Dzēst šo sarunas kārtu",
   "com_ui_message_turn_delete_confirm": "Dzēst šo lietotāja ziņojumu un visas atbildes uz to? Vēlākie ziņojumi tiks saglabāti. Šo darbību nevar atsaukt.",
   "com_ui_message_turn_delete_error": "Neizdevās dzēst sarunas kārtu",

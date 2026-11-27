@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Hanya penggunaan API yang terkonfirmasi; panggilan sebelumnya atau yang tidak dilaporkan mungkin tidak tercatat.",
   "com_ui_message_turn_delete": "Hapus giliran ini",
   "com_ui_message_turn_delete_confirm": "Hapus pesan pengguna ini beserta semua balasannya? Pesan berikutnya akan dipertahankan. Tindakan ini tidak dapat dibatalkan.",
   "com_ui_message_turn_delete_error": "Gagal menghapus giliran ini",

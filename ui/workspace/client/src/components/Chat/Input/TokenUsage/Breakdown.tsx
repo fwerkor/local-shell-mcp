@@ -180,7 +180,7 @@ export default function Breakdown({
   /** Keep the largest tool for the pressure insight, but retain every named
    *  result in the disclosure. Result counts are a subset of the tool-call
    *  share; any invocation overhead in that share remains unassigned. */
-  const { largestTool, toolBreakdown } = useMemo(() => {
+  const { largestTool, toolBreakdown: rawToolBreakdown } = useMemo(() => {
     const counts = view.toolMessageTokenCounts;
     if (counts == null) {
       return {
@@ -211,7 +211,7 @@ export default function Breakdown({
       toolBreakdown: candidates,
     };
   }, [toolCallTokens, view.toolMessageTokenCounts]);
-  const hasToolCounts = toolBreakdown.length > 0;
+  const hasToolCounts = rawToolBreakdown.length > 0;
   /** Insights shown on hovering the ⓘ button: largest tool, runway, and what a
    *  summarization could reclaim. */
   const insights: string[] = [];
@@ -351,6 +351,23 @@ export default function Breakdown({
       rawRemaining -= original;
     }
   }
+  // Nested counts describe portions of their reconciled parent, including
+  // rounding. Preserve the unallocated portion of each parent as well.
+  const toolParent = segments.find((segment) => segment.id === 'tool-calls')?.value ?? 0;
+  const systemParent = segments.find((segment) => segment.id === 'system')?.value ?? 0;
+  let rawToolRemaining = toolCallTokens ?? rawToolBreakdown.reduce((sum, tool) => sum + tool.tokens, 0);
+  let toolRemaining = toolParent;
+  const toolBreakdown = rawToolBreakdown.map((tool) => {
+    const tokens = rawToolRemaining > 0
+      ? Math.min(toolRemaining, Math.round(toolRemaining * tool.tokens / rawToolRemaining))
+      : 0;
+    toolRemaining -= tokens;
+    rawToolRemaining -= tool.tokens;
+    return { ...tool, tokens };
+  });
+  const reconciledDynamicTokens = systemTokens > 0
+    ? Math.min(systemParent, Math.round(systemParent * dynamicInstructionTokens / systemTokens))
+    : 0;
   const unclassified = Math.max(
     0,
     usedTokens - segments.reduce((sum, segment) => sum + segment.value, 0),
@@ -505,11 +522,11 @@ export default function Breakdown({
                             ))}
                           </div>
                         )}
-                        {id === 'system' && dynamicInstructionTokens > 0 && (
+                        {id === 'system' && reconciledDynamicTokens > 0 && (
                           <div className="pl-6">
                             <Row
                               label={localize('com_ui_context_dynamic_instructions')}
-                              value={dynamicInstructionTokens}
+                              value={reconciledDynamicTokens}
                             />
                           </div>
                         )}

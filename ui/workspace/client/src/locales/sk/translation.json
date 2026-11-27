@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Iba potvrdené využitie API; skoršie alebo nenahlásené volania môžu chýbať.",
   "com_ui_message_turn_delete": "Odstrániť tento ťah",
   "com_ui_message_turn_delete_confirm": "Odstrániť túto správu používateľa a všetky odpovede na ňu? Neskoršie správy zostanú zachované. Táto akcia sa nedá vrátiť.",
   "com_ui_message_turn_delete_error": "Tento ťah sa nepodarilo odstrániť",

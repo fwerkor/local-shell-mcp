@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Kun bekræftet API-forbrug; tidligere eller ikke-rapporterede kald kan mangle.",
   "com_ui_message_turn_delete": "Slet denne tur",
   "com_ui_message_turn_delete_confirm": "Vil du slette denne brugerbesked og alle dens svar? Senere beskeder bevares. Handlingen kan ikke fortrydes.",
   "com_ui_message_turn_delete_error": "Kunne ikke slette denne tur",

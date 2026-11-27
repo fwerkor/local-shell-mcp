@@ -1,4 +1,5 @@
 {
+  "com_ui_context_recorded_only": "Vain vahvistettu API-käyttö; aiemmat tai raportoimattomat kutsut voivat puuttua.",
   "com_ui_message_turn_delete": "Poista tämä vuoro",
   "com_ui_message_turn_delete_confirm": "Poistetaanko tämä käyttäjän viesti ja kaikki sen vastaukset? Myöhemmät viestit säilyvät. Tätä ei voi perua.",
   "com_ui_message_turn_delete_error": "Vuoron poistaminen epäonnistui",

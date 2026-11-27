@@ -88,6 +88,32 @@ describe('separate cumulative and context usage', () => {
     expect(totals.getByText('60%')).toBeInTheDocument();
   });
 
+  it('reconciles nested estimates with scaled parent categories', () => {
+    render(panel({
+      ...view,
+      usedTokens: 275,
+      percent: 27.5,
+      toolMessageTokenCounts: { demo: 200 },
+      snapshot: {
+        ...view.snapshot!,
+        breakdown: {
+          ...view.snapshot!.breakdown!,
+          systemMessageTokens: 25,
+          dynamicInstructionTokens: 25,
+          toolMessageTokenCounts: { demo: 200 },
+        },
+      },
+    }));
+    fireEvent.click(screen.getByTestId('context-breakdown-toggle'));
+    const detail = within(screen.getByTestId('context-breakdown'));
+    const toolRow = detail.getByRole('button', { name: /com_ui_context_tool_calls/ });
+    fireEvent.click(toolRow);
+    expect(toolRow).toHaveTextContent('110');
+    expect(detail.getByText('demo').parentElement?.parentElement).toHaveTextContent('110');
+    expect(detail.getByText('com_ui_context_dynamic_instructions').parentElement?.parentElement)
+      .toHaveTextContent('14');
+  });
+
   it('distinguishes explicit zero cache hits from incomplete telemetry', () => {
     const recordedUsage = { ...view.recordedUsage!, cacheReadTokens: 0 };
     const { rerender } = render(panel({ ...view, recordedUsage }));
