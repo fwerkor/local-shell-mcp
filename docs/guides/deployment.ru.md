@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
+<!-- i18n-source-sha256: ca97dc84c0c0fed91b1440fbdc7a381102e0c8699fb47419a9464b020f796fe7 -->
 # Выбор runtime и модель развёртывания
 
 `local-shell-mcp` имеет два взаимодополняющих решения:
@@ -52,13 +52,13 @@ Local MCP client
 | Интерфейс | Требуется общедоступный HTTPS. | Использует `/mcp` | Требуется OAuth | Типичное время выполнения |
 |---|---:|---:|---:|---|
 | Единое веб-рабочее пространство LSM | Да для удаленного доступа; также возможен локальный прокси | Внутренне | вход в ЛСМ | Контроллер плюс отдельный веб-стек |
-| Gemini Spark / Пользовательские приложения | Да | Да | Да, для публичного использования | Любой HTTP-контроллер |
+| Gemini Task / Пользовательские приложения | Да | Да | Да, для публичного использования | Любой HTTP-контроллер |
 | ChatGPT custom MCP connector | Да | Да | Да для публичного использования | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Нет | Нет | Нет | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | Обычно нет для localhost; да через сети | Да | Рекомендуется вне localhost | Any HTTP runtime |
 | VS Code extension helper flow | Только если нужен ChatGPT | Да при копировании ChatGPT URL | Рекомендуется для ChatGPT | VS Code-launched runtime |
 
-См. [unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) и [network connectivity](../clients/connectivity.md).
+См. [unified web workspace](../getting-started/web-workspace.md), [Gemini Task](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) и [network connectivity](../clients/connectivity.md).
 
 ## Что контролирует каждый runtime
 
@@ -121,7 +121,7 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 ## Страницы client
 
 - [Unified web workspace](../getting-started/web-workspace.md)
-- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
+- [Gemini Task / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

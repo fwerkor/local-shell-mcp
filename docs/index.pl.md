@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
+<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Własny obszar roboczy AI · Płaszczyzna kontroli MCP</span>
 
@@ -55,7 +55,7 @@ Docelową isolation boundary jest container lub VM uruchamiający service.
 | Podstawowy obszar roboczy przeglądarki | [Unified web workspace](getting-started/web-workspace.md) | Czat, projekty i strony kontrolne LSM ze wspólnym loginem |
 | Pierwsze wdrożenie kontrolera | [Quickstart](getting-started/quickstart.md) | Zalecana wersja binarna, OAuth i pierwsza sesja |
 | Wybór runtime layer | [Runtime choices](guides/deployment.md) | Opisuje Docker, VS Code, binary, Python i stdio jako osobne runtime options |
-| Łączenie Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Kwalifikowalność, adres URL HTTPS MCP, OAuth i testowanie |
+| Łączenie Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | Kwalifikowalność, adres URL HTTPS MCP, OAuth i testowanie |
 | Dodanie ChatGPT jako client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, pierwszy bezpieczny prompt, tool discovery |
 | Dodać LSM do DeepSeek Harness | [Plugin DeepSeek Harness](clients/deepseek-harness.md) | Zainstalować repository jako DSH bundle, zachowując pełną powierzchnię narzędzi LSM i remote workers |
 | Uruchomienie z VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime i uwagi host safety |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
+<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
 # Быстрый старт
 
 Это руководство запускает контроллер LSM и открывает его интерфейс браузера. [unified web workspace](web-workspace.md) — рекомендуемый ежедневный опыт; это отдельно развернутый дополнительный стек чата. ChatGPT, Gemini и другие внешние клиенты MCP могут подключаться к одному и тому же контроллеру. См. [runtime choices and deployment model](../guides/deployment.md).
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | Запуск через release binary | [Автономный binary runtime](../installation/binary.md) |
 | Запуск через Python или source checkout | [Python runtimes](../installation/python.md) |
 | Используйте единый чат и интерфейс управления | [Unified web workspace](web-workspace.md) |
-| Добавьте Gemini Spark в качестве клиента | [Gemini Custom Apps](gemini-spark.md) |
+| Добавьте Gemini Task в качестве клиента | [Gemini Custom Apps](gemini-spark.md) |
 | Добавить ChatGPT как client | [ChatGPT connector](chatgpt-connector.md) |
 | Выбирать инструменты и писать лучшие prompts | [Сценарии использования](../guides/usage-patterns.md) |
 | Подключить HPC, NPU/GPU или NAT машину | [Удалённые workers](../guides/remote-workers.md) |

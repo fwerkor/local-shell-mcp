@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: b7c3dfd7dc21a498f8410a88a8a52094ca0349856dfa43d267e3fe7bb273685a -->
-# Gemini Spark'ı / Özel Uygulamaları Bağlayın
+<!-- i18n-source-sha256: 0d50677fe8bd21dbf6f3fff366adea800f15d50fdbc67ed3b77abf84437f73eb -->
+# Gemini Task / özel uygulamaları bağlama
 
-Gemini'nin **özel bağlantılı uygulamalar** özelliği (daha önce **Spark** olarak tanımlanıyordu) uygun bir Gemini kullanıcısının uzak bir MCP sunucusuna bağlanmasına olanak tanır. LSM, MCP uç noktasını sağlayabilir. Bu, [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md) ve diğer MCP istemcilerine **alternatif bir istemci bağlantısıdır**; LSM Denetleyicisinin yerini almaz veya dağıtmaz.
+Gemini'nin **özel bağlantılı uygulamalar** özelliği uygun bir Gemini kullanıcısının uzak bir MCP sunucusuna bağlanmasına olanak tanır. LSM, MCP uç noktasını sağlayabilir. Bu, [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md) ve diğer MCP istemcilerine **alternatif bir istemci bağlantısıdır**; LSM Denetleyicisinin yerini almaz veya dağıtmaz.
 
 Google şu anda özel uygulamaları **Amerika Birleşik Devletleri'nde **kişisel Google Hesabı** ile oturum açmış ve **Etkinliği Etkin Tut** ile oturum açmış 18 yaş ve üstü kullanıcılar** ile sınırlandırmaktadır. Bu özellik **İngilizce** olarak mevcuttur. Bağlantıların Gemini web uygulamasında oluşturulması gerekir, ancak bağlı uygulamalar daha sonra mobil cihazlarda kullanılabilir. Kullanılabilirlik ve kullanıcı arayüzü etiketleri değişebilir; [official Gemini custom apps instructions](https://support.google.com/gemini/answer/17209137)'e bakın.
 
@@ -30,6 +30,16 @@ Web kullanıcı arayüzüne (`/ui`), LibreChat URL'sine veya site kaynağına `/
 6. Gemini görüşmesinde `@` yazın ve LSM aracı istemek için bağlı özel uygulamayı seçin.
 
 Şununla başlayın: "Ortamı incelemek ve çalışma alanı dosyalarını listelemek için bağlı LSM uygulamasını kullanın. Hiçbir şeyi değiştirmeyin." Yazma işlemlerini denemeden önce araç sonuçlarını ve Denetleyici denetimini kontrol edin.
+
+## Task modunu (eski adı Spark) kullanma
+
+Çok adımlı geliştirme, hata ayıklama ve sunucu bakımı için normal sohbet yerine **Task** önerilir: iş planlama, bağlı araçları tekrar kullanma ve ilerlemeyi izleme olanağı sunar. Bu, ölçülmüş bir hız veya kalite garantisi değildir.
+
+Gemini ana ekranında giriş kutusunun altındaki **Task** seçeneğini seçin ve gerekirse kurulumu tamamlayın. `@` yazın, görünüyorsa LSM'yi seçin ve hedefi, makineyi veya çalışma alanını ve tamamlanma ölçütlerini belirtin.
+
+Örnek: “LSM ile depoyu incele, başarısız testi yeniden üret, nedeni düzelt ve testleri tekrar çalıştır. Değişen dosyaları ve sonuçları bildir.”
+
+İlerlemeyi izleyin ve gerekli işlemleri onaylayın. Controller denetim günlüğünde LSM çağrılarını doğrulayın: Gemini'nin bulut bilgisayarı sizin LSM çalışma alanınız değildir. Controller ve gerekli Worker'ları çevrimiçi tutun. Task ve özel uygulamaların erişim koşulları farklıdır; seçenek yoksa [resmî Task kılavuzuna](https://support.google.com/gemini/answer/17094507) bakın.
 
 ## Sınırlamalar ve sorun giderme
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
+<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
 # البدء السريع
 
 يبدأ هذا الدليل تشغيل وحدة تحكم LSM ويفتح واجهة المتصفح الخاصة بها. [unified web workspace](web-workspace.md) هي التجربة اليومية الموصى بها؛ إنها عبارة عن مكدس دردشة اختياري تم نشره بشكل منفصل. يمكن لعملاء ChatGPT وGemini وعملاء MCP الخارجيين الآخرين الاتصال بنفس وحدة التحكم. انظر [runtime choices and deployment model](../guides/deployment.md).

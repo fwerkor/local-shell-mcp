@@ -14,7 +14,7 @@
 [![Docker](https://img.shields.io/badge/docker-ready-2496ed?logo=docker&logoColor=white)](https://github.com/fwerkor/local-shell-mcp/pkgs/container/local-shell-mcp)
 [![License](https://img.shields.io/github/license/fwerkor/local-shell-mcp)](LICENSE)
 
-[Documentation](https://fwerkor.github.io/local-shell-mcp/) · [Quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) · [Runtime choices](https://fwerkor.github.io/local-shell-mcp/guides/deployment/) · [Web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/) · [Gemini Spark](https://fwerkor.github.io/local-shell-mcp/getting-started/gemini-spark/) · [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/) · [DSH plugin](https://fwerkor.github.io/local-shell-mcp/clients/deepseek-harness/) · [Tools](https://fwerkor.github.io/local-shell-mcp/reference/tools/) · [Releases](https://github.com/fwerkor/local-shell-mcp/releases)
+[Documentation](https://fwerkor.github.io/local-shell-mcp/) · [Quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) · [Runtime choices](https://fwerkor.github.io/local-shell-mcp/guides/deployment/) · [Web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/) · [Gemini Task](https://fwerkor.github.io/local-shell-mcp/getting-started/gemini-spark/) · [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/) · [DSH plugin](https://fwerkor.github.io/local-shell-mcp/clients/deepseek-harness/) · [Tools](https://fwerkor.github.io/local-shell-mcp/reference/tools/) · [Releases](https://github.com/fwerkor/local-shell-mcp/releases)
 
 </div>
 
@@ -135,7 +135,7 @@ See the [human interface guide](https://fwerkor.github.io/local-shell-mcp/guides
 
 ## External MCP clients
 
-The built-in web workspace is the primary browser experience. External clients connect separately using LSM's `/mcp` endpoint; consult [Gemini Spark / Custom Apps](https://fwerkor.github.io/local-shell-mcp/getting-started/gemini-spark/) or the [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/).
+The built-in web workspace is the primary browser experience. External clients connect separately using LSM's `/mcp` endpoint; consult [Gemini Task / Custom Apps](https://fwerkor.github.io/local-shell-mcp/getting-started/gemini-spark/) or the [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/).
 
 For full shell, filesystem, remote-worker, and Playwright tools, use ChatGPT Developer Mode or another full MCP client. ChatGPT is a client connection; choose and start a runtime first.
 

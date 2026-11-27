@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
+<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
 # त्वरित शुरुआत
 
 यह मार्गदर्शिका एक एलएसएम नियंत्रक प्रारंभ करती है और उसका ब्राउज़र इंटरफ़ेस खोलती है। [unified web workspace](web-workspace.md) अनुशंसित दैनिक अनुभव है; यह एक अलग से तैनात, वैकल्पिक चैट स्टैक है। चैटजीपीटी, जेमिनी और अन्य बाहरी एमसीपी क्लाइंट एक ही नियंत्रक से जुड़ सकते हैं। [runtime choices and deployment model](../guides/deployment.md) देखें.
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | release binary से चलाएँ | [Standalone binary runtime](../installation/binary.md) |
 | Python या source checkout से चलाएँ | [Python runtimes](../installation/python.md) |
 | एकीकृत चैट और नियंत्रण इंटरफ़ेस का उपयोग करें | [Unified web workspace](web-workspace.md) |
-| जेमिनी स्पार्क को ग्राहक के रूप में जोड़ें | [Gemini Custom Apps](gemini-spark.md) |
+| Gemini Task को ग्राहक के रूप में जोड़ें | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT को client के रूप में जोड़ें | [ChatGPT connector](chatgpt-connector.md) |
 | tools चुनें और बेहतर prompts लिखें | [Usage patterns](../guides/usage-patterns.md) |
 | HPC, NPU/GPU या NAT machine जोड़ें | [Remote workers](../guides/remote-workers.md) |
