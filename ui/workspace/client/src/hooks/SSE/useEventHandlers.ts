@@ -1113,8 +1113,21 @@ export default function useEventHandlers({
             responseMessage,
             initialResponseId: submission.initialResponse.messageId,
           });
-        } else if (requestMessage != null && responseMessage != null) {
-          finalMessages = [...messages, requestMessage, responseMessage];
+        } else if (isRegenerate && requestMessage != null) {
+          // The run ended without a committed assistant (e.g. Stop before
+          // the first token). Keep the saved branch and drop its placeholder.
+          finalMessages = (submission.regenerateMessages ?? currentMessages ?? messages).filter(
+            (message) => message.messageId !== submission.initialResponse.messageId,
+          );
+        } else if (requestMessage != null) {
+          finalMessages = [...messages, requestMessage, ...(responseMessage ? [responseMessage] : [])];
+        } else if (
+          responseMessage != null &&
+          responseMessage.parentMessageId === submission.userMessage.messageId
+        ) {
+          // Compatibility with older Controller final frames: the CREATED
+          // event already supplied the committed request identity.
+          finalMessages = [...messages, submission.userMessage, responseMessage];
         }
 
         /* Preserve files and streamed content identity from current messages:
