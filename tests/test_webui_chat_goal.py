@@ -138,3 +138,51 @@ def test_external_resume_releases_only_terminal_chat_owner(goal_context):
     assert resumed["plan"]["status"] == "active"
     assert "continuation_driver" not in resumed["plan"]
     assert chat_goal.active_plan(database, "local", generation.run_id) is None
+
+
+@pytest.mark.parametrize("payload", [
+    {"ok": False},
+    {"ok": True, "data": None},
+    {"ok": True, "data": {"goal_mode": True, "session_id": "missing"}},
+])
+def test_observe_ignores_invalid_goal_results(goal_context, payload):
+    database, _, generation, _ = goal_context
+    raw = json.dumps(payload)
+    assert chat_goal.observe_result(database, "local", generation.run_id, "plan_manage",
+                                    {"action": "start"}, raw) == raw
+
+
+def test_goal_cannot_bind_to_ended_generation_or_wrong_plan(goal_context):
+    database, store, generation, _ = goal_context
+    manager = get_session_runtime_manager()
+    sid = manager.manage("local", action="start", label="Goal")["session_id"]
+    plan_id = manager.manage_plan(sid, subject="local", action="start",
+                                  objective="Goal", steps=[{"text": "Work"}])["plan"]["plan_id"]
+    assert not chat_goal.bind(database, "other", generation.run_id, sid, plan_id)
+    assert not chat_goal.bind(database, "local", generation.run_id, sid, "wrong-plan")
+    raw = json.dumps({"ok": True, "data": {"goal_mode": True,
+                     "session_id": sid, "plan": {"plan_id": "wrong-plan"}}})
+    result = chat_goal.observe_result(database, "local", generation.run_id, "plan_manage",
+                                      {"action": "resume"}, raw)
+    assert json.loads(result)["ok"] is False
+    assert store.finish("local", generation.run_id, status="aborted")
+    assert not chat_goal.bind(database, "local", generation.run_id, sid, plan_id)
+
+
+@pytest.mark.parametrize("error", [KeyError("gone"), RuntimeError("storage unavailable")])
+def test_goal_pause_handles_missing_session_or_storage_failure(goal_context, monkeypatch, error):
+    database, _, generation, _ = goal_context
+    manager = get_session_runtime_manager()
+    sid = manager.manage("local", action="start", label="Goal")["session_id"]
+    plan_id = manager.manage_plan(sid, subject="local", action="start",
+                                  objective="Goal", steps=[{"text": "Work"}])["plan"]["plan_id"]
+    assert chat_goal.bind(database, "local", generation.run_id, sid, plan_id)
+
+    def unavailable(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(manager, "pause_chat_plan", unavailable)
+    chat_goal.pause(database, "local", generation.run_id, "Stopped")
+    monkeypatch.setattr(manager, "chat_plan_state", unavailable)
+    if isinstance(error, KeyError):
+        assert chat_goal.active_plan(database, "local", generation.run_id) is None
