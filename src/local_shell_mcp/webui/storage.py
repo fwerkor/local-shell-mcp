@@ -204,6 +204,68 @@ class WorkspaceRepository:
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
             return self._message(db.execute("SELECT * FROM messages WHERE id=?", (message_id,)).fetchone())
 
+    def delete_message_turn(self, owner: str, conversation_id: str, message_id: str) -> list[str]:
+        """Remove one prompt and its replies, splicing all surviving branches."""
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
+                              (conversation_id, owner)).fetchone():
+                raise KeyError("Conversation not found")
+            rows = db.execute("SELECT id,parent_id,role,content,metadata FROM messages WHERE conversation_id=?",
+                              (conversation_id,)).fetchall()
+            by_id = {row["id"]: row for row in rows}
+            selected = by_id.get(message_id)
+            if selected is None:
+                raise KeyError("Message not found")
+            prompt = selected if selected["role"] == "user" else by_id.get(selected["parent_id"])
+            if prompt is None or prompt["role"] != "user":
+                raise ValueError("Message is not part of a user turn")
+            if db.execute("SELECT 1 FROM runs WHERE conversation_id=? AND status IN ('running','requires_action')",
+                          (conversation_id,)).fetchone():
+                raise ValueError("Cannot delete a turn during a generation")
+            removed = {prompt["id"], *(row["id"] for row in rows
+                        if row["parent_id"] == prompt["id"] and row["role"] == "assistant")}
+            children: dict[str, list[str]] = {}
+            for row in rows:
+                children.setdefault(row["parent_id"], []).append(row["id"])
+            affected = set(removed)
+            pending = list(removed)
+            while pending:
+                for child in children.get(pending.pop(), []):
+                    if child not in affected:
+                        affected.add(child)
+                        pending.append(child)
+
+            # Keep detached job ownership and audit state intact. Deleted runs
+            # must no longer be offered for reconnect/replay in the chat UI.
+            for ident in removed:
+                db.execute("UPDATE runs SET state=json_set(state,'$.historyDeleted',json('true')) "
+                           "WHERE conversation_id=? AND (json_extract(state,'$.responseMessageId')=? "
+                           "OR (json_extract(state,'$.userMessageId')=? "
+                           "AND coalesce(json_extract(state,'$.manualCompaction'),0)=0))",
+                           (conversation_id, ident, ident))
+                db.execute("UPDATE messages SET parent_id=? WHERE conversation_id=? AND parent_id=?",
+                           (prompt["parent_id"], conversation_id, ident))
+                db.execute("DELETE FROM messages WHERE conversation_id=? AND id=?", (conversation_id, ident))
+
+            # A descendant checkpoint may summarize the removed turn. Drop it
+            # and reconstruct history from the surviving canonical model steps.
+            for ident in affected - removed:
+                row = by_id[ident]
+                content = json.loads(row["content"])
+                metadata = _decode(row["metadata"])
+                filtered = ([part for part in content if not isinstance(part, dict)
+                             or part.get("type") != "summary"] if isinstance(content, list) else content)
+                if filtered != content or "summary" in metadata:
+                    for key in ("summary", "summaryTokenCount", "tokenCount"):
+                        metadata.pop(key, None)
+                    db.execute("UPDATE messages SET content=?,metadata=? WHERE id=?",
+                               (_json(filtered), _json(metadata), ident))
+                    db.execute("UPDATE runs SET state=json_remove(state,'$.summaryCheckpoint') "
+                               "WHERE conversation_id=? AND json_extract(state,'$.responseMessageId')=?",
+                               (conversation_id, ident))
+            return sorted(removed)
+
     def messages(self, owner: str, conversation_id: str, *, limit: int = 100, cursor: str | None = None) -> dict:
         limit = max(1, min(int(limit), 200))
         with self.database.connect() as db:

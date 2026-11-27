@@ -115,7 +115,8 @@ class GenerationStore:
         with self.database.connect() as db:
             row = db.execute(
                 "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
-                "WHERE c.owner=? AND r.conversation_id=? ORDER BY r.created_at DESC,r.id DESC LIMIT 1",
+                "WHERE c.owner=? AND r.conversation_id=? AND coalesce(json_extract(r.state,'$.historyDeleted'),0)=0 "
+                "ORDER BY r.created_at DESC,r.id DESC LIMIT 1",
                 (owner, conversation_id),
             ).fetchone()
             return self._run(row) if row else None
@@ -230,6 +231,8 @@ class GenerationStore:
                     (owner, client_request_id),
                 ).fetchone()
                 if prior:
+                    if json.loads(prior["state"]).get("historyDeleted"):
+                        raise KeyError("Generation history has been deleted")
                     return self._run(prior), False
             if new_conversation:
                 if project_id and not db.execute(
@@ -291,6 +294,10 @@ class GenerationStore:
                     (conversation_id,),
                 ).fetchone()
                 parent_id = parent["id"] if parent else None
+            if parent_id and parent_id != "00000000-0000-0000-0000-000000000000" and not db.execute(
+                "SELECT 1 FROM messages WHERE conversation_id=? AND id=?", (conversation_id, parent_id),
+            ).fetchone():
+                raise KeyError("Message ancestor not found")
             from .attachments import resolve_files
 
             files = resolve_files(db, owner, payload.get("files", []))

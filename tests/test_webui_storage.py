@@ -83,3 +83,71 @@ def test_user_settings_are_namespaced(repo: WorkspaceRepository) -> None:
     repo.save_setting("alice", "chat", {"model": "gpt-4.1"})
     assert repo.setting("alice", "chat")["model"] == "gpt-4.1"
     assert repo.setting("bob", "chat") is None
+
+
+def test_delete_turn_splices_regenerated_branches_and_invalidates_summary(repo):
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    owner = "alice"
+    cid = repo.create_conversation(owner, {})["conversationId"]
+
+    def add(mid, role, parent, **extra):
+        return repo.add_message(owner, cid, {"messageId": mid, "role": role,
+                                            "parentMessageId": parent, "text": mid, **extra})
+
+    add("first", "user", None)
+    add("first-reply", "assistant", "first")
+    add("remove", "user", "first-reply")
+    add("remove-reply", "assistant", "remove")
+    add("retry-reply", "assistant", "remove")
+    add("next", "user", "remove-reply")
+    add("next-reply", "assistant", "next", content=[
+        {"type": "summary", "content": "removed secret"},
+        {"type": "text", "text": "next-reply"},
+    ])
+    add("other-branch", "user", "retry-reply")
+    with repo.database.connect() as db:
+        db.execute("INSERT INTO webui_message_bookmarks(owner,message_id,title,created_at) VALUES(?,?,?,?)",
+                   (owner, "remove-reply", "bookmark", 1))
+    with pytest.raises(KeyError):
+        repo.delete_message_turn("bob", cid, "remove")
+    assert repo.delete_message_turn(owner, cid, "remove-reply") == [
+        "remove", "remove-reply", "retry-reply"]
+    messages = {m["messageId"]: m for m in repo.messages(owner, cid)["messages"]}
+    assert set(messages) == {"first", "first-reply", "next", "next-reply", "other-branch"}
+    assert messages["next"]["parentMessageId"] == "first-reply"
+    assert messages["other-branch"]["parentMessageId"] == "first-reply"
+    assert messages["next-reply"]["content"] == [{"type": "text", "text": "next-reply"}]
+    assert GenerationStore(repo.database).history(owner, cid, message_id="next-reply") == [
+        {"role": "user", "content": "first"}, {"role": "assistant", "content": "first-reply"},
+        {"role": "user", "content": "next"}, {"role": "assistant", "content": "next-reply"}]
+    with repo.database.connect() as db:
+        assert db.execute("SELECT count(*) FROM webui_message_bookmarks").fetchone()[0] == 0
+
+
+def test_delete_generated_turn_and_block_active_run(repo):
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    store = GenerationStore(repo.database)
+    first, _ = store.begin("alice", {"text": "first"})
+    cid = first.conversation_id
+    with pytest.raises(ValueError, match="generation"):
+        repo.delete_message_turn("alice", cid, first.user_message_id)
+    store.finish("alice", first.run_id, status="complete", text="first reply")
+    second, _ = store.begin("alice", {"text": "second", "conversationId": cid,
+                                      "clientRequestId": "second-request"})
+    store.finish("alice", second.run_id, status="complete", text="second reply")
+    assert set(repo.delete_message_turn("alice", cid, second.user_message_id)) == {
+        second.user_message_id, second.response_message_id}
+    assert store.latest("alice", cid).run_id == first.run_id
+    with pytest.raises(KeyError, match="deleted"):
+        store.begin("alice", {"text": "second", "conversationId": cid,
+                              "clientRequestId": "second-request"})
+    with pytest.raises(KeyError, match="ancestor"):
+        store.begin("alice", {"text": "stale", "conversationId": cid,
+                              "parentMessageId": second.response_message_id})
+    assert [m["content"] for m in store.history("alice", cid)] == ["first", "first reply"]
+    assert set(repo.delete_message_turn("alice", cid, first.response_message_id)) == {
+        first.user_message_id, first.response_message_id}
+    assert store.latest("alice", cid) is None
+    assert store.history("alice", cid) == []
