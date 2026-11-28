@@ -27,3 +27,11 @@ def test_pinned_group_labels_are_localized():
         assert translations["com_ui_pinned_favorites"]
         assert translations["com_ui_pinned_conversations"]
         assert translations["com_ui_pinned_favorites"] != translations["com_ui_pinned_conversations"]
+
+
+def test_root_sidebar_uses_unassigned_scope_without_limiting_search_or_archive():
+    source = (CLIENT / "components/UnifiedSidebar/ConversationsSection.tsx").read_text(encoding="utf-8")
+    assert "projectId: search.debouncedQuery || isArchivedView ? undefined : 'unassigned'" in source
+    assert "pinnedConversations.filter((conversation) => !conversation.chatProjectId)" in source
+    assert "conversations={rootPinnedConversations}" in source
+    assert "rootPinnedConversations.length === pinnedConversations.length" in source

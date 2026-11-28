@@ -1015,6 +1015,33 @@ describe('Conversation Utilities', () => {
         expect(data!.pages[0].conversations.map((c) => c.conversationId)).toEqual(['b', 'a']);
       });
 
+      it('keeps project conversations out of root pages during generation and assignment', () => {
+        const rootKey = ['allConversations', { projectId: 'unassigned' }];
+        const projectKey = ['allConversations', { projectId: 'project-a' }];
+        const rootIds = () =>
+          queryClient
+            .getQueryData<InfiniteData<ConversationCursorData>>(rootKey)!
+            .pages.flatMap((page) => page.conversations.map((c) => c.conversationId));
+        queryClient.setQueryData(rootKey, {
+          pages: [{ conversations: [convoA], nextCursor: null }],
+          pageParams: [],
+        });
+        queryClient.setQueryData(projectKey, {
+          pages: [{ conversations: [], nextCursor: null }],
+          pageParams: [],
+        });
+        const filed = { ...convoB, chatProjectId: 'project-a' };
+        upsertConvoInAllQueries(queryClient, filed);
+        expect(rootIds()).toEqual(['a']);
+        expect(
+          queryClient
+            .getQueryData<InfiniteData<ConversationCursorData>>(projectKey)!
+            .pages[0].conversations.map((c) => c.conversationId),
+        ).toEqual(['b']);
+        updateConvoInAllQueries(queryClient, 'a', (c) => ({ ...c, chatProjectId: 'project-a' }));
+        expect(rootIds()).toEqual([]);
+      });
+
       it('updateConvoInAllQueries updates correct convo', () => {
         updateConvoInAllQueries(queryClient, 'a', (c) => ({ ...c, model: 'gpt-4' }));
         const data = queryClient.getQueryData<InfiniteData<any>>(['allConversations']);

@@ -66,6 +66,8 @@ const ConversationsSection = memo(() => {
       sortDirection: sort.direction,
       tags: tags.length === 0 ? undefined : tags,
       search: search.debouncedQuery || undefined,
+      // Search and archive are cross-project views; the ordinary sidebar is not.
+      projectId: search.debouncedQuery || isArchivedView ? undefined : 'unassigned',
     },
     {
       enabled: isAuthenticated,
@@ -117,6 +119,11 @@ const ConversationsSection = memo(() => {
     () =>
       collectPinnedConversations(pinnedData?.conversations, isArchivedView ? [] : conversations),
     [pinnedData?.conversations, conversations, isArchivedView],
+  );
+
+  const rootPinnedConversations = useMemo(
+    () => pinnedConversations.filter((conversation) => !conversation.chatProjectId),
+    [pinnedConversations],
   );
 
   /**
@@ -198,13 +205,15 @@ const ConversationsSection = memo(() => {
             )}
             {!search.query && (
               <PinnedSection
-                conversations={pinnedConversations}
+                conversations={rootPinnedConversations}
                 toggleNav={toggleNav}
                 isSmallScreen={isSmallScreen}
                 /* Only a successful drain proves the list is whole: a failed later
                  page still publishes partial data and stops fetching. The Chats filters
-                 never reach this query, so nothing else can truncate it. */
-                membershipComplete={isPinnedComplete}
+                 never reach this query. Hidden project pins must retain their saved order. */
+                membershipComplete={
+                  isPinnedComplete && rootPinnedConversations.length === pinnedConversations.length
+                }
                 /* When that drain last ran, which decides whether it is current
                  enough to prune the stored order against. */
                 membershipUpdatedAt={pinnedUpdatedAt}

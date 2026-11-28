@@ -180,3 +180,21 @@ def test_delete_turn_preserves_descendant_live_checkpoint_steps(repo):
     assert store.history("alice", first.conversation_id, message_id=second.response_message_id) == [
         {"role": "user", "content": "keep prompt"}, *retained, final,
     ]
+
+
+def test_unassigned_conversations_paginate_without_project_chats(repo):
+    owner = "alice"
+    project_id = repo.create_project(owner, "Project")["_id"]
+    first = repo.create_conversation(owner, {"title": "Root 1"})["conversationId"]
+    second = repo.create_conversation(owner, {"title": "Root 2"})["conversationId"]
+    filed = repo.create_conversation(owner, {"title": "Filed", "projectId": project_id})["conversationId"]
+    repo.update_conversation(owner, filed, {"pinned": True})
+    page = repo.conversations(owner, project_id="unassigned", limit=1)
+    assert page["nextCursor"] is not None
+    next_page = repo.conversations(owner, project_id="unassigned", limit=1, cursor=page["nextCursor"])
+    assert {row["conversationId"] for row in page["conversations"] + next_page["conversations"]} == {first, second}
+    assert next_page["nextCursor"] is None
+    assert [row["conversationId"] for row in repo.conversations(owner, project_id=project_id)["conversations"]] == [filed]
+    assert [row["conversationId"] for row in repo.conversations(owner, search="Filed")["conversations"]] == [filed]
+    repo.update_conversation(owner, filed, {"projectId": None})
+    assert {row["conversationId"] for row in repo.conversations(owner, project_id="unassigned")["conversations"]} == {first, second, filed}
