@@ -346,17 +346,19 @@ async def test_unsupported_tool_declaration():
         _ = [item async for item in stream_model_with_tools(PROFILE, [USER], tools=[{"type": "invalid"}])]
 
 @pytest.mark.parametrize("event,code,retryable", [
-    ({"type": "error", "code": "rate_limit_exceeded", "message": "private key"}, "rate_limit_exceeded", True),
+    ({"type": "error", "code": "rate_limit_exceeded", "message": "upstream refused request: private key"}, "rate_limit_exceeded", True),
     ({"type": "response.failed", "response": {"error": {"code": "server_error"}}}, "server_error", True),
     ({"type": "response.cancelled"}, None, True),
     ({"type": "error", "error": {"type": "insufficient_quota"}}, "insufficient_quota", False),
     ({"type": "error", "code": "invalid_api_key"}, "invalid_api_key", False),
-    ({"type": "error", "code": "private key"}, "unrecognized_code", False),
+    ({"type": "error", "code": "vendor_unknown_failure"}, "vendor_unknown_failure", True),
+    ({"type": "error", "code": "private key"}, "[REDACTED]", True),
+    ({"type": "error", "error": {"code": 401, "message": "Unauthorized"}}, "401", False),
 ])
 def test_sse_failure_classification_and_safe_diagnostics(event, code, retryable):
     from local_shell_mcp.webui.error_diagnostics import generation_failure
 
-    error = ResponsesStreamError.from_event(event)
+    error = ResponsesStreamError.from_event(event, credentials=("private key",))
     assert error.event_type == event["type"]
     assert error.code == code and error.retryable is retryable
     diagnostic = generation_failure(error, "run")
@@ -369,6 +371,9 @@ def test_sse_failure_classification_and_safe_diagnostics(event, code, retryable)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", [
     {"type": "error", "code": "rate_limit_exceeded"},
+    {"type": "error", "code": "vendor_unknown_failure", "message": "try again"},
+    {"error": {"code": "vendor_unknown_failure", "message": "try again"}},
+    {"type": "response.canceled"},
     {"type": "response.failed", "response": {"error": {"code": "server_error"}}},
     {"type": "response.cancelled"},
     {"type": "response.completed", "response": {"status": "failed", "error": {"code": "server_error"}}},
@@ -402,6 +407,7 @@ async def test_parallel_responses_recover_empty_sse_failure(transport, monkeypat
 @pytest.mark.parametrize("prefix,code", [
     ([], "insufficient_quota"),
     ([{"type": "response.output_text.delta", "output_index": 0, "delta": "partial"}], "server_error"),
+    ([{"type": "response.output_text.delta", "output_index": 0, "delta": "partial"}], "vendor_unknown_failure"),
     ([{"type": "response.reasoning_summary_text.delta", "delta": "thinking"}], "server_error"),
 ])
 async def test_sse_does_not_retry_permanent_or_observable_failure(transport, monkeypatch, prefix, code):
@@ -489,3 +495,41 @@ async def test_responses_session_affinity_on_wire(transport, with_tools, url, mo
     assert body.get("prompt_cache_key") == expected_key
     for name in ("session-id", "x-session-id", "x-opencode-session"):
         assert headers.get(name) == ("conversation-1" if name == expected_header else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_tools", [False, True])
+@pytest.mark.parametrize("provider", ["openai-responses", "openai", "anthropic", "google"])
+async def test_provider_stream_error_preserves_redacted_diagnostics(transport, provider, with_tools):
+    from local_shell_mcp.webui.error_diagnostics import generation_failure
+    from local_shell_mcp.webui.provider_errors import ProviderStreamError
+
+    batches, _ = transport
+    batches.append([{"type": "error", "error": {"code": "vendor_new_code", "type": "vendor_error",
+                   "param": "tools[0]", "message": "Backend busy; secret-actual; Bearer other-token"}}])
+    config = ProviderConfig(provider, "test", "https://model.invalid/v1?api_key=query-secret", "secret-actual")
+    source = stream_model_with_tools(config, [USER], tools=TOOLS) if with_tools else stream_model(config, [USER])
+    with pytest.raises(ProviderStreamError) as raised:
+        _ = [event async for event in source]
+    error = raised.value
+    from local_shell_mcp.webui.agent_runtime import _retryable_model_error
+    assert _retryable_model_error(error)
+    detail = json.loads(generation_failure(error, "run"))["details"]
+    assert "vendor_new_code" in detail and "vendor_error" in detail
+    assert "Backend busy" in detail and "tools[0]" in detail
+    assert "secret-actual" not in detail and "other-token" not in detail
+
+
+def test_sse_diagnostics_redact_actual_oauth_and_query_credentials():
+    from local_shell_mcp.webui.error_diagnostics import generation_failure
+
+    request = httpx.Request("POST", "https://model.invalid/v1?key=query-credential",
+                            headers={"Authorization": "Bearer refreshed-oauth"})
+    response = httpx.Response(200, request=request)
+    error = ResponsesStreamError.from_event({"type": "error", "code": "new_vendor_code",
+        "message": "backend failed: refreshed-oauth; query-credential; configured-key; password=\"some pass\""},
+        response=response, credentials=("configured-key",))
+    detail = json.loads(generation_failure(error, "run"))["details"]
+    assert "backend failed" in detail and "new_vendor_code" in detail
+    for value in ("refreshed-oauth", "query-credential", "configured-key", "some pass"):
+        assert value not in detail

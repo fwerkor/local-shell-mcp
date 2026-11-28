@@ -123,6 +123,7 @@ class AgentRunner:
                                        checkpoint_ns=namespace, event_actor=True)
         self.active_config = self.config
         self.image_disabled = set()
+        self.virtual_failures = {}
         self.cache = {}
         self.configs = {}
         self._injected_background_names: dict[str, frozenset[str]] = {}
@@ -1068,7 +1069,8 @@ class AgentRunner:
             # Only the physical transport knows which member rejected an image.
             # Reuse this runner's fallback/cache at that boundary, not at the pool.
             profile = replace(profile, virtual_session=(self.owner, self.generation.conversation_id),
-                              virtual_stream_wrapper=self._stream_with_image_fallback)
+                              virtual_stream_wrapper=self._stream_with_image_fallback,
+                              virtual_failures=self.virtual_failures)
             async with aclosing(stream(profile, prepared, **kwargs)) as source:
                 async for event in source:
                     yield event

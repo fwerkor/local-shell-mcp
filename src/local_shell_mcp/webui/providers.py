@@ -16,6 +16,8 @@ from urllib.parse import quote, urlsplit
 
 from local_shell_mcp import __version__
 
+from .provider_errors import ProviderStreamError
+
 MODEL_USER_AGENT = f"local-shell-mcp/{__version__}"
 
 
@@ -33,6 +35,7 @@ class ProviderConfig:
     virtual_channel: str | None = None
     virtual_session: tuple[str, str] | None = None
     virtual_stream_wrapper: Callable[..., AsyncIterator] | None = field(default=None, repr=False, compare=False)
+    virtual_failures: dict[tuple[str, str], tuple[float, Exception]] = field(default_factory=dict, repr=False, compare=False)
     session_id: str | None = None
 
 
@@ -450,12 +453,10 @@ async def stream_model(
                 event = json.loads(frame)
             except json.JSONDecodeError:
                 continue
-            if "error" in event:
+            if event.get("error") is not None or event.get("type") == "error":
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                from .provider_responses import ResponsesStreamError
-
-                raise ResponsesStreamError.from_event(event, event_type="error")
+                raise ProviderStreamError.from_event(event, response=response, credentials=(config.token,))
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "openai":
                 for choice in event.get("choices", []):
@@ -600,12 +601,10 @@ async def stream_model_with_tools(
                 event = json.loads(frame)
             except json.JSONDecodeError:
                 continue
-            if "error" in event:
+            if event.get("error") is not None or event.get("type") == "error":
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                from .provider_responses import ResponsesStreamError
-
-                raise ResponsesStreamError.from_event(event, event_type="error")
+                raise ProviderStreamError.from_event(event, response=response, credentials=(config.token,))
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             for choice in event.get("choices", []):
                 delta = choice.get("delta") or {}

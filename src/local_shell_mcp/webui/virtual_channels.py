@@ -118,7 +118,7 @@ def cooldown_for(error):
 
     from .agent_runtime import _retryable_model_error
     from .model_oauth import ReauthorizationRequired
-    from .provider_responses import ResponsesStreamError
+    from .provider_errors import ProviderStreamError
 
     if isinstance(error, ReauthorizationRequired):
         return 300
@@ -131,15 +131,48 @@ def cooldown_for(error):
             return 300
         if status == 404:
             return 60
-    if isinstance(error, ResponsesStreamError) and error.code in {
-        "insufficient_quota", "quota_exceeded", "billing_hard_limit_reached",
-        "usage_limit_reached", "authentication_error", "invalid_api_key", "permission_denied",
-        "model_not_found",
-    }:
-        return 300
+    if isinstance(error, ProviderStreamError):
+        for field in ("code", "status", "type"):
+            code = str(error.fields.get(field, "")).strip().lower()
+            if code in {"401", "402", "403", "authentication_error", "invalid_api_key",
+                        "unauthenticated", "authorization_error", "permission_denied",
+                        "permission_error", "billing_error", "insufficient_quota", "quota_exceeded",
+                        "billing_hard_limit_reached", "usage_limit_reached"}:
+                return 300
+            if code in {"404", "not_found", "not_found_error", "model_not_found"}:
+                return 60
+            if code == "429":
+                return 60
     if _retryable_model_error(error):
         return 10
     return None
+
+
+
+def snapshot_failure(error):
+    """Retain only credential-redacted fields, without request bodies or tracebacks."""
+    import httpx
+
+    from .model_oauth import ReauthorizationRequired
+    from .provider_errors import ProviderStreamError
+
+    if isinstance(error, ProviderStreamError):
+        return type(error)(error.event_type, fields=error.fields)
+    if isinstance(error, httpx.HTTPStatusError):
+        response = error.response
+        try:
+            payload = response.json()
+        except (ValueError, RuntimeError):
+            payload = {}
+        payload = payload if isinstance(payload, dict) else {}
+        snapshot = ProviderStreamError.from_event(
+            {**payload, "status": response.status_code}, event_type="http_error", response=response)
+        snapshot.status_code = response.status_code
+        return snapshot
+    if isinstance(error, ReauthorizationRequired):
+        return ProviderStreamError("oauth_error", code="authentication_error",
+                                   fields={"message": "Account requires reauthorization"})
+    return ProviderStreamError("transport_error", fields={"type": type(error).__name__})
 
 
 def scoped_messages(messages, scope):
@@ -235,6 +268,18 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
                     children[key] = stored
                     _health.setdefault(key, Health())
             if not candidates:
+                if last_error is None:
+                    # Health is shared, but provider messages belong to the run
+                    # that received them. Only reuse its own unexpired failures.
+                    remembered = []
+                    for member, _ in physical_members(node, target, lookup=lookup):
+                        key = member_key(member)
+                        failure = config.virtual_failures.get(key)
+                        health = _health.get(key)
+                        if failure is not None and health is not None and min(failure[0], health.cooldown) > now:
+                            remembered.append(failure)
+                    if remembered:
+                        last_error = max(remembered, key=lambda entry: entry[0])[1]
                 raise VirtualUnavailable("No available member for virtual model " + target) from last_error
             member = choose(node, target, candidates, config.virtual_session)
             key = member_key(member)
@@ -283,6 +328,7 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
             actual = replace(provider_config(*key), session_id=config.session_id)
         except ValueError as exc:
             health.cooldown = time.monotonic() + 60
+            config.virtual_failures[key] = (health.cooldown, snapshot_failure(exc))
             raise VirtualUnavailable("Unavailable physical model " + key[1]) from exc
         scope = _scope(actual)
         prepared = scoped_messages(messages, scope)
@@ -315,10 +361,12 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
                     elif isinstance(event, ModelToolCall) and (event.provider_data or {}).get("thoughtSignature"):
                         event = replace(event, provider_data={**event.provider_data, "route_scope": scope})
                     yield event
+            config.virtual_failures.pop(key, None)
         except Exception as exc:
             delay = cooldown_for(exc)
             if delay is not None:
                 health.cooldown = time.monotonic() + delay
+                config.virtual_failures[key] = (health.cooldown, snapshot_failure(exc))
             if emitted or delay is None:
                 raise
             raise VirtualUnavailable("Unavailable physical model " + key[1]) from exc
