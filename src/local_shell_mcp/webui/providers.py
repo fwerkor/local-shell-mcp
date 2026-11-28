@@ -35,6 +35,7 @@ class ProviderConfig:
     virtual_channel: str | None = None
     virtual_session: tuple[str, str] | None = None
     virtual_stream_wrapper: Callable[..., AsyncIterator] | None = field(default=None, repr=False, compare=False)
+    virtual_failures: dict[tuple[str, str], tuple[float, Exception]] = field(default_factory=dict, repr=False, compare=False)
     session_id: str | None = None
 
 

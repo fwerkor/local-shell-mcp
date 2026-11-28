@@ -641,3 +641,60 @@ async def test_image_fallback_is_scoped_to_physical_member(pool, monkeypatch):
     assert len(runner.image_disabled) == 1
     assert sum(event.get("event") == "on_attachment_image_fallback"
                for _, event in store.events("alice", job.run_id)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fields", [
+    {"code": 401}, {"code": "403"}, {"type": "permission_error"},
+    {"status": "UNAUTHENTICATED"}, {"type": "not_found_error"},
+])
+async def test_equivalent_sse_account_errors_fail_over(pool, monkeypatch, fields):
+    seen = []
+    original = httpx.AsyncClient
+
+    def reply(request):
+        seen.append(request.url.host)
+        if request.url.host == "primary.invalid":
+            event = {"error": {**fields, "message": "account unavailable"}}
+            return httpx.Response(200, text="data: " + json.dumps(event) + "\n\n")
+        return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(reply), **kw))
+    config = provider_config("Pool", "alias")
+    assert "ok" in [item async for item in stream_model(config, [{"role": "user", "content": "hello"}])]
+    assert seen == ["primary.invalid", "backup.invalid"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sse", [True, False])
+async def test_cooling_members_preserve_only_own_run_diagnostics(pool, monkeypatch, sse):
+    from local_shell_mcp.webui.error_diagnostics import generation_failure
+
+    seen = []
+    original = httpx.AsyncClient
+
+    def reply(request):
+        seen.append(request.url.host)
+        error = {"error": {"code": "invalid_api_key", "message": "Account suspended; secret test"}}
+        if sse:
+            return httpx.Response(200, text="data: " + json.dumps(error) + "\n\n",
+                                  headers={"x-request-id": "provider-request-123"})
+        return httpx.Response(401, json=error, headers={"x-request-id": "provider-request-123"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(reply), **kw))
+    config = provider_config("Pool", "alias")
+    messages = [{"role": "user", "content": "hello"}]
+
+    async def fail(profile):
+        with pytest.raises(routing.VirtualUnavailable) as exc:
+            _ = [item async for item in stream_model(profile, messages)]
+        return generation_failure(exc.value, "run")
+
+    await fail(config)
+    assert seen == ["primary.invalid", "backup.invalid"]
+    detail = await fail(config)
+    assert seen == ["primary.invalid", "backup.invalid"]
+    assert "invalid_api_key" in detail and "provider-request-123" in detail
+    assert "Account suspended" in detail and "secret test" not in detail
+    assert "Account suspended" not in await fail(provider_config("Pool", "alias"))
+    assert all(error.__traceback__ is None for _, error in config.virtual_failures.values())
