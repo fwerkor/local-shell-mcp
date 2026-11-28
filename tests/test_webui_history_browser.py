@@ -8,8 +8,8 @@ from starlette.applications import Starlette
 
 from local_shell_mcp.main import _with_oauth_routes
 from local_shell_mcp.settings import get_settings
-from local_shell_mcp.webui.storage import WorkspaceRepository
 from local_shell_mcp.sqlite_store import shared_database
+from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
 @pytest.mark.asyncio
