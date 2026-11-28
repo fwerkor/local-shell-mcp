@@ -13,6 +13,8 @@ import {
   sumTotalUsage,
   prunedBranchTokens,
   collectAnchorSeries,
+  contextSnapshotInputTokens,
+  contextSnapshotMatchesModel,
   latestExchangeTokens,
   findBranchSnapshotAnchor,
   estimateTokens,
@@ -1125,4 +1127,61 @@ test('releasing message bodies preserves the usage and context index', () => {
   } finally {
     clearIndex(CONVO);
   }
+});
+
+describe('context snapshot input occupancy', () => {
+  const snapshot = {
+    breakdown: {
+      maxContextTokens: 256000,
+      instructionTokens: 8450,
+      summaryTokens: 0,
+      messageTokens: 212000,
+    },
+    contextBudget: 243200,
+    remainingContextTokens: 22750,
+  } as Parameters<typeof contextSnapshotInputTokens>[0];
+
+  it('keeps occupancy from a 256K snapshot when the selected model has a 1M window', () => {
+    const used = contextSnapshotInputTokens(snapshot);
+    expect(used).toBe(220450);
+    expect(Math.round((used / 1000000) * 100)).toBe(22);
+    expect(1000000 - used).toBe(779550);
+  });
+
+  it('rejects a previous model snapshot, including switches with the same window', () => {
+    const measured = { ...snapshot, model: 'previous-model', providerInputTokens: 220450 };
+    expect(
+      contextSnapshotMatchesModel(measured, { model: 'next-model', maxContextTokens: 1000000 }),
+    ).toBe(false);
+    expect(
+      contextSnapshotMatchesModel(measured, { model: 'next-model', maxContextTokens: 256000 }),
+    ).toBe(false);
+    expect(
+      contextSnapshotMatchesModel(measured, { model: 'previous-model', maxContextTokens: 256000 }),
+    ).toBe(true);
+    expect(contextSnapshotMatchesModel(snapshot, { maxContextTokens: 1000000 })).toBe(false);
+    expect(contextSnapshotMatchesModel({ ...measured, channel: 'old' }, { channel: 'new' })).toBe(
+      false,
+    );
+    expect(contextSnapshotMatchesModel({ ...measured, agentId: 'old' }, {}, 'new')).toBe(false);
+    expect(contextSnapshotInputTokens(measured)).toBe(220450);
+  });
+
+  it('uses the breakdown for older snapshots without a usable budget', () => {
+    expect(contextSnapshotInputTokens({ ...snapshot, contextBudget: undefined })).toBe(220450);
+  });
+
+  it('includes unclassified input but excludes the output reserve', () => {
+    expect(contextSnapshotInputTokens({ ...snapshot, remainingContextTokens: 20000 })).toBe(223200);
+  });
+
+  it('does not hide overflow when the remaining budget is clamped to zero', () => {
+    expect(
+      contextSnapshotInputTokens({
+        ...snapshot,
+        remainingContextTokens: 0,
+        breakdown: { ...snapshot.breakdown, messageTokens: 300000 },
+      }),
+    ).toBe(308450);
+  });
 });

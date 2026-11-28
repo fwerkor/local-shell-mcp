@@ -157,6 +157,8 @@ async def test_runner_publishes_budget_without_triggering_summary(setup):
               if item.get('event') == 'on_context_usage']
     assert len(events) == 1
     assert events[0]['data']['breakdown']['messageCount'] == 1
+    assert events[0]['data']['model'] == 'test'
+    assert events[0]['data']['provider'] == 'openai'
     assert store.finish('alice', job.run_id, status='complete', text='done')
     assert store.events('alice', job.run_id)[-1][1]['responseMessage']['metadata']['contextUsage'] == events[0]['data']
 
@@ -278,3 +280,39 @@ def test_conversation_consumption_survives_compaction_and_message_deletion(setup
     assert reopened.delete_conversation('alice', job.conversation_id)
     with db.connect() as conn:
         assert conn.execute('SELECT count(*) FROM webui_conversation_usage').fetchone()[0] == 0
+
+
+
+@pytest.mark.asyncio
+async def test_context_identity_prefers_agent_channel_and_handles_removed_channel(setup, monkeypatch):
+    from local_shell_mcp.webui import provider_profiles
+
+    db, store, job = setup
+
+    async def empty(*args, **kwargs):
+        if False:
+            yield None
+
+    async def emit(_):
+        pass
+
+    profile = ProviderConfig('openai', 'test', 'https://invalid.example/v1', '')
+    runner = AgentRunner('alice', job, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=empty, stream_text=empty, on_text=emit, profile=profile)
+    state = AgentLoopState(AgentContext(profile, [], agent={'id': 'agent', 'provider': 'Named'}),
+                           [{'role': 'user', 'content': 'hello'}])
+    def resolve(channel):
+        assert channel == 'Named'
+        raise ValueError('channel removed')
+
+    monkeypatch.setattr(provider_profiles, 'profile', resolve)
+    assert runner._context_channel(state) == 'Named'
+    assert runner._context_limit(state, {}) is None
+    assert runner._context_limit(state, {'agents': {'maxContextTokens': 8192}}) == 8192
+    await runner._observe_model_usage(ModelUsage('openai', 1024, 32), state)
+    snapshot = [evt['data'] for _, evt in store.events('alice', job.run_id)
+                if evt.get('event') == 'on_context_usage'][-1]
+    assert snapshot['channel'] == 'Named'
+    assert snapshot['model'] == 'test'
+    assert snapshot['providerInputTokens'] == 1024
+    assert snapshot['breakdown']['maxContextTokens'] == 0

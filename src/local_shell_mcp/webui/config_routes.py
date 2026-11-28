@@ -145,7 +145,14 @@ async def endpoint_configs(request: Request):
     from .memory import memory_tools_available
 
     owner = _owner(request)
-    return JSONResponse(_endpoint_info(memory_available=memory_tools_available(_repo(), owner)))
+    repo = _repo()
+    result = _endpoint_info(memory_available=memory_tools_available(repo, owner))
+    settings = repo.setting(owner, "endpoints", {}) or {}
+    agents = settings.get("agents") or {}
+    raw = agents.get("maxContextTokens") if isinstance(agents, dict) else None
+    if type(raw) in (int, float) and 0 < raw <= 2_000_000:
+        result["agents"]["maxContextTokens"] = int(raw)
+    return JSONResponse(result)
 
 
 async def models(request: Request):

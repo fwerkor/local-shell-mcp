@@ -290,6 +290,8 @@ export type TContextUsageEvent = {
   /** Provider-confirmed tokens of the LAST model request, never a local estimate. */
   providerInputTokens?: number;
   providerOutputTokens?: number;
+  /** Configured channel (distinct from the transport provider protocol). */
+  channel?: string;
   /** Model and provider of the reconciling primary call, retained across reloads. */
   model?: string;
   provider?: string;

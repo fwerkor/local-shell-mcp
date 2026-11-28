@@ -584,10 +584,45 @@ export interface AnchorReading {
   configuration?: string;
 }
 
+/** A context snapshot is only valid for the configuration that produced it.
+ * Older snapshots without model identity can still be rejected by window size. */
+export function contextSnapshotMatchesModel(
+  snapshot: TContextUsageEvent,
+  limits: { model?: string; maxContextTokens?: number; channel?: string },
+  agentId?: string | null,
+): boolean {
+  const previousMax = normalizeTokenCount(snapshot.breakdown.maxContextTokens);
+  const currentMax = normalizeTokenCount(limits.maxContextTokens);
+  return (
+    !(snapshot.model && limits.model && snapshot.model !== limits.model) &&
+    !(snapshot.agentId && agentId && snapshot.agentId !== agentId) &&
+    !(snapshot.channel && limits.channel && snapshot.channel !== limits.channel) &&
+    !(previousMax > 0 && currentMax > 0 && previousMax !== currentMax)
+  );
+}
+
+/** Recover prompt occupancy from the budget that produced the snapshot.
+ * The current model's window may differ, and the output reserve is not input. */
+export function contextSnapshotInputTokens(snapshot: TContextUsageEvent): number {
+  const breakdown = snapshot.breakdown;
+  const counted =
+    normalizeTokenCount(snapshot.effectiveInstructionTokens ?? breakdown.instructionTokens) +
+    normalizeTokenCount(breakdown.summaryTokens) +
+    normalizeTokenCount(breakdown.messageTokens);
+  const budget = normalizeTokenCount(snapshot.contextBudget);
+  if (budget > 0 && snapshot.remainingContextTokens != null) {
+    return Math.max(counted, budget - normalizeTokenCount(snapshot.remainingContextTokens));
+  }
+  return counted;
+}
+
 /** Compare the measured call configuration, including fixed prompt overhead.
  * Older snapshots without call identity cannot establish comparability. */
 export function snapshotConfiguration(
-  snapshot: Pick<TContextUsageEvent, 'model' | 'provider' | 'agentId' | 'contextBudget'> & {
+  snapshot: Pick<
+    TContextUsageEvent,
+    'model' | 'provider' | 'agentId' | 'contextBudget' | 'channel'
+  > & {
     breakdown?: Partial<TTokenBudgetBreakdown>;
   },
 ): string | undefined {
@@ -597,6 +632,7 @@ export function snapshotConfiguration(
   return JSON.stringify([
     snapshot.model,
     snapshot.provider,
+    snapshot.channel,
     snapshot.agentId,
     snapshot.contextBudget ?? snapshot.breakdown?.maxContextTokens,
     snapshot.breakdown?.instructionTokens,
