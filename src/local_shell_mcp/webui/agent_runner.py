@@ -1056,20 +1056,28 @@ class AgentRunner:
             if missing:
                 state.completed = False
 
-    async def _stream_with_image_fallback(self, stream, profile, prepared, **kwargs):
+    async def _stream_with_image_fallback(self, stream, profile, prepared, *, physical_member=None, **kwargs):
         """Retry only an explicit vision rejection before any provider output."""
-        from .providers import UnsupportedImageInput
-        from .steer_media import without_attachment_images
-
-        key = (profile.provider, profile.url, profile.model, profile.account_id, profile.virtual_channel)
-        fallback, changed = without_attachment_images(prepared)
-        if key in self.image_disabled:
-            prepared = fallback
         from contextlib import aclosing
         from dataclasses import replace
 
+        from .providers import UnsupportedImageInput
+        from .steer_media import without_attachment_images
+
         if profile.virtual_channel:
-            profile = replace(profile, virtual_session=(self.owner, self.generation.conversation_id))
+            # Only the physical transport knows which member rejected an image.
+            # Reuse this runner's fallback/cache at that boundary, not at the pool.
+            profile = replace(profile, virtual_session=(self.owner, self.generation.conversation_id),
+                              virtual_stream_wrapper=self._stream_with_image_fallback)
+            async with aclosing(stream(profile, prepared, **kwargs)) as source:
+                async for event in source:
+                    yield event
+            return
+
+        key = (profile.provider, profile.url, profile.model, profile.account_id, physical_member)
+        fallback, changed = without_attachment_images(prepared)
+        if key in self.image_disabled:
+            prepared = fallback
         emitted = False
         try:
             async with aclosing(stream(profile, prepared, **kwargs)) as source:

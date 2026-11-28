@@ -597,3 +597,47 @@ async def test_nested_affinity_and_partial_stream_never_replays(pool, monkeypatc
         await anext(stream)
     assert seen == ["flash-free", "flash", "flash"]
     assert all(h.active == 0 for h in routing._health.values())
+
+
+@pytest.mark.asyncio
+async def test_image_fallback_is_scoped_to_physical_member(pool, monkeypatch):
+    from local_shell_mcp.webui import providers
+    from local_shell_mcp.webui.agent_runner import AgentRunner
+    from local_shell_mcp.webui.generations import GenerationStore
+
+    pool = dict(pool, strategy="round_robin", session_affinity=False)
+    _repo().save_setting("__lsm_controller__", "model.channel.Pool", pool)
+    db = _repo().database
+    store = GenerationStore(db)
+    job, _ = store.begin("alice", {"text": "image"})
+    config = provider_config("Pool", "alias")
+    seen = []
+    original_stream = providers.stream_model
+
+    async def model(profile, messages, **kwargs):
+        if profile.provider == "virtual":
+            async for event in original_stream(profile, messages, **kwargs):
+                yield event
+            return
+        image = isinstance(messages[-1]["content"], list)
+        seen.append((profile.model, image))
+        if profile.model == "flash-free" and image:
+            raise providers.UnsupportedImageInput("no vision")
+        yield profile.model
+
+    async def emit(_):
+        pass
+
+    monkeypatch.setattr(providers, "stream_model", model)
+    runner = AgentRunner("alice", job, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=model, stream_text=model, on_text=emit, profile=config)
+    messages = [{"role": "user", "source": "attachment", "attachmentImageIndices": [1],
+                 "content": [{"type": "text", "text": "image path"},
+                             {"type": "image_url", "image_url": {"url": "data:image/png;base64,eA=="}}]}]
+    for expected in ("flash-free", "flash", "flash-free", "flash"):
+        assert [event async for event in runner._stream_with_image_fallback(model, config, messages)] == [expected]
+    assert seen == [("flash-free", True), ("flash-free", False), ("flash", True),
+                    ("flash-free", False), ("flash", True)]
+    assert len(runner.image_disabled) == 1
+    assert sum(event.get("event") == "on_attachment_image_fallback"
+               for _, event in store.events("alice", job.run_id)) == 1

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing, asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
@@ -32,6 +32,7 @@ class ProviderConfig:
     auth_method: str | None = None
     virtual_channel: str | None = None
     virtual_session: tuple[str, str] | None = None
+    virtual_stream_wrapper: Callable[..., AsyncIterator] | None = field(default=None, repr=False, compare=False)
     session_id: str | None = None
 
 

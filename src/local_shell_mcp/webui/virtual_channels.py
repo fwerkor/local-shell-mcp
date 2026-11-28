@@ -290,12 +290,19 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
         start = time.monotonic()
         health.active += 1
         try:
+            options = dict(kwargs)
             if tools is not None:
-                source = stream_model_with_tools(actual, prepared, tools=tools, **kwargs)
+                transport = stream_model_with_tools
+                options["tools"] = tools
             elif actual.provider in {"anthropic", "google"} and kwargs.get("emit_finish_reason"):
-                source = stream_native_tools(actual, prepared, tools=[], **kwargs)
+                transport = stream_native_tools
+                options["tools"] = []
             else:
-                source = stream_model(actual, prepared, **kwargs)
+                transport = stream_model
+            if config.virtual_stream_wrapper is not None:
+                source = config.virtual_stream_wrapper(transport, actual, prepared, physical_member=key, **options)
+            else:
+                source = transport(actual, prepared, **options)
             async with aclosing(source):
                 async for event in source:
                     if not emitted:
