@@ -43,6 +43,8 @@ Enable automatic discovery to request model information from the provider. The C
 
 Specify the context window for each model when it is known. An explicit per-model value overrides discovered metadata or fills a missing value. The editor accepts 1 to 2,000,000 tokens; this is a configuration range, not a guarantee that a provider supports that capacity. Use the effective limit for your deployment, accounting for server-side configuration and the model's own limits.
 
+For recognized official provider endpoints, missing context values can be filled from the public models.dev catalog using exact provider and model IDs. Upstream metadata takes precedence over this fallback, and manual overrides take precedence over both. The Controller shares a six-hour in-memory catalog cache; a failed fetch preserves the last good cache and retries after ten minutes. No channel credentials, URLs or model IDs are sent to models.dev. Unknown endpoints and unmatched IDs remain unknown when the provider does not report a limit.
+
 ## Sampling, reasoning and usage
 
 Channel/model defaults control the request parameters supported by the selected provider. The chat composer may expose reasoning effort where available. Different protocols implement sampling and reasoning differently; an option may be unsupported by a particular model. Begin with provider defaults, then change one setting at a time.

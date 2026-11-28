@@ -153,6 +153,9 @@ async def _fetch_models(kind: str, base: str, token: str, *, allow_empty: bool =
             raise ValueError('Provider model list has too many pages')
     if not models and not allow_empty:
         raise ValueError('Provider returned no supported models; enter model identifiers manually')
+    from .model_metadata import fill_missing_contexts
+
+    await fill_missing_contexts(kind, base, models)
     return {'models': list(models), 'model_contexts': {m: n for m, n in models.items() if n is not None}}
 
 
