@@ -8,7 +8,6 @@ import type { TEndpointsConfig } from 'librechat-data-provider';
 import type { NavLink } from '~/common';
 import { useGetEndpointsQuery, useGetStartupConfig } from '~/data-provider';
 import ConversationsSection from '~/components/UnifiedSidebar/ConversationsSection';
-import { ControlSidebar } from '~/components/LSM/Control';
 import useSideNavLinks from '~/hooks/Nav/useSideNavLinks';
 import store from '~/store';
 
@@ -49,12 +48,11 @@ export default function useUnifiedSidebarLinks() {
 
   const links = useMemo(() => {
     const controlLink: NavLink = {
-      title: 'com_nav_control_panel',
-      label: 'LSM Controller',
+      title: 'com_lsm_workspace',
+      label: 'Workspace',
       icon: LayoutDashboard,
       id: 'lsm-control',
-      Component: ControlSidebar,
-      onClick: () => navigate('/control/overview'),
+      onClick: () => navigate('/control/workspace'),
     };
     const conversationLink: NavLink = {
       title: 'com_ui_chat_history',

@@ -23,7 +23,7 @@ export default function StartupLayout({ isAuthenticated }: { isAuthenticated?: b
       const hasPendingRedirect =
         new URLSearchParams(window.location.search).has(REDIRECT_PARAM) || hasStoredRedirect();
       if (!hasPendingRedirect) {
-        navigate('/control/overview', { replace: true });
+        navigate('/control/workspace', { replace: true });
       }
     }
     if (data) {

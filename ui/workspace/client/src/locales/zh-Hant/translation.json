@@ -3101,5 +3101,20 @@
   "com_lsm_channel_discover_interval": "伺服器每 10 分鐘更新一次。更新失敗時將保留現有資料。",
   "com_lsm_channel_discover_context_help": "留空以使用 API 元資料；輸入一個值來覆寫它或填入未知的限制。",
   "com_lsm_channel_refreshed": "模型資訊已更新。",
-  "com_ui_tool_name_sleep": "等待"
+  "com_ui_tool_name_sleep": "等待",
+  "com_lsm_workspace": "工作區",
+  "com_lsm_workspace_jobs": "任務",
+  "com_lsm_workspace_explorer": "檔案樹",
+  "com_lsm_workspace_unsaved": "放棄未儲存的修改？",
+  "com_lsm_workspace_disconnected": "已中斷",
+  "com_lsm_workspace_connecting": "連線中…",
+  "com_lsm_workspace_connected": "已連線",
+  "com_lsm_workspace_open_desktop": "開啟桌面",
+  "com_lsm_workspace_no_file": "從檔案樹開啟檔案。",
+  "com_lsm_workspace_select_window": "選擇視窗",
+  "com_lsm_workspace_reconnect": "重新連線",
+  "com_lsm_workspace_toggle_explorer": "切換檔案樹",
+  "com_lsm_workspace_toggle_panel": "切換底部面板",
+  "com_lsm_workspace_job_output": "任務輸出",
+  "com_lsm_workspace_conflict": "機器上的檔案已變更，請重新開啟再儲存。"
 }

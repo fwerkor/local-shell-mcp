@@ -3101,5 +3101,20 @@
   "com_lsm_channel_discover_manual_help": "Turn off automatic discovery to configure models manually.",
   "com_lsm_channel_discover_interval": "Refreshed by the server every 10 minutes. Existing data is retained if a refresh fails.",
   "com_lsm_channel_discover_context_help": "Leave blank to use API metadata; enter a value to override it or fill in an unknown limit.",
-  "com_lsm_channel_refreshed": "Model information refreshed."
+  "com_lsm_channel_refreshed": "Model information refreshed.",
+  "com_lsm_workspace": "Workspace",
+  "com_lsm_workspace_jobs": "Jobs",
+  "com_lsm_workspace_explorer": "Explorer",
+  "com_lsm_workspace_unsaved": "Discard unsaved changes?",
+  "com_lsm_workspace_disconnected": "Disconnected",
+  "com_lsm_workspace_connecting": "Connecting…",
+  "com_lsm_workspace_connected": "Connected",
+  "com_lsm_workspace_open_desktop": "Open desktop",
+  "com_lsm_workspace_no_file": "Open a file from the explorer.",
+  "com_lsm_workspace_select_window": "Select a window",
+  "com_lsm_workspace_reconnect": "Reconnect",
+  "com_lsm_workspace_toggle_explorer": "Toggle file tree",
+  "com_lsm_workspace_toggle_panel": "Toggle bottom panel",
+  "com_lsm_workspace_job_output": "Job output",
+  "com_lsm_workspace_conflict": "The file changed on the machine. Reopen it before saving."
 }

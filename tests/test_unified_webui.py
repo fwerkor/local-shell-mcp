@@ -23,7 +23,7 @@ def test_unified_react_workspace_is_first_party_and_vendored_backend_is_removed(
     source = WORKSPACE / "client" / "src" / "routes" / "index.tsx"
     text = source.read_text(encoding="utf-8")
     assert text.count("path: 'control/:section?'") == 1
-    assert 'Navigate to="/control/overview"' in text
+    assert 'Navigate to="/control/workspace"' in text
     assert (WORKSPACE / "LICENSE").is_file()
     assert (WORKSPACE / "README.md").is_file()
     assert (WORKSPACE / "bun.lock").is_file()
@@ -57,11 +57,13 @@ def test_native_python_login_agents_and_sse_are_routed_without_node(monkeypatch)
 
 def test_native_control_pages_and_settings_source_are_retained():
     pages = WORKSPACE / "client" / "src" / "components" / "LSM"
-    for name in ("Control.tsx", "Overview.tsx", "Files.tsx", "Operations.tsx", "Desktop.tsx"):
+    for name in ("Control.tsx", "Workspace.tsx", "WorkspaceTerminal.tsx", "WorkspaceJobs.tsx", "Operations.tsx", "Desktop.tsx"):
         assert (pages / name).is_file()
     navigation = (pages / "Control.tsx").read_text(encoding="utf-8")
     settings = (pages.parent / "Nav" / "Settings" / "ControllerSettings.tsx").read_text(encoding="utf-8")
-    assert "/control/" in navigation
+    assert "<Workspace initialSection={section}" in navigation
+    assert not (pages / "Overview.tsx").exists()
+    assert not (pages / "Files.tsx").exists()
     assert "section === 'settings'" in navigation
     for action in ("view", "save", "restart"):
         assert action in settings

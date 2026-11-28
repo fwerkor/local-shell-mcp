@@ -158,7 +158,7 @@ function ExpandedPanel({
 
   return (
     <div className="flex h-full flex-shrink-0 flex-col gap-2 border-r border-border-light bg-surface-primary-alt px-2 py-2">
-      <Link to="/control/overview" title="local-shell-mcp" aria-label={localize('com_lsm_ui_controller_home')}
+      <Link to="/control/workspace" title="local-shell-mcp" aria-label={localize('com_lsm_ui_controller_home')}
         className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-surface-hover">
         <img src="/assets/logo.svg" alt="" className="size-7 rounded-lg" />
       </Link>

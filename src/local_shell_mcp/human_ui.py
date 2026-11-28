@@ -48,7 +48,7 @@ from .fs_ops import (
     write_content,
 )
 from .image_ops import ImageFile, assert_view_image_size, detect_image_type, make_image_preview
-from .jobs import list_jobs
+from .jobs import list_jobs, retry_job, stop_job, tail_job
 from .live_channel import get_live_channel_manager, live_id_from_claims
 from .oauth import ALL_OAUTH_SCOPES
 from .remote import (
@@ -787,6 +787,8 @@ async def api_bootstrap(request: Request) -> Response:
     return _json_ok(
         {
             "version": version_info(),
+            "ui_path": "/" + settings.ui_path.strip("/"),
+            "auth_mode": settings.auth_mode,
             "machines": machines,
             "features": {
                 "remote": settings.remote_enabled,
@@ -1530,6 +1532,55 @@ async def api_gui_action(request: Request) -> Response:
             window_id=window_id,
             actions=[str(action.get("type") or "") for action in actions],
         )
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_jobs(request: Request) -> Response:
+    machine = str(request.query_params.get("machine") or "local")
+    try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
+        limit = max(1, min(100, int(request.query_params.get("limit", "50"))))
+        offset = max(0, int(request.query_params.get("offset", "0")))
+        args = {"include_finished": True, "limit": limit, "offset": offset}
+        result = await _machine_dispatch(machine, lambda: list_jobs(**args), "job_list", args)
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_job_output(request: Request) -> Response:
+    machine = str(request.query_params.get("machine") or "local")
+    try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
+        job_id = str(request.query_params.get("job_id") or "")
+        if not job_id:
+            raise ValueError("job_id is required")
+        lines = max(1, min(1000, int(request.query_params.get("lines", "200"))))
+        result = await _machine_dispatch(
+            machine, lambda: tail_job(job_id, lines), "job_tail", {"job_id": job_id, "lines": lines}
+        )
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_job_action(request: Request) -> Response:
+    try:
+        body = await request.json()
+        machine = str(body.get("machine") or "local")
+        _require_ui_scopes(request, "shell:execute", machine=machine)
+        job_id = str(body.get("job_id") or "")
+        if not job_id:
+            raise ValueError("job_id is required")
+        action = request.path_params["action"]
+        if action == "stop":
+            result = await _machine_dispatch(machine, lambda: stop_job(job_id), "job_stop", {"job_id": job_id})
+        elif action == "retry":
+            result = await _machine_dispatch(machine, lambda: retry_job(job_id), "job_retry", {"job_id": job_id})
+        else:
+            raise ValueError("Unsupported job action")
         return _json_ok(result)
     except Exception as exc:
         return _json_error(exc)
@@ -3640,6 +3691,9 @@ def ui_routes() -> list[Any]:
             methods=["POST"],
         ),
         Route(UI_API_PREFIX + "/gui/action", api_gui_action, methods=["POST"]),
+        Route(UI_API_PREFIX + "/jobs", api_jobs, methods=["GET"]),
+        Route(UI_API_PREFIX + "/jobs/output", api_job_output, methods=["GET"]),
+        Route(UI_API_PREFIX + "/jobs/{action}", api_job_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/terminals", api_terminals, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/read", api_terminal_read, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/{action}", api_terminal_action, methods=["POST"]),

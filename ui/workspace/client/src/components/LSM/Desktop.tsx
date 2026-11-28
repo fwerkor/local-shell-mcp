@@ -1,143 +1,145 @@
-import useLocalize from '~/hooks/useLocalize';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Keyboard, Monitor, MousePointer2, RefreshCw } from 'lucide-react';
+import { Maximize, RefreshCw } from 'lucide-react';
+import useLocalize from '~/hooks/useLocalize';
 import { useAuthContext } from '~/hooks';
-import { asText, binaryRequest, qs, type RecordValue } from './api';
-import { useControllerServices } from './hooks';
+import { workspaceSocket, type WorkspaceConnection } from './workspaceTransport';
+import type { RecordValue } from './api';
 
 type Bounds = { x: number; y: number; width: number; height: number };
-type Observation = { id: string; bounds: Bounds; coordinateInput: boolean };
-const button = 'rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm hover:bg-surface-hover disabled:opacity-40';
-export default function Desktop() {
+type Frame = { type: 'frame'; observation_id: string; bounds: Bounds; ttl_s: number; coordinate_input: boolean; image: boolean };
+type Observation = Frame & { expires: number };
+const toolButton = 'rounded p-1.5 hover:bg-surface-hover disabled:opacity-40';
+
+export default function Desktop({ machine, windowId, connection }: { machine: string; windowId: string; connection: WorkspaceConnection }) {
   const localize = useLocalize();
-  const { read, write } = useControllerServices();
   const { token } = useAuthContext();
-  const [machine, setMachine] = useState(() => {
-    try { return window.localStorage.getItem('lsm:desktop-machine') || 'local'; }
-    catch { return 'local'; }
-  });
-  const [machines, setMachines] = useState<string[]>(['local']);
-  const [windows, setWindows] = useState<RecordValue[]>([]);
-  const [windowId, setWindowId] = useState('');
+  const container = useRef<HTMLDivElement>(null);
+  const socket = useRef<WebSocket | null>(null);
+  const observation = useRef<Observation | null>(null);
+  const sequence = useRef(0);
   const [image, setImage] = useState('');
-  const [observation, setObservation] = useState<Observation | null>(null);
   const [error, setError] = useState('');
-  const [unavailable, setUnavailable] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [generation, setGeneration] = useState(0);
   const [keys, setKeys] = useState('');
-  const imageRef = useRef<HTMLImageElement>(null);
+  const [coordinateInput, setCoordinateInput] = useState(false);
   const urlRef = useRef('');
-  const requestRef = useRef(0);
   useEffect(() => {
-    void read<{ machines?: RecordValue[] }>('machines').then(data => {
-      setMachines(['local', ...(data.machines ?? []).map(row => String(row.machine || row.name || row.id || '')).filter(m => m && m !== 'local')]);
-    }).catch(() => {});
-    return () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
-  }, []);
-  const refreshWindows = async (target = machine) => {
-    const request = ++requestRef.current;
-    setBusy(true);
-    try {
-      const result = await read<{ windows?: RecordValue[]; available?: boolean; reason?: string }>('gui/windows', { machine: target });
-      if (request !== requestRef.current) return;
-      setWindows(result.windows || []);
-      setUnavailable(result.available === false ? result.reason || localize('com_lsm_desktop_unavailable') : '');
-      setError('');
-    } catch (e) {
-      if (request !== requestRef.current) return;
-      setWindows([]); setUnavailable(''); setError(String(e));
-    } finally { if (request === requestRef.current) setBusy(false); }
-  };
-  useEffect(() => {
-    setWindowId(''); setImage(''); setObservation(null);
-    void refreshWindows();
-  }, [machine]);
-  const frame = async (id = windowId) => {
-    if (!id) return;
-    setBusy(true);
-    try {
-      const response = await binaryRequest('gui/frame' + qs({ machine, window_id: id }), token);
-      if (!(response.headers.get('content-type') || '').startsWith('image/')) {
-        throw new Error(localize('com_lsm_controller_returned_no_display_frame'));
-      }
-      const bounds: Bounds = {
-        x: Number(response.headers.get('x-lsm-gui-window-x') || 0),
-        y: Number(response.headers.get('x-lsm-gui-window-y') || 0),
-        width: Number(response.headers.get('x-lsm-gui-window-width') || 0),
-        height: Number(response.headers.get('x-lsm-gui-window-height') || 0),
-      };
-      const next = URL.createObjectURL(await response.blob());
+    let stopped = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let delay = 500;
+    let pending: Observation | null = null;
+    let latest: Observation | null = null;
+    let frameVersion = 0;
+    let paintedVersion = -1;
+    const clearFrame = () => {
+      observation.current = null;
+      pending = null;
+      latest = null;
+      frameVersion++;
+      paintedVersion = -1;
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-      urlRef.current = next; setImage(next);
-      setObservation({ id: response.headers.get('x-lsm-gui-observation-id') || '', bounds,
-        coordinateInput: response.headers.get('x-lsm-gui-coordinate-input') === '1' });
-      setError('');
-    } catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
-  };
-  const act = async (action: RecordValue) => {
-    if (!observation || !windowId) return;
-    setBusy(true);
-    try {
-      await write('gui/action', { machine, window_id: windowId, observation_id: observation.id, bounds: observation.bounds, actions: [action] });
-      await frame();
-    } catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
+      urlRef.current = '';
+      setImage('');
+      setCoordinateInput(false);
+    };
+    clearFrame();
+    const connect = () => {
+      if (stopped) return;
+      setStatus('connecting');
+      const ws = workspaceSocket(connection, token, 'desktop', { machine, window_id: windowId });
+      ws.binaryType = 'arraybuffer';
+      socket.current = ws;
+      ws.onopen = () => { if (!stopped && socket.current === ws) setError(''); };
+      ws.onmessage = event => {
+        if (stopped || socket.current !== ws) return;
+        if (event.data instanceof ArrayBuffer) {
+          if (!pending) return;
+          const next = URL.createObjectURL(new Blob([event.data], { type: 'image/jpeg' }));
+          const version = frameVersion;
+          pending = null;
+          const decoded = new Image();
+          decoded.onload = () => {
+            if (stopped || socket.current !== ws || version !== frameVersion || !latest) { URL.revokeObjectURL(next); return; }
+            if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+            urlRef.current = next;
+            paintedVersion = version;
+            observation.current = latest;
+            setImage(next);
+            setCoordinateInput(latest.coordinate_input);
+            setStatus('connected');
+            delay = 500;
+          };
+          decoded.onerror = () => URL.revokeObjectURL(next);
+          decoded.src = next;
+          return;
+        }
+        if (typeof event.data !== 'string') return;
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'frame') {
+            const frame = message as Frame;
+            const next = { ...frame, expires: performance.now() + Math.max(0, frame.ttl_s * 1000) };
+            latest = next;
+            if (frame.image) { frameVersion++; pending = next; observation.current = null; }
+            else if (urlRef.current && paintedVersion === frameVersion) { observation.current = next; setCoordinateInput(frame.coordinate_input); }
+          } else if (message.type === 'error' || (message.type === 'action-ack' && message.ok === false)) {
+            setError(String(message.message || 'Desktop operation failed'));
+            if (message.refresh && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'refresh' }));
+          }
+        } catch (e) { setError(String(e)); }
+      };
+      ws.onclose = event => {
+        if (stopped || socket.current !== ws) return;
+        clearFrame();
+        setStatus('disconnected');
+        if (event.reason) setError(event.reason);
+        if (event.code === 4401 || event.code === 4403 || event.code === 1000) return;
+        retry = setTimeout(connect, delay);
+        delay = Math.min(delay * 2, 10000);
+      };
+    };
+    connect();
+    return () => {
+      stopped = true;
+      clearTimeout(retry);
+      socket.current?.close();
+      socket.current = null;
+      observation.current = null;
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      urlRef.current = '';
+    };
+  }, [machine, windowId, connection.ui_path, connection.auth_mode, token, generation]);
+  const send = (action: RecordValue) => {
+    const frame = observation.current;
+    const ws = socket.current;
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    if (!frame || frame.expires <= performance.now()) { ws.send(JSON.stringify({ type: 'refresh' })); return; }
+    ws.send(JSON.stringify({ type: 'action', request_id: ++sequence.current, observation_id: frame.observation_id, bounds: frame.bounds, action }));
   };
   const click = (event: React.MouseEvent<HTMLImageElement>) => {
-    if (!observation?.coordinateInput || !observation.bounds.width || !observation.bounds.height) return;
+    const frame = observation.current;
+    if (!frame?.coordinate_input || !frame.bounds.width || !frame.bounds.height) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const x = Math.floor((event.clientX - rect.left) * observation.bounds.width / rect.width);
-    const y = Math.floor((event.clientY - rect.top) * observation.bounds.height / rect.height);
-    void act({ type: event.shiftKey ? 'right_click' : 'click', x: Math.max(0, Math.min(observation.bounds.width - 1, x)), y: Math.max(0, Math.min(observation.bounds.height - 1, y)) });
+    if (!rect.width || !rect.height) return;
+    const x = Math.max(0, Math.min(frame.bounds.width - 1, Math.floor((event.clientX - rect.left) * frame.bounds.width / rect.width)));
+    const y = Math.max(0, Math.min(frame.bounds.height - 1, Math.floor((event.clientY - rect.top) * frame.bounds.height / rect.height)));
+    send({ type: event.type === 'contextmenu' || event.shiftKey ? 'right_click' : 'click', x, y });
   };
-  return <div className="space-y-4">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h2 className="text-xl font-semibold">{localize('com_lsm_desktop')}</h2><p className="mt-1 text-sm text-text-secondary">{localize('com_lsm_inspect_gui_windows_and_send_approved_actions')}</p></div>
-      <div className="flex gap-2">
-        <select aria-label={localize('com_lsm_desktop_machine')} className={button} value={machine} onChange={e => {
-          try { window.localStorage.setItem('lsm:desktop-machine', e.target.value); } catch { /* Storage is optional. */ }
-          setMachine(e.target.value);
-        }}>
-          {machines.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
-        <button className={button} onClick={() => void refreshWindows()} disabled={busy}><RefreshCw size={16} /></button>
-      </div>
+  return <div ref={container} className="flex h-full min-h-0 flex-col bg-surface-primary">
+    <div className="flex shrink-0 items-center gap-2 border-b border-border-light px-2 py-1 text-xs">
+      <span className="truncate">{machine} · {localize(status === 'connected' ? 'com_lsm_workspace_connected' : status === 'connecting' ? 'com_lsm_workspace_connecting' : 'com_lsm_workspace_disconnected')}</span>
+      <span className="flex-1" />
+      <button className={toolButton} aria-label={localize('com_lsm_workspace_reconnect')} title={localize('com_lsm_workspace_reconnect')} onClick={() => { if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: 'refresh' })); else setGeneration(n => n + 1); }}><RefreshCw size={15}/></button>
+      <button className={toolButton} title="Fullscreen" aria-label="Fullscreen" onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else void container.current?.requestFullscreen(); }}><Maximize size={15}/></button>
     </div>
-    {error && <p className="rounded-lg border border-status-error-border bg-status-error-subtle p-3 text-sm text-status-error" role="alert">{error}</p>}
-    <div className="grid min-h-64 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="rounded-xl border border-border-light p-3">
-        <h3 className="mb-2 text-sm font-semibold">{localize('com_lsm_windows')}</h3>
-        {unavailable && <div role="status" className="space-y-1 p-2 text-sm text-text-secondary">
-          <p>{unavailable}</p>
-          <p>{localize('com_lsm_desktop_choose_graphical_machine')}</p>
-        </div>}
-        {!unavailable && !error && windows.length === 0 && <p className="p-2 text-sm text-text-secondary">{localize('com_lsm_no_windows_available')}</p>}
-        {windows.map((item, index) => {
-          const id = String(item.window_id || item.id || '');
-          return <button key={id || index} className={'mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-hover ' + (windowId === id ? 'bg-surface-active-alt' : '')}
-            onClick={() => { setWindowId(id); void frame(id); }}>
-            <Monitor size={15} className="shrink-0" /><span className="truncate">{asText(item.title || item.name || id)}</span>
-          </button>;
-        })}
-      </aside>
-      <section className="min-w-0 overflow-hidden rounded-xl border border-border-light">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-light bg-surface-primary-alt px-4 py-3">
-          <span className="text-sm font-medium">{windowId || localize('com_lsm_select_a_window')}</span>
-          {windowId && <button className={button} onClick={() => void frame()} disabled={busy}>{localize('com_lsm_refresh_frame')}</button>}
-        </div>
-        {!image ? <p className="p-10 text-center text-sm text-text-secondary">{localize('com_lsm_select_a_desktop_window_to_view_its_latest_frame')}</p> :
-          <div className="flex flex-col items-center gap-3 p-3">
-            <img ref={imageRef} src={image} alt={localize('com_lsm_desktop_window_frame')} className={'max-h-[60vh] max-w-full object-contain ' + (observation?.coordinateInput ? 'cursor-crosshair' : '')} onClick={click} />
-            <div className="flex w-full flex-wrap items-center gap-2">
-              <label htmlFor="lsm-desktop-keys" className="text-xs text-text-secondary"><Keyboard size={15} className="inline" /> {localize('com_lsm_keyboard')}</label>
-              <input id="lsm-desktop-keys" value={keys} onChange={e => setKeys(e.target.value)}
-                placeholder={localize('com_lsm_e_g_ctrl_l')} className="min-w-[170px] flex-1 rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm" />
-              <button className={button} onClick={() => { void act({ type: 'key', keys }); setKeys(''); }} disabled={!keys || busy}>{localize('com_lsm_send_key')}</button>
-            </div>
-            <p className="self-start text-xs text-text-secondary">{observation?.coordinateInput ? localize('com_lsm_click_the_image_to_interact_shift_click_for_right_click') : localize('com_lsm_this_backend_does_not_support_coordinate_input')}</p>
-          </div>}
-      </section>
+    {error && <div role="alert" className="shrink-0 px-2 py-1 text-xs text-status-error">{error}</div>}
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black/90 p-1">
+      {image ? <img src={image} alt={localize('com_lsm_desktop_window_frame')} draggable={false} className={'max-h-full max-w-full object-contain ' + (coordinateInput ? 'cursor-crosshair' : '')} onClick={click} onContextMenu={e => { e.preventDefault(); click(e); }} /> : <span className="text-sm text-white/70">{localize('com_lsm_workspace_connecting')}</span>}
     </div>
+    <form className="flex shrink-0 gap-2 border-t border-border-light p-1" onSubmit={e => { e.preventDefault(); if (keys) { send({ type: 'key', keys }); setKeys(''); } }}>
+      <input aria-label={localize('com_lsm_keyboard')} value={keys} onChange={e => setKeys(e.target.value)} placeholder={localize('com_lsm_e_g_ctrl_l')} className="min-w-0 flex-1 rounded border border-border-medium bg-surface-primary px-2 py-1 text-xs" />
+      <button className="rounded px-2 text-xs hover:bg-surface-hover disabled:opacity-40" disabled={!keys || status !== 'connected'}>{localize('com_lsm_send_key')}</button>
+    </form>
   </div>;
 }

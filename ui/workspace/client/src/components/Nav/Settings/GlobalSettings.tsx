@@ -13,7 +13,7 @@ export default function GlobalSettings() {
   useEffect(() => {
     if (pathname.replace(/\/+$/, '') !== '/control/settings') return;
     setTab(hash === '#models' ? 'models' : 'controller');
-    navigate('/control/overview', { replace: true });
+    navigate('/control/workspace', { replace: true });
   }, [pathname, hash, navigate, setTab]);
 
   if (tab === null) return null;

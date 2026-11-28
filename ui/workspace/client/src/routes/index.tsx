@@ -68,7 +68,7 @@ export const router = createBrowserRouter(
           children: [
             {
               index: true,
-              element: <Navigate to="/control/overview" replace={true} />,
+              element: <Navigate to="/control/workspace" replace={true} />,
             },
             {
               path: 'control/:section?',
