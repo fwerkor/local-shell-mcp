@@ -87,8 +87,11 @@ def cooldown_for(error):
     import httpx
 
     from .agent_runtime import _retryable_model_error
+    from .model_oauth import ReauthorizationRequired
     from .provider_responses import ResponsesStreamError
 
+    if isinstance(error, ReauthorizationRequired):
+        return 300
     if isinstance(error, httpx.HTTPStatusError):
         status = error.response.status_code
         if status == 429:

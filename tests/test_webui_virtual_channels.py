@@ -390,3 +390,52 @@ async def test_virtual_runner_records_physical_usage_and_session(pool, monkeypat
     assert snapshot["physicalChannel"] == "Backup" and snapshot["physicalModel"] == "flash"
     assert snapshot["physicalProvider"] == "openai"
     assert snapshot["providerInputTokens"] == 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already_invalid", [True, False])
+async def test_oauth_member_reauthorization_fails_over(pool, monkeypatch, already_invalid):
+    from local_shell_mcp.webui import model_oauth
+
+    account = {
+        "name": "Codex", "provider": "openai-responses",
+        "base_url": model_oauth.RESOURCE, "models": ["test"],
+        "api_key": "", "oauth_id": "account-id", "auth_method": "chatgpt",
+        "oauth_error": "Sign in again" if already_invalid else None,
+    }
+    repo = _repo()
+    repo.save_setting("__lsm_controller__", "model.channel.Codex", account)
+    value = _validate({"name": "Pool", "provider": "virtual", "routes": {
+        "alias": [{"channel": "Codex", "model": "test"},
+                  {"channel": "Backup", "model": "flash"}]}})
+    repo.save_setting("__lsm_controller__", "model.channel.Pool", value)
+
+    seen = []
+    attempts = []
+    original_client = httpx.AsyncClient
+    if not already_invalid:
+        async def access(database, name, identity, *, rejected=None):
+            assert (name, identity) == ("Codex", "account-id")
+            attempts.append(rejected)
+            if rejected:
+                raise model_oauth.ReauthorizationRequired("Sign in again")
+            return "old-token"
+
+        monkeypatch.setattr(model_oauth, "access_token", access)
+
+    def reply(request):
+        seen.append(request.url.host)
+        if request.url.host == "api.openai.com":
+            return httpx.Response(401, json={"error": "revoked"})
+        assert request.url.host == "backup.invalid"
+        return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original_client(transport=httpx.MockTransport(reply), **kw))
+    config = provider_config("Pool", "alias")
+    messages = [{"role": "user", "content": "Hello"}]
+    assert "ok" in [item async for item in stream_model(config, messages)]
+    assert seen == (["backup.invalid"] if already_invalid else ["api.openai.com", "backup.invalid"])
+    assert attempts == ([] if already_invalid else [None, "old-token"])
+    assert routing._health[("Codex", "test")].cooldown > 0
+    assert all(h.active == 0 for h in routing._health.values())
+    assert routing.cooldown_for(ValueError("Unrelated configuration failure")) is None
