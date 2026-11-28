@@ -464,3 +464,28 @@ async def test_repeated_sse_failures_exhaust_retry_budget(transport, monkeypatch
         await run_agent_loop(state, stream_tools=stream_model_with_tools, stream_text=stream_model,
                              dispatch=unexpected, on_text=unexpected)
     assert len(requests) == 3 and state.messages == [USER]
+
+
+@pytest.mark.parametrize("with_tools", [False, True])
+@pytest.mark.parametrize("url,model,auth_method,expected_header,expected_key", [
+    ("https://api.openai.com/v1/responses", "gpt-5.5", None, None, "conversation-1"),
+    ("https://api.openai.com/v1/responses", "gpt-6.2", None, None, None),
+    ("https://api.openai.com/v1/responses", "gpt-6.2", "chatgpt", "session-id", None),
+    ("https://chatgpt.com/backend-api/codex/responses", "gpt-5.5", None, "session-id", None),
+    ("https://openrouter.ai/api/v1/responses", "openai/gpt-5.5", None, "x-session-id", None),
+    ("https://gateway.invalid/v1/responses", "gpt-5.5", None, None, None),
+])
+async def test_responses_session_affinity_on_wire(transport, with_tools, url, model, auth_method,
+                                                  expected_header, expected_key):
+    from local_shell_mcp.webui.providers import bind_model_session
+
+    batches, requests = transport
+    batches.append([complete([MESSAGE])])
+    config = bind_model_session(ProviderConfig("openai-responses", model, url, "secret",
+                                               auth_method=auth_method), "conversation-1")
+    source = stream_model_with_tools(config, [USER], tools=TOOLS) if with_tools else stream_model(config, [USER])
+    assert any(event == "Reading" for event in [event async for event in source])
+    _, headers, body = requests[-1]
+    assert body.get("prompt_cache_key") == expected_key
+    for name in ("session-id", "x-session-id", "x-opencode-session"):
+        assert headers.get(name) == ("conversation-1" if name == expected_header else None)

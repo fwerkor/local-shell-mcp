@@ -25,7 +25,7 @@ from .memory import (
     tool_definitions,
 )
 from .memory_protection import configured_filters, inspect_memory_content
-from .providers import ModelToolCall, ModelUsage, provider_config
+from .providers import ModelToolCall, ModelUsage, bind_model_session, provider_config
 from .storage import WorkspaceRepository
 from .tokenizer import count_tokens
 
@@ -105,6 +105,7 @@ async def run_automatic_memory(owner: str, generation, database, history: list[d
         return 0
     try:
         chosen = provider_config(agent.get('provider', 'openai'), agent.get('model'))
+        chosen = bind_model_session(chosen, generation.conversation_id, 'automatic-memory')
     except (ValueError, KeyError, TypeError):
         _log.warning('Automatic Memory model is not available')
         return 0

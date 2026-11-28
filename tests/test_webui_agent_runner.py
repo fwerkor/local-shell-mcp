@@ -721,3 +721,16 @@ async def test_controller_sleep_available_to_restricted_agent_and_resumes(runtim
     dispatched = [e for e in events if e.get("event") == "on_tool_calls_dispatched"]
     assert dispatched[0]["data"]["toolCalls"][0]["name"] == "sleep"
     assert any(e.get("event") == "on_run_step_closed" for e in events)
+
+
+def test_runner_binds_model_session(runtime):
+    _, database, store, profile = runtime
+    job, _ = store.begin("local", {"text": "Hi", "provider": "openai", "model": "test"})
+    async def emit(*args):
+        pass
+
+    runner = AgentRunner("local", job, database, store, scopes=set(),
+                         grant_expires=None, stream_tools=emit, stream_text=emit,
+                         on_text=emit, profile=profile)
+    context = runner._context(None, profile=profile)
+    assert context.profile.session_id == job.conversation_id

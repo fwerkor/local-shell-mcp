@@ -10,7 +10,7 @@ from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui.agent_runner import AgentRunner
 from local_shell_mcp.webui.agents import AgentRepository
 from local_shell_mcp.webui.generations import GenerationStore
-from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
+from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig, bind_model_session
 from local_shell_mcp.webui.subagent_task_host import SQLiteSubagentTaskHost, shutdown_subagent_tasks
 
 
@@ -463,7 +463,9 @@ async def test_ordinary_chat_self_subagent_inherits_model_without_recursive_spaw
     result = await runner.run(store.history("local", generation.conversation_id))
     assert result[-1]["content"] == "parent answer"
     assert next(m["content"] for m in result if m["role"] == "tool") == "child answer"
-    assert all(active == profile for active, _, _ in observed)
+    for active, history, _ in observed:
+        namespace = "/subagent:self-sync" if any(m.get("content") == "isolated task" for m in history) else ""
+        assert active == bind_model_session(profile, generation.conversation_id, namespace)
     child_history = next(history for _, history, _ in observed
                          if any(m.get("content") == "isolated task" for m in history))
     assert not any(m.get("content") == "parent-only history" for m in child_history)
@@ -491,11 +493,15 @@ async def test_ordinary_chat_background_recovery_and_wakeup(runtime, monkeypatch
     monkeypatch.setattr(subagent_wakeup, "_DELAY_MS", 0)
     ready, release = asyncio.Event(), asyncio.Event()
     child_histories = []
+    child_sessions = []
 
     async def model(active_profile, history, **kwargs):
-        assert active_profile == profile
+        assert active_profile == bind_model_session(profile, active_profile.session_id)
+        if not any(m.get("content") == "detached task" for m in history):
+            assert active_profile.session_id == generation.conversation_id
         if any(m.get("content") == "detached task" for m in history):
             child_histories.append(list(history))
+            child_sessions.append(active_profile.session_id)
             ready.set()
             await release.wait()
             yield "detached result"
@@ -531,6 +537,8 @@ async def test_ordinary_chat_background_recovery_and_wakeup(runtime, monkeypatch
         await host.check({"background_task_id": task_id})
         await poll_until(host, task_id)
         assert len(child_histories) == 2
+        assert child_sessions == [row["child_conversation_id"]] * 2
+        assert child_sessions[0] != generation.conversation_id
         store.finish("local", generation.run_id, status="complete", text="parent continues")
         dispatched = []
 

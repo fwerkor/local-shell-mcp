@@ -23,8 +23,10 @@ from .providers import (
     _anthropic_omits_sampling_parameters,
     _data_frames,
     _usage_frame,
+    apply_model_cache_options,
     check_image_response,
     image_input_rejected,
+    model_request_headers,
 )
 
 
@@ -184,7 +186,7 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
     import httpx
 
     history, instructions = native_messages(messages, config.provider)
-    headers = {"accept": "text/event-stream", "content-type": "application/json"}
+    headers = model_request_headers(config)
     if config.provider == "anthropic":
         headers.update({"x-api-key": config.token, "anthropic-version": "2023-06-01"})
         body = {"model": config.model, "stream": True, "messages": history, "max_tokens": max_tokens if max_tokens is not None else 16384,
@@ -216,6 +218,7 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
     pending: dict[int, dict] = {}
     usage_snapshot = None
     finish_reason = None
+    apply_model_cache_options(config, body)
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
         "POST", config.url, headers=headers, json=body,
