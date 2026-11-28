@@ -211,12 +211,14 @@ function MessagesViewContent({
 export default function MessagesView({
   messagesTree,
   messages,
+  isLoadingTail = false,
 }: {
   messagesTree?: TMessage[] | null;
   messages?: TMessage[] | null;
+  isLoadingTail?: boolean;
 }) {
   return (
-    <MessagesViewProvider>
+    <MessagesViewProvider isLoadingTail={isLoadingTail}>
       <MessagesViewContent messagesTree={messagesTree} messages={messages} />
     </MessagesViewProvider>
   );
