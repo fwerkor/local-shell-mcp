@@ -1,73 +1,67 @@
-<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
-# Không gian làm việc web hợp nhất
+<!-- i18n-source-sha256: 01cf883cb71925e93fabc21d32315ef8c869ee2ea548e54a0347e2f6b730a327 -->
+<!-- Machine-assisted translation; English source is authoritative. -->
+# Quy trình khởi động nhanh cho WebUI Chat
 
-**Không gian làm việc web LSM hợp nhất** là cách được khuyến nghị để sử dụng local-shell-mcp hàng ngày. Nó kết hợp trò chuyện AI, lịch sử dự án và mặt phẳng điều khiển LSM trong một giao diện đáp ứng, dựa trên giao diện người dùng LibreChat đã được sửa đổi và cung cấp. Bạn vẫn có thể kết nối các máy khách MCP bên ngoài như [ChatGPT](chatgpt-connector.md) hoặc [Gemini](gemini-spark.md).
+Trang làm việc chung của LSM được tích hợp các tính năng như trò chuyện thông qua AI, các dự án, các “Người lãnh đạo” và các trang quản lý của người điều khiển hệ thống. Trang này được vận hành bởi trình điều khiển Python, và sử dụng cơ sở dữ liệu SQLite để xử lý các tác vụ liên quan. Không cần phải có máy chủ trò chuyện riêng biệt. Các client bên ngoài như [ChatGPT](chatgpt-connector.md) và [Gemini](gemini-spark.md) vẫn được hỗ trợ.
 
-Không gian làm việc **tự lưu trữ và tùy chọn cài đặt**: đây là một dịch vụ web riêng biệt, không phải là một phần của hình ảnh Bộ điều khiển tối thiểu, gói Thực thi độc lập hoặc gói Công nhân từ xa. Việc triển khai chỉ dành cho bộ điều khiển giữ lại giao diện người dùng trình duyệt gốc và OpenTUI.
+## 1. Khởi động Controller
 
-## Trong không gian làm việc có gì?
-
-| Khu vực | Bạn có thể làm gì |
-|---|---|
-| Trò chuyện và dự án | Chọn mô hình đã định cấu hình, tạo cuộc hội thoại, sắp xếp dự án, tìm các cuộc trò chuyện trước đây và lưu trữ các cuộc trò chuyện. Lịch sử vẫn còn trên máy chủ. |
-| Tổng quan về bộ điều khiển | Xem tình trạng, hoạt động gần đây và các máy được kết nối. |
-| Tập tin | Duyệt và quản lý các tập tin cục bộ hoặc từ xa. |
-| Thiết bị đầu cuối | Làm việc với các thiết bị đầu cuối liên tục trên Bộ điều khiển hoặc Công nhân. |
-| Máy tính để bàn | Kiểm tra và kiểm soát các phiên GUI từ xa. |
-| Phiên | Kiểm tra các nhiệm vụ LSM lâu bền và vòng đời của chúng. |
-| Điều khiển từ xa | Kết nối và quản lý Công nhân đi. |
-| Kiểm toán | Kiểm tra hoạt động của công cụ có nguồn gốc từ mô hình. |
-| MCP lồng nhau | Đăng ký, chỉnh sửa, kích hoạt, vô hiệu hóa, làm mới và xóa các máy chủ MCP bên ngoài đằng sau LSM. |
-
-Các tuyến Bộ điều khiển là `/control/overview`, `/control/files`, `/control/terminals`, `/control/desktop`, `/control/sessions`, `/control/remotes` và `/control/audit`. Trò chuyện mở ra tại `/c/new`. Trình quản lý MCP LSM kiểm soát **Đăng ký MCP lồng nhau của LSM**; nó không tạo sổ đăng ký thứ hai trong LibreChat.
-
-## Triển khai ngăn xếp trò chuyện tùy chọn
-
-1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
-2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
-3. To override the defaults, configure the Controller service environment:
+Hãy làm theo hướng dẫn [tiếp nhận cài đặt](quickstart.md) để chọn môi trường chạy phù hợp với bạn. Hãy đảm bảo rằng giao diện WebUI được kích hoạt, và sử dụng cơ chế lưu trữ liên tục. Các thiết lập mặc định sẽ được áp dụng theo quy định thông thường.
 
 ```env
 LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
 LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. Start the Controller from its Python package or standalone executable:
+Sau khi xuất khẩu môi trường hoạt động của dịch vụ của bạn, hãy khởi động máy chủ điều khiển.
 
 ```sh
 local-shell-mcp --mode mcp
 ```
 
-5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
+Đối với việc phát hành dưới dạng một hàng duy nhất, hãy sử dụng tập tin thực thi đã tải về. Controller được cài đặt sẽ chạy phần mềm giao diện người dùng đã được biên dịch; công cụ xây dựng JavaScript chỉ cần được sử dụng để tạo các bản mã nguồn. Xem [Hướng dẫn xây dựng WebUI](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) để biết thêm chi tiết.
 
-Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
+## 2. Mở không gian làm việc trên trình duyệt
 
-**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
+Hãy truy cập trang web `http://127.0.0.1:8765/ui` từ máy chủ Controller. Hoặc bạn có thể truy cập bằng URL HTTPS được cấu hình, kết thúc bằng chữ `/ui`. Hãy đăng nhập với thông tin xác thực LSM đã được cấu hình cho phiên bản triển khai này. Hãy sử dụng giao thức HTTPS để truy cập từ xa. Các trang chat và trang điều khiển sử dụng cùng một nguồn gốc.
 
-## Đăng nhập và sử dụng trò chuyện
+## 3. Thêm kênh mô hình
 
-1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
-2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
-3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
-4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
-5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
+Hãy mở công cụ chọn mô hình và quản lý kênh truyền thông. Thêm một kênh API vào hoặc kết nối với tài khoản được hỗ trợ. Đối với các điểm cuối tương thích với OpenAI, hãy nhập tên kênh, chọn Chat Completions, nhập URL cơ sở của API và thông tin xác thực. Sau đó, bạn có thể tìm kiếm các mô hình hoặc nhập ID của mô hình đã biết. Hãy lưu lại cấu hình và chọn một mô hình phù hợp.
 
-Nội dung tải lên trò chuyện (tối đa 32 MiB) được lưu trữ trong không gian làm việc của Bộ điều khiển và đường dẫn tuyệt đối của chúng được cung cấp cho mô hình. Tải lên trình duyệt không cấp thêm quyền truy cập tệp. Các lệnh gọi công cụ hướng tới mô hình chuyển qua ủy quyền, kiểm tra LSM và bộ định tuyến làm việc từ xa.
+Đối với dịch vụ suy luận cục bộ, hãy sử dụng địa chỉ mà có thể truy cập được từ Controller, chứ không chỉ từ trình duyệt của bạn. Ví dụ, `http://127.0.0.1:8080/v1` là địa chỉ phù hợp nếu dịch vụ suy luận hoạt động trên địa chỉ này trong mạng tên miền của Controller. Xem [Channels and models](../chat/channels.md) để biết thêm thông tin về các giao thức, quyền truy cập vào tài khoản, việc phát hiện mô hình, và các giới hạn liên quan đến ngữ cảnh.
 
-## MCP bên ngoài, bảo mật và dữ liệu
+## 4. Chạy tác vụ đầu tiên
 
-Sử dụng thanh bên MCP của không gian làm việc để quản lý các máy chủ MCP bên ngoài lồng nhau. Điều này hỗ trợ các máy chủ stdio cục bộ và máy chủ HTTP, bao gồm các biến môi trường riêng tư và tiêu đề yêu cầu. Bí mật không được trả lại cho trình duyệt. Nút chuyển đổi trò chuyện **MCP bên ngoài** cho phép tìm kiếm, kiểm tra và gọi các công cụ lồng nhau; nó không cấp mô hình `mcp_manage` khi các công cụ LSM gốc bị tắt. Quản lý giao diện người dùng được bảo vệ bằng ủy quyền của Bộ điều khiển thông thường.
+Hãy bắt đầu một cuộc trò chuyện và đặt một câu hỏi đơn giản để kiểm tra khả năng kết nối của mô hình. Sau đó, hãy thử sử dụng công cụ chỉ có chức năng đọc dữ liệu mà thôi.
 
-Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
+```text
+Hãy liệt kê các tệp tin trong thư mục gốc của không gian làm việc của Controller.
+Xin hãy cho tôi biết bạn đã kiểm tra chiếc máy nào, và tổng kết kết quả của việc kiểm tra đó như thế nào.
+Xin đừng thay đổi các tập tin hoặc thực hiện bất kỳ thao tác ghi dữ liệu nào.
+```
 
-The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
+Hãy kiểm tra kết quả thực tế của công cụ đó. Nếu có công cụ nào bị thiếu, hãy kiểm tra các tùy chọn liên quan đến công cụ trong chat, cài đặt của người quản lý và quyền truy cập của máy tính. Hãy sử dụng người quản lý đã được lưu trước đó để thực hiện các nhiệm vụ lặp đi lặp lại, và thiết lập quyền truy cập cho người quản lý đó một cách rõ ràng. Xem thêm [Công cụ và quyền truy cập](../chat/permissions.md).
 
-## Khắc phục sự cố
+![Trò chuyện qua WebUI với hình ảnh minh họa cụ thể](../assets/chat/chat-workspace.png)
 
-- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
-- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
-- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
-- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
-- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
+Các hình ảnh chụp màn hình trong hướng dẫn này và các trang tiếp theo được lấy từ một hệ thống kiểm soát độc lập, sử dụng mô hình minh họa cụ thể. Những hình ảnh này không chứa thông tin về tài khoản sản xuất hay các cuộc trò chuyện nào cả. Các nhãn giao diện người dùng bằng tiếng Anh có thể khác với ngôn ngữ được chọn trong hệ thống.
 
-Để biết chi tiết triển khai và cập nhật, hãy xem [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) và [human interface guide](../guides/human-interface.md).
+## 5. Khám phá không gian làm việc
+
+| Khu vực/Phạm vi | Để làm gì nhỉ? |
+|---|---|
+| Trò chuyện và quản lý dự án | Khởi tạo và tìm kiếm các cuộc trò chuyện; tổ chức các dự án, gán nhãn cho chúng, và lưu lại các tin nhắn cần thiết. |
+| Agents | Các mô hình, hướng dẫn và cấu hình công cụ có thể được sử dụng lại nhiều lần. |
+| Ký ức và kỹ năng | Quản lý các kiến thức và hướng dẫn có thể được sử dụng lại. |
+| Các cuộc trò chuyện được lên lịch. | Chạy chương trình của người quản lý đã được lưu lại, với câu hỏi lặp đi lặp lại. |
+| Tệp tin và môi trường hoạt động. | Hãy kiểm tra hoặc thực hiện các thao tác liên quan đến môi trường Controller và Worker. |
+| Màn hình làm việc. | Kiểm tra và kiểm soát các phiên làm việc từ xa. |
+| Các phiên họp, công việc và việc kiểm toán | Kiểm tra các tác vụ có tính chất bền vững, tiến độ thực hiện công việc, cũng như hoạt động của các công cụ hỗ trợ trong quá trình thực hiện công việc. |
+| Các máy móc và các thiết bị bên ngoài | Quản lý công nhân và các máy chủ MCP được đặt trong cấu trúc lồng nhau. |
+
+Bộ công cụ điều khiển chính xác sẽ phụ thuộc vào cách bạn triển khai hệ thống, tài khoản của bạn, cũng như các tính năng được kích hoạt trong hệ thống đó. Việc đóng cửa trình duyệt không có nghĩa là quá trình tạo dữ liệu trên máy chủ sẽ bị ngừng hoàn toàn; hãy sử dụng công cụ “stop” khi bạn cần ngắt quá trình này lại.
+
+## Những bước tiếp theo
+
+Hãy đọc hướng dẫn sử dụng WebUI Chat tại địa chỉ [WebUI Chat guide](../chat/index.md) để biết chi tiết về quy trình hoạt động của hệ thống. Ngoài ra, hãy tham khảo phần [Administration and troubleshooting](../chat/administration.md) để biết cách thiết lập hệ thống, sao lưu dữ liệu và khắc phục các lỗi có thể xảy ra.

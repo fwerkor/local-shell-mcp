@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Standalone binary runtime
 
 نوصي **بملف Controller تنفيذي واحد** من GitHub Releases، دون Python أو Docker أو نسخة مصدر.
@@ -108,7 +108,7 @@ local-shell-mcp --config /path/to/config.yaml
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-يتضمن الملف Controller؛ الأدوات الخارجية والمتصفح اختيارية. تتطلب الدردشة والسجل [مساحة ويب](../getting-started/web-workspace.md) وقاعدة بيانات منفصلتين.
+يتضمن الملف Controller؛ الأدوات الخارجية والمتصفح اختيارية. الدردشة والسجل متاحان في [مساحة ويب](../getting-started/web-workspace.md) المدمجة باستخدام SQLite.
 
 ## Long-running service
 

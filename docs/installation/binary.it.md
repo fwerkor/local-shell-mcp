@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Runtime binario autonomo
 
 È consigliato il **singolo eseguibile del Controller** di GitHub Releases, senza Python, Docker o checkout sorgente.
@@ -108,7 +108,7 @@ Installa ciò che serve alle tue attività:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Il binario include il Controller; strumenti esterni e browser sono opzionali. Chat e cronologia richiedono il [workspace web](../getting-started/web-workspace.md) e database separati.
+Il binario include il Controller; strumenti esterni e browser sono opzionali. Chat e cronologia sono disponibili nel [workspace web](../getting-started/web-workspace.md) integrato con SQLite.
 
 ## Servizio persistente
 

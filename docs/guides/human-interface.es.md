@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # Interfaz humana
 
-[unified web workspace](../getting-started/web-workspace.md) es la interfaz de navegador recomendada. Combina chat de IA, proyectos y páginas del controlador LSM en una interfaz de usuario de LibreChat modificada, utilizando las mismas API de herramientas y autorización de LSM. Es un servicio opcional implementado por separado.
+[unified web workspace](../getting-started/web-workspace.md) es la interfaz de navegador recomendada. Combina chat de IA, proyectos y páginas del controlador LSM en una interfaz de usuario de LibreChat modificada, utilizando las mismas API de herramientas y autorización de LSM. El Controller la sirve directamente.
 
 El controlador liviano también conserva dos interfaces humanas alternativas compatibles además de la misma API, espacio de trabajo, registro de terminal persistente, registro de trabajadores remotos y registro de auditoría de MCP:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 Un Plan opcional de `plan_manage` habilita el Goal mode de la Session. Si el Plan está active y no hay agent activity durante 15 minutos, un Live Workspace asociado puede pedir a ChatGPT que continúe. La continuación reanuda el mismo `session_id` explícito y está limitada a 10 intentos, aceptados o rechazados. Los Plan blocked, completed y cancelled no continúan automáticamente; un Plan active cuyos steps estén todos completed o skipped sigue siendo elegible para una continuation de cierre para que el agente reanudado pueda terminar el Plan. Los controles humanos pause/resume/cancel actualizan el Plan propiedad de la Session, no un estado efímero del Live Workspace.
 
-Consulte [Hosted Chat](hosted-chat.md) para conocer el modelo de host autohospedado opcional y el cliente de aplicaciones MCP.
+Consulta [WebUI Chat](hosted-chat.md) para el espacio de trabajo integrado de modelos y agentes.
 
 ## Interfaz del navegador
 

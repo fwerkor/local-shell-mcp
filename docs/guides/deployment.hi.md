@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ca97dc84c0c0fed91b1440fbdc7a381102e0c8699fb47419a9464b020f796fe7 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Runtime विकल्प और deployment model
 
 `local-shell-mcp` के दो पूरक निर्णय हैं:
@@ -51,7 +51,7 @@ Local MCP client
 
 | इंटरफ़ेस | सार्वजनिक HTTPS की आवश्यकता है | `/mcp` का उपयोग करता है | OAuth की आवश्यकता है | विशिष्ट रनटाइम |
 |---|---:|---:|---:|---|
-| एकीकृत एलएसएम वेब कार्यक्षेत्र | दूरस्थ पहुँच के लिए हाँ; स्थानीय प्रॉक्सी भी संभव है | आंतरिक रूप से | एलएसएम लॉगिन | नियंत्रक प्लस अलग वेब स्टैक |
+| एकीकृत एलएसएम वेब कार्यक्षेत्र | दूरस्थ पहुँच के लिए हाँ; स्थानीय प्रॉक्सी भी संभव है | आंतरिक रूप से | एलएसएम लॉगिन | Controller |
 | Gemini Task/कस्टम ऐप्स | हाँ | हाँ | हाँ सार्वजनिक उपयोग के लिए | कोई HTTP नियंत्रक |
 | ChatGPT custom MCP connector | हाँ | हाँ | Public use में हाँ | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | नहीं | नहीं | नहीं | `local-shell-mcp --mode stdio` |

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # Interface humaine
 
-Le [unified web workspace](../getting-started/web-workspace.md) est l'interface de navigateur recommandée. Il combine le chat AI, les projets et les pages du contrôleur LSM dans une seule interface utilisateur LibreChat modifiée, en utilisant les mêmes API d'autorisation et d'outils LSM. Il s'agit d'un service facultatif déployé séparément.
+Le [unified web workspace](../getting-started/web-workspace.md) est l'interface de navigateur recommandée. Il combine le chat AI, les projets et les pages du contrôleur LSM dans une seule interface utilisateur LibreChat modifiée, en utilisant les mêmes API d'autorisation et d'outils LSM. Le Controller la sert directement.
 
 Le contrôleur léger conserve également deux interfaces humaines de secours compatibles au-dessus de la même API, du même espace de travail, du même registre de terminaux persistants, du même registre des travailleurs distants et du même journal d'audit MCP :
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 Un Plan `plan_manage` facultatif active le Goal mode de la Session. Si le Plan est active et qu’aucune agent activity n’a lieu pendant 15 minutes, un Live Workspace associé peut demander à ChatGPT de continuer. La continuation reprend le même `session_id` explicite et est limitée à 10 tentatives, acceptées ou refusées. Les Plans blocked, completed et cancelled ne sont pas poursuivis automatiquement ; un Plan active dont tous les steps sont completed ou skipped reste éligible à une continuation de finalisation afin que l’agent repris puisse terminer le Plan. Les contrôles humains pause/resume/cancel modifient le Plan détenu par la Session plutôt qu’un état éphémère du Live Workspace.
 
-Voir [Hosted Chat](hosted-chat.md) pour l'hôte modèle auto-hébergé en option et le client MCP Apps.
+Voir [WebUI Chat](hosted-chat.md) pour l’espace de travail intégré des modèles et agents.
 
 ## Interface navigateur
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Standalone binary runtime
 
 GitHub Releases の **Controller 単一実行ファイル**によるデプロイを推奨します。Python、Docker、ソース checkout は不要です。
@@ -108,7 +108,7 @@ binary が package するのは Python application であり、すべての deve
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-実行ファイルは Controller のみを内蔵します。外部ツールとブラウザーは必要に応じて導入してください。チャットと履歴には別途 [Web ワークスペース](../getting-started/web-workspace.md) とデータベースが必要です。
+実行ファイルは Controller のみを内蔵します。外部ツールとブラウザーは必要に応じて導入してください。 チャットと履歴には SQLite を使う統合 [Web ワークスペース](../getting-started/web-workspace.md) が利用できます。
 
 ## Long-running service
 

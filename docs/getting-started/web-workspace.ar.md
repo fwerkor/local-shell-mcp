@@ -1,73 +1,67 @@
-<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
-# مساحة عمل الويب الموحدة
+<!-- i18n-source-sha256: 01cf883cb71925e93fabc21d32315ef8c869ee2ea548e54a0347e2f6b730a327 -->
+<!-- Machine-assisted translation; English source is authoritative. -->
+# بدء العمل بسرعة في واجهة الدردشة WebUI
 
-**مساحة عمل ويب LSM الموحدة** هي الطريقة الموصى بها لاستخدام local-shell-mcp يومًا بعد يوم. فهو يجمع بين دردشة الذكاء الاصطناعي وسجل المشروع ومستوى التحكم LSM في واجهة واحدة سريعة الاستجابة، استنادًا إلى واجهة LibreChat الأمامية المعدلة والمقدمة من البائع. لا يزال بإمكانك توصيل عملاء MCP الخارجيين مثل [ChatGPT](chatgpt-connector.md) أو [Gemini](gemini-spark.md).
+المنصة الإلكترونية الموحدة لـ LSM تجمع بين خاصية الدردشة الذكية، والمشاريع المختلفة، والوكلاء المسؤولين عن تنفيذ العمليات، بالإضافة إلى صفحات التشغيل الخاصة بالمراقب. يتم تشغيل هذه المنصة باستخدام بروتوكول Python، ويتم استخدام قاعدة البيانات SQLite في عملية التشغيل. لا حاجة لوجود خادم دردشة منفصل. ولا تزال الشركات الخارجية مثل [ChatGPT](chatgpt-connector.md) و[Gemini](gemini-spark.md) متاحة للاستخدام.
 
-مساحة العمل ** مستضافة ذاتيًا واختيارية للتثبيت **: إنها خدمة ويب منفصلة، ​​وليست جزءًا من الحد الأدنى من صورة وحدة التحكم، أو حزمة العامل المستقلة القابلة للتنفيذ أو البعيدة. تحتفظ عمليات النشر لوحدة التحكم فقط بواجهة مستخدم المتصفح الأصلية وOpenTUI.
+## 1. بدء تشغيل Controller
 
-## ماذا يوجد في مساحة العمل؟
-
-| المنطقة | ما يمكنك القيام به |
-|---|---|
-| الدردشة والمشاريع | اختر نموذجًا تم تكوينه، وقم بإنشاء المحادثات، وتنظيم المشاريع، والعثور على الدردشات السابقة وأرشفة المحادثات. يبقى التاريخ على الخادم. |
-| نظرة عامة على وحدة التحكم | عرض الحالة الصحية والنشاط الأخير والأجهزة المتصلة. |
-| ملفات | تصفح وإدارة الملفات المحلية أو البعيدة. |
-| المحطات | العمل مع المحطات الطرفية المستمرة على وحدة التحكم أو العمال. |
-| سطح المكتب | فحص ومراقبة جلسات واجهة المستخدم الرسومية عن بعد. |
-| الجلسات | فحص مهام LSM الدائمة ودورة حياتها. |
-| أجهزة التحكم عن بعد | ربط وإدارة العمال الخارجيين. |
-| التدقيق | فحص نشاط الأداة التي تم إنشاؤها بواسطة النموذج. |
-| متداخل MCP | تسجيل وتحرير وتمكين وتعطيل وتحديث وإزالة خوادم MCP الخارجية خلف LSM. |
-
-مسارات وحدة التحكم هي `/control/overview`، و`/control/files`، و`/control/terminals`، و`/control/desktop`، و`/control/sessions`، و`/control/remotes`، و`/control/audit`. يتم فتح الدردشة على `/c/new`. يتحكم مدير LSM MCP في **سجل MCP المتداخل الخاص بـ LSM**؛ ولا يقوم بإنشاء تسجيل ثانٍ في LibreChat.
-
-## قم بنشر مكدس الدردشة الاختياري
-
-1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
-2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
-3. To override the defaults, configure the Controller service environment:
+اتبعوا الخطوات المذكورة. [تثبيت بسرعة](quickstart.md) لتطبيق الوقت المناسب لعمل البرنامج. تأكد من أن واجهة الويب مفعلة، واستخدم التخزين المستمر. الخصائص الافتراضية هي كالتالي:
 
 ```env
 LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
 LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. Start the Controller from its Python package or standalone executable:
+بعد تصدير بيئة الخدمة الخاصة بك، قم بتشغيل جهاز الـ “Controller”.
 
 ```sh
 local-shell-mcp --mode mcp
 ```
 
-5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
+للإطلاق باستخدام خيار “الصف واحد”， يجب استخدام الملف التنفيذي الذي تم تنزيله. أما الجهاز المثبت، فهو يخدم كأداة لتشغيل الواجهة المجمعة؛ أما سلسلة أدوات البرمجة باللغة JavaScript، فإنها مطلوبة فقط لبناء المصدر الخاص بالبرنامج. راجع تعليمات بناء WebUI في الرابط التالي: [WebUI build instructions](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
 
-Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
+## 2. فتح مساحة العمل في المتصفح
 
-**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
+مفتوح `http://127.0.0.1:8765/ui` من خادم التحكم، أو العنوان HTTPS المُعد مسبقًا، والذي ينتهي بـ `/ui`قم بتسجيل الدخول باستخدام معلومات التحقق من الهوية المخصصة لتلك النسخة من النظام. استخدم بروتوكول HTTPS للوصول عن بُعد. صفحات الدردشة والتحكم تتبع نفس المصدر.
 
-## تسجيل الدخول واستخدام الدردشة
+## 3. إضافة قناة نموذج
 
-1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
-2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
-3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
-4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
-5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
+افتح قسم اختيار النماذج وإدارة القنوات. أضف قناة API، أو قم بالاتصال بحساب مدعوم. بالنسبة للنقطة النهائية المتوافقة مع OpenAI، يكفي إدخال اسم القناة، اختيار خيار “Chat Completions”， وإدخال عنوان URL الأساسي للواجهة API والمعلومات اللازمة للوصول إلى النماذج. يمكنك أيضًا اختيار نموذج معين يدويًا. قم بحفظ التكوينات، ثم اختر النموذج الذي تريده.
 
-يتم تخزين تحميلات الدردشة (ما يصل إلى 32 ميجابايت) ضمن مساحة عمل وحدة التحكم ويتم توفير مساراتها المطلقة للنموذج. لا تمنح عمليات تحميل المتصفح أذونات إضافية للملفات. تمر استدعاءات الأداة التي تواجه النموذج من خلال ترخيص LSM والتدقيق وجهاز توجيه العامل عن بعد.
+بالنسبة لخدمة الاستنتاج المحلية، يجب استخدام عنوان يمكن الوصول إليه من خلال جهاز التحكم، وليس فقط من خلال المتصفح الخاص بك. على سبيل المثال، `http://127.0.0.1:8080/v1` هو العنوان المناسب إذا كانت خدمة الاستنتاج تستمع إلى هذا العنوان داخل مساحة الشبكة التابعة لجهاز التحكم. راجع [القنوات والنماذج](../chat/channels.md) لمعرفة البروتوكولات، وتفاصيل تخويل الحسابات، واكتشاف النماذج، بالإضافة إلى القيود المتعلقة بالسياق.
 
-## MCP الخارجي والأمن والبيانات
+## 4. تنفيذ مهمة أولى
 
-استخدم الشريط الجانبي لمساحة العمل MCP لإدارة خوادم MCP الخارجية المتداخلة. وهذا يدعم خوادم stdio المحلية وخوادم HTTP، بما في ذلك متغيرات البيئة الخاصة المنفصلة ورؤوس الطلبات. لا يتم إرجاع الأسرار إلى المتصفح. يتيح تبديل الدردشة **External MCP** إمكانية البحث عن الأدوات المتداخلة وفحصها واستدعاءها؛ ولا يمنح النموذج `mcp_manage` عند تعطيل أدوات LSM الأصلية. إدارة واجهة المستخدم محمية بترخيص وحدة التحكم العادي.
+ابدأ محادثة وسأل عن سؤال بسيط لاختبار اتصال النموذج بالجهاز. ثم جرب استخدام أداة القراءة فقط.
 
-Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
+```text
+قم بسرد الملفات الموجودة في الجذر الخاص بمنطقة العمل في الـ Controller.
+أخبرني أي الجهاز قمت بفحصه، وقدم تلخيصًا للنتائج.
+لا تقم بتعديل الملفات أو تنفيذ أي عمليات كتابة فيها.
+```
 
-The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
+يرجى فحص نتائج استخدام الأداة الفعلية. إذا كانت هناك أداة مفقودة، فقم بفحص تغييرات الأدوات في الدردشة، وإعدادات العميل، وحقوق الوصول إلى الجهاز. استخدم عميلًا محفوظًا للقيام بالمهام المتكررة، وحدد إعدادات الوصول الخاصة به بشكل صريح. راجع [الأدوات وحقوق الوصول](../chat/permissions.md).
 
-## استكشاف الأخطاء وإصلاحها
+![محادثة عبر واجهة الويب، مع مثال على المحادثة الحقيقية](../assets/chat/chat-workspace.png)
 
-- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
-- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
-- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
-- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
-- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
+الصور الموجودة في هذا الدليل والصفحات التالية تم التقاطها باستخدام جهاز تحكم معين، وكانت هذه الصور تُظهر نموذجًا تجريبيًا فقط. لا تحتوي هذه الصور على أي بيانات أو معلومات خاصة بالعمليات الفعلية. قد تختلف العلامات المستخدمة في واجهة المستخدم باللغة الإنجليزية عن اللغة المختارة في النظام.
 
-للحصول على تفاصيل التنفيذ والتحديثات، راجع [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) و[human interface guide](../guides/human-interface.md).
+## 5. استكشاف مساحة العمل
+
+| المنطقة | ما الذي يجب استخدامه في هذا المجال؟ |
+|---|---|
+| الدردشة والمشاريع | بدء البحث في الدردشات، تنظيم المشاريع، وضع العلامات على الرسائل |
+| Agents | نماذج الإرشاد والأدوات التي يمكن استخدامها مرة أخرى |
+| الذاكرة والمهارات | إدارة المعرفة والإرشادات التي يمكن استخدامها مرة أخرى |
+| الدردشات المخطط لها | قم بتشغيل الوكيل المحفوظ، مع استخدام نفس الرسالة المتكررة في كل مرة. |
+| الملفات والأجهزة | يجب فحص أو تشغيل بيئات “المراقبين” و“العاملين”. |
+| سطح المكتب | التحكم في جلسات الواجهة الافتراضية المتاحة عن بُعد |
+| الجلسات، الوظائف والتدقيق | فحص المهام المستمرة، وتقدم التنفيذ، وأنشطة الأدوات المستخدمة في العملية. |
+| الآلات والمواد الخارجية المتعلقة بـ MCP | إدارة العمال والخوادم المدمجة في نظام MCP. |
+
+مجموعة التحكمات المستخدمة تعتمد على طريقة النشر، الحسابات المُفعلة، والإمكانيات المتاحة. إغلاق المتصفح لا يؤدي إلى إيقاف العملية بشكل كامل؛ يجب استخدام أداة الإيقاف عند الحاجة إلى توقف العملية.
+
+## الخطوات التالية…
+
+راجع دليل [WebUI Chat](../chat/index.md) لمعرفة سير العملية بالكامل، واطلع على الدليل المتعلق بالإدارة والحلول للمشاكل في [Administration and troubleshooting](../chat/administration.md).

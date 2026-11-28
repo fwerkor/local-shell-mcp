@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Ruang kerja AI yang dihosting sendiri · Bidang kendali MCP</span>
 
@@ -53,6 +53,7 @@ Isolation boundary yang dimaksud adalah container atau VM tempat service berjala
 | Skenario | Mulai di sini | Alasan |
 |---|---|---|
 | Ruang kerja browser utama | [Unified web workspace](getting-started/web-workspace.md) | Obrolan, proyek, dan halaman kontrol LSM dengan login bersama |
+| Menggunakan agen AI bawaan | [WebUI Chat](chat/index.md) | Kanal, agen, izin, konteks, dan otomatisasi |
 | Penerapan Pengendali pertama | [Quickstart](getting-started/quickstart.md) | Binary rekomendasi, OAuth dan sesi browser pertama |
 | Memilih runtime layer | [Runtime choices](guides/deployment.md) | Menjelaskan Docker, VS Code, binary, Python, dan stdio sebagai opsi runtime terpisah |
 | Menghubungkan Percikan Gemini | [Gemini Custom Apps](getting-started/gemini-spark.md) | Kelayakan, URL HTTPS MCP, OAuth, dan pengujian |

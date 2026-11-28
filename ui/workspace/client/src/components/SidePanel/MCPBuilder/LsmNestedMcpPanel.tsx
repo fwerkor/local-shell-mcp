@@ -1,5 +1,7 @@
 import useLocalize from '~/hooks/useLocalize';
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { externalMcpServersQueryKey } from '~/hooks/Plugins/useLsmExternalMcpServers';
 import type { FormEvent } from 'react';
 import { ChevronDown, CirclePlus, Plug, RefreshCw, Trash2 } from 'lucide-react';
 import { useControllerQuery, useControllerServices } from '~/components/LSM/hooks';
@@ -25,6 +27,7 @@ const iconStyle = 'rounded-lg p-2 text-text-secondary hover:bg-surface-hover hov
 /** LibreChat's MCP sidebar manages Controller-persisted nested servers, never LibreChat's registry. */
 export default function LsmNestedMcpPanel() {
   const localize = useLocalize();
+  const queryClient = useQueryClient();
   const { write } = useControllerServices();
   const registry = useControllerQuery<{ servers: Server[] }>('nested-mcp', {}, {
     refetchInterval: 5_000,
@@ -50,7 +53,7 @@ export default function LsmNestedMcpPanel() {
   const [credentialValue, setCredentialValue] = useState('');
 
   const refresh = async () => {
-    await registry.refetch();
+    await Promise.all([registry.refetch(), queryClient.invalidateQueries(externalMcpServersQueryKey)]);
   };
 
   const manage = async (action: Action, server: Server, key?: string, value?: string) => {

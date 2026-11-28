@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # त्वरित शुरुआत
 
-यह मार्गदर्शिका एक एलएसएम नियंत्रक प्रारंभ करती है और उसका ब्राउज़र इंटरफ़ेस खोलती है। [unified web workspace](web-workspace.md) अनुशंसित दैनिक अनुभव है; यह एक अलग से तैनात, वैकल्पिक चैट स्टैक है। चैटजीपीटी, जेमिनी और अन्य बाहरी एमसीपी क्लाइंट एक ही नियंत्रक से जुड़ सकते हैं। [runtime choices and deployment model](../guides/deployment.md) देखें.
+यह मार्गदर्शिका एक एलएसएम नियंत्रक प्रारंभ करती है और उसका ब्राउज़र इंटरफ़ेस खोलती है। [unified web workspace](web-workspace.md) अनुशंसित दैनिक अनुभव है। चैटजीपीटी, जेमिनी और अन्य बाहरी एमसीपी क्लाइंट एक ही नियंत्रक से जुड़ सकते हैं। [runtime choices and deployment model](../guides/deployment.md) देखें.
 
 [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) से **Controller की एकल executable फ़ाइल** उपयोग करना अनुशंसित है। Python, Docker या source checkout की जरूरत नहीं। उदाहरण **Linux x86_64** के लिए है; अन्य प्लेटफ़ॉर्म: [बाइनरी गाइड](../installation/binary.md)।
 

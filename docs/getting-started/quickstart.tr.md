@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # Hızlı başlangıç
 
-Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar. [unified web workspace](web-workspace.md) önerilen günlük deneyimdir; ayrı olarak konuşlandırılmış, isteğe bağlı bir sohbet yığınıdır. ChatGPT, Gemini ve diğer harici MCP istemcileri aynı Denetleyiciye bağlanabilir. Bkz. [runtime choices and deployment model](../guides/deployment.md).
+Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar. [unified web workspace](web-workspace.md) önerilen günlük deneyimdir. ChatGPT, Gemini ve diğer harici MCP istemcileri aynı Denetleyiciye bağlanabilir. Bkz. [runtime choices and deployment model](../guides/deployment.md).
 
 Önerilen yöntem, [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) üzerinden **tek dosyalık Controller çalıştırılabilirini** kullanmaktır. Python, Docker veya kaynak checkout gerekmez. Örnek **Linux x86_64** içindir; diğerleri: [ikili kurulum](../installation/binary.md).
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Standalone binary runtime
 
 GitHub Releases의 **Controller 단일 실행 파일** 배포를 권장합니다. Python, Docker, 소스 체크아웃이 필요 없습니다.
@@ -108,7 +108,7 @@ binary는 Python application을 package하지만 모든 developer tool을 포함
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-바이너리에는 Controller만 포함됩니다. 외부 도구와 브라우저는 필요할 때 설치하세요. 채팅 및 기록은 별도 [웹 워크스페이스](../getting-started/web-workspace.md)와 데이터베이스가 필요합니다.
+바이너리에는 Controller만 포함됩니다. 외부 도구와 브라우저는 필요할 때 설치하세요. 채팅 및 기록은 SQLite 기반 통합 [웹 워크스페이스](../getting-started/web-workspace.md)에서 사용할 수 있습니다.
 
 ## Long-running service
 

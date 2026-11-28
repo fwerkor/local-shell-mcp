@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # Configuración
 
 El repositorio incluye un único archivo inicial copiable: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose lee automáticamente el `.env` resultante, y otros runtimes pueden usar las mismas variables de entorno `LOCAL_SHELL_MCP_`. YAML sigue siendo una entrada avanzada opcional para deployments binary o source; cree un archivo explícitamente y selecciónelo con `LOCAL_SHELL_MCP_CONFIG` o `--config`. Las variables de entorno sobrescriben los valores YAML, así que evite definir el mismo ajuste en ambos salvo que la sobrescritura sea intencional. Las claves YAML usan los nombres de campo de abajo.
@@ -44,7 +44,7 @@ Para pruebas solo locales, `auth_bypass_localhost` está habilitado por defecto.
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | Deshabilita restricciones de workspace/path cuando es true; úselo solo dentro de boundaries desechables. |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | Deshabilita el controller host como target de ejecución shell/file/browser. Remote workers y control-plane services siguen disponibles. |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | Hace que el controller sea apto para instancias efímeras/serverless: implica `disable_local`, deshabilita local file links/wallpaper caching y usa `memory` como `state_backend` por defecto. Con `auth_mode=oauth`, configure explícitamente un `oauth_jwt_secret` fuerte. |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file`, `memory` o `redis`. Use Redis cuando el estado del controller serverless deba sobrevivir cold starts. |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file`, `memory` o `redis`. Use Redis cuando el estado del controller serverless deba sobrevivir cold starts. |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | URL de conexión Redis cuando `state_backend=redis`. Se redacta en diagnostics. |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Namespace del estado control-plane en memory/Redis. |
 

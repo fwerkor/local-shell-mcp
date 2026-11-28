@@ -1,73 +1,67 @@
-<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
-# Espace de travail Web unifié
+<!-- i18n-source-sha256: 01cf883cb71925e93fabc21d32315ef8c869ee2ea548e54a0347e2f6b730a327 -->
+<!-- Machine-assisted translation; English source is authoritative. -->
+# Quickstart pour le chat via WebUI
 
-L'**espace de travail Web LSM unifié** est la méthode recommandée pour utiliser local-shell-mcp au quotidien. Il combine le chat IA, l'historique du projet et le plan de contrôle LSM dans une seule interface réactive, basée sur une interface LibreChat modifiée et vendue. Vous pouvez toujours connecter des clients MCP externes tels que [ChatGPT](chatgpt-connector.md) ou [Gemini](gemini-spark.md).
+L’espace de travail web unifié LSM intègre une fonction de chat intelligent, des projets, des agents, ainsi que les pages opérationnelles du contrôleur. Il est géré par le contrôleur Python, qui utilise son système d’authentification et sa base de données SQLite. Aucun serveur de chat séparé n’est nécessaire. Les clients externes tels que [ChatGPT](chatgpt-connector.md) et [Gemini](gemini-spark.md) sont toujours pris en charge.
 
-L'espace de travail est **auto-hébergé et son installation est facultative** : il s'agit d'un service Web distinct, ne faisant pas partie de l'image minimale du contrôleur, de l'exécutable autonome ou du bundle de travail à distance. Les déploiements de contrôleur uniquement conservent l'interface utilisateur du navigateur d'origine et OpenTUI.
+## 1. Démarrer le Controller
 
-## Qu'y a-t-il dans l'espace de travail ?
-
-| Zone | Ce que tu peux faire |
-|---|---|
-| Chat et projets | Choisissez un modèle configuré, créez des conversations, organisez des projets, recherchez des discussions passées et archivez des conversations. L'historique reste sur le serveur. |
-| Présentation du contrôleur | Affichez l’état de santé, l’activité récente et les machines connectées. |
-| Fichiers | Parcourez et gérez des fichiers locaux ou distants. |
-| Terminaux | Travaillez avec des terminaux persistants sur le contrôleur ou les travailleurs. |
-| Bureau | Inspectez et contrôlez les sessions GUI à distance. |
-| Séances | Inspectez les tâches LSM durables et leur cycle de vie. |
-| Télécommandes | Connectez et administrez les travailleurs sortants. |
-| Vérification | Inspectez l’activité de l’outil créé par le modèle. |
-| MCP imbriqué | Enregistrez, modifiez, activez, désactivez, actualisez et supprimez les serveurs MCP externes derrière LSM. |
-
-Les routes du contrôleur sont `/control/overview`, `/control/files`, `/control/terminals`, `/control/desktop`, `/control/sessions`, `/control/remotes` et `/control/audit`. Le chat s'ouvre à `/c/new`. Le gestionnaire MCP LSM contrôle **le registre MCP imbriqué** de LSM ; il ne crée pas de deuxième registre dans LibreChat.
-
-## Déployer la pile de discussion facultative
-
-1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
-2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
-3. To override the defaults, configure the Controller service environment:
+Suivez les instructions de l’[initiation à l’installation](quickstart.md) pour votre environnement de développement préféré. Assurez-vous que la fonctionnalité WebUI est activée, et utilisez un stockage persistant. Les paramètres par défaut sont les suivants :
 
 ```env
 LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
 LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. Start the Controller from its Python package or standalone executable:
+Après avoir exporté votre environnement de service, lancez le contrôleur.
 
 ```sh
 local-shell-mcp --mode mcp
 ```
 
-5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
+Pour la version à une seule file, utilisez l’exécutable téléchargé. Le contrôleur installé sert de serveur pour le frontend compilé ; le chaîne d’outils JavaScript est nécessaire uniquement pour les builds source. Veuillez consulter les instructions de build du WebUI à l’adresse [WebUI build instructions](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
 
-Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
+## 2. Ouvrir l’espace de travail dans le navigateur
 
-**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
+Ouvrez la page `http://127.0.0.1:8765/ui` depuis l’hôte Controller. Ou bien, utilisez le URL HTTPS configuré, qui se termine par `/ui`. Connectez-vous avec l’authentification LSM configurée pour cette déploiement. Utilisez l’accès HTTPS pour l’accès à distance. Les pages de chat et de contrôle partagent la même origine.
 
-## Connectez-vous et utilisez le chat
+## 3. Ajouter un canal de modèle
 
-1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
-2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
-3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
-4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
-5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
+Ouvrez le sélecteur de modèles et la gestion des canaux. Ajoutez un canal API ou connectez un compte compatible. Pour un endpoint OpenAI compatible, entrez un nom de canal, choisissez « Chat Completions », indiquez l’URL de base de l’API ainsi que les informations de connexion nécessaires. Vous pouvez également sélectionner un modèle manuellement ou fournir une ID de modèle connue. Sauvegardez la configuration et choisissez un modèle.
 
-Les téléchargements de chat (jusqu'à 32 Mio) sont stockés dans l'espace de travail du contrôleur et leurs chemins absolus sont fournis au modèle. Les téléchargements via le navigateur n'accordent pas d'autorisations de fichiers supplémentaires. Les appels aux outils orientés modèle passent par l’autorisation LSM, l’audit et le routeur du travailleur distant.
+Pour un service d’inférence local, il est nécessaire d’utiliser une adresse accessible depuis le contrôleur, et non simplement depuis votre navigateur. Par exemple, `http://127.0.0.1:8080/v1` est une adresse appropriée si le service d’inférence écoute sur cette adresse, au sein du nom de domaine réseau du contrôleur. Pour plus d’informations sur les protocoles, l’autorisation des comptes, la découverte des modèles et les limites liées au contexte, consultez [Channels and models](../chat/channels.md).
 
-## MCP externe, sécurité et données
+## 4. Exécuter une première tâche
 
-Utilisez la barre latérale MCP de l’espace de travail pour gérer les serveurs MCP externes imbriqués. Cela prend en charge les serveurs stdio locaux et les serveurs HTTP, y compris les variables d'environnement privées distinctes et les en-têtes de requête. Les secrets ne sont pas renvoyés au navigateur. Le bouton de discussion **External MCP** permet la recherche, l'inspection et l'invocation d'outils imbriqués ; il n'accorde pas le modèle `mcp_manage` lorsque les outils LSM natifs sont désactivés. La gestion de l'interface utilisateur est protégée par l'autorisation normale du contrôleur.
+Lancez une conversation et posez une question simple pour vérifier la connectivité du modèle. Ensuite, essayez d’utiliser un outil de lecture uniquement.
 
-Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
+```text
+Énumérez les fichiers situés dans le répertoire racine du workspace du contrôleur.
+Dites-moi quelle machine vous avez inspectée, et résumez les résultats de cette inspection.
+Ne modifiez pas les fichiers, ni ne effectuez de transactions de stockage des données.
+```
 
-The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
+Vérifiez le résultat réel de l’outil utilisé. Si un outil manque, vérifiez les options liées à cet outil dans le chat, les paramètres de l’agent et les autorisations de la machine. Utilisez un agent préchargé pour les tâches répétitives, et configurez son accès de manière explicite. Voir [Outils et autorisations](../chat/permissions.md).
 
-## Dépannage
+![Chat via l’interface WebUI, avec une conversation de démonstration](../assets/chat/chat-workspace.png)
 
-- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
-- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
-- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
-- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
-- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
+Les captures d’écran présentées dans cette guide et sur les pages suivantes ont été réalisées à l’aide d’un contrôleur isolé, avec un modèle de démonstration. Ces captures d’écran ne contiennent aucune information concernant les identifiants ou les conversations utilisés dans le produit réel. Les labels de l’interface utilisateur en anglais peuvent différer de ceux du langage sélectionné.
 
-Pour les détails de mise en œuvre et les mises à jour, consultez [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) et [human interface guide](../guides/human-interface.md).
+## 5. Explorer l’espace de travail
+
+| Zone | À quoi l’utiliser ? |
+|---|---|
+| Chats et projets | Démarrer et rechercher des chats, organiser les projets, utiliser des tags et des marqueurs de messages. |
+| Agents | Modèles, instructions et configurations de outils réutilisables. |
+| Mémoire et compétences | Gérer le savoir et les instructions réutilisables. |
+| Chats planifiés. | Exécuter un Agent sauvegardé avec un prompt récurrent. |
+| Fichiers et terminaux. | Inspecter ou manipuler les environnements Controller et Worker. |
+| Bureau. | Inspecter et contrôler les sessions GUI distantes prises en charge. |
+| Sessions, tâches et audit | Vérification des tâches permanentes, du progrès de l’exécution des tâches et des activités liées aux outils utilisés. |
+| Machines et services externes MCP. | Gérer les travailleurs et les serveurs MCP imbriqués |
+
+Le ensemble de contrôles nécessaires dépend de votre configuration, de vos comptes et des capacités activées. Fermer la fenêtre de navigateur ne met pas automatiquement fin à la génération de données côté serveur ; utilisez le bouton “Arrêter” lorsque vous avez besoin d’interrompre les opérations.
+
+## Prochaines étapes…
+
+Lisez le [guide du WebUI Chat](../chat/index.md) pour connaître le flux de travail complet. Pour les paramètres liés à l’administration et au dépannage, consultez [Administration et dépannage](../chat/administration.md).

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # Yapılandırma
 
 Repository tek bir kopyalanabilir başlangıç dosyası sağlar: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose oluşan `.env` dosyasını otomatik okur; diğer runtimes da aynı `LOCAL_SHELL_MCP_` environment variables değerlerini kullanabilir. YAML binary/source deployments için optional advanced input olarak kalır; dosyayı explicit oluşturup `LOCAL_SHELL_MCP_CONFIG` veya `--config` ile seçin. Environment variables YAML values değerlerini override eder; override bilinçli değilse aynı setting’i iki yerde tanımlamayın. YAML keys aşağıdaki field names değerlerini kullanır.
@@ -44,7 +44,7 @@ Local-only testing için `auth_bypass_localhost` default etkin. Public network �
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | True olduğunda workspace/path restrictions kapatır; yalnız disposable boundaries içinde kullanın. |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | Controller host’u shell/file/browser execution target olarak devre dışı bırakır. Remote workers ve control-plane services kullanılabilir kalır. |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | Controller’ı ephemeral/serverless instances için uygun yapar: `disable_local` imply eder, local file links/wallpaper caching kapatır ve default `state_backend=memory` olur. `auth_mode=oauth` ile güçlü `oauth_jwt_secret` explicit yapılandırın. |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file`, `memory` veya `redis`. Serverless controller state cold starts sonrasında kalmalıysa Redis kullanın. |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file`, `memory` veya `redis`. Serverless controller state cold starts sonrasında kalmalıysa Redis kullanın. |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | `state_backend=redis` için Redis connection URL. Diagnostics içinde redacted. |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Memory/Redis control-plane state namespace. |
 

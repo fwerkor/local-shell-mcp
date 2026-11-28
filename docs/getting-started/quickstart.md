@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide starts an LSM Controller and opens its browser interface. The [unified web workspace](web-workspace.md) is the recommended daily experience; it is a separately deployed, optional chat stack. ChatGPT, Gemini and other external MCP clients can connect to the same Controller. See [runtime choices and deployment model](../guides/deployment.md).
+This guide starts an LSM Controller and opens its browser interface. The [unified web workspace](web-workspace.md) is the recommended daily experience. ChatGPT, Gemini and other external MCP clients can connect to the same Controller. See [runtime choices and deployment model](../guides/deployment.md).
 
 Download the standalone **single-file Controller executable** from [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest). This is the recommended deployment. No Python, Docker, or repository checkout is required for the Controller. The commands below target **Linux x86_64**; for Windows, macOS or ARM64 see [binary installation](../installation/binary.md).
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # 配置
 
 仓库提供一个可直接复制的起始文件：[`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)。Docker Compose 会自动读取由此生成的 `.env`，其他 runtime 也可以使用相同的 `LOCAL_SHELL_MCP_` 环境变量。YAML 仍是 binary 或源码部署的可选高级输入；需要显式创建配置文件，并通过 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 选择。环境变量会覆盖 YAML，因此除非确实需要覆盖，否则不要在两处重复定义同一设置。YAML key 使用下表所列字段名。
@@ -44,7 +44,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | 为 true 时关闭 workspace/path 限制；仅用于 disposable boundary。 |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | 禁止将 controller host 作为 shell/file/browser 执行目标；remote workers 与 control-plane services 仍可使用。 |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | 使 controller 适合 ephemeral/serverless instance：隐含 `disable_local`，关闭 local file links/wallpaper caching，并默认将 `state_backend` 设为 `memory`。默认 `auth_mode=oauth` 时必须显式配置强 `oauth_jwt_secret`。 |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | 可选 `file`、`memory` 或 `redis`。Serverless controller state 需要跨 cold start 持久化时使用 Redis。 |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | 可选 `sqlite`, `file`、`memory` 或 `redis`。Serverless controller state 需要跨 cold start 持久化时使用 Redis。 |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | `state_backend=redis` 时使用的 Redis connection URL；diagnostics 中会被脱敏。 |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Memory/Redis control-plane state 的 namespace。 |
 

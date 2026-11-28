@@ -52,6 +52,7 @@ The intended isolation boundary is the container or VM running the service.
 | Scenario | Start here | Why |
 |---|---|---|
 | Primary browser workspace | [Unified web workspace](getting-started/web-workspace.md) | Chat, projects and LSM control pages with a shared login |
+| Using the built-in AI agent | [WebUI Chat](chat/index.md) | Model channels, Agents, permissions, context and automation |
 | First Controller deployment | [Quickstart](getting-started/quickstart.md) | Recommended single-file binary, OAuth and the first browser session |
 | Choosing the runtime layer | [Runtime choices](guides/deployment.md) | Explains Docker, VS Code, binary, Python, and stdio as separate runtime options |
 | Connecting Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | Eligibility, HTTPS MCP URL, OAuth and testing |

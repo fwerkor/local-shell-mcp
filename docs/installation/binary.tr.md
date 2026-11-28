@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Bağımsız binary runtime
 
 Önerilen yöntem, GitHub Releases üzerinden **tek dosyalık Controller çalıştırılabilirini** kullanmaktır. Python, Docker veya kaynak checkout gerekmez.
@@ -108,7 +108,7 @@ Task’larınızın ihtiyaç duyduklarını kurun:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-İkili yalnızca Controller içerir; harici araçlar ve tarayıcılar isteğe bağlıdır. Sohbet ve geçmiş ayrı [web çalışma alanı](../getting-started/web-workspace.md) ve veritabanı gerektirir.
+İkili yalnızca Controller içerir; harici araçlar ve tarayıcılar isteğe bağlıdır. Sohbet ve geçmiş SQLite kullanan bütünleşik [web çalışma alanı](../getting-started/web-workspace.md) içinde kullanılabilir.
 
 ## Uzun süre çalışan service
 

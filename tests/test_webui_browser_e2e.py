@@ -166,11 +166,11 @@ async def test_real_react_machine_permission_scopes_and_inheritance(tmp_path, mo
                                 wait_until="domcontentloaded")
                 # The composer popup is labelled in the UI's own language and
                 # exposes machine access as segmented buttons, not a <select>.
-                selector = page.get_by_role("button", name="Tool permissions", exact=True)
+                selector = page.get_by_role("button", name="Tools Options", exact=True)
                 await selector.wait_for(timeout=15_000)
                 await page.set_viewport_size({"width": 1000, "height": 480})
                 await selector.click()
-                dialog = page.get_by_role("dialog", name="Tool permissions")
+                dialog = page.get_by_role("dialog", name="Tool Library")
                 await dialog.wait_for()
                 bounds = await dialog.bounding_box()
                 assert bounds and bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 480

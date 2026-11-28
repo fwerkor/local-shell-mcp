@@ -9,11 +9,11 @@
 /* Native select popups need a matching browser color scheme as well as
    semantic text colors: a dark control with a light native foreground is
    otherwise unreadable on some browsers. Keep this scoped to the LSM dialog. */
-.lsm-permissions-dialog select {
+.lsm-tool-management select {
   color-scheme: light;
 }
 
-.dark .lsm-permissions-dialog select {
+.dark .lsm-tool-management select {
   color-scheme: dark;
 }
 

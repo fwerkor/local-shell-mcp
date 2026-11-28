@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Espaço de trabalho de IA auto-hospedado · Plano de controle MCP</span>
 
@@ -53,6 +53,7 @@ O limite de isolamento pretendido é o container ou VM que executa o serviço.
 | Cenário | Comece aqui | Por quê |
 |---|---|---|
 | Espaço de trabalho do navegador principal | [Unified web workspace](getting-started/web-workspace.md) | Chat, projetos e páginas de controle LSM com login compartilhado |
+| Usar o agente de IA integrado | [WebUI Chat](chat/index.md) | Canais, agentes, permissões, contexto e automação |
 | Implantação do primeiro controlador | [Quickstart](getting-started/quickstart.md) | Binário recomendado, OAuth e primeiro acesso no navegador |
 | Escolher a camada runtime | [Runtime choices](guides/deployment.md) | Explica Docker, VS Code, binary, Python e stdio como opções de runtime separadas |
 | Conectando Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | Elegibilidade, URL HTTPS MCP, OAuth e testes |

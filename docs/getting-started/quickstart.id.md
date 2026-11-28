@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # Mulai cepat
 
-Panduan ini memulai Pengontrol LSM dan membuka antarmuka browsernya. [unified web workspace](web-workspace.md) adalah pengalaman harian yang direkomendasikan; ini adalah tumpukan obrolan opsional yang diterapkan secara terpisah. ChatGPT, Gemini, dan klien MCP eksternal lainnya dapat terhubung ke Pengontrol yang sama. Lihat [runtime choices and deployment model](../guides/deployment.md).
+Panduan ini memulai Pengontrol LSM dan membuka antarmuka browsernya. [unified web workspace](web-workspace.md) adalah pengalaman harian yang direkomendasikan. ChatGPT, Gemini, dan klien MCP eksternal lainnya dapat terhubung ke Pengontrol yang sama. Lihat [runtime choices and deployment model](../guides/deployment.md).
 
 Direkomendasikan **satu berkas executable Controller** dari [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) tanpa Python, Docker atau checkout source. Contoh **Linux x86_64**; platform lain: [panduan binary](../installation/binary.md).
 

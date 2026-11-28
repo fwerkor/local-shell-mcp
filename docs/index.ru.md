@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Автономное рабочее пространство ИИ · Плоскость управления MCP</span>
 
@@ -53,6 +53,7 @@ Optional remote workers: outbound machine connections
 | Сценарий | Начать здесь | Почему |
 |---|---|---|
 | Основное рабочее пространство браузера | [Unified web workspace](getting-started/web-workspace.md) | Чат, проекты и страницы управления LSM с общим логином |
+| Использовать встроенного ИИ-агента | [WebUI Chat](chat/index.md) | Каналы, агенты, разрешения, контекст и автоматизация |
 | Первое развертывание контроллера | [Quickstart](getting-started/quickstart.md) | Рекомендуемый бинарник, OAuth и первый вход |
 | Выбор runtime layer | [Runtime choices](guides/deployment.md) | Объясняет Docker, VS Code, binary, Python и stdio как отдельные runtime options |
 | Подключение Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | Право на участие, URL-адрес HTTPS MCP, OAuth и тестирование |

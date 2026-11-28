@@ -9,6 +9,16 @@ nav:
       - Quickstart: getting-started/quickstart.md
       - Unified web workspace: getting-started/web-workspace.md
       - Runtime vs client model: guides/deployment.md
+  - WebUI Chat:
+      - Chat overview: chat/index.md
+      - Channels and models: chat/channels.md
+      - Agents and Skills: chat/agents.md
+      - Conversations and projects: chat/conversations.md
+      - Memory and context: chat/context.md
+      - Tools and permissions: chat/permissions.md
+      - Goals and automation: chat/automation.md
+      - Network search: guides/webui-network-search.md
+      - Administration and troubleshooting: chat/administration.md
   - Runtime installation:
       - Choose a runtime: guides/deployment.md
       - Standalone binary: installation/binary.md
@@ -69,6 +79,16 @@ plugins:
           name: 简体中文
           build: true
           nav_translations:
+            WebUI Chat: WebUI Chat
+            Chat overview: 聊天概览
+            Channels and models: 渠道与模型
+            Agents and Skills: 智能体与 Skill
+            Conversations and projects: 会话与项目
+            Memory and context: 记忆与上下文
+            Tools and permissions: 工具与权限
+            Goals and automation: 目标与自动化
+            Network search: 网络搜索
+            Administration and troubleshooting: 管理与故障排查
             Home: 首页
             Getting started: 快速开始
             Quickstart: 快速开始
@@ -108,6 +128,16 @@ plugins:
           name: 繁體中文
           build: true
           nav_translations:
+            WebUI Chat: WebUI Chat
+            Chat overview: 聊天總覽
+            Channels and models: 渠道與模型
+            Agents and Skills: 智慧體與 Skill
+            Conversations and projects: 對話與專案
+            Memory and context: 記憶與上下文
+            Tools and permissions: 工具與權限
+            Goals and automation: 目標與自動化
+            Network search: 網路搜尋
+            Administration and troubleshooting: 管理與疑難排解
             Home: 首頁
             Getting started: 快速開始
             Quickstart: 快速開始
@@ -147,6 +177,16 @@ plugins:
           name: 日本語
           build: true
           nav_translations:
+            WebUI Chat: WebUI チャット
+            Chat overview: チャット概要
+            Channels and models: チャネルとモデル
+            Agents and Skills: エージェントとスキル
+            Conversations and projects: 会話とプロジェクト
+            Memory and context: メモリとコンテキスト
+            Tools and permissions: ツールと権限
+            Goals and automation: 目標と自動化
+            Network search: ウェブ検索
+            Administration and troubleshooting: 管理とトラブルシューティング
             Home: ホーム
             Getting started: はじめに
             Quickstart: クイックスタート
@@ -186,6 +226,16 @@ plugins:
           name: 한국어
           build: true
           nav_translations:
+            WebUI Chat: WebUI 채팅
+            Chat overview: 채팅 개요
+            Channels and models: 채널 및 모델
+            Agents and Skills: 에이전트 및 스킬
+            Conversations and projects: 대화 및 프로젝트
+            Memory and context: 메모리 및 컨텍스트
+            Tools and permissions: 도구 및 권한
+            Goals and automation: 목표 및 자동화
+            Network search: 웹 검색
+            Administration and troubleshooting: 관리 및 문제 해결
             Home: 홈
             Getting started: 시작하기
             Quickstart: 빠른 시작
@@ -225,6 +275,16 @@ plugins:
           name: Español
           build: true
           nav_translations:
+            WebUI Chat: Chat WebUI
+            Chat overview: Vista general del chat
+            Channels and models: Canales y modelos
+            Agents and Skills: Agentes y habilidades
+            Conversations and projects: Conversaciones y proyectos
+            Memory and context: Memoria y contexto
+            Tools and permissions: Herramientas y permisos
+            Goals and automation: Objetivos y automatización
+            Network search: Búsqueda web
+            Administration and troubleshooting: Administración y solución de problemas
             Home: Inicio
             Getting started: Primeros pasos
             Quickstart: Inicio rápido
@@ -264,6 +324,16 @@ plugins:
           name: Français
           build: true
           nav_translations:
+            WebUI Chat: Chat WebUI
+            Chat overview: Vue d’ensemble du chat
+            Channels and models: Canaux et modèles
+            Agents and Skills: Agents et compétences
+            Conversations and projects: Conversations et projets
+            Memory and context: Mémoire et contexte
+            Tools and permissions: Outils et autorisations
+            Goals and automation: Objectifs et automatisation
+            Network search: Recherche web
+            Administration and troubleshooting: Administration et dépannage
             Home: Accueil
             Getting started: Premiers pas
             Quickstart: Démarrage rapide
@@ -303,6 +373,16 @@ plugins:
           name: Deutsch
           build: true
           nav_translations:
+            WebUI Chat: WebUI-Chat
+            Chat overview: Chat-Übersicht
+            Channels and models: Kanäle und Modelle
+            Agents and Skills: Agenten und Skills
+            Conversations and projects: Unterhaltungen und Projekte
+            Memory and context: Speicher und Kontext
+            Tools and permissions: Werkzeuge und Berechtigungen
+            Goals and automation: Ziele und Automatisierung
+            Network search: Websuche
+            Administration and troubleshooting: Administration und Fehlerbehebung
             Home: Start
             Getting started: Einstieg
             Quickstart: Schnellstart
@@ -342,6 +422,16 @@ plugins:
           name: Русский
           build: true
           nav_translations:
+            WebUI Chat: Чат WebUI
+            Chat overview: Обзор чата
+            Channels and models: Каналы и модели
+            Agents and Skills: Агенты и навыки
+            Conversations and projects: Диалоги и проекты
+            Memory and context: Память и контекст
+            Tools and permissions: Инструменты и разрешения
+            Goals and automation: Цели и автоматизация
+            Network search: Веб-поиск
+            Administration and troubleshooting: Администрирование и устранение неполадок
             Home: Главная
             Getting started: Начало работы
             Quickstart: Быстрый старт
@@ -381,6 +471,16 @@ plugins:
           name: Português
           build: true
           nav_translations:
+            WebUI Chat: Chat WebUI
+            Chat overview: Visão geral do chat
+            Channels and models: Canais e modelos
+            Agents and Skills: Agentes e habilidades
+            Conversations and projects: Conversas e projetos
+            Memory and context: Memória e contexto
+            Tools and permissions: Ferramentas e permissões
+            Goals and automation: Metas e automação
+            Network search: Pesquisa na web
+            Administration and troubleshooting: Administração e solução de problemas
             Home: Início
             Getting started: Primeiros passos
             Quickstart: Início rápido
@@ -420,6 +520,16 @@ plugins:
           name: Italiano
           build: true
           nav_translations:
+            WebUI Chat: Chat WebUI
+            Chat overview: Panoramica della chat
+            Channels and models: Canali e modelli
+            Agents and Skills: Agenti e competenze
+            Conversations and projects: Conversazioni e progetti
+            Memory and context: Memoria e contesto
+            Tools and permissions: Strumenti e permessi
+            Goals and automation: Obiettivi e automazione
+            Network search: Ricerca web
+            Administration and troubleshooting: Amministrazione e risoluzione dei problemi
             Home: Home
             Getting started: Per iniziare
             Quickstart: Avvio rapido
@@ -459,6 +569,16 @@ plugins:
           name: العربية
           build: true
           nav_translations:
+            WebUI Chat: دردشة WebUI
+            Chat overview: نظرة عامة على الدردشة
+            Channels and models: القنوات والنماذج
+            Agents and Skills: الوكلاء والمهارات
+            Conversations and projects: المحادثات والمشاريع
+            Memory and context: الذاكرة والسياق
+            Tools and permissions: الأدوات والأذونات
+            Goals and automation: الأهداف والأتمتة
+            Network search: البحث على الويب
+            Administration and troubleshooting: الإدارة واستكشاف الأخطاء وإصلاحها
             Home: الرئيسية
             Getting started: البدء
             Quickstart: البدء السريع
@@ -498,6 +618,16 @@ plugins:
           name: हिन्दी
           build: true
           nav_translations:
+            WebUI Chat: WebUI चैट
+            Chat overview: चैट का अवलोकन
+            Channels and models: चैनल और मॉडल
+            Agents and Skills: एजेंट और स्किल
+            Conversations and projects: वार्तालाप और प्रोजेक्ट
+            Memory and context: मेमोरी और संदर्भ
+            Tools and permissions: टूल और अनुमतियाँ
+            Goals and automation: लक्ष्य और स्वचालन
+            Network search: वेब खोज
+            Administration and troubleshooting: प्रशासन और समस्या निवारण
             Home: मुखपृष्ठ
             Getting started: शुरुआत
             Quickstart: त्वरित शुरुआत
@@ -537,6 +667,16 @@ plugins:
           name: Bahasa Indonesia
           build: true
           nav_translations:
+            WebUI Chat: Chat WebUI
+            Chat overview: Ikhtisar chat
+            Channels and models: Kanal dan model
+            Agents and Skills: Agen dan skill
+            Conversations and projects: Percakapan dan proyek
+            Memory and context: Memori dan konteks
+            Tools and permissions: Alat dan izin
+            Goals and automation: Tujuan dan otomatisasi
+            Network search: Pencarian web
+            Administration and troubleshooting: Administrasi dan pemecahan masalah
             Home: Beranda
             Getting started: Mulai
             Quickstart: Mulai cepat
@@ -576,6 +716,16 @@ plugins:
           name: Tiếng Việt
           build: true
           nav_translations:
+            WebUI Chat: Chat WebUI
+            Chat overview: Tổng quan trò chuyện
+            Channels and models: Kênh và mô hình
+            Agents and Skills: Agent và kỹ năng
+            Conversations and projects: Cuộc trò chuyện và dự án
+            Memory and context: Bộ nhớ và ngữ cảnh
+            Tools and permissions: Công cụ và quyền
+            Goals and automation: Mục tiêu và tự động hóa
+            Network search: Tìm kiếm web
+            Administration and troubleshooting: Quản trị và khắc phục sự cố
             Home: Trang chủ
             Getting started: Bắt đầu
             Quickstart: Bắt đầu nhanh
@@ -615,6 +765,16 @@ plugins:
           name: Türkçe
           build: true
           nav_translations:
+            WebUI Chat: WebUI sohbeti
+            Chat overview: Sohbet genel bakışı
+            Channels and models: Kanallar ve modeller
+            Agents and Skills: Ajanlar ve beceriler
+            Conversations and projects: Konuşmalar ve projeler
+            Memory and context: Bellek ve bağlam
+            Tools and permissions: Araçlar ve izinler
+            Goals and automation: Hedefler ve otomasyon
+            Network search: Web araması
+            Administration and troubleshooting: Yönetim ve sorun giderme
             Home: Ana sayfa
             Getting started: Başlangıç
             Quickstart: Hızlı başlangıç
@@ -654,6 +814,16 @@ plugins:
           name: Polski
           build: true
           nav_translations:
+            WebUI Chat: Czat WebUI
+            Chat overview: Przegląd czatu
+            Channels and models: Kanały i modele
+            Agents and Skills: Agenci i umiejętności
+            Conversations and projects: Rozmowy i projekty
+            Memory and context: Pamięć i kontekst
+            Tools and permissions: Narzędzia i uprawnienia
+            Goals and automation: Cele i automatyzacja
+            Network search: Wyszukiwanie w sieci
+            Administration and troubleshooting: Administracja i rozwiązywanie problemów
             Home: Strona główna
             Getting started: Pierwsze kroki
             Quickstart: Szybki start

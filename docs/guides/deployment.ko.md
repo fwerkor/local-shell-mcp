@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ca97dc84c0c0fed91b1440fbdc7a381102e0c8699fb47419a9464b020f796fe7 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Runtime 선택과 deployment 모델
 
 `local-shell-mcp`에는 두 가지 보완적인 결정이 있습니다.
@@ -51,7 +51,7 @@ Local MCP client
 
 | 인터페이스 | 공개 HTTPS가 필요합니다 | `/mcp`를 사용합니다. | OAuth 필요 | 일반적인 런타임 |
 |---|---:|---:|---:|---|
-| 통합 LSM 웹 작업공간 | 예, 원격 액세스의 경우입니다. 로컬 프록시도 가능 | 내부적으로 | LSM 로그인 | 컨트롤러와 별도의 웹 스택 |
+| 통합 LSM 웹 작업공간 | 예, 원격 액세스의 경우입니다. 로컬 프록시도 가능 | 내부적으로 | LSM 로그인 | Controller |
 | Gemini Task / 맞춤형 앱 | 예 | 예 | 네, 공용으로 사용하세요 | 모든 HTTP 컨트롤러 |
 | ChatGPT custom MCP connector | 예 | 예 | public 사용 시 예 | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | 아니요 | 아니요 | 아니요 | `local-shell-mcp --mode stdio` |

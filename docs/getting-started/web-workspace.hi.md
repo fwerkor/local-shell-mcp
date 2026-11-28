@@ -1,73 +1,67 @@
-<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
-# एकीकृत वेब कार्यक्षेत्र
+<!-- i18n-source-sha256: 01cf883cb71925e93fabc21d32315ef8c869ee2ea548e54a0347e2f6b730a327 -->
+<!-- Machine-assisted translation; English source is authoritative. -->
+# वेबयूआई चैट – त्वरित शुरुआत
 
-**एकीकृत एलएसएम वेब कार्यक्षेत्र** लोकल-शेल-एमसीपी को दिन-प्रतिदिन उपयोग करने का अनुशंसित तरीका है। यह एआई चैट, प्रोजेक्ट इतिहास और एलएसएम नियंत्रण विमान को एक संशोधित, विक्रेताबद्ध लिब्रेचैट फ्रंटएंड के आधार पर एक प्रतिक्रियाशील इंटरफ़ेस में जोड़ता है। आप अभी भी बाहरी MCP क्लाइंट जैसे [ChatGPT](chatgpt-connector.md) या [Gemini](gemini-spark.md) कनेक्ट कर सकते हैं।
+यूनिफाइड LSM वेब वर्कस्पेस में एआई चैट, प्रोजेक्ट्स, एजेंट्स, एवं कंट्रोलर के ऑपरेशनल पृष्ठ शामिल हैं। इसे पायथन कंट्रोलर द्वारा संचालित किया जाता है; इसमें प्रमाणीकरण एवं आईक्यूएलसी डेटाबेस का उपयोग किया जाता है। किसी अलग चैट सर्वर की आवश्यकता नहीं है। [ChatGPT](chatgpt-connector.md) एवं [Gemini](gemini-spark.md) जैसे बाहरी क्लाइंट्स का भी समर्थन जारी रहेगा।
 
-कार्यक्षेत्र **स्वयं-होस्टेड है और इंस्टॉल करने के लिए वैकल्पिक** है: यह एक अलग वेब सेवा है, न्यूनतम नियंत्रक छवि, स्टैंडअलोन निष्पादन योग्य या रिमोट वर्कर बंडल का हिस्सा नहीं है। केवल-नियंत्रक परिनियोजन मूल ब्राउज़र UI और OpenTUI को बनाए रखते हैं।
+## 1. Controller शुरू करें
 
-## कार्यक्षेत्र में क्या है?
-
-| क्षेत्र | आप क्या कर सकते हैं |
-|---|---|
-| चैट और प्रोजेक्ट | एक कॉन्फ़िगर किया गया मॉडल चुनें, वार्तालाप बनाएं, प्रोजेक्ट व्यवस्थित करें, पिछली चैट ढूंढें और वार्तालाप संग्रहीत करें। इतिहास सर्वर पर रहता है. |
-| नियंत्रक सिंहावलोकन | स्वास्थ्य, हाल की गतिविधि और कनेक्टेड मशीनें देखें। |
-| फ़ाइलें | स्थानीय या दूरस्थ फ़ाइलें ब्राउज़ करें और प्रबंधित करें। |
-| टर्मिनल | नियंत्रक या श्रमिकों पर लगातार टर्मिनलों के साथ कार्य करें। |
-| डेस्कटॉप | दूरस्थ जीयूआई सत्रों का निरीक्षण और नियंत्रण करें। |
-| सत्र | टिकाऊ एलएसएम कार्यों और उनके जीवनचक्र का निरीक्षण करें। |
-| रिमोट | आउटबाउंड श्रमिकों से जुड़ें और प्रशासन करें। |
-| लेखापरीक्षा | मॉडल-उत्पन्न उपकरण गतिविधि का निरीक्षण करें। |
-| नेस्टेड एम.सी.पी | एलएसएम के पीछे बाहरी एमसीपी सर्वर को पंजीकृत करें, संपादित करें, सक्षम करें, अक्षम करें, रीफ्रेश करें और हटाएं। |
-
-नियंत्रक मार्ग `/control/overview`, `/control/files`, `/control/terminals`, `/control/desktop`, `/control/sessions`, `/control/remotes` और `/control/audit` हैं। चैट `/c/new` पर खुलती है। एलएसएम एमसीपी प्रबंधक **एलएसएम की नेस्टेड एमसीपी रजिस्ट्री** को नियंत्रित करता है; यह लिब्रेचैट में दूसरी रजिस्ट्री नहीं बनाता है।
-
-## वैकल्पिक चैट स्टैक तैनात करें
-
-1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
-2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
-3. To override the defaults, configure the Controller service environment:
+अपनी पसंद के रनटाइम के लिए [इंस्टॉलेशन निर्देश](quickstart.md) का पालन करें। यह सुनिश्चित करें कि WebUI सक्रिय है, एवं डेटा स्थायी रूप से संग्रहीत हो रहा है।
 
 ```env
 LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
 LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. Start the Controller from its Python package or standalone executable:
+अपने सेवा वातावरण को आउटपुट करने के बाद, अब कंट्रोलर को शुरू करें।
 
 ```sh
 local-shell-mcp --mode mcp
 ```
 
-5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
+एकल-फाइल वाले रिलीज के लिए, डाउनलोड किए गए एक्जीक्यूटेबल का उपयोग करें। इंस्टॉल किया गया कंट्रोलर, संकलित फ्रंटएंड को संचालित करता है; जबकि जावास्क्रिप्ट बिल्ड टूलचेन केवल सोर्स बिल्ड के लिए ही आवश्यक है। विस्तृत निर्देशों के लिए [WebUI बिल्ड निर्देश](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) देखें।
 
-Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
+## 2. ब्राउज़र में कार्यक्षेत्र खोलें
 
-**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
+कंट्रोलर होस्ट से `http://127.0.0.1:8765/ui` पर जाएँ। या, `/ui` से समाप्त होने वाली HTTPS URL का उपयोग करें। उस डिप्लॉयमेंट के लिए निर्धारित LSM प्रमाणीकरण का उपयोग करके लॉगिन करें। रिमोट एक्सेस हेतु प्रमाणित HTTPS का उपयोग करें। चैट एवं नियंत्रण पृष्ठ, एक ही स्रोत से आते हैं।
 
-## साइन इन करें और चैट का उपयोग करें
+## 3. मॉडल चैनल जोड़ें
 
-1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
-2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
-3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
-4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
-5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
+मॉडल सिलेक्टर एवं चैनल मैनेजमेंट खोलें। एक API चैनल जोड़ें, या किसी समर्थित अकाउंट को जोड़ें। ओपनAI-संगत एंडपॉइंट के लिए, चैनल का नाम दें, “Chat Completions” का विकल्प चुनें, API बेस URL एवं क्रेडेंशियल दर्ज करें। मॉडलों को खोजें, या किसी ज्ञात मॉडल आईडी को मैन्युअल रूप से दर्ज करें। कॉन्फ़िगरेशन सही होने पर, कोई मॉडल चुनें।
 
-चैट अपलोड (32 एमआईबी तक) नियंत्रक कार्यक्षेत्र के अंतर्गत संग्रहीत किए जाते हैं और उनके पूर्ण पथ मॉडल को आपूर्ति किए जाते हैं। ब्राउज़र अपलोड अतिरिक्त फ़ाइल अनुमतियाँ नहीं देते हैं. मॉडल-फ़ेसिंग टूल कॉल एलएसएम प्राधिकरण, ऑडिट और रिमोट-वर्कर राउटर से होकर गुजरती हैं।
+स्थानीय अनुमान प्रणाली के लिए, कंट्रोलर से ही जुड़ने योग्य पता का उपयोग करें; केवल ब्राउज़र से ही नहीं। उदाहरण के लिए, `http://127.0.0.1:8080/v1` ऐसा ही पता है, जिस पर अनुमान प्रणाली काम करती है। प्रोटोकॉल, खाते के अधिकारों, मॉडलों की खोज, एवं संदर्भ संबंधी सीमाओं के बारे में जानने हेतु [Channels and models](../chat/channels.md) देखें।
 
-## बाहरी एमसीपी, सुरक्षा और डेटा
+## 4. पहला कार्य चलाएँ
 
-नेस्टेड बाहरी MCP सर्वर को प्रबंधित करने के लिए कार्यस्थान MCP साइडबार का उपयोग करें। यह स्थानीय stdio सर्वर और HTTP सर्वर का समर्थन करता है, जिसमें अलग-अलग निजी वातावरण चर और अनुरोध हेडर शामिल हैं। रहस्य ब्राउज़र पर वापस नहीं आते. **बाहरी एमसीपी** चैट टॉगल नेस्टेड टूल की खोज, निरीक्षण और आह्वान की अनुमति देता है; जब मूल एलएसएम उपकरण अक्षम हो जाते हैं तो यह मॉडल `mcp_manage` प्रदान नहीं करता है। यूआई प्रबंधन सामान्य नियंत्रक प्राधिकरण द्वारा संरक्षित है।
+एक चैट शुरू करें, एवं मॉडल की कनेक्टिविटी की जाँच करें। फिर “रीड-ओनली” टूल का उपयोग करें।
 
-Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
+```text
+कृपया, Controller वर्कस्पेस के रूट में मौजूद फ़ाइलों की सूची दें।
+बताएं कि आपने किस मशीन की जाँच की, एवं परिणामों का सारांश दें।
+फ़ाइलों में कोई बदलाव न करें, एवं कोई लिखने वाला कार्य भी न चलाएं।
+```
 
-यूआई एक शीर्ष-स्तरीय ऐप है, **आईफ्रेम नहीं**। यदि वैकल्पिक चैट सेवा कॉन्फ़िगर नहीं की गई है, तो `/ui` मूल LSM WebUI की सेवा जारी रखता है। मूल OpenTUI और बाहरी क्लाइंट समर्थित रहते हैं।
+वास्तविक उपकरण के परिणामों की जाँच करें। यदि कोई उपकरण अनुपस्थित है, तो चैट में उपलब्ध उपकरणों, एजेंट सेटिंगों एवं मशीन की अनुमतियों की जाँच करें। बार-बार होने वाले कार्यों के लिए एक सुरक्षित एजेंट का उपयोग करें, एवं उस एजेंट की अनुमतियों को स्पष्ट रूप से निर्धारित करें। विस्तार से जानने हेतु [उपकरण एवं अनुमतियाँ](../chat/permissions.md) देखें।
 
-## समस्या निवारण
+![WebUI चैट – एक दृष्टि प्रदान करने वाला उदाहरण](../assets/chat/chat-workspace.png)
 
-- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
-- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
-- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
-- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
-- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
+इस गाइड में दिए गए स्क्रीनशॉट, एक “कंट्रोलर” के द्वारा लिए गए हैं; इस कंट्रोलर में डेमो मॉडल उपलब्ध था। इन स्क्रीनशॉटों में कोई प्रोडक्शन विवरण या बातचीतें नहीं हैं। अंग्रेजी भाषा में दिए गए लेबल, चयनित भाषा से अलग हो सकते हैं।
 
-कार्यान्वयन विवरण और अपडेट के लिए, [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) और [human interface guide](../guides/human-interface.md) देखें।
+## 5. कार्यक्षेत्र देखें
+
+| क्षेत्र/एरिया… | इसका उपयोग किस लिए किया जाए? |
+|---|---|
+| चैट एवं प्रोजेक्ट्स | चैटों को शुरू करना, उन्हें व्यवस्थित करना, प्रोजेक्टों, टैगों एवं संदेशों को बुकमार्क करना। |
+| Agents | पुनर्उपयोग योग्य मॉडल, निर्देश एवं टूल्स |
+| स्मृति एवं कौशल/योग्यताएँ | पुनर्उपयोग योग्य ज्ञान एवं निर्देशों का प्रबंधन |
+| नियोजित चैटें | एक सहेजे गए एजेंट को, बार-बार दिए जाने वाले प्रॉम्प्ट के साथ चलाएं। |
+| फाइलें एवं टर्मिनल | कंट्रोलर एवं वर्कर वातावरणों की जाँच/ऑपरेशन करें। |
+| डेस्कटॉप | समर्थित रिमोट GUI सेशन्�ों की जाँच एवं नियंत्रण |
+| सत्र, कार्य एवं ऑडिट | टिकाऊ कार्यों की जाँच, कार्यान्वयन की प्रगति एवं उपकरणों की गतिविधियाँ |
+| मशीनें एवं बाहरी MCPs | कर्मचारियों एवं नेस्टेड MCP सर्वरों का प्रबंधन करें। |
+
+नियंत्रण व्यवस्था, आपके डिप्लॉयमेंट, अकाउंट एवं सक्रिय क्षमताओं पर निर्भर है। ब्राउज़र को बंद करने से सर्वर-साइड जैविक प्रक्रियाएँ रुक जाती हैं; कार्य रोकने हेतु “स्टॉप” विकल्प का उपयोग करें।
+
+## अगले चरण…
+
+पूर्ण कार्यप्रवाह हेतु [WebUI Chat गाइड](../chat/index.md) देखें; प्रोडक्शन सेटअप, बैकअप एवं त्रुटि ठीक करने हेतु [Administration and Troubleshooting](../chat/administration.md) देखें।

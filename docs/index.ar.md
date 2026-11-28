@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">مساحة عمل الذكاء الاصطناعي ذاتية الاستضافة · طائرة التحكم MCP</span>
 
@@ -53,6 +53,7 @@ Remote workers اختيارية: outbound machine connections
 | السيناريو | ابدأ هنا | لماذا |
 |---|---|---|
 | مساحة عمل المتصفح الأساسية | [Unified web workspace](getting-started/web-workspace.md) | صفحات التحكم في الدردشة والمشاريع وLSM مع تسجيل دخول مشترك |
+| استخدام وكيل الذكاء الاصطناعي المدمج | [WebUI Chat](chat/index.md) | القنوات والوكلاء والأذونات والسياق والأتمتة |
 | نشر وحدة التحكم الأولى | [Quickstart](getting-started/quickstart.md) | الملف التنفيذي الموصى به، OAuth وأول جلسة |
 | اختيار runtime layer | [Runtime choices](guides/deployment.md) | يشرح Docker وVS Code وbinary وPython وstdio كخيارات runtime منفصلة |
 | ربط الجوزاء سبارك | [Gemini Custom Apps](getting-started/gemini-spark.md) | الأهلية وعنوان URL الخاص بـ HTTPS MCP وOAuth والاختبار |

@@ -43,7 +43,7 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | Disables workspace/path restrictions when true; use only inside disposable boundaries. |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | Disables the controller host as a shell/file/browser execution target. Remote workers and control-plane services remain available. |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | Makes the controller suitable for ephemeral/serverless instances: implies `disable_local`, disables local file links/wallpaper caching, and defaults `state_backend` to `memory`. With the default `auth_mode=oauth`, configure a strong `oauth_jwt_secret` explicitly. |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file`, `memory`, or `redis`. Use Redis when serverless controller state must survive cold starts. |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file`, `memory`, or `redis`. Use Redis when serverless controller state must survive cold starts. |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | Redis connection URL when `state_backend=redis`. Redacted from diagnostics. |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Namespace for memory/Redis control-plane state. |
 

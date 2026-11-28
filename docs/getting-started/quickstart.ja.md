@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # クイックスタート
 
-このガイドでは、LSM コントローラーを起動し、そのブラウザー インターフェイスを開きます。 [unified web workspace](web-workspace.md) は、毎日の推奨エクスペリエンスです。これは、個別にデプロイされるオプションのチャット スタックです。 ChatGPT、Gemini、およびその他の外部 MCP クライアントは、同じコントローラーに接続できます。 [runtime choices and deployment model](../guides/deployment.md)を参照してください。
+このガイドでは、LSM コントローラーを起動し、そのブラウザー インターフェイスを開きます。 [unified web workspace](web-workspace.md) は、毎日の推奨エクスペリエンスです。 ChatGPT、Gemini、およびその他の外部 MCP クライアントは、同じコントローラーに接続できます。 [runtime choices and deployment model](../guides/deployment.md)を参照してください。
 
 [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) の **Controller 単一実行ファイル**によるデプロイを推奨します。Python、Docker、ソース checkout は不要です。例は **Linux x86_64** 用です。その他は [バイナリガイド](../installation/binary.md) を参照してください。
 
