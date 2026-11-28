@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from functools import lru_cache
+from functools import cache
 from urllib.parse import urlsplit, urlunsplit
 
 from starlette.exceptions import HTTPException
@@ -199,7 +199,7 @@ def _validate_virtual(body: dict, *, lookup=None) -> dict:
     from .virtual_channels import STRATEGIES, physical_members
 
     if lookup is None:
-        @lru_cache(maxsize=None)
+        @cache
         def lookup(channel):
             return profile(channel, effective=False)
     name = body.get("name")

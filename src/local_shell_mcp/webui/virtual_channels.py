@@ -5,7 +5,7 @@ import time
 from collections import OrderedDict
 from contextlib import aclosing
 from dataclasses import dataclass, replace
-from functools import lru_cache
+from functools import cache
 
 STRATEGIES = ("priority", "round_robin", "weighted_round_robin", "least_connections", "least_latency")
 
@@ -34,7 +34,8 @@ def direct_members(value, model, *, lookup=None):
     from .provider_profiles import profile
 
     if lookup is None:
-        lookup = lambda channel: profile(channel, effective=False)
+        def lookup(channel):
+            return profile(channel, effective=False)
     for member in (value.get("routes") or {}).get(model, []):
         try:
             stored = lookup(member["channel"])
@@ -49,7 +50,7 @@ def physical_members(value, model, *, lookup=None):
     if lookup is None:
         from .provider_profiles import profile
 
-        @lru_cache(maxsize=None)
+        @cache
         def lookup(channel):
             return profile(channel, effective=False)
     visited = set()
@@ -269,8 +270,12 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
         from .provider_responses import _scope
         from .provider_tool_protocols import stream_native_tools
         from .providers import (
-            ModelThought, ModelToolCall, ModelUsage, provider_config,
-            stream_model, stream_model_with_tools,
+            ModelThought,
+            ModelToolCall,
+            ModelUsage,
+            provider_config,
+            stream_model,
+            stream_model_with_tools,
         )
 
         health = _health[key]
