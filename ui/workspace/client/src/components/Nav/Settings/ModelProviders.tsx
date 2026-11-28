@@ -6,7 +6,14 @@ import { apiBaseUrl, request, QueryKeys } from 'librechat-data-provider';
 import SamplingFields, { samplingDraft, parseSampling } from '~/components/Endpoints/SamplingFields';
 import type { Sampling, SamplingDraft } from '~/components/Endpoints/SamplingFields';
 
-type Kind = 'openai' | 'openai-responses' | 'anthropic' | 'google';
+type Kind = 'openai' | 'openai-responses' | 'anthropic' | 'google' | 'virtual';
+type Member = { channel: string; model: string; weight: number };
+type VirtualModel = { id: number; model: string; members: Member[] };
+const strategies = [
+  ['priority', 'com_lsm_channel_priority'], ['round_robin', 'com_lsm_channel_round_robin'],
+  ['weighted_round_robin', 'com_lsm_channel_weighted_round_robin'],
+  ['least_connections', 'com_lsm_channel_least_connections'], ['least_latency', 'com_lsm_channel_least_latency'],
+] as const;
 type Source = 'default' | 'environment' | 'saved' | 'named';
 type Profile = {
   name?: string;
@@ -24,12 +31,16 @@ type Profile = {
   auth_method?: string;
   oauth_error?: string | null;
   source: Source;
+  routes?: Record<string, Member[]>;
+  strategy?: string;
+  session_affinity?: boolean;
 };
 type Profiles = { providers: Profile[] };
 type DiscoveredModels = { models: string[]; model_contexts: Record<string, number> };
 type Draft = { name: string; provider: Kind; base: string; models: string;
   autoDiscover: boolean; reportedContexts: Record<string, number>;
-  contexts: Record<string, string>; sampling: Record<string, SamplingDraft>; apiKey: string };
+  contexts: Record<string, string>; sampling: Record<string, SamplingDraft>; apiKey: string;
+  strategy: string; affinity: boolean; virtualModels: VirtualModel[] };
 type Editor = { original: Profile | null };
 type AccountMethod = { id: string; label: TranslationKeys; defaultName: string };
 const accountMethods: AccountMethod[] = [
@@ -51,7 +62,7 @@ const kinds: { value: Kind; label: TranslationKeys; defaultUrl: string }[] = [
 const channelId = (profile: Profile) => profile.name ?? 'legacy:' + profile.provider;
 const newDraft = (): Draft => ({ name: '', provider: 'openai', base: kinds[0].defaultUrl,
   autoDiscover: true, reportedContexts: {},
-  models: '', contexts: {}, sampling: {}, apiKey: '' });
+  models: '', contexts: {}, sampling: {}, apiKey: '', strategy: 'priority', affinity: true, virtualModels: [] });
 const errorMessage = (reason: unknown) => {
   const error = reason as { response?: { data?: { detail?: string; message?: string } | string }; message?: string };
   const data = error?.response?.data;
@@ -66,6 +77,7 @@ const errorMessage = (reason: unknown) => {
 export default function ModelProviders() {
   const localize = useLocalize();
   const protocolLabel = (provider: Kind) => {
+    if (provider === 'virtual') return localize('com_lsm_channel_virtual');
     const key = kinds.find((kind) => kind.value === provider)?.label;
     return key ? localize(key) : provider;
   };
@@ -97,7 +109,8 @@ export default function ModelProviders() {
   const [previewRevision, setPreviewRevision] = useState(0);
   const url = apiBaseUrl() + '/api/lsm/providers';
   const channels = profiles.filter((profile) => profile.source !== 'default');
-  const draftModels = [...new Set(draft.models.split(/[\n,]/).map((model) => model.trim()).filter(Boolean))];
+  const isVirtual = draft.provider === 'virtual';
+  const draftModels = isVirtual ? draft.virtualModels.map((model) => model.model.trim()).filter(Boolean) : [...new Set(draft.models.split(/[\n,]/).map((model) => model.trim()).filter(Boolean))];
 
   useEffect(() => {
     let live = true;
@@ -117,10 +130,10 @@ export default function ModelProviders() {
     await Promise.all([QueryKeys.models, QueryKeys.endpoints, QueryKeys.tokenConfig].map((name) =>
       client.invalidateQueries({ queryKey: [name], refetchType: 'all' })));
   };
-  const beginAdd = () => {
+  const beginAdd = (virtual = false) => {
     setAddMenu(false);
     setEditor({ original: null });
-    setDraft(newDraft());
+    setDraft(virtual ? { ...newDraft(), provider: 'virtual', base: '', autoDiscover: false } : newDraft());
     setPreview('idle');
     setPreviewError('');
     setConfirmDelete(null);
@@ -144,6 +157,8 @@ export default function ModelProviders() {
       ).map(([key, value]) => [key, String(value)])),
       sampling: Object.fromEntries(Object.entries(profile.model_sampling ?? {}).map(([model, value]) => [model, samplingDraft(value)])),
       apiKey: '',
+      strategy: profile.strategy ?? 'priority', affinity: profile.session_affinity ?? true,
+      virtualModels: Object.entries(profile.routes ?? {}).map(([model, members], id) => ({ id, model, members })),
     });
     setConfirmDelete(null);
     setForceDelete(null);
@@ -345,6 +360,25 @@ export default function ModelProviders() {
       const name = draft.name.trim();
       if ((!original || original.name) && !name) throw new Error(localize('com_lsm_channel_name_required'));
       const models = draftModels;
+      if (isVirtual) {
+        if (draft.virtualModels.length !== models.length || new Set(models).size !== models.length ||
+            !models.length || draft.virtualModels.some((model) => !model.members.length)) {
+          throw new Error(localize('com_lsm_channel_virtual_invalid'));
+        }
+        const modelSampling = Object.fromEntries(models
+          .map((model) => [model, parseSampling(draft.sampling[model] ?? samplingDraft())] as const)
+          .filter(([, value]) => Object.keys(value).length > 0));
+        await request.put(url, {
+          name, provider: 'virtual', strategy: draft.strategy, session_affinity: draft.affinity,
+          routes: Object.fromEntries(draft.virtualModels.map((model) => [model.model.trim(), model.members])),
+          model_sampling: modelSampling,
+          ...(original?.name && name !== original.name ? { previous_name: original.name } : {}),
+        });
+        await refresh();
+        setEditor(null);
+        setSuccess(localize('com_lsm_channel_saved'));
+        return;
+      }
       const contexts = draft.contexts;
       const modelContexts: Record<string, number> = {};
       for (const model of models) {
@@ -420,9 +454,11 @@ export default function ModelProviders() {
         <button type="button" disabled={busy || authorization != null} onClick={() => setAddMenu((value) => !value)}
           aria-label={localize('com_lsm_channel_add')} aria-expanded={addMenu} aria-haspopup="menu" className={button}>{localize('com_lsm_channel_add')} ▾</button>
         {addMenu && <div ref={addMenuRef} role="menu" aria-label={localize('com_lsm_channel_add')} className="mt-1 w-max min-w-0 max-w-full rounded-lg border border-border-medium bg-surface-primary p-1 shadow-lg">
-          <button role="menuitem" type="button" onClick={beginAdd} className="block w-full break-words rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize('com_lsm_channel_manual_config')}</button>
+          <button role="menuitem" type="button" onClick={() => beginAdd()} className="block w-full break-words rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize('com_lsm_channel_manual_config')}</button>
           {accountMethods.map((method) => <button role="menuitem" type="button" key={method.id}
             onClick={() => selectAccount(method)} className="block w-full break-words rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize(method.label)}</button>)}
+          <button role="menuitem" type="button" onClick={() => beginAdd(true)}
+            className="block w-full break-words rounded px-3 py-2 text-left text-sm hover:bg-surface-secondary">{localize('com_lsm_channel_virtual')}</button>
         </div>}
       </div>
     </div>
@@ -506,6 +542,64 @@ export default function ModelProviders() {
         {(!editor.original || editor.original.name) && <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_name')}</span>
           <input aria-label={localize('com_lsm_channel_name')} className={input} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={localize('com_lsm_channel_name_example')} maxLength={64} required />
         </label>}
+        {isVirtual ? <>
+          <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_strategy')}</span>
+            <select className={input} value={draft.strategy} onChange={(event) => setDraft({ ...draft, strategy: event.target.value })}>
+              {strategies.map(([value, label]) => <option key={value} value={value}>{localize(label)}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center justify-between gap-3 text-sm font-medium text-text-primary sm:col-span-2">
+            {localize('com_lsm_channel_affinity')}
+            <input type="checkbox" role="switch" checked={draft.affinity} onChange={(event) => setDraft({ ...draft, affinity: event.target.checked })} />
+          </label>
+          <div className="space-y-3 sm:col-span-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-text-primary">{localize('com_ui_model')}</span>
+              <button type="button" className={button} onClick={() => setDraft((old) => ({
+                ...old, virtualModels: [...old.virtualModels, { id: Math.max(-1, ...old.virtualModels.map((m) => m.id)) + 1, model: '', members: [] }],
+              }))}>{localize('com_lsm_channel_add_model')}</button>
+            </div>
+            {draft.virtualModels.map((model) => {
+              const update = (next: Partial<VirtualModel>) => setDraft((old) => ({
+                ...old, virtualModels: old.virtualModels.map((m) => m.id === model.id ? { ...m, ...next } : m),
+              }));
+              const candidates = channels.filter((p) => p.provider !== 'virtual').flatMap((p) =>
+                p.models.map((m) => ({ channel: p.name ?? p.provider, model: m, weight: 1 })));
+              const available = candidates.filter((c) => !model.members.some((m) => m.channel === c.channel && m.model === c.model));
+              const limits = model.members.map((m) => channels.find((p) => (p.name ?? p.provider) === m.channel)?.model_contexts?.[m.model]);
+              const limit = limits.length && limits.every((n) => typeof n === 'number') ? Math.min(...limits as number[]) : null;
+              return <div key={model.id} className="space-y-2 rounded-lg border border-border-medium p-3">
+                <div className="flex items-center gap-2">
+                  <input className={input} value={model.model} aria-label={localize('com_lsm_channel_identifiers')} placeholder={localize('com_lsm_channel_identifiers')} required
+                    onChange={(event) => update({ model: event.target.value })} />
+                  <button type="button" className={button} onClick={() => setDraft((old) => ({ ...old, virtualModels: old.virtualModels.filter((m) => m.id !== model.id) }))}>{localize('com_ui_delete')}</button>
+                </div>
+                <p className="text-xs text-text-secondary">{localize('com_ui_context_window')}: {limit ? limit.toLocaleString() : localize('com_ui_unknown')}</p>
+                <p className="text-sm text-text-secondary">{localize('com_lsm_channel_members')}</p>
+                {model.members.map((m, index) => <div key={JSON.stringify([m.channel, m.model])} className="flex flex-wrap items-center gap-2 rounded border border-border-light p-2">
+                  {draft.strategy === 'priority' && <button type="button" className={button} disabled={!index}
+                    aria-label={localize('com_lsm_channel_move_up')} onClick={() => {
+                      const members = [...model.members]; [members[index - 1], members[index]] = [members[index], members[index - 1]];
+                      update({ members });
+                    }}>↑</button>}
+                  <div className="min-w-0 flex-1 break-all text-sm">{m.channel}<div className="text-xs text-text-secondary">{m.model}</div></div>
+                  {draft.strategy === 'weighted_round_robin' && <input className={input + ' max-w-24'} type="number" min={1} max={10000} required
+                    aria-label={localize('com_lsm_channel_weight')} value={m.weight} onChange={(event) => update({
+                      members: model.members.map((item, i) => i === index ? { ...item, weight: Number(event.target.value) } : item),
+                    })} />}
+                  <button type="button" className={button} onClick={() => update({ members: model.members.filter((_, i) => i !== index) })}>{localize('com_ui_delete')}</button>
+                </div>)}
+                <select className={input} aria-label={localize('com_lsm_channel_add_member')} value="" disabled={!available.length} onChange={(event) => {
+                  const selected = available[Number(event.target.value)];
+                  if (event.target.value !== '' && selected) update({ members: [...model.members, selected] });
+                }}>
+                  <option value="" disabled>{localize('com_lsm_channel_add_member')}</option>
+                  {available.map((m, i) => <option key={JSON.stringify([m.channel, m.model])} value={i}>{m.channel} / {m.model}</option>)}
+                </select>
+              </div>;
+            })}
+          </div>
+        </> : <>
         <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_protocol')}</span>
           <select aria-label={localize('com_lsm_channel_provider')} className={input} value={draft.provider} disabled={Boolean(editor.original)} onChange={(event) => {
             const provider = event.target.value as Kind;
@@ -563,6 +657,7 @@ export default function ModelProviders() {
             {draft.autoDiscover && <p className="text-xs text-text-tertiary">{localize('com_lsm_channel_discover_context_help')}</p>}
           </div>}
         </div>
+        </>}
         {draftModels.length > 0 && <details className="space-y-3 rounded-lg border border-border-light p-3 sm:col-span-2">
           <summary className="cursor-pointer text-sm font-medium text-text-primary">{localize('com_lsm_channel_defaults')}</summary>
           {draftModels.map((model) => <div key={model} className="space-y-2">
@@ -573,9 +668,9 @@ export default function ModelProviders() {
           </div>)}
         </details>}
       </div>
-      <p className="text-xs text-text-secondary">{editor.original?.name ? localize('com_lsm_channel_rename_help') : ''}{' '}{localize('com_lsm_channel_key_help')}</p>
+      <p className="text-xs text-text-secondary">{editor.original?.name ? localize('com_lsm_channel_rename_help') : ''}{' '}{!isVirtual && localize('com_lsm_channel_key_help')}</p>
       <div className="flex flex-wrap gap-2">
-        <button type="submit" disabled={busy || !draft.base.trim()} className={button}>{busy ? localize('com_lsm_channel_saving') : localize('com_lsm_channel_save')}</button>
+        <button type="submit" disabled={busy || (!isVirtual && !draft.base.trim())} className={button}>{busy ? localize('com_lsm_channel_saving') : localize('com_lsm_channel_save')}</button>
         <button type="button" disabled={busy} className={button} onClick={() => { setEditor(null); setError(''); }}>{localize('com_ui_cancel')}</button>
       </div>
     </form>}

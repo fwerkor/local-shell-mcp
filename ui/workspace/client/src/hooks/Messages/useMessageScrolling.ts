@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { Constants } from 'librechat-data-provider';
 import type { TMessage } from 'librechat-data-provider';
@@ -432,7 +432,7 @@ export default function useMessageScrolling(
    * delta and cache reconcile, and re-running on those would drag a reader who
    * has scrolled away back to the bottom.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!autoScroll || skipAutoLanding) {
       /** Switching the setting off releases the landing, so switching it back
        *  on while the same conversation is open honours it again. */
@@ -444,7 +444,7 @@ export default function useMessageScrolling(
       return;
     }
 
-    if (!scrollToBottom || !messagesEndRef.current || !scrollableRef.current) {
+    if (!messagesEndRef.current || !scrollableRef.current) {
       return;
     }
 
@@ -468,8 +468,12 @@ export default function useMessageScrolling(
     }
 
     landedConversationRef.current = conversationId;
-    scrollToBottom();
-  }, [autoScroll, conversationId, messagesTree, scrollToBottom, skipAutoLanding]);
+    const container = scrollableRef.current;
+    container.scrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    isNearBottomRef.current = true;
+    isStuckRef.current = true;
+    lastScrollTopRef.current = container.scrollTop;
+  }, [autoScroll, conversationId, messagesTree, skipAutoLanding]);
 
   return {
     conversation,

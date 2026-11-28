@@ -9,8 +9,10 @@ from __future__ import annotations
 import base64
 import json
 import secrets
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -47,6 +49,13 @@ def _cursor_decode(cursor: str | None) -> tuple[int, str] | None:
         return int(data["stamp"]), str(data["id"])
     except (ValueError, KeyError, UnicodeDecodeError, TypeError) as exc:
         raise ValueError("Invalid pagination cursor") from exc
+
+
+# Revision-keyed and bounded: warm history opens do not parse old tool results
+# again, and no message text/content is held by the server cache.
+_HISTORY_METRICS_LIMIT = 8192
+_history_metrics_cache: OrderedDict[tuple[str, str, int], dict] = OrderedDict()
+_history_metrics_lock = threading.Lock()
 
 
 class WorkspaceRepository:
@@ -335,23 +344,159 @@ class WorkspaceRepository:
                               [*params, limit + 1]).fetchall()
             has_next = len(rows) > limit
             page = rows[:limit]
-            from .tool_attachments import response_attachments, visible_response_attachments
-
-            current = response_attachments(
-                db, owner, [row["id"] for row in page if row["role"] == "assistant"])
-            messages = []
-            for row in reversed(page):
-                message = self._message(row)
-                if row["role"] == "assistant" and (
-                    row["id"] in current or "attachments" in message
-                ):
-                    # Deleted attachment rows cascade the file association.
-                    # A stale snapshot must not resurrect a deleted file.
-                    message["attachments"] = visible_response_attachments(
-                        current.get(row["id"], []), message.get("attachments"))
-                messages.append(message)
+            messages = self._serialize_message_rows(db, owner, list(reversed(page)))
         return {"messages": messages,
                 "nextCursor": _cursor_encode(page[-1]["created_at"], page[-1]["id"]) if has_next else None}
+
+    def _serialize_message_rows(self, db, owner: str, rows: list) -> list[dict]:
+        from .tool_attachments import response_attachments, visible_response_attachments
+
+        current = response_attachments(
+            db, owner, [row["id"] for row in rows if row["role"] == "assistant"])
+        messages = []
+        for row in rows:
+            message = self._message(row)
+            if row["role"] == "assistant" and (
+                row["id"] in current or "attachments" in message
+            ):
+                message["attachments"] = visible_response_attachments(
+                    current.get(row["id"], []), message.get("attachments"))
+            messages.append(message)
+        return messages
+
+    @staticmethod
+    def _history_metrics(text: str, content: str) -> dict:
+        """Mirror the UI's character-based context estimate without transferring bodies."""
+        def length(value):
+            return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+
+        parts = json.loads(content)
+        chars = length(text)
+        tool_chars = result_chars = 0
+        if isinstance(parts, list) and parts:
+            chars = 0
+            for part in parts:
+                if not isinstance(part, dict) or part.get("type") in ("think", "error"):
+                    continue
+                if part.get("type") == "tool_call":
+                    call = part.get("tool_call")
+                    if not isinstance(call, dict):
+                        continue
+                    name, args, output = (call.get(key) for key in ("name", "args", "output"))
+                    name_chars = length(name) if isinstance(name, str) else 0
+                    args_chars = (length(args) if isinstance(args, str) else
+                                  length(json.dumps(args, ensure_ascii=False, separators=(",", ":")))
+                                  if args is not None else 0)
+                    output_chars = length(output) if isinstance(output, str) else 0
+                    chars += name_chars + args_chars + output_chars
+                    tool_chars += name_chars + args_chars + output_chars
+                    if "args" in call and args is None:
+                        tool_chars += 4
+                    result_chars += output_chars
+                else:
+                    value = part.get("text")
+                    if isinstance(value, dict):
+                        value = value.get("value")
+                    if isinstance(value, str):
+                        chars += length(value)
+        return {"chars": chars, "toolChars": tool_chars, "resultChars": result_chars}
+
+    def compact_message_history(self, owner: str, conversation_id: str, recent: int = 30) -> list[dict]:
+        """Keep branch topology and usage metadata, defer historical assistant bodies.
+
+        The latest rows remain complete for the ordinary append/resume paths.
+        The client hydrates visible turns and their parents before offering
+        editing or regeneration. No history is modified on disk.
+        """
+        from .tool_attachments import visible_response_attachments
+
+        recent = max(1, min(int(recent), 100))
+        with self.database.connect() as db:
+            # Keep the index, revisions and usage metrics in one read snapshot.
+            db.execute("BEGIN")
+            if not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
+                              (conversation_id, owner)).fetchone():
+                raise KeyError("Conversation not found")
+            rows = db.execute("""
+                WITH recent AS (
+                    SELECT id FROM messages WHERE conversation_id=?
+                    ORDER BY created_at DESC,id DESC LIMIT ?
+                )
+                SELECT m.id,m.conversation_id,m.parent_id,m.role,m.metadata,
+                       m.created_at,m.updated_at,
+                       CASE WHEN r.id IS NULL
+                            THEN substr(m.text,1,512) ELSE m.text END AS text,
+                       CASE WHEN r.id IS NULL
+                            THEN '{}' ELSE m.content END AS content,
+                       (r.id IS NULL) AS history_stub
+                FROM messages m LEFT JOIN recent r ON r.id=m.id
+                WHERE m.conversation_id=? ORDER BY m.created_at,m.id
+            """, (conversation_id, recent, conversation_id)).fetchall()
+            full_rows = [row for row in rows if not row["history_stub"]]
+            full = {message["messageId"]: message
+                    for message in self._serialize_message_rows(db, owner, full_rows)}
+            # Read only cache misses. Old body payloads are streamed and
+            # released one at a time; the bounded cache retains just counts.
+            metrics = {}
+            missing = []
+            database_key = str(self.database.path)
+            with _history_metrics_lock:
+                for row in rows:
+                    if not row["history_stub"]:
+                        continue
+                    key = (database_key, row["id"], row["updated_at"])
+                    cached = _history_metrics_cache.get(key)
+                    if cached is None:
+                        missing.append(row["id"])
+                    else:
+                        metrics[row["id"]] = cached
+                        _history_metrics_cache.move_to_end(key)
+            for start in range(0, len(missing), 100):
+                ids = missing[start:start + 100]
+                placeholders = ",".join("?" for _ in ids)
+                for old in db.execute(
+                    f"SELECT id,text,content,updated_at FROM messages "
+                    f"WHERE conversation_id=? AND id IN ({placeholders})",
+                    [conversation_id, *ids],
+                ):
+                    counts = self._history_metrics(old["text"], old["content"])
+                    metrics[old["id"]] = counts
+                    key = (database_key, old["id"], old["updated_at"])
+                    with _history_metrics_lock:
+                        _history_metrics_cache[key] = counts
+                        _history_metrics_cache.move_to_end(key)
+                        while len(_history_metrics_cache) > _HISTORY_METRICS_LIMIT:
+                            _history_metrics_cache.popitem(last=False)
+            result = []
+            for row in rows:
+                if row["history_stub"]:
+                    message = self._message(row)
+                    # Keep the cross-turn UI resource index available even when the
+                    # source body is not mounted. File links and other attachments
+                    # are reconciled only when the complete body is read.
+                    resources = visible_response_attachments([], message.pop("attachments", None))
+                    if resources:
+                        message["attachments"] = resources
+                    message["historyStub"] = True
+                    message["historyMetrics"] = metrics[row["id"]]
+                    result.append(message)
+                else:
+                    result.append(full[row["id"]])
+            return result
+
+    def message_bodies(self, owner: str, conversation_id: str, ids: list[str]) -> list[dict]:
+        """Hydrate selected bodies, scoped to the owning conversation."""
+        if not ids or len(ids) > 100:
+            raise ValueError("Expected 1 to 100 message ids")
+        with self.database.connect() as db:
+            if not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
+                              (conversation_id, owner)).fetchone():
+                raise KeyError("Conversation not found")
+            placeholders = ",".join("?" for _ in ids)
+            rows = db.execute(
+                f"SELECT * FROM messages WHERE conversation_id=? AND id IN ({placeholders}) "
+                "ORDER BY created_at,id", [conversation_id, *ids]).fetchall()
+            return self._serialize_message_rows(db, owner, rows)
 
     def search_messages(self, owner: str, query: str, limit: int = 30) -> list[dict]:
         if not query.strip():

@@ -234,6 +234,12 @@ function partTextChars(part: unknown): number {
  *  and output — the estimate path's split of message body into conversation vs
  *  tool-call usage. Zero for plain-text bodies. */
 function messageToolChars(message: Partial<TMessage>): { chars: number; resultChars: number } {
+  if (message.historyStub && message.historyMetrics) {
+    return {
+      chars: message.historyMetrics.toolChars,
+      resultChars: message.historyMetrics.resultChars,
+    };
+  }
   if (!Array.isArray(message.content)) {
     return { chars: 0, resultChars: 0 };
   }
@@ -275,6 +281,9 @@ function messageToolChars(message: Partial<TMessage>): { chars: number; resultCh
  *  tool calls), so a message carrying both `text` and `content` (e.g. a stopped
  *  agent response) would otherwise drop its content/tool-call tokens. */
 function messageChars(message: Partial<TMessage>): number {
+  if (message.historyStub && message.historyMetrics) {
+    return message.historyMetrics.chars;
+  }
   if (Array.isArray(message.content) && message.content.length > 0) {
     let chars = 0;
     for (const part of message.content) {
@@ -286,6 +295,30 @@ function messageChars(message: Partial<TMessage>): number {
     return message.text.length;
   }
   return 0;
+}
+
+/** Release a settled historical message's heavy body while preserving its usage index. */
+export function toHistoryStub(message: TMessage): TMessage {
+  if (message.historyStub) return message;
+  const tools = messageToolChars(message);
+  const { content: _content, attachments, ...metadata } = message;
+  // UI resources are addressable from later turns; retain their lookup data,
+  // while releasing the old message body and unrelated attachment metadata.
+  const resources = attachments?.filter(
+    (attachment) =>
+      attachment?.type === Tools.ui_resources && Array.isArray(attachment[Tools.ui_resources]),
+  );
+  return {
+    ...metadata,
+    text: message.text?.slice(0, 512) ?? '',
+    historyStub: true,
+    ...(resources?.length ? { attachments: resources } : {}),
+    historyMetrics: {
+      chars: messageChars(message),
+      toolChars: tools.chars,
+      resultChars: tools.resultChars,
+    },
+  };
 }
 
 /** Quoted excerpts the send path merges into a user message's prompt. */

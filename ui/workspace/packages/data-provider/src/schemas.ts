@@ -1052,6 +1052,9 @@ export type TAttachment =
       TAttachmentMetadata);
 
 export type TMessage = z.input<typeof tMessageSchema> & {
+  /** Historical message body is fetched separately; never a complete message. */
+  historyStub?: boolean;
+  historyMetrics?: { chars: number; toolChars: number; resultChars: number };
   children?: TMessage[];
   content?: TMessageContentParts[];
   files?: Partial<TFile>[];

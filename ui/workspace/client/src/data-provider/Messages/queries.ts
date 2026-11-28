@@ -5,6 +5,7 @@ import { Constants, QueryKeys, dataService } from 'librechat-data-provider';
 import type { UseQueryOptions, QueryObserverResult, QueryClient } from '@tanstack/react-query';
 import type * as t from 'librechat-data-provider';
 import { isNotFoundError, logger } from '~/utils';
+import { FLAT_THREAD } from '~/components/Chat/Messages/Thread/flag';
 
 type StableMessagesParams = {
   pathname: string;
@@ -108,7 +109,10 @@ export const useGetMessagesByConvoId = <TData = t.TMessage[]>(
 
       let result: t.TMessage[];
       try {
-        result = await dataService.getMessagesByConvoId(id);
+        result = await dataService.getMessagesByConvoId(
+          id,
+          FLAT_THREAD && !isStreamingRef.current && !hasActiveJob(queryClient, id),
+        );
       } catch (error) {
         const currentMessages = queryClient.getQueryData<t.TMessage[]>(queryKey);
         if (

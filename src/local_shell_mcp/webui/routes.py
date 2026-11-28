@@ -157,6 +157,8 @@ async def conversation_messages(request: Request):
     conversation_id = request.path_params["conversation_id"]
     if request.method == "GET":
         try:
+            if request.query_params.get("compact") == "1":
+                return _result(repo.compact_message_history(owner, conversation_id))
             # The original LibreChat GET /api/messages/:conversationId endpoint
             # returns an array, unlike the paginated GET /api/messages query.
             pages = []
@@ -177,6 +179,20 @@ async def conversation_messages(request: Request):
         _not_found()
     except sqlite3.IntegrityError as exc:
         raise HTTPException(409, detail="Duplicate message or conflicting parent") from exc
+
+
+async def message_bodies(request: Request):
+    payload = await _body(request)
+    ids = payload.get("messageIds")
+    if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or not all(
+        isinstance(message_id, str) and 0 < len(message_id) <= 256 for message_id in ids
+    ):
+        raise HTTPException(400, detail="Expected 1 to 100 message ids")
+    try:
+        return _result(_repo().message_bodies(
+            _owner(request), request.path_params["conversation_id"], ids))
+    except KeyError:
+        _not_found()
 
 
 async def delete_message_turn(request: Request):
@@ -270,6 +286,7 @@ def webui_routes() -> list[Route]:
         Route("/api/convos", conversations, methods=["GET", "POST", "PUT", "DELETE"]),
         Route("/api/convos/{conversation_id}", conversation, methods=["GET", "PUT", "PATCH", "DELETE"]),
         Route("/api/messages", messages, methods=["GET"]),
+        Route("/api/messages/{conversation_id}/history-bodies", message_bodies, methods=["POST"]),
         Route("/api/messages/{conversation_id}/{message_id}", delete_message_turn, methods=["DELETE"]),
         Route("/api/messages/{conversation_id}", conversation_messages, methods=["GET", "POST"]),
         Route("/api/projects", projects, methods=["GET", "POST"]),

@@ -42,7 +42,8 @@ async def update_conversation(request: Request):
             if conversation is None:
                 _not_found()
             channel = changes.get('endpoint') or conversation.get('endpoint')
-            changes["lsmSampling"] = validate_channel_sampling(changes["lsmSampling"], channel)
+            changes["lsmSampling"] = validate_channel_sampling(changes["lsmSampling"], channel,
+                                                              changes.get("model") or conversation.get("model"))
         except ValueError as exc:
             raise HTTPException(400, detail=str(exc)) from exc
     updated = repo.update_conversation(owner, conversation_id, changes)

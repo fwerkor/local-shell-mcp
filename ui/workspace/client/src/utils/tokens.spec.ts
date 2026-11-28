@@ -2,6 +2,7 @@ import { Constants, Providers } from 'librechat-data-provider';
 import type { TMessage, TResponseUsage } from 'librechat-data-provider';
 import {
   buildIndex,
+  toHistoryStub,
   upsertEntries,
   migrateIndex,
   clearIndex,
@@ -1095,6 +1096,39 @@ describe('per-message usage index (branch + total)', () => {
   });
 });
 
+test('releasing message bodies preserves the usage and context index', () => {
+  const original = [
+    { ...msg('u', Constants.NO_PARENT, true), text: 'user text '.repeat(100) },
+    {
+      ...msg('a', 'u', false),
+      text: 'preview',
+      content: [
+        { type: 'text', text: 'text '.repeat(200) },
+        {
+          type: 'tool_call',
+          tool_call: { name: 'shell', args: { cmd: 'ls' }, output: 'x'.repeat(5000) },
+        },
+        { type: 'think', think: 'ignored' },
+      ],
+      metadata: { usage: USAGE_A },
+    } as unknown as TMessage,
+  ];
+  try {
+    buildIndex(CONVO, original);
+    const expected = sumBranch(CONVO, 'a');
+    const total = sumTotalUsage(CONVO);
+    const compact = original.map(toHistoryStub);
+    expect(compact[0].text.length).toBe(512);
+    expect(compact[1].content).toBeUndefined();
+    expect(compact[1].historyStub).toBe(true);
+    buildIndex(CONVO, compact);
+    expect(sumBranch(CONVO, 'a')).toEqual(expected);
+    expect(sumTotalUsage(CONVO)).toEqual(total);
+  } finally {
+    clearIndex(CONVO);
+  }
+});
+
 describe('context snapshot input occupancy', () => {
   const snapshot = {
     breakdown: {
@@ -1150,4 +1184,20 @@ describe('context snapshot input occupancy', () => {
       }),
     ).toBe(308450);
   });
+});
+
+test('retains cross-turn UI resource lookups when historical message bodies are evicted', () => {
+  const resource = {
+    type: 'ui_resources',
+    ui_resources: [{ resourceId: 'older-ui', uri: 'ui://old', text: '<b>old</b>' }],
+  };
+  const source = {
+    ...msg('old', 'u', false),
+    content: [{ type: 'text', text: 'old body' }],
+    attachments: [resource, { type: 'file', file_id: 'unrelated' }],
+  } as unknown as TMessage;
+  const stub = toHistoryStub(source);
+  expect(stub.content).toBeUndefined();
+  expect(stub.attachments).toEqual([resource]);
+  expect(toHistoryStub(stub)).toBe(stub);
 });

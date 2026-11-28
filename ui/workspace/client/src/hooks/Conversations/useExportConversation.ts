@@ -4,7 +4,7 @@ import { useParams } from 'react-router-dom';
 import exportFromJSON from 'export-from-json';
 import { useToastContext } from '@librechat/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { buildTree, QueryKeys } from 'librechat-data-provider';
+import { buildTree, dataService, QueryKeys } from 'librechat-data-provider';
 import type { TConversation, TMessage, TPreset } from 'librechat-data-provider';
 import { ScreenshotLimitError, useScreenshot } from '~/hooks/ScreenshotContext';
 import useBuildMessageTree from '~/hooks/Messages/useBuildMessageTree';
@@ -42,10 +42,20 @@ export default function useExportConversation({
 
   const { conversationId: paramId } = useParams();
 
-  const getMessageTree = useCallback(() => {
+  const getMessageTree = useCallback(async () => {
     const queryParam =
       paramId === 'new' ? paramId : (conversation?.conversationId ?? paramId ?? '');
-    const messages = queryClient.getQueryData<TMessage[]>([QueryKeys.messages, queryParam]) ?? [];
+    let messages = queryClient.getQueryData<TMessage[]>([QueryKeys.messages, queryParam]) ?? [];
+    if (messages.some((message) => message.historyStub)) {
+      const full = await dataService.getMessagesByConvoId(queryParam);
+      const byId = new Map(full.map((message) => [message.messageId, message]));
+      messages = messages.map((message) => {
+        if (!message.historyStub) return message;
+        const hydrated = byId.get(message.messageId);
+        if (!hydrated) throw new Error('Historical message no longer exists');
+        return hydrated;
+      });
+    }
     const dataTree = buildTree({ messages });
     return dataTree?.length === 0 ? null : (dataTree ?? null);
   }, [paramId, conversation?.conversationId, queryClient]);
@@ -76,7 +86,7 @@ export default function useExportConversation({
     const messages = await buildMessageTree({
       messageId: conversation?.conversationId,
       message: null,
-      messages: getMessageTree(),
+      messages: await getMessageTree(),
       branches: Boolean(exportBranches),
       recursive: false,
     });
@@ -154,7 +164,7 @@ export default function useExportConversation({
     const messages = await buildMessageTree({
       messageId: conversation?.conversationId,
       message: null,
-      messages: getMessageTree(),
+      messages: await getMessageTree(),
       branches: false,
       recursive: false,
     });
@@ -210,7 +220,7 @@ export default function useExportConversation({
     const messages = await buildMessageTree({
       messageId: conversation?.conversationId,
       message: null,
-      messages: getMessageTree(),
+      messages: await getMessageTree(),
       branches: false,
       recursive: false,
     });
@@ -262,7 +272,7 @@ export default function useExportConversation({
     const messages = await buildMessageTree({
       messageId: conversation?.conversationId,
       message: null,
-      messages: getMessageTree(),
+      messages: await getMessageTree(),
       branches: Boolean(exportBranches),
       recursive: Boolean(recursive),
     });

@@ -1,6 +1,7 @@
 import { createContext, useRef, useContext, RefObject, ReactNode } from 'react';
 import { toCanvas } from 'html-to-image';
 import { ThemeContext, isDark } from '@librechat/client';
+import { prepareVirtualThreadCapture } from '~/hooks/Messages/virtualThreadCapture';
 import { completeProgressiveRowMounts } from '~/hooks/Messages/useProgressiveRowMount';
 
 type ScreenshotContextType = {
@@ -88,10 +89,13 @@ export const useScreenshot = () => {
     /** A capture taken while a long thread is still progressively mounting
      *  would clone a truncated DOM; force the remaining rows in first. */
     await completeProgressiveRowMounts();
-    if (ref?.current) {
-      return takeScreenShot(ref.current);
+    const release = await prepareVirtualThreadCapture();
+    try {
+      if (ref?.current) return await takeScreenShot(ref.current);
+      throw new Error('Ref is not attached to any element.');
+    } finally {
+      release();
     }
-    throw new Error('Ref is not attached to any element.');
   };
 
   return { screenshotTargetRef: ref, captureScreenshot };

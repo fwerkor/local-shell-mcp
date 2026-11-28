@@ -26,9 +26,11 @@ import store from '~/store';
 function MessagesViewContent({
   messagesTree: _messagesTree,
   messages,
+  isFetching = false,
 }: {
   messagesTree?: TMessage[] | null;
   messages?: TMessage[] | null;
+  isFetching?: boolean;
 }) {
   const localize = useLocalize();
   const location = useLocation();
@@ -64,7 +66,7 @@ function MessagesViewContent({
    *  the fact — visibly unmounting rows the user is already reading. */
   const treeConversationId = _messagesTree?.[0]?.conversationId ?? conversationId;
   const mountWindow = useProgressiveRowMount({
-    tailDepth: latestMessageDepth,
+    tailDepth: FLAT_THREAD ? undefined : latestMessageDepth,
     anchorBottom: !target && (autoScroll || isSubmitting),
     isSubmitting,
     conversationId: treeConversationId,
@@ -94,18 +96,30 @@ function MessagesViewContent({
     }
     let frame = 0;
     let attempts = 0;
+    let positionedPlaceholder = false;
     const reveal = () => {
       const element = document.getElementById(target);
       const container = scrollableRef.current;
       if (element && container?.contains(element)) {
-        container.scrollTop +=
-          element.getBoundingClientRect().top - container.getBoundingClientRect().top - 64;
-        element.animate?.(
-          [{ outline: '2px solid currentColor' }, { outline: '2px solid transparent' }],
-          { duration: 1600 },
-        );
-        completedJump.current = jumpKey;
-      } else if (++attempts < 180) {
+        const placeholder = element.closest('[data-history-body="placeholder"]');
+        if (!placeholder || !positionedPlaceholder) {
+          container.scrollTop +=
+            element.getBoundingClientRect().top - container.getBoundingClientRect().top - 64;
+          positionedPlaceholder = true;
+        }
+        // A virtual anchor is not the final message. Re-land after its body
+        // and any preceding visible rows hydrate, rather than marking an
+        // estimated position as a completed bookmark jump.
+        if (!placeholder) {
+          element.animate?.(
+            [{ outline: '2px solid currentColor' }, { outline: '2px solid transparent' }],
+            { duration: 1600 },
+          );
+          completedJump.current = jumpKey;
+          return;
+        }
+      }
+      if (++attempts < 180) {
         frame = requestAnimationFrame(reveal);
       }
     };
@@ -162,6 +176,12 @@ function MessagesViewContent({
                       {FLAT_THREAD && threadRows ? (
                         <ThreadList
                           rows={threadRows}
+                          scrollableRef={scrollableRef}
+                          conversationId={treeConversationId}
+                          anchorBottom={!target && (autoScroll || isSubmitting)}
+                          target={target}
+                          isSubmitting={isSubmitting}
+                          isFetching={isFetching}
                           setCurrentEditId={setCurrentEditId}
                           currentEditId={currentEditId ?? null}
                         />
@@ -211,15 +231,21 @@ function MessagesViewContent({
 export default function MessagesView({
   messagesTree,
   messages,
+  isFetching = false,
   isLoadingTail = false,
 }: {
   messagesTree?: TMessage[] | null;
   messages?: TMessage[] | null;
+  isFetching?: boolean;
   isLoadingTail?: boolean;
 }) {
   return (
     <MessagesViewProvider isLoadingTail={isLoadingTail}>
-      <MessagesViewContent messagesTree={messagesTree} messages={messages} />
+      <MessagesViewContent
+        messagesTree={messagesTree}
+        messages={messages}
+        isFetching={isFetching}
+      />
     </MessagesViewProvider>
   );
 }

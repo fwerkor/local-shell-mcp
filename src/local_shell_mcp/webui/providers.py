@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import aclosing, asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from urllib.parse import quote, urlsplit
@@ -30,6 +30,8 @@ class ProviderConfig:
     account_channel: str | None = None
     account_id: str | None = None
     auth_method: str | None = None
+    virtual_channel: str | None = None
+    virtual_session: tuple[str, str] | None = None
     session_id: str | None = None
 
 
@@ -128,6 +130,13 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
 
     value = profile(provider)
     kind = value["provider"]
+    if kind == "virtual":
+        from .virtual_channels import physical_members
+        name = model or value["models"][0]
+        if name not in value["models"] or not list(physical_members(value, name)):
+            raise ValueError("No available models in this virtual channel")
+        return ProviderConfig(kind, name, "", "", sampling=(value.get("model_sampling") or {}).get(name, {}),
+                              virtual_channel=value["name"])
     token, base = value.get("api_key", ""), value["base_url"]
     if not model and not value["models"]:
         raise ValueError("No available models in this channel")
@@ -271,6 +280,8 @@ class ModelUsage:
     output_tokens: int
     cache_read: int | None = None
     cache_write: int | None = None
+    channel: str | None = None
+    model: str | None = None
 
 
 def _usage_count(value: object) -> int | None:
@@ -361,6 +372,14 @@ async def stream_model(
     emit_finish_reason: bool = False,
 ) -> AsyncIterator[str | ModelUsage | ModelFinish | ModelThought]:
     """Stream user-visible answer text without buffering the provider response."""
+    if config.provider == "virtual":
+        from .virtual_channels import stream_virtual
+        async with aclosing(stream_virtual(config, messages, max_tokens=max_tokens,
+                                           temperature=temperature, top_p=top_p,
+                                           emit_finish_reason=emit_finish_reason)) as source:
+            async for event in source:
+                yield event
+        return
     if config.provider == "openai-responses":
         from .provider_responses import stream_responses
 
@@ -433,7 +452,9 @@ async def stream_model(
             if "error" in event:
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Model provider rejected the generation request")
+                from .provider_responses import ResponsesStreamError
+
+                raise ResponsesStreamError.from_event(event, event_type="error")
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "openai":
                 for choice in event.get("choices", []):
@@ -518,6 +539,13 @@ async def stream_model_with_tools(
     Unsupported providers do not receive tool declarations. Their ordinary
     text-stream behavior is preserved until their native tool protocols exist.
     """
+    if config.provider == "virtual":
+        from .virtual_channels import stream_virtual
+        async with aclosing(stream_virtual(config, messages, tools=tools, max_tokens=max_tokens,
+                                           temperature=temperature, top_p=top_p)) as source:
+            async for event in source:
+                yield event
+        return
     if config.provider == "openai-responses":
         from .provider_responses import stream_responses
 
@@ -574,7 +602,9 @@ async def stream_model_with_tools(
             if "error" in event:
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Model provider rejected the generation request")
+                from .provider_responses import ResponsesStreamError
+
+                raise ResponsesStreamError.from_event(event, event_type="error")
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             for choice in event.get("choices", []):
                 delta = choice.get("delta") or {}

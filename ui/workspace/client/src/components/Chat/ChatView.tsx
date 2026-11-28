@@ -143,6 +143,7 @@ function ChatView({ index = 0, project }: { index?: number; project?: TChatProje
       <MessagesView
         messagesTree={messagesTree}
         messages={messages}
+        isFetching={isFetching}
         isLoadingTail={!isSubmitting && (isFetching || isResuming)}
       />
     );

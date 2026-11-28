@@ -268,3 +268,31 @@ it('localizes the manual account authorization instructions and callback control
     mockLocale = 'en';
   }
 });
+
+it('creates a virtual channel in the existing inline editor with per-model member mappings', async () => {
+  const backup = { ...existing, name: 'Backup', models: ['pro'], model_contexts: { pro: 32768 } };
+  get.mockResolvedValue({ providers: [existing, backup] });
+  mount();
+  await screen.findByRole('button', { name: 'Edit DeepSeek' });
+  fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Virtual channel' }));
+  expect(screen.queryByLabelText('Model API base URL')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Channel name'), { target: { value: 'Pool' } });
+  fireEvent.change(screen.getByLabelText('Routing strategy'), { target: { value: 'weighted_round_robin' } });
+  expect(screen.getByRole('switch', { name: 'Session affinity' })).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Add model' }));
+  fireEvent.change(screen.getByLabelText('Model identifiers'), { target: { value: 'alias' } });
+  const members = screen.getByLabelText('Add member');
+  fireEvent.change(members, { target: { value: '1' } });
+  fireEvent.change(members, { target: { value: '1' } });
+  fireEvent.change(screen.getAllByLabelText('Weight')[0], { target: { value: '3' } });
+  expect(screen.getByText(/Context window: 32,768/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, {
+    name: 'Pool', provider: 'virtual', strategy: 'weighted_round_robin', session_affinity: true,
+    routes: { alias: [{ channel: 'DeepSeek', model: 'flash', weight: 3 }, { channel: 'Backup', model: 'pro', weight: 1 }] },
+    model_sampling: {},
+  });
+  expect(post).not.toHaveBeenCalled();
+});
