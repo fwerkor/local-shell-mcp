@@ -75,7 +75,13 @@ async def test_goal_continues_in_same_generation(goal_context, monkeypatch, outc
                     "action": outcome, "session_id": sid, "note": "Cannot proceed",
                 })
         elif turns == 3:
-            assert json.loads(last["content"])["ok"] is True
+            payload = json.loads(last["content"])
+            assert payload["ok"] is True
+            plan = payload["data"]["plan"]
+            assert plan["continuation_driver"] == "chat"
+            assert "revision" not in plan
+            assert "continuation_claim_id" not in plan
+            assert "in_flight_calls" not in plan
             yield "Still working."
         elif outcome in {"finish", "long"} and last.get("tool_call_id") == "update":
             yield ModelToolCall("finish", "plan_manage", {"action": "finish", "session_id": sid})

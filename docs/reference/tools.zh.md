@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # 工具参考
 
 本页由实际 MCP tool schema 生成。公开工具接口变更后，运行 `python scripts/generate-tools-reference.py` 更新 English 参考页。
@@ -41,11 +41,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `environment_get`
 
-返回本地或 remote machine 的版本、workspace、认证、策略与环境信息。
+返回本地或 remote machine 的版本、workspace、认证、策略与环境信息。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `skill_list`
 
-列出已安装的 Agent Skills，但不加载其完整 instructions。MCP tool surface 保持固定；Skill directory 的新增或删除会在下一次调用时反映。
+列出已安装的 Agent Skills，但不加载其完整 instructions。MCP tool surface 保持固定；Skill directory 的新增或删除会在下一次调用时反映。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-按 `skill_list` 返回的精确名称加载一个已安装 Skill，返回完整 `SKILL.md` instructions 与 related file paths。
+按 `skill_list` 返回的精确名称加载一个已安装 Skill，返回完整 `SKILL.md` instructions 与 related file paths。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-管理明确 Logical Session 的可选 Goal mode。活动 plan 在 15 分钟没有 agent activity 后启用自动 continuation，最多 10 次。session_id 必须是 session_manage 返回的同一个持久 id。Action：start、get、update、block、resume、finish、cancel。start 需要 objective 和 steps；finish 要求所有 steps 都是 completed 或 skipped。
+管理明确 Logical Session 的可选 Goal mode。活动 plan 在 15 分钟没有 agent activity 后启用自动 continuation，最多 10 次。session_id 必须是 session_manage 返回的同一个持久 id。Action：start、get、update、block、resume、finish、cancel。start 需要 objective 和 steps；finish 要求所有 steps 都是 completed 或 skipped。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -130,6 +133,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_read`
 
-读取 persistent local/remote shell session 的最近输出。
+读取 persistent local/remote shell session 的最近输出。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_stop`
 
-终止 persistent local/remote shell session。
+终止 persistent local/remote shell session。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_list`
 
-列出本地或 remote machine 上的 persistent shell sessions。
+列出本地或 remote machine 上的 persistent shell sessions。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-列出简洁的 Job 摘要，运行中的 Job 优先。使用 next_offset 翻页；数据总量限制为 32 KiB。
+列出简洁的 Job 摘要，运行中的 Job 优先。使用 next_offset 翻页；数据总量限制为 32 KiB。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -299,6 +306,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_list`
 
-列出本地或 remote machine 上的文件与目录。
+列出本地或 remote machine 上的文件与目录。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -378,6 +386,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_tree`
 
-返回本地或 remote machine 上紧凑的 directory tree。
+返回本地或 remote machine 上紧凑的 directory tree。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -394,6 +403,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_grep`
 
-搜索本地或 remote machine 的文件内容。
+搜索本地或 remote machine 的文件内容。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -429,6 +439,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_read`
 
-读取本地或 remote machine 上一个文件或一组文件。
+读取本地或 remote machine 上一个文件或一组文件。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -447,6 +458,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-注册、列出、读取、启用、禁用、刷新、删除或更新 dynamic MCP servers 的隔离 environment/headers。`stdio` transport 使用 command/args/cwd，`streamable_http` transport 使用 url。Secret env/header values 会私密持久化且永不返回。
+注册、列出、读取、启用、禁用、刷新、删除或更新 dynamic MCP servers 的隔离 environment/headers。`stdio` transport 使用 command/args/cwd，`streamable_http` transport 使用 url。Secret env/header values 会私密持久化且永不返回。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -617,19 +629,21 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-搜索已启用 dynamic MCP servers 的 cached lightweight tool summaries。Dynamic tools 不进入本 server 的 `tools/list`；调用前先用返回的 `<server>:<tool>` 名称配合 `mcp_tool_inspect`。
+搜索已启用 dynamic MCP servers 的 cached lightweight tool summaries。Dynamic tools 不进入本 server 的 `tools/list`；调用前先用返回的 `<server>:<tool>` 名称配合 `mcp_tool_inspect`。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_snapshot`
 
-捕获 persistent browser page：title、URL、bounded visible text、带 `e1` 等 stable short refs 的 interactive elements、最近 page/network errors，以及可选 screenshot path。Page 导航或重新 snapshot 前，可直接把 refs 作为 `browser_act` targets。
+捕获 persistent browser page：title、URL、bounded visible text、带 `e1` 等 stable short refs 的 interactive elements、最近 page/network errors，以及可选 screenshot path。Page 导航或重新 snapshot 前，可直接把 refs 作为 `browser_act` targets。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -698,6 +712,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_act`
 
-在 persistent browser session 执行 structured actions，支持 navigate、new_page、close_page、click、fill、type、select、press、check、uncheck、hover、wait、wait_for_text、wait_for_url。Target 可为 `browser_snapshot` 的 `e1` 等 ref 或 CSS selector；只有 high-level actions 不足时才用 `browser_run_script`。
+在 persistent browser session 执行 structured actions，支持 navigate、new_page、close_page、click、fill、type、select、press、check、uncheck、hover、wait、wait_for_text、wait_for_url。Target 可为 `browser_snapshot` 的 `e1` 等 ref 或 CSS selector；只有 high-level actions 不足时才用 `browser_run_script`。 使用 verbose=true 返回完整诊断元数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -715,6 +730,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

@@ -3648,8 +3648,8 @@ def _register_environment_tools(
     shell_read_meta = _oauth_meta(["shell:read"])
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def environment_get(machine: str | None = None) -> ToolResult:
-        """Return version, workspace, auth, policy, and environment information locally or on a remote machine."""
+    async def environment_get(machine: str | None = None, verbose: bool = False) -> ToolResult:
+        """Return version, workspace, auth, policy, and environment information locally or on a remote machine. Use verbose=true to include full diagnostic metadata."""
         if machine:
             return await _remote_call(settings, machine, "environment_info", {})
         try:
@@ -3676,13 +3676,13 @@ def _register_environment_tools(
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def skill_list() -> ToolResult:
-        """List installed agent skills without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call."""
+    async def skill_list(verbose: bool = False) -> ToolResult:
+        """List installed agent skills without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call. Use verbose=true to include full diagnostic metadata."""
         return await _tool_call(asyncio.to_thread, list_skills, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def skill_load(name: str) -> ToolResult:
-        """Load one installed agent skill by the exact name returned from skill_list. Returns SKILL.md instructions plus related file paths."""
+    async def skill_load(name: str, verbose: bool = False) -> ToolResult:
+        """Load one installed agent skill by the exact name returned from skill_list. Returns SKILL.md instructions plus related file paths. Use verbose=true to include full diagnostic metadata."""
         return await _tool_call(asyncio.to_thread, load_skill, name, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
@@ -3810,8 +3810,9 @@ def _register_shell_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnot
         session_id: str,
         lines: int = 200,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Read recent output from a persistent local or remote shell session."""
+        """Read recent output from a persistent local or remote shell session. Use verbose=true to include full diagnostic metadata."""
         if machine:
             return await _remote_call(
                 settings,
@@ -3826,8 +3827,9 @@ def _register_shell_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnot
         session_id: str,
         machine: str | None = None,
         idempotency_key: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Terminate a persistent local or remote shell session."""
+        """Terminate a persistent local or remote shell session. Use verbose=true to include full diagnostic metadata."""
         if machine:
             return await _remote_call(
                 settings, machine, "shell_kill",
@@ -3836,8 +3838,8 @@ def _register_shell_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnot
         return await _tool_call(kill_shell, session_id, idempotency_key)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def shell_list(machine: str | None = None) -> ToolResult:
-        """List persistent shell sessions locally or on a remote machine."""
+    async def shell_list(machine: str | None = None, verbose: bool = False) -> ToolResult:
+        """List persistent shell sessions locally or on a remote machine. Use verbose=true to include full diagnostic metadata."""
         if machine:
             return await _remote_call(settings, machine, "shell_list", {})
         return await _tool_call(list_shells)
@@ -3874,8 +3876,9 @@ def _register_job_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotat
         limit: int = JOB_LIST_DEFAULT_LIMIT,
         offset: int = 0,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """List compact job summaries, newest active first. Paginate with next_offset; JSON data payload is capped at 32 KiB."""
+        """List compact job summaries, newest active first. Paginate with next_offset; JSON data payload is capped at 32 KiB. Use verbose=true to include full diagnostic metadata."""
         if machine:
             return await _remote_call(
                 settings,
@@ -3951,8 +3954,9 @@ def _register_workspace_read_tools(
         recursive: bool = False,
         max_entries: int = 500,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """List files and directories locally or on a remote machine."""
+        """List files and directories locally or on a remote machine. Use verbose=true to include full diagnostic metadata."""
         if machine:
             return await _remote_call(
                 settings,
@@ -3972,8 +3976,9 @@ def _register_workspace_read_tools(
         depth: int = 3,
         max_entries: int = 500,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Return a compact directory tree locally or on a remote machine."""
+        """Return a compact directory tree locally or on a remote machine. Use verbose=true to include full diagnostic metadata."""
         if machine:
             return await _remote_call(
                 settings,
@@ -4012,8 +4017,9 @@ def _register_workspace_read_tools(
         case_sensitive: bool = True,
         max_results: int | None = None,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Search file contents locally or on a remote machine."""
+        """Search file contents locally or on a remote machine. Use verbose=true to include full diagnostic metadata."""
         if machine:
             return await _remote_call(
                 settings,
@@ -4038,8 +4044,9 @@ def _register_workspace_read_tools(
         binary_preview: str | None = None,
         binary_preview_bytes: int = 256,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Read one file or a list of files locally or on a remote machine."""
+        """Read one file or a list of files locally or on a remote machine. Use verbose=true to include full diagnostic metadata."""
         args = {
             "path": path,
             "start_line": start_line,
@@ -4375,8 +4382,9 @@ def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -
         status: str | None = None,
         text: str | None = None,
         note: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Manage optional Goal mode for the explicit Logical Session. An active plan enables automatic continuation after 15 minutes without agent activity, capped at 10 continuation attempts. session_id must be the same durable id returned by session_manage. Actions: start, get, update, block, resume, finish, cancel. start requires objective and steps; finish requires every step to be completed or skipped."""
+        """Manage optional Goal mode for the explicit Logical Session. An active plan enables automatic continuation after 15 minutes without agent activity, capped at 10 continuation attempts. session_id must be the same durable id returned by session_manage. Actions: start, get, update, block, resume, finish, cancel. start requires objective and steps; finish requires every step to be completed or skipped. Use verbose=true to include full diagnostic metadata."""
         return await _tool_call(
             asyncio.to_thread,
             get_session_runtime_manager().manage_plan,
@@ -4420,8 +4428,9 @@ def _register_dynamic_mcp_tools(
         refresh: bool = True,
         key: str | None = None,
         value: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Register, list, get, enable, disable, refresh, remove, or update the isolated environment/headers of dynamic MCP servers. Use transport=stdio with command/args/cwd, or transport=streamable_http with url. Secret env/header values are persisted privately and are never returned."""
+        """Register, list, get, enable, disable, refresh, remove, or update the isolated environment/headers of dynamic MCP servers. Use transport=stdio with command/args/cwd, or transport=streamable_http with url. Secret env/header values are persisted privately and are never returned. Use verbose=true to include full diagnostic metadata."""
         return await _tool_call(
             manager.manage,
             action=action,
@@ -4442,9 +4451,10 @@ def _register_dynamic_mcp_tools(
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def mcp_tool_search(
-        query: str = "", server: str | None = None, limit: int = 20
+        query: str = "", server: str | None = None, limit: int = 20,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Search cached lightweight tool summaries from enabled dynamic MCP servers. Dynamic tools stay out of this server's tools/list; use the returned <server>:<tool> name with mcp_tool_inspect before calling it."""
+        """Search cached lightweight tool summaries from enabled dynamic MCP servers. Dynamic tools stay out of this server's tools/list; use the returned <server>:<tool> name with mcp_tool_inspect before calling it. Use verbose=true to include full diagnostic metadata."""
         return await _tool_call(manager.search, query, server=server, limit=limit)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
@@ -4517,8 +4527,9 @@ def _register_browser_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnn
         max_text_chars: int = 100_000,
         max_elements: int = 100,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Capture a persistent browser page: title, URL, bounded visible text, interactive elements with stable short refs such as e1, recent page/network errors, and an optional screenshot path. Use refs directly as browser_act targets until the page navigates or a new snapshot is taken."""
+        """Capture a persistent browser page: title, URL, bounded visible text, interactive elements with stable short refs such as e1, recent page/network errors, and an optional screenshot path. Use refs directly as browser_act targets until the page navigates or a new snapshot is taken. Use verbose=true to include full diagnostic metadata."""
         args = {
             "session_id": session_id,
             "page_id": page_id,
@@ -4539,8 +4550,9 @@ def _register_browser_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnn
         page_id: str | None = None,
         timeout_ms: int = 30_000,
         machine: str | None = None,
+        verbose: bool = False,
     ) -> ToolResult:
-        """Run structured actions in a persistent browser session. Supports navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text, and wait_for_url. target may be a browser_snapshot ref such as e1 or a CSS selector. Use browser_run_script only when these high-level actions are insufficient."""
+        """Run structured actions in a persistent browser session. Supports navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text, and wait_for_url. target may be a browser_snapshot ref such as e1 or a CSS selector. Use browser_run_script only when these high-level actions are insufficient. Use verbose=true to include full diagnostic metadata."""
         args = {
             "session_id": session_id,
             "actions": actions,

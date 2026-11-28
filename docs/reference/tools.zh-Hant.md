@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # 工具參考
 
 本頁由實際 MCP tool schema 產生。公開工具介面變更後，執行 `python scripts/generate-tools-reference.py` 更新 English 參考頁。
@@ -41,11 +41,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `environment_get`
 
-回傳本機或 remote machine 的版本、workspace、驗證、policy 與環境資訊。
+回傳本機或 remote machine 的版本、workspace、驗證、policy 與環境資訊。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `skill_list`
 
-列出已安裝 Agent Skills，但不載入完整 instructions。MCP tool surface 保持固定；Skill directory 新增或移除會在下一次呼叫反映。
+列出已安裝 Agent Skills，但不載入完整 instructions。MCP tool surface 保持固定；Skill directory 新增或移除會在下一次呼叫反映。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-依 `skill_list` 回傳的精確名稱載入一個已安裝 Skill，回傳完整 `SKILL.md` instructions 與 related file paths。
+依 `skill_list` 回傳的精確名稱載入一個已安裝 Skill，回傳完整 `SKILL.md` instructions 與 related file paths。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-管理明確 Logical Session 的可選 Goal mode。活動 plan 在 15 分鐘沒有 agent activity 後啟用自動 continuation，最多 10 次。session_id 必須是 session_manage 回傳的同一個持久 id。Action：start、get、update、block、resume、finish、cancel。start 需要 objective 與 steps；finish 要求所有 steps 都是 completed 或 skipped。
+管理明確 Logical Session 的可選 Goal mode。活動 plan 在 15 分鐘沒有 agent activity 後啟用自動 continuation，最多 10 次。session_id 必須是 session_manage 回傳的同一個持久 id。Action：start、get、update、block、resume、finish、cancel。start 需要 objective 與 steps；finish 要求所有 steps 都是 completed 或 skipped。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -130,6 +133,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_read`
 
-讀取 persistent local/remote shell session 的最近輸出。
+讀取 persistent local/remote shell session 的最近輸出。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_stop`
 
-終止 persistent local/remote shell session。
+終止 persistent local/remote shell session。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_list`
 
-列出本機或 remote machine 上的 persistent shell sessions。
+列出本機或 remote machine 上的 persistent shell sessions。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-列出精簡的 Job 摘要，執行中的 Job 優先。使用 next_offset 分頁；資料總量限制為 32 KiB。
+列出精簡的 Job 摘要，執行中的 Job 優先。使用 next_offset 分頁；資料總量限制為 32 KiB。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -299,6 +306,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_list`
 
-列出本機或 remote machine 上的檔案與目錄。
+列出本機或 remote machine 上的檔案與目錄。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -378,6 +386,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_tree`
 
-回傳本機或 remote machine 上緊湊的 directory tree。
+回傳本機或 remote machine 上緊湊的 directory tree。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -394,6 +403,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_grep`
 
-搜尋本機或 remote machine 的檔案內容。
+搜尋本機或 remote machine 的檔案內容。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -429,6 +439,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_read`
 
-讀取本機或 remote machine 上一個檔案或一組檔案。
+讀取本機或 remote machine 上一個檔案或一組檔案。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -447,6 +458,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-註冊、列出、讀取、啟用、停用、refresh、移除或更新 dynamic MCP servers 的隔離 environment/headers。`stdio` transport 使用 command/args/cwd，`streamable_http` transport 使用 url。Secret env/header values 會私密持久化且永不回傳。
+註冊、列出、讀取、啟用、停用、refresh、移除或更新 dynamic MCP servers 的隔離 environment/headers。`stdio` transport 使用 command/args/cwd，`streamable_http` transport 使用 url。Secret env/header values 會私密持久化且永不回傳。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -617,19 +629,21 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-搜尋已啟用 dynamic MCP servers 的 cached lightweight tool summaries。Dynamic tools 不會進入本 server 的 `tools/list`；呼叫前先用回傳的 `<server>:<tool>` 名稱搭配 `mcp_tool_inspect`。
+搜尋已啟用 dynamic MCP servers 的 cached lightweight tool summaries。Dynamic tools 不會進入本 server 的 `tools/list`；呼叫前先用回傳的 `<server>:<tool>` 名稱搭配 `mcp_tool_inspect`。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_snapshot`
 
-擷取 persistent browser page：title、URL、bounded visible text、帶 `e1` 等 stable short refs 的 interactive elements、最近 page/network errors，以及可選 screenshot path。Page 導航或重新 snapshot 前，可直接將 refs 作為 `browser_act` targets。
+擷取 persistent browser page：title、URL、bounded visible text、帶 `e1` 等 stable short refs 的 interactive elements、最近 page/network errors，以及可選 screenshot path。Page 導航或重新 snapshot 前，可直接將 refs 作為 `browser_act` targets。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -698,6 +712,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_act`
 
-在 persistent browser session 執行 structured actions，支援 navigate、new_page、close_page、click、fill、type、select、press、check、uncheck、hover、wait、wait_for_text、wait_for_url。Target 可為 `browser_snapshot` 的 `e1` 等 ref 或 CSS selector；只有 high-level actions 不足時才使用 `browser_run_script`。
+在 persistent browser session 執行 structured actions，支援 navigate、new_page、close_page、click、fill、type、select、press、check、uncheck、hover、wait、wait_for_text、wait_for_url。Target 可為 `browser_snapshot` 的 `e1` 等 ref 或 CSS selector；只有 high-level actions 不足時才使用 `browser_run_script`。 使用 verbose=true 傳回完整診斷中繼資料。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -715,6 +730,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # Referência de ferramentas
 
 Esta página é construída a partir dos schemas MCP reais. Execute `python scripts/generate-tools-reference.py` após alterar a superfície pública de tools para atualizar a referência English.
@@ -41,11 +41,12 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `environment_get`
 
-Retorna versão, workspace, auth, policy e informações de ambiente localmente ou em máquina remota.
+Retorna versão, workspace, auth, policy e informações de ambiente localmente ou em máquina remota. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `skill_list`
 
-Lista Agent Skills instaladas sem carregar suas instructions. A superfície MCP de tools permanece fixa; adicionar ou remover diretórios Skill aparece na próxima chamada.
+Lista Agent Skills instaladas sem carregar suas instructions. A superfície MCP de tools permanece fixa; adicionar ou remover diretórios Skill aparece na próxima chamada. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-Carrega uma Skill instalada pelo nome exato retornado por `skill_list`. Retorna instructions completas de `SKILL.md` e paths de arquivos relacionados.
+Carrega uma Skill instalada pelo nome exato retornado por `skill_list`. Retorna instructions completas de `SKILL.md` e paths de arquivos relacionados. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-Gerencia o Goal mode opcional da Logical Session explícita. Um plan ativo habilita continuação automática após 15 minutos sem atividade do agent, limitada a 10 tentativas. session_id deve ser o mesmo id durável retornado por session_manage. Ações: start, get, update, block, resume, finish, cancel. start exige objective e steps; finish exige todos os steps completed ou skipped.
+Gerencia o Goal mode opcional da Logical Session explícita. Um plan ativo habilita continuação automática após 15 minutos sem atividade do agent, limitada a 10 tentativas. session_id deve ser o mesmo id durável retornado por session_manage. Ações: start, get, update, block, resume, finish, cancel. start exige objective e steps; finish exige todos os steps completed ou skipped. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -130,6 +133,7 @@ Gerencia o Goal mode opcional da Logical Session explícita. Um plan ativo habil
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `shell_read`
 
-Lê output recente de sessão shell persistente local ou remota.
+Lê output recente de sessão shell persistente local ou remota. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `shell_stop`
 
-Encerra sessão shell persistente local ou remota.
+Encerra sessão shell persistente local ou remota. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `shell_list`
 
-Lista sessões shell persistentes localmente ou em máquina remota.
+Lista sessões shell persistentes localmente ou em máquina remota. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `job_list`
 
-Lista resumida de tarefas, com as ativas primeiro. Paginação por next_offset; dados limitados a 32 KiB.
+Lista resumida de tarefas, com as ativas primeiro. Paginação por next_offset; dados limitados a 32 KiB. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -299,6 +306,7 @@ Lista resumida de tarefas, com as ativas primeiro. Paginação por next_offset; 
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `file_list`
 
-Lista arquivos e diretórios localmente ou em máquina remota.
+Lista arquivos e diretórios localmente ou em máquina remota. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -378,6 +386,7 @@ Lista arquivos e diretórios localmente ou em máquina remota.
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `file_tree`
 
-Retorna árvore compacta de diretórios localmente ou em máquina remota.
+Retorna árvore compacta de diretórios localmente ou em máquina remota. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -394,6 +403,7 @@ Retorna árvore compacta de diretórios localmente ou em máquina remota.
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `file_grep`
 
-Pesquisa conteúdo de arquivos localmente ou em máquina remota.
+Pesquisa conteúdo de arquivos localmente ou em máquina remota. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -429,6 +439,7 @@ Pesquisa conteúdo de arquivos localmente ou em máquina remota.
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `file_read`
 
-Lê um arquivo ou lista de arquivos localmente ou em máquina remota.
+Lê um arquivo ou lista de arquivos localmente ou em máquina remota. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -447,6 +458,7 @@ Lê um arquivo ou lista de arquivos localmente ou em máquina remota.
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-Registra, lista, obtém, habilita, desabilita, refresh, remove ou atualiza environment/headers isolados de servidores MCP dinâmicos. Use transport `stdio` com command/args/cwd ou `streamable_http` com url. Valores secret env/header são persistidos privadamente e nunca retornados.
+Registra, lista, obtém, habilita, desabilita, refresh, remove ou atualiza environment/headers isolados de servidores MCP dinâmicos. Use transport `stdio` com command/args/cwd ou `streamable_http` com url. Valores secret env/header são persistidos privadamente e nunca retornados. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -617,19 +629,21 @@ Registra, lista, obtém, habilita, desabilita, refresh, remove ou atualiza envir
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-Pesquisa summaries leves cacheados de tools de servidores MCP dinâmicos habilitados. Tools dinâmicas ficam fora de `tools/list` deste server; use o nome `<server>:<tool>` retornado com `mcp_tool_inspect` antes de chamar.
+Pesquisa summaries leves cacheados de tools de servidores MCP dinâmicos habilitados. Tools dinâmicas ficam fora de `tools/list` deste server; use o nome `<server>:<tool>` retornado com `mcp_tool_inspect` antes de chamar. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `browser_snapshot`
 
-Captura página browser persistente: title, URL, texto visível limitado, elementos interativos com refs curtas estáveis como `e1`, erros recentes page/network e path opcional de screenshot. Use as refs diretamente como targets de `browser_act` até ocorrer navegação ou novo snapshot.
+Captura página browser persistente: title, URL, texto visível limitado, elementos interativos com refs curtas estáveis como `e1`, erros recentes page/network e path opcional de screenshot. Use as refs diretamente como targets de `browser_act` até ocorrer navegação ou novo snapshot. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -698,6 +712,7 @@ Captura página browser persistente: title, URL, texto visível limitado, elemen
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `browser_act`
 
-Executa ações estruturadas em sessão browser persistente. Suporta navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text e wait_for_url. `target` pode ser ref `browser_snapshot` como `e1` ou selector CSS. Use `browser_run_script` somente quando as ações de alto nível não bastarem.
+Executa ações estruturadas em sessão browser persistente. Suporta navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text e wait_for_url. `target` pode ser ref `browser_snapshot` como `e1` ou selector CSS. Use `browser_run_script` somente quando as ações de alto nível não bastarem. Use verbose=true para incluir todos os metadados de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -715,6 +730,7 @@ Executa ações estruturadas em sessão browser persistente. Suporta navigate, n
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

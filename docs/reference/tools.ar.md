@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # مرجع الأدوات
 
 تُبنى هذه الصفحة من MCP tool schemas الفعلية. شغّل `python scripts/generate-tools-reference.py` بعد تغيير public tool surface لتحديث English reference.
@@ -41,11 +41,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `environment_get`
 
-يعيد version وworkspace وauth وpolicy ومعلومات environment محليًا أو على machine بعيدة.
+يعيد version وworkspace وauth وpolicy ومعلومات environment محليًا أو على machine بعيدة. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `skill_list`
 
-يسرد Agent Skills المثبتة دون تحميل instructions. يبقى MCP tool surface ثابتًا؛ وتظهر إضافة/إزالة Skill directories في الاستدعاء التالي.
+يسرد Agent Skills المثبتة دون تحميل instructions. يبقى MCP tool surface ثابتًا؛ وتظهر إضافة/إزالة Skill directories في الاستدعاء التالي. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-يحمّل Skill مثبتة بالاسم الدقيق الذي أعادته `skill_list`. يعيد instructions الكاملة لـ `SKILL.md` وpaths الملفات المتعلقة.
+يحمّل Skill مثبتة بالاسم الدقيق الذي أعادته `skill_list`. يعيد instructions الكاملة لـ `SKILL.md` وpaths الملفات المتعلقة. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-أدر Goal mode الاختياري للـ Logical Session المحددة صراحةً. يفعّل plan نشط المتابعة التلقائية بعد 15 دقيقة من دون نشاط agent، بحد أقصى 10 محاولات. يجب أن يكون session_id هو المعرّف الدائم نفسه الذي أعاده session_manage. الإجراءات: start, get, update, block, resume, finish, cancel. يتطلب start objective وsteps، ويتطلب finish أن تكون كل steps completed أو skipped.
+أدر Goal mode الاختياري للـ Logical Session المحددة صراحةً. يفعّل plan نشط المتابعة التلقائية بعد 15 دقيقة من دون نشاط agent، بحد أقصى 10 محاولات. يجب أن يكون session_id هو المعرّف الدائم نفسه الذي أعاده session_manage. الإجراءات: start, get, update, block, resume, finish, cancel. يتطلب start objective وsteps، ويتطلب finish أن تكون كل steps completed أو skipped. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -130,6 +133,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_read`
 
-يقرأ output الحديث من persistent local/remote shell session.
+يقرأ output الحديث من persistent local/remote shell session. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_stop`
 
-ينهي persistent local/remote shell session.
+ينهي persistent local/remote shell session. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_list`
 
-يسرد persistent shell sessions محليًا أو على machine بعيدة.
+يسرد persistent shell sessions محليًا أو على machine بعيدة. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-قائمة موجزة للمهام مع تقديم المهام النشطة، وحد إجمالي للبيانات يبلغ 32 KiB. استخدم next_offset للصفحات التالية.
+قائمة موجزة للمهام مع تقديم المهام النشطة، وحد إجمالي للبيانات يبلغ 32 KiB. استخدم next_offset للصفحات التالية. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -299,6 +306,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_list`
 
-يسرد الملفات وdirectories محليًا أو على machine بعيدة.
+يسرد الملفات وdirectories محليًا أو على machine بعيدة. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -378,6 +386,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_tree`
 
-يعيد directory tree مدمجة محليًا أو على machine بعيدة.
+يعيد directory tree مدمجة محليًا أو على machine بعيدة. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -394,6 +403,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_grep`
 
-يبحث في محتوى الملفات محليًا أو على machine بعيدة.
+يبحث في محتوى الملفات محليًا أو على machine بعيدة. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -429,6 +439,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_read`
 
-يقرأ ملفًا أو قائمة files محليًا أو على machine بعيدة.
+يقرأ ملفًا أو قائمة files محليًا أو على machine بعيدة. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -447,6 +458,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-يسجل أو يسرد أو يجلب أو يفعّل أو يعطّل أو refresh أو يحذف أو يحدّث environment/headers المعزولة لـ dynamic MCP servers. استخدم transport `stdio` مع command/args/cwd أو `streamable_http` مع url. يتم حفظ secret env/header values بشكل خاص ولا تعاد أبدًا.
+يسجل أو يسرد أو يجلب أو يفعّل أو يعطّل أو refresh أو يحذف أو يحدّث environment/headers المعزولة لـ dynamic MCP servers. استخدم transport `stdio` مع command/args/cwd أو `streamable_http` مع url. يتم حفظ secret env/header values بشكل خاص ولا تعاد أبدًا. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -617,19 +629,21 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-يبحث cached lightweight tool summaries من dynamic MCP servers المفعلة. لا تدخل dynamic tools في `tools/list` لهذا server؛ استخدم اسم `<server>:<tool>` المعاد مع `mcp_tool_inspect` قبل الاستدعاء.
+يبحث cached lightweight tool summaries من dynamic MCP servers المفعلة. لا تدخل dynamic tools في `tools/list` لهذا server؛ استخدم اسم `<server>:<tool>` المعاد مع `mcp_tool_inspect` قبل الاستدعاء. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_snapshot`
 
-يلتقط persistent browser page: title وURL ونصًا مرئيًا محدودًا وعناصر تفاعلية ذات refs قصيرة ثابتة مثل `e1` وأخطاء page/network حديثة وpath screenshot اختياري. استخدم refs مباشرة كـ targets لـ `browser_act` حتى تتنقل الصفحة أو تؤخذ snapshot جديدة.
+يلتقط persistent browser page: title وURL ونصًا مرئيًا محدودًا وعناصر تفاعلية ذات refs قصيرة ثابتة مثل `e1` وأخطاء page/network حديثة وpath screenshot اختياري. استخدم refs مباشرة كـ targets لـ `browser_act` حتى تتنقل الصفحة أو تؤخذ snapshot جديدة. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -698,6 +712,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_act`
 
-ينفذ structured actions في persistent browser session. يدعم navigate وnew_page وclose_page وclick وfill وtype وselect وpress وcheck وuncheck وhover وwait وwait_for_text وwait_for_url. يمكن أن يكون `target` ref من `browser_snapshot` مثل `e1` أو CSS selector. استخدم `browser_run_script` فقط عندما لا تكفي high-level actions.
+ينفذ structured actions في persistent browser session. يدعم navigate وnew_page وclose_page وclick وfill وtype وselect وpress وcheck وuncheck وhover وwait وwait_for_text وwait_for_url. يمكن أن يكون `target` ref من `browser_snapshot` مثل `e1` أو CSS selector. استخدم `browser_run_script` فقط عندما لا تكفي high-level actions. استخدم verbose=true لتضمين البيانات الوصفية التشخيصية الكاملة.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -715,6 +730,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

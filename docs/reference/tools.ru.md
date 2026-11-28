@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # Справочник tools
 
 Эта страница строится из фактических MCP tool schemas. После изменения public tool surface запустите `python scripts/generate-tools-reference.py`, чтобы обновить English reference.
@@ -41,11 +41,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `environment_get`
 
-Возвращает version, workspace, auth, policy и environment information локально или на remote machine.
+Возвращает version, workspace, auth, policy и environment information локально или на remote machine. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `skill_list`
 
-Перечисляет installed Agent Skills без загрузки instructions. MCP tool surface остаётся фиксированным; добавление/удаление Skill directories отражается при следующем call.
+Перечисляет installed Agent Skills без загрузки instructions. MCP tool surface остаётся фиксированным; добавление/удаление Skill directories отражается при следующем call. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-Загружает installed Skill по exact name из `skill_list`. Возвращает полные `SKILL.md` instructions и related file paths.
+Загружает installed Skill по exact name из `skill_list`. Возвращает полные `SKILL.md` instructions и related file paths. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-Управляет необязательным Goal mode для явно заданной Logical Session. Активный plan включает автоматическое продолжение после 15 минут без активности agent, максимум 10 попыток. session_id должен быть тем же долговечным id, который вернул session_manage. Действия: start, get, update, block, resume, finish, cancel. start требует objective и steps; finish требует, чтобы все steps были completed или skipped.
+Управляет необязательным Goal mode для явно заданной Logical Session. Активный plan включает автоматическое продолжение после 15 минут без активности agent, максимум 10 попыток. session_id должен быть тем же долговечным id, который вернул session_manage. Действия: start, get, update, block, resume, finish, cancel. start требует objective и steps; finish требует, чтобы все steps были completed или skipped. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -130,6 +133,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_read`
 
-Читает recent output persistent local/remote shell session.
+Читает recent output persistent local/remote shell session. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_stop`
 
-Завершает persistent local/remote shell session.
+Завершает persistent local/remote shell session. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_list`
 
-Перечисляет persistent shell sessions локально или на remote machine.
+Перечисляет persistent shell sessions локально или на remote machine. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-Краткий список заданий с активными в начале. Постраничный вывод через next_offset; объём данных ограничен 32 KiB.
+Краткий список заданий с активными в начале. Постраничный вывод через next_offset; объём данных ограничен 32 KiB. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -299,6 +306,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_list`
 
-Перечисляет files/directories локально или на remote machine.
+Перечисляет files/directories локально или на remote machine. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -378,6 +386,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_tree`
 
-Возвращает compact directory tree локально или на remote machine.
+Возвращает compact directory tree локально или на remote machine. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -394,6 +403,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_grep`
 
-Ищет содержимое files локально или на remote machine.
+Ищет содержимое files локально или на remote machine. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -429,6 +439,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_read`
 
-Читает один file или list files локально или на remote machine.
+Читает один file или list files локально или на remote machine. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -447,6 +458,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-Регистрирует, перечисляет, получает, включает, отключает, refresh, удаляет или обновляет isolated environment/headers dynamic MCP servers. Для transport `stdio` используются command/args/cwd, для `streamable_http` — url. Secret env/header values persist privately и никогда не возвращаются.
+Регистрирует, перечисляет, получает, включает, отключает, refresh, удаляет или обновляет isolated environment/headers dynamic MCP servers. Для transport `stdio` используются command/args/cwd, для `streamable_http` — url. Secret env/header values persist privately и никогда не возвращаются. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -617,19 +629,21 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-Ищет cached lightweight tool summaries enabled dynamic MCP servers. Dynamic tools не входят в `tools/list` этого server; перед call используйте возвращённое имя `<server>:<tool>` с `mcp_tool_inspect`.
+Ищет cached lightweight tool summaries enabled dynamic MCP servers. Dynamic tools не входят в `tools/list` этого server; перед call используйте возвращённое имя `<server>:<tool>` с `mcp_tool_inspect`. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_snapshot`
 
-Capture persistent browser page: title, URL, bounded visible text, interactive elements со stable short refs вроде `e1`, recent page/network errors и optional screenshot path. Используйте refs напрямую как `browser_act` targets до navigation или нового snapshot.
+Capture persistent browser page: title, URL, bounded visible text, interactive elements со stable short refs вроде `e1`, recent page/network errors и optional screenshot path. Используйте refs напрямую как `browser_act` targets до navigation или нового snapshot. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -698,6 +712,7 @@ Capture persistent browser page: title, URL, bounded visible text, interactive e
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_act`
 
-Выполняет structured actions в persistent browser session. Поддерживает navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text и wait_for_url. `target` может быть ref `browser_snapshot` вроде `e1` или CSS selector. Используйте `browser_run_script` только если high-level actions недостаточно.
+Выполняет structured actions в persistent browser session. Поддерживает navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text и wait_for_url. `target` может быть ref `browser_snapshot` вроде `e1` или CSS selector. Используйте `browser_run_script` только если high-level actions недостаточно. Используйте verbose=true, чтобы включить полные диагностические метаданные.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -715,6 +730,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

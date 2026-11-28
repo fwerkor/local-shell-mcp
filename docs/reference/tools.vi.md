@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -41,11 +41,12 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `environment_get`
 
-Trả về version, workspace, auth, policy và environment information local hoặc trên remote machine.
+Trả về version, workspace, auth, policy và environment information local hoặc trên remote machine. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `skill_list`
 
-Liệt kê installed Agent Skills mà không load instructions. MCP tool surface giữ cố định; thêm hoặc xóa Skill directories được phản ánh ở call tiếp theo.
+Liệt kê installed Agent Skills mà không load instructions. MCP tool surface giữ cố định; thêm hoặc xóa Skill directories được phản ánh ở call tiếp theo. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-Load installed Skill bằng exact name do `skill_list` trả về. Trả về instructions đầy đủ `SKILL.md` và related file paths.
+Load installed Skill bằng exact name do `skill_list` trả về. Trả về instructions đầy đủ `SKILL.md` và related file paths. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-Quản lý Goal mode tùy chọn cho Logical Session được chỉ định rõ ràng. Plan đang active bật automatic continuation sau 15 phút không có agent activity, tối đa 10 lần. session_id phải là cùng durable id do session_manage trả về. Action: start, get, update, block, resume, finish, cancel. start yêu cầu objective và steps; finish yêu cầu mọi steps đều completed hoặc skipped.
+Quản lý Goal mode tùy chọn cho Logical Session được chỉ định rõ ràng. Plan đang active bật automatic continuation sau 15 phút không có agent activity, tối đa 10 lần. session_id phải là cùng durable id do session_manage trả về. Action: start, get, update, block, resume, finish, cancel. start yêu cầu objective và steps; finish yêu cầu mọi steps đều completed hoặc skipped. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -130,6 +133,7 @@ Quản lý Goal mode tùy chọn cho Logical Session được chỉ định rõ 
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `shell_read`
 
-Đọc recent output của persistent local/remote shell session.
+Đọc recent output của persistent local/remote shell session. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `shell_stop`
 
-Kết thúc persistent local/remote shell session.
+Kết thúc persistent local/remote shell session. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `shell_list`
 
-Liệt kê persistent shell sessions local hoặc trên remote machine.
+Liệt kê persistent shell sessions local hoặc trên remote machine. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `job_list`
 
-Danh sách công việc rút gọn, ưu tiên công việc đang chạy. Phân trang bằng next_offset; dữ liệu tối đa 32 KiB.
+Danh sách công việc rút gọn, ưu tiên công việc đang chạy. Phân trang bằng next_offset; dữ liệu tối đa 32 KiB. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -299,6 +306,7 @@ Danh sách công việc rút gọn, ưu tiên công việc đang chạy. Phân t
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `file_list`
 
-Liệt kê files và directories local hoặc trên remote machine.
+Liệt kê files và directories local hoặc trên remote machine. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -378,6 +386,7 @@ Liệt kê files và directories local hoặc trên remote machine.
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `file_tree`
 
-Trả về compact directory tree local hoặc trên remote machine.
+Trả về compact directory tree local hoặc trên remote machine. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -394,6 +403,7 @@ Trả về compact directory tree local hoặc trên remote machine.
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `file_grep`
 
-Tìm trong file contents local hoặc trên remote machine.
+Tìm trong file contents local hoặc trên remote machine. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -429,6 +439,7 @@ Tìm trong file contents local hoặc trên remote machine.
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `file_read`
 
-Đọc một file hoặc list files local hoặc trên remote machine.
+Đọc một file hoặc list files local hoặc trên remote machine. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -447,6 +458,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-Register, list, get, enable, disable, refresh, remove hoặc update isolated environment/headers của dynamic MCP servers. Dùng transport `stdio` với command/args/cwd hoặc `streamable_http` với url. Secret env/header values được persist riêng tư và không bao giờ trả về.
+Register, list, get, enable, disable, refresh, remove hoặc update isolated environment/headers của dynamic MCP servers. Dùng transport `stdio` với command/args/cwd hoặc `streamable_http` với url. Secret env/header values được persist riêng tư và không bao giờ trả về. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -617,19 +629,21 @@ Register, list, get, enable, disable, refresh, remove hoặc update isolated env
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-Tìm cached lightweight tool summaries từ enabled dynamic MCP servers. Dynamic tools không vào `tools/list` của server này; dùng returned `<server>:<tool>` name với `mcp_tool_inspect` trước khi call.
+Tìm cached lightweight tool summaries từ enabled dynamic MCP servers. Dynamic tools không vào `tools/list` của server này; dùng returned `<server>:<tool>` name với `mcp_tool_inspect` trước khi call. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `browser_snapshot`
 
-Capture persistent browser page: title, URL, bounded visible text, interactive elements có stable short refs như `e1`, recent page/network errors và optional screenshot path. Dùng refs trực tiếp làm `browser_act` targets cho tới khi page navigate hoặc có snapshot mới.
+Capture persistent browser page: title, URL, bounded visible text, interactive elements có stable short refs như `e1`, recent page/network errors và optional screenshot path. Dùng refs trực tiếp làm `browser_act` targets cho tới khi page navigate hoặc có snapshot mới. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -698,6 +712,7 @@ Capture persistent browser page: title, URL, bounded visible text, interactive e
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `browser_act`
 
-Chạy structured actions trong persistent browser session. Hỗ trợ navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text và wait_for_url. `target` có thể là `browser_snapshot` ref như `e1` hoặc CSS selector. Chỉ dùng `browser_run_script` khi high-level actions không đủ.
+Chạy structured actions trong persistent browser session. Hỗ trợ navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text và wait_for_url. `target` có thể là `browser_snapshot` ref như `e1` hoặc CSS selector. Chỉ dùng `browser_run_script` khi high-level actions không đủ. Dùng verbose=true để bao gồm đầy đủ siêu dữ liệu chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -715,6 +730,7 @@ Chạy structured actions trong persistent browser session. Hỗ trợ navigate,
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # Tools reference
 
 이 페이지는 실제 MCP tool schema에서 구성됩니다. Public tool surface를 변경한 뒤 `python scripts/generate-tools-reference.py`를 실행해 English reference를 갱신하십시오.
@@ -41,11 +41,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `environment_get`
 
-Local 또는 remote machine의 version, workspace, auth, policy, environment information을 반환합니다.
+Local 또는 remote machine의 version, workspace, auth, policy, environment information을 반환합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `skill_list`
 
-Instructions를 로드하지 않고 installed Agent Skills를 나열합니다. MCP tool surface는 고정되며 Skill directories 추가/삭제는 다음 call에 반영됩니다.
+Instructions를 로드하지 않고 installed Agent Skills를 나열합니다. MCP tool surface는 고정되며 Skill directories 추가/삭제는 다음 call에 반영됩니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-`skill_list`가 반환한 exact name으로 installed Skill을 로드하고 전체 `SKILL.md` instructions와 related file paths를 반환합니다.
+`skill_list`가 반환한 exact name으로 installed Skill을 로드하고 전체 `SKILL.md` instructions와 related file paths를 반환합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-명시적 Logical Session의 optional Goal mode를 관리합니다. active plan은 agent activity가 15분 없으면 automatic continuation을 활성화하며 최대 10회로 제한됩니다. session_id는 session_manage가 반환한 동일한 durable id여야 합니다. Action: start, get, update, block, resume, finish, cancel. start에는 objective와 steps가 필요하고 finish에는 모든 steps가 completed 또는 skipped여야 합니다.
+명시적 Logical Session의 optional Goal mode를 관리합니다. active plan은 agent activity가 15분 없으면 automatic continuation을 활성화하며 최대 10회로 제한됩니다. session_id는 session_manage가 반환한 동일한 durable id여야 합니다. Action: start, get, update, block, resume, finish, cancel. start에는 objective와 steps가 필요하고 finish에는 모든 steps가 completed 또는 skipped여야 합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -130,6 +133,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_read`
 
-Persistent local/remote shell session의 recent output을 읽습니다.
+Persistent local/remote shell session의 recent output을 읽습니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_stop`
 
-Persistent local/remote shell session을 종료합니다.
+Persistent local/remote shell session을 종료합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_list`
 
-Local 또는 remote machine의 persistent shell sessions를 나열합니다.
+Local 또는 remote machine의 persistent shell sessions를 나열합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-활성 작업을 우선 표시하는 간략한 작업 목록입니다. next_offset으로 페이지를 이동하며 데이터는 32 KiB로 제한됩니다.
+활성 작업을 우선 표시하는 간략한 작업 목록입니다. next_offset으로 페이지를 이동하며 데이터는 32 KiB로 제한됩니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -299,6 +306,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_list`
 
-Local 또는 remote machine의 files/directories를 나열합니다.
+Local 또는 remote machine의 files/directories를 나열합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -378,6 +386,7 @@ Local 또는 remote machine의 files/directories를 나열합니다.
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_tree`
 
-Local 또는 remote machine의 compact directory tree를 반환합니다.
+Local 또는 remote machine의 compact directory tree를 반환합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -394,6 +403,7 @@ Local 또는 remote machine의 compact directory tree를 반환합니다.
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_grep`
 
-Local 또는 remote machine의 file contents를 검색합니다.
+Local 또는 remote machine의 file contents를 검색합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -429,6 +439,7 @@ Local 또는 remote machine의 file contents를 검색합니다.
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_read`
 
-Local 또는 remote machine의 file 하나 또는 file list를 읽습니다.
+Local 또는 remote machine의 file 하나 또는 file list를 읽습니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -447,6 +458,7 @@ Local 또는 remote machine의 file 하나 또는 file list를 읽습니다.
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-Dynamic MCP servers의 isolated environment/headers를 register, list, get, enable, disable, refresh, remove, update합니다. `stdio` transport는 command/args/cwd, `streamable_http`는 url을 사용합니다. Secret env/header values는 private하게 persist되며 반환되지 않습니다.
+Dynamic MCP servers의 isolated environment/headers를 register, list, get, enable, disable, refresh, remove, update합니다. `stdio` transport는 command/args/cwd, `streamable_http`는 url을 사용합니다. Secret env/header values는 private하게 persist되며 반환되지 않습니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -617,19 +629,21 @@ Dynamic MCP servers의 isolated environment/headers를 register, list, get, enab
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-Enabled dynamic MCP servers의 cached lightweight tool summaries를 검색합니다. Dynamic tools는 이 server의 `tools/list`에 들어가지 않으므로 반환된 `<server>:<tool>` name을 `mcp_tool_inspect`로 inspect한 뒤 call합니다.
+Enabled dynamic MCP servers의 cached lightweight tool summaries를 검색합니다. Dynamic tools는 이 server의 `tools/list`에 들어가지 않으므로 반환된 `<server>:<tool>` name을 `mcp_tool_inspect`로 inspect한 뒤 call합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_snapshot`
 
-Persistent browser page의 title, URL, bounded visible text, `e1` 같은 stable short refs가 있는 interactive elements, recent page/network errors, optional screenshot path를 capture합니다. Page navigation 또는 새 snapshot 전까지 refs를 `browser_act` targets로 직접 사용합니다.
+Persistent browser page의 title, URL, bounded visible text, `e1` 같은 stable short refs가 있는 interactive elements, recent page/network errors, optional screenshot path를 capture합니다. Page navigation 또는 새 snapshot 전까지 refs를 `browser_act` targets로 직접 사용합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -698,6 +712,7 @@ Persistent browser page의 title, URL, bounded visible text, `e1` 같은 stable 
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_act`
 
-Persistent browser session에서 structured actions를 실행합니다. navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text, wait_for_url을 지원합니다. Target은 `browser_snapshot`의 `e1` 같은 ref 또는 CSS selector이며 high-level actions가 부족할 때만 `browser_run_script`를 사용합니다.
+Persistent browser session에서 structured actions를 실행합니다. navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text, wait_for_url을 지원합니다. Target은 `browser_snapshot`의 `e1` 같은 ref 또는 CSS selector이며 high-level actions가 부족할 때만 `browser_run_script`를 사용합니다. 전체 진단 메타데이터를 포함하려면 verbose=true를 사용합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -715,6 +730,7 @@ Persistent browser session에서 structured actions를 실행합니다. navigate
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
