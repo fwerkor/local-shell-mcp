@@ -1061,15 +1061,21 @@ class AgentRunner:
         from .providers import UnsupportedImageInput
         from .steer_media import without_attachment_images
 
-        key = (profile.provider, profile.url, profile.model, profile.account_id)
+        key = (profile.provider, profile.url, profile.model, profile.account_id, profile.virtual_channel)
         fallback, changed = without_attachment_images(prepared)
         if key in self.image_disabled:
             prepared = fallback
+        from contextlib import aclosing
+        from dataclasses import replace
+
+        if profile.virtual_channel:
+            profile = replace(profile, virtual_session=(self.owner, self.generation.conversation_id))
         emitted = False
         try:
-            async for event in stream(profile, prepared, **kwargs):
-                emitted = True
-                yield event
+            async with aclosing(stream(profile, prepared, **kwargs)) as source:
+                async for event in source:
+                    emitted = True
+                    yield event
         except UnsupportedImageInput:
             if emitted or not changed or key in self.image_disabled:
                 raise
@@ -1077,8 +1083,9 @@ class AgentRunner:
             self.store.append(self.owner, self.generation.run_id, {
                 "event": "on_attachment_image_fallback", "data": {},
             }, actor_lease=self.actor_lease)
-            async for event in stream(profile, fallback, **kwargs):
-                yield event
+            async with aclosing(stream(profile, fallback, **kwargs)) as source:
+                async for event in source:
+                    yield event
 
     async def _summarize_history(self, messages, *, manual=False, max_tokens=2048,
                                  prompt=None, update_prompt=None, head_count=0,
@@ -1360,12 +1367,8 @@ class AgentRunner:
             return int(raw)
         from .provider_profiles import profile
 
-        channel = (state.context.agent or {}).get('provider')
+        channel = self._context_channel(state)
         if not channel:
-            with self.database.connect() as db:
-                row = db.execute('SELECT state FROM runs WHERE id=?', (self.generation.run_id,)).fetchone()
-            channel = (json.loads(row['state']).get('provider') if row else None)
-        if not isinstance(channel, str) or not channel:
             return None
         try:
             stored = profile(channel)
@@ -1374,9 +1377,25 @@ class AgentRunner:
         limit = (stored.get('model_contexts') or {}).get(state.context.profile.model)
         return limit if type(limit) is int and 0 < limit <= 2_000_000 else None
 
+    def _context_channel(self, state: AgentLoopState) -> str | None:
+        channel = (state.context.agent or {}).get('provider')
+        if not channel:
+            with self.database.connect() as db:
+                row = db.execute('SELECT state FROM runs WHERE id=?', (self.generation.run_id,)).fetchone()
+            channel = (json.loads(row['state']).get('provider') if row else None)
+        return channel if isinstance(channel, str) and channel else None
+
     def _record_model_consumption(self, usage: ModelUsage) -> None:
         try:
             self.store.record_model_consumption(self.owner, self.generation.run_id, usage)
+            if usage.channel:
+                self.store.append(self.owner, self.generation.run_id, {
+                    "event": "on_model_route_usage", "data": {
+                        "channel": usage.channel, "model": usage.model, "provider": usage.provider,
+                        "inputTokens": usage.input_tokens, "outputTokens": usage.output_tokens,
+                        "cacheRead": usage.cache_read, "cacheWrite": usage.cache_write,
+                    },
+                }, actor_lease=self.actor_lease)
         except Exception as exc:
             logging.getLogger(__name__).warning(
                 'Model consumption recording failed (%s)', type(exc).__name__)
@@ -1384,7 +1403,7 @@ class AgentRunner:
     async def _observe_model_usage(self, usage: ModelUsage, state: AgentLoopState) -> None:
         """Record each provider call and update the primary context snapshot."""
         self._record_model_consumption(usage)
-        if self.namespace or usage.provider != state.context.profile.provider:
+        if self.namespace or (usage.provider != state.context.profile.provider and state.context.profile.provider != "virtual"):
             return
         if usage.input_tokens <= 0:
             return
@@ -1403,12 +1422,19 @@ class AgentRunner:
             snapshot = provider_usage_snapshot(
                 input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
                 cache_read=usage.cache_read, cache_write=usage.cache_write,
-                provider=usage.provider, model=state.context.profile.model,
+                provider=state.context.profile.provider, model=state.context.profile.model,
                 messages=state.provider_projection or state.messages, tools=state.context.tools,
                 max_context_tokens=self._context_limit(state, settings),
                 reserve_ratio=ratio, calibration_ratio=calibration.ratio,
                 run_id=self.generation.run_id,
                 agent_id=(state.context.agent or {}).get('id'))
+            if usage.channel:
+                snapshot['physicalChannel'] = usage.channel
+                snapshot['physicalModel'] = usage.model
+                snapshot['physicalProvider'] = usage.provider
+            channel = self._context_channel(state)
+            if channel:
+                snapshot['channel'] = channel
             if self._compaction_status:
                 snapshot['compactionStatus'] = self._compaction_status
             self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
@@ -1640,6 +1666,11 @@ class AgentRunner:
             [*self._conversation_context(), *state.messages], state.context.tools, max_context, reserve_ratio=config.get('reserveRatio', 0.05),
             run_id=self.generation.run_id, agent_id=(state.context.agent or {}).get('id'),
             calibration_ratio=calibration.ratio)
+        snapshot['model'] = state.context.profile.model
+        snapshot['provider'] = state.context.profile.provider
+        channel = self._context_channel(state)
+        if channel:
+            snapshot['channel'] = channel
         if self._compaction_status:
             snapshot['compactionStatus'] = self._compaction_status
         self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
@@ -1913,13 +1944,17 @@ class AgentRunner:
 
         async def stream_tools_with_media(profile, messages, **kwargs):
             prepared = await prepared_provider_messages(messages)
-            async for event in self._stream_with_image_fallback(self.stream_tools, profile, prepared, **kwargs):
-                yield event
+            from contextlib import aclosing
+            async with aclosing(self._stream_with_image_fallback(self.stream_tools, profile, prepared, **kwargs)) as source:
+                async for event in source:
+                    yield event
 
         async def stream_text_with_media(profile, messages, **kwargs):
             prepared = await prepared_provider_messages(messages)
-            async for event in self._stream_with_image_fallback(self.stream_text, profile, prepared, **kwargs):
-                yield event
+            from contextlib import aclosing
+            async with aclosing(self._stream_with_image_fallback(self.stream_text, profile, prepared, **kwargs)) as source:
+                async for event in source:
+                    yield event
 
         async def on_model_retry(attempt, maximum, delay, status):
             self._check_grant()

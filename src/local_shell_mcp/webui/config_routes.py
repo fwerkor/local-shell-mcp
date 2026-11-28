@@ -18,12 +18,20 @@ from .routes import _body, _owner, _repo
 
 
 def _endpoint_models() -> dict[str, list[str]]:
-    from .provider_profiles import all_profiles
+    from .provider_profiles import all_profiles, configured
     from .providers import provider_config
 
     available: dict[str, list[str]] = {}
     for value in all_profiles():
         label = value.get("name") or ("openAI" if value["provider"] == "openai" else value["provider"])
+        if value["provider"] == "virtual":
+            from .virtual_channels import physical_members
+
+            models = [model for model in value["models"] if any(
+                configured(stored) for _, stored in physical_members(value, model))]
+            if models:
+                available[label] = models
+            continue
         try:
             provider_config(label)
         except ValueError:
@@ -52,7 +60,7 @@ def _endpoint_info(*, memory_available: bool = False) -> dict:
         # The native LibreChat endpointSchema uses OpenAI-compatible transport
         # for a custom name unless provider='anthropic'. LSM additionally has
         # an explicit Google native channel, never a generic custom client.
-        endpoint_type = ("openAI" if value["provider"] in {"openai", "openai-responses"} else value["provider"])
+        endpoint_type = ("openAI" if value["provider"] in {"openai", "openai-responses", "virtual"} else value["provider"])
         responses = value["provider"] == "openai-responses"
         result[name] = {
             "order": index, "type": endpoint_type, "name": name,
@@ -145,7 +153,14 @@ async def endpoint_configs(request: Request):
     from .memory import memory_tools_available
 
     owner = _owner(request)
-    return JSONResponse(_endpoint_info(memory_available=memory_tools_available(_repo(), owner)))
+    repo = _repo()
+    result = _endpoint_info(memory_available=memory_tools_available(repo, owner))
+    settings = repo.setting(owner, "endpoints", {}) or {}
+    agents = settings.get("agents") or {}
+    raw = agents.get("maxContextTokens") if isinstance(agents, dict) else None
+    if type(raw) in (int, float) and 0 < raw <= 2_000_000:
+        result["agents"]["maxContextTokens"] = int(raw)
+    return JSONResponse(result)
 
 
 async def models(request: Request):

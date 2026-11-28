@@ -89,7 +89,7 @@ async def test_native_tool_roundtrip_preserves_protocol_and_credentials(transpor
 async def test_unknown_frames_and_provider_error(transport, provider):
     events, _ = transport
     events[:] = ["invalid json", {"unrecognized": True}, {"error": {"message": "private provider diagnostic"}}]
-    with pytest.raises(RuntimeError, match="rejected"):
+    with pytest.raises(RuntimeError, match="provider generation failed"):
         await collect(provider, events)
 
 
