@@ -4,9 +4,8 @@ import { QueryKeys, EModelEndpoint, dataService } from 'librechat-data-provider'
 import type { Agent, TEndpointsConfig, TModelSpec } from 'librechat-data-provider';
 import type { Favorite } from '~/store/favorites';
 import { useGetEndpointsQuery, useGetStartupConfig } from '~/data-provider';
-import { useAssistantsMapContext, useAgentsMapContext } from '~/Providers';
-import { useFavorites, useGetConversation, useNewConvo } from '~/hooks';
-import useSelectMention from '~/hooks/Input/useSelectMention';
+import { useAgentsMapContext } from '~/Providers';
+import { useFavorites } from '~/hooks';
 
 /** A 404/403 from getAgentById means the agent is gone or inaccessible; other errors are transient. */
 export const isMissingAgentError = (error: unknown): boolean => {
@@ -16,18 +15,6 @@ export const isMissingAgentError = (error: unknown): boolean => {
   }
   return false;
 };
-
-export type FavoriteSelectKwargs = {
-  model?: string;
-  agent_id?: string;
-  assistant_id?: string;
-  spec?: string | null;
-};
-export type SelectEndpointHandler = (
-  endpoint?: EModelEndpoint | string | null,
-  kwargs?: FavoriteSelectKwargs,
-) => void;
-export type SelectSpecHandler = (spec: TModelSpec) => void;
 
 export type FavoritesData = {
   favorites: Favorite[];
@@ -40,23 +27,12 @@ export type FavoritesData = {
   specsMap: Record<string, TModelSpec>;
   endpointsConfig: TEndpointsConfig;
   reorderFavorites: (favorites: Favorite[], persist: boolean) => void;
-  onSelectEndpoint: SelectEndpointHandler | undefined;
-  onSelectSpec: SelectSpecHandler | undefined;
 };
 
-/**
- * Data layer for the sidebar's favorite models/agents/specs: resolution of
- * favorites into renderable items, agent fetching past the global map, and
- * cleanup of favorites whose agent or spec no longer exists. Rendering and
- * ordering live with the caller (the Pinned section interleaves these rows
- * with pinned conversations).
- */
+/** Resolve pinned models, agents and specs, and clean up deleted agents/specs. */
 export default function useFavoritesData(): FavoritesData {
-  const getConversation = useGetConversation(0);
   const { favorites, reorderFavorites, isLoading, isLoaded, dataUpdatedAt } = useFavorites();
 
-  const { newConversation } = useNewConvo();
-  const assistantsMap = useAssistantsMapContext();
   const agentsMapContext = useAgentsMapContext();
   const { data: endpointsConfig = {} as TEndpointsConfig, isLoading: isEndpointsLoading } =
     useGetEndpointsQuery();
@@ -74,15 +50,6 @@ export default function useFavoritesData(): FavoritesData {
     }
     return map;
   }, [modelSpecs]);
-
-  const { onSelectEndpoint, onSelectSpec } = useSelectMention({
-    modelSpecs,
-    assistantsMap,
-    endpointsConfig,
-    getConversation,
-    newConversation,
-    returnHandlers: true,
-  });
 
   const safeFavorites = useMemo(() => (Array.isArray(favorites) ? favorites : []), [favorites]);
 
@@ -204,7 +171,5 @@ export default function useFavoritesData(): FavoritesData {
     specsMap,
     endpointsConfig,
     reorderFavorites,
-    onSelectEndpoint,
-    onSelectSpec,
   };
 }

@@ -1,10 +1,7 @@
 import { EModelEndpoint } from 'librechat-data-provider';
 import type { TAgentsMap, TEndpointsConfig, TStartupConfig } from 'librechat-data-provider';
-import {
-  favoriteEntryKey,
-  getPinnedSelection,
-  pinnedSelectionAwaitsAgents,
-} from './pinnedSelection';
+import { getPinnedSelection, pinnedSelectionAwaitsAgents } from './pinnedSelection';
+import { favoriteEntryKey } from './pinnedFavoritesOrder';
 
 const model = { endpoint: 'channel', model: 'model-a' };
 const agent = { agentId: 'agent-a' };
@@ -36,7 +33,7 @@ const agents: TAgentsMap = {
 const options = { favorites: [model, agent], endpoints, models, agents };
 
 describe('getPinnedSelection', () => {
-  it('uses the persisted sidebar order rather than membership order', () => {
+  it('uses the persisted model selector order rather than membership order', () => {
     expect(
       getPinnedSelection({
         ...options,

@@ -25,6 +25,8 @@ interface EndpointModelItemProps {
    * every option and the implicit values are already correct.
    */
   posInSet?: number;
+  pinned?: boolean;
+  reorderEnabled?: boolean;
   setSize?: number;
 }
 
@@ -36,6 +38,8 @@ function EndpointModelItemComponent({
   onToggleFavorite,
   posInSet,
   setSize,
+  pinned = false,
+  reorderEnabled = false,
 }: EndpointModelItemProps) {
   const localize = useLocalize();
   const { handleSelectModel, selectedValues } = useModelSelectorContext();
@@ -75,7 +79,7 @@ function EndpointModelItemComponent({
   const renderAvatar = () => {
     const isAgentOrAssistant =
       isAgentsEndpoint(endpoint.value) || isAssistantsEndpoint(endpoint.value);
-    const showEndpointIcon = isAgentOrAssistant && endpoint.icon;
+    const showEndpointIcon = (pinned || isAgentOrAssistant) && endpoint.icon;
 
     const getContent = () => {
       if (avatarUrl) {
@@ -104,13 +108,19 @@ function EndpointModelItemComponent({
       ref={itemRef}
       onClick={() => handleSelectModel(endpoint, modelId ?? '')}
       aria-selected={isSelected || undefined}
+      aria-keyshortcuts={reorderEnabled ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
       aria-posinset={posInSet}
       aria-setsize={setSize}
       className="group flex w-full cursor-pointer items-center justify-between rounded-lg px-2 text-sm"
     >
       <div className="flex w-full min-w-0 items-center gap-2 px-1 py-1">
         {renderAvatar()}
-        <span className="truncate">{modelName}</span>
+        <span className="min-w-0 flex-1 truncate">{modelName}</span>
+        {pinned && !isAgentsEndpoint(endpoint.value) && (
+          <span className="max-w-[35%] shrink-0 truncate text-xs text-text-secondary">
+            {endpoint.label}
+          </span>
+        )}
         {isGlobal && <EarthIcon className="ml-1 size-4 text-surface-submit" />}
       </div>
       <button
