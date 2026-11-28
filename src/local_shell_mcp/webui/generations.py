@@ -258,7 +258,7 @@ class GenerationStore:
                 db.execute(
                     "INSERT INTO conversations(id,owner,title,model,endpoint,project_id,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",
-                    (conversation_id, owner, prompt.strip()[:80], state["model"],
+                    (conversation_id, owner, "New chat", state["model"],
                      payload.get("endpoint") or "agents", project_id,
                      _json({"lsmSampling": state["sampling"]} if "lsmSampling" in payload and not agent else {}), now, now),
                 )
@@ -357,7 +357,9 @@ class GenerationStore:
                            (owner, client_request_id, run_id))
             created = {
                 "created": True,
-                "conversation": {"conversationId": conversation_id, "title": prompt.strip()[:80]},
+                "conversation": {"conversationId": conversation_id, "title": db.execute(
+                    "SELECT title FROM conversations WHERE id=?", (conversation_id,),
+                ).fetchone()["title"]},
                 "message": {
                     "messageId": user_message_id,
                     "conversationId": conversation_id,
@@ -1803,7 +1805,7 @@ class GenerationStore:
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
                error: str | None = None, expired_action_id: str | None = None,
                actor_lease=None, _connection: Any | None = None,
-               model_steps: list[dict] | None = None) -> bool:
+               model_steps: list[dict] | None = None, title_update=None) -> bool:
         if status not in _TERMINAL:
             raise ValueError("Only terminal statuses can finish a generation")
         with (contextlib.nullcontext(_connection) if _connection is not None
@@ -1989,11 +1991,23 @@ class GenerationStore:
                 "WHERE id=? RETURNING unread_marker",
                 (now, "manual:" + run_id, "run:" + run_id, generation.conversation_id),
             ).fetchone()["unread_marker"]
+            if status == "complete" and title_update is not None:
+                # A manual rename or changed preference during the auxiliary
+                # request wins over an outdated automatic title.
+                from .conversation_titles import title_preferences
+
+                preference = db.execute("SELECT value FROM settings WHERE owner=? AND key='user.preferences'",
+                                        (owner,)).fetchone()
+                mode, target = title_preferences(json.loads(preference["value"]) if preference else {})
+                if (mode, target) == (title_update.mode, title_update.target):
+                    db.execute("UPDATE conversations SET title=? WHERE id=? AND owner=? AND title=?",
+                               (title_update.title, generation.conversation_id, owner, title_update.previous))
+            title = db.execute("SELECT title FROM conversations WHERE id=?", (generation.conversation_id,)).fetchone()["title"]
             final = {
                 "final": True,
                 "unreadMarker": unread,
                 "generationProtocolVersion": generation.protocol_version,
-                "conversation": {"conversationId": generation.conversation_id},
+                "conversation": {"conversationId": generation.conversation_id, "title": title},
                 **({"responseMessage": response_message} if response_message is not None else {}),
                 **({"requestMessage": WorkspaceRepository._message(request_row)} if request_row is not None else {}),
                 **({"aborted": True} if status == "aborted" else {}),

@@ -1,4 +1,11 @@
 {
+  "com_lsm_title_mode": "Automatic conversation naming",
+  "com_lsm_title_off": "Do not name automatically",
+  "com_lsm_title_once": "Name new conversations once",
+  "com_lsm_title_every": "Rename after every reply",
+  "com_lsm_title_model": "Naming model",
+  "com_lsm_title_original_model": "Conversation model",
+  "com_lsm_title_timing": "Titles are generated after the complete model reply.",
   "com_ui_tool_approval_mode": "Tool approval mode",
   "com_ui_tool_approval_auto": "Automatic",
   "com_ui_tool_approval_dangerous": "Review risky operations",

@@ -135,13 +135,23 @@ async def test_streaming_generation_http_reconnect_and_token_isolation(database,
     monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
 
+    reply_done = False
+
     async def fake_stream(profile, messages, **kwargs):
+        nonlocal reply_done
         assert profile.token == "model-secret"
         assert messages[-1]["content"] == "Hello"
         for fragment in ("Hi", " there"):
             await asyncio.sleep(0.01)
             yield fragment
+        reply_done = True
 
+    async def title_stream(profile, messages, **kwargs):
+        assert reply_done
+        assert json.loads(messages[-1]["content"])["reply"] == "Hi there"
+        yield "Greeting"
+
+    monkeypatch.setattr(generation_routes, "stream_model", title_stream)
     monkeypatch.setattr(generation_routes, "stream_model_with_tools", fake_stream)
     monkeypatch.setattr(generation_routes, "provider_config",
                         lambda kind, model: ProviderConfig("openai", model or "test", "https://test.invalid", "model-secret"))
@@ -174,6 +184,8 @@ async def test_streaming_generation_http_reconnect_and_token_isolation(database,
         assert events[0]["created"] is True
         assert events[1]["event"] == "on_run_step"
         assert [event["data"]["delta"]["content"]["text"] for event in events if event.get("event") == "on_message_delta"] == ["Hi", " there"]
+        assert events[0]["conversation"]["title"] == "New chat"
+        assert events[-1]["conversation"]["title"] == "Greeting"
         assert events[-1]["responseMessage"]["text"] == "Hi there"
         assert events[-1]["final"] is True
         assert (await client.get(f"/api/agents/chat/status/{cid}", headers=alice)).json()["status"] == "complete"

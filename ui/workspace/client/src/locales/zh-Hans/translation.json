@@ -1,4 +1,11 @@
 {
+  "com_lsm_title_mode": "自动命名会话",
+  "com_lsm_title_off": "不自动命名",
+  "com_lsm_title_once": "新会话命名一次",
+  "com_lsm_title_every": "每回合都重命名",
+  "com_lsm_title_model": "命名模型",
+  "com_lsm_title_original_model": "会话原模型",
+  "com_lsm_title_timing": "在模型完整回复结束后生成标题。",
   "com_ui_tool_approval_mode": "工具审批模式",
   "com_ui_tool_approval_auto": "自动执行",
   "com_ui_tool_approval_dangerous": "危险操作审批",

@@ -1,3 +1,4 @@
+import ConversationTitleSettings from './ConversationTitleSettings';
 import KeyboardShortcutsSettings from './KeyboardShortcuts';
 import ModelProviders from './ModelProviders';
 import ControllerSettings from './ControllerSettings';
@@ -391,6 +392,14 @@ export const registry: SettingEntry[] = [
     }),
   },
   // Chat · Conversations
+  {
+    id: 'conversationTitles',
+    tab: CHAT,
+    section: 'conversations',
+    labelKey: 'com_lsm_title_mode',
+    keywords: ['title', 'rename', 'conversation', 'model', '命名', '标题', '会话'],
+    Component: ConversationTitleSettings,
+  },
   {
     id: 'newChatSwitchToHistory',
     tab: CHAT,
