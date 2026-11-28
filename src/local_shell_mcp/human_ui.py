@@ -48,7 +48,7 @@ from .fs_ops import (
     write_content,
 )
 from .image_ops import ImageFile, assert_view_image_size, detect_image_type, make_image_preview
-from .jobs import list_jobs
+from .jobs import list_jobs, retry_job, stop_job, tail_job
 from .live_channel import get_live_channel_manager, live_id_from_claims
 from .oauth import ALL_OAUTH_SCOPES
 from .remote import (
@@ -787,6 +787,8 @@ async def api_bootstrap(request: Request) -> Response:
     return _json_ok(
         {
             "version": version_info(),
+            "ui_path": "/" + settings.ui_path.strip("/"),
+            "auth_mode": settings.auth_mode,
             "machines": machines,
             "features": {
                 "remote": settings.remote_enabled,
@@ -1530,6 +1532,55 @@ async def api_gui_action(request: Request) -> Response:
             window_id=window_id,
             actions=[str(action.get("type") or "") for action in actions],
         )
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_jobs(request: Request) -> Response:
+    machine = str(request.query_params.get("machine") or "local")
+    try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
+        limit = max(1, min(100, int(request.query_params.get("limit", "50"))))
+        offset = max(0, int(request.query_params.get("offset", "0")))
+        args = {"include_finished": True, "limit": limit, "offset": offset}
+        result = await _machine_dispatch(machine, lambda: list_jobs(**args), "job_list", args)
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_job_output(request: Request) -> Response:
+    machine = str(request.query_params.get("machine") or "local")
+    try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
+        job_id = str(request.query_params.get("job_id") or "")
+        if not job_id:
+            raise ValueError("job_id is required")
+        lines = max(1, min(1000, int(request.query_params.get("lines", "200"))))
+        result = await _machine_dispatch(
+            machine, lambda: tail_job(job_id, lines), "job_tail", {"job_id": job_id, "lines": lines}
+        )
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_job_action(request: Request) -> Response:
+    try:
+        body = await request.json()
+        machine = str(body.get("machine") or "local")
+        _require_ui_scopes(request, "shell:execute", machine=machine)
+        job_id = str(body.get("job_id") or "")
+        if not job_id:
+            raise ValueError("job_id is required")
+        action = request.path_params["action"]
+        if action == "stop":
+            result = await _machine_dispatch(machine, lambda: stop_job(job_id), "job_stop", {"job_id": job_id})
+        elif action == "retry":
+            result = await _machine_dispatch(machine, lambda: retry_job(job_id), "job_retry", {"job_id": job_id})
+        else:
+            raise ValueError("Unsupported job action")
         return _json_ok(result)
     except Exception as exc:
         return _json_error(exc)
@@ -3392,6 +3443,8 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
 
     from .desktop_stream import (
         FRAME_INTERVAL_S,
+        FRAME_ACK_TIMEOUT_S,
+        ADAPTIVE_OBSERVATIONS,
         RETAINED_OBSERVATIONS,
         STREAM_IDLE_S,
         STREAMS,
@@ -3400,7 +3453,7 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
         frame_metadata,
     )
 
-    stream = DesktopStream(machine, window_id)
+    stream = DesktopStream(machine, window_id, adaptive=websocket.query_params.get("adaptive") == "1")
     if len(STREAMS) >= max(1, get_settings().ui_terminal_max_sessions):
         await websocket.close(code=4429, reason="Too many desktop streams")
         return
@@ -3416,6 +3469,9 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
     is_remote = machine != "local"
     manager = None
     send_lock = asyncio.Lock()
+    frame_ack = asyncio.Event()
+    frame_serial = 0
+    pending_frame: int | None = None
 
     def live_credential_valid() -> bool:
         if live_credentials is None:
@@ -3428,6 +3484,14 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             await websocket.send_text(json.dumps(control, separators=(",", ":")))
 
     async def emit(metadata: dict[str, Any], image: bytes) -> None:
+        nonlocal frame_serial, pending_frame
+        started = time.monotonic()
+        acknowledge = stream.adaptive and bool(image)
+        if acknowledge:
+            frame_serial += 1
+            pending_frame = frame_serial
+            frame_ack.clear()
+            metadata = {**metadata, "frame_id": frame_serial}
         async with send_lock:
             if metadata.get("type") == "frame" and isinstance(metadata.get("ttl_s"), (int, float)):
                 metadata = dict(metadata)
@@ -3436,6 +3500,16 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             await websocket.send_text(json.dumps({**metadata, "image": bool(image)}, separators=(",", ":")))
             if image:
                 await websocket.send_bytes(image)
+        if acknowledge:
+            try:
+                # Do not queue another image behind an undecoded browser frame.
+                await asyncio.wait_for(frame_ack.wait(), timeout=FRAME_ACK_TIMEOUT_S)
+                stream.pacer.sample(len(image), time.monotonic() - started)
+            except TimeoutError:
+                stream.pacer.congested()
+                raise RuntimeError("Desktop frame acknowledgement timed out")
+            finally:
+                pending_frame = None
 
     async def ack_sender() -> None:
         while True:
@@ -3496,17 +3570,19 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                             continue
                         refresh_event.clear()
                     started = time.monotonic()
-                    if len(recent) >= RETAINED_OBSERVATIONS:
+                    if len(recent) >= (ADAPTIVE_OBSERVATIONS if stream.adaptive else RETAINED_OBSERVATIONS):
                         await manager.discard_frame_observation(window_id, recent.pop(0))
-                    data, image = await capture_frame(manager, window_id)
+                    data, image = await capture_frame(manager, window_id, stream.pacer.profile) if stream.adaptive else await capture_frame(manager, window_id)
                     observation_id = data["observation_id"]
                     recent.append(observation_id)
                     digest = hashlib.blake2s(image).digest()
                     force_frame = stream.force_frame
                     stream.force_frame = False
-                    await emit(frame_metadata(data), image if digest != last_digest or force_frame else b"")
+                    changed = digest != last_digest or force_frame
+                    await emit(frame_metadata(data), image if changed else b"")
                     last_digest = digest
-                    await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
+                    interval = stream.pacer.interval(changed, stream.force_frame) if stream.adaptive else FRAME_INTERVAL_S
+                    await asyncio.sleep(max(0.05, interval - (time.monotonic() - started)))
             finally:
                 for observation_id in recent:
                     with contextlib.suppress(Exception):
@@ -3527,6 +3603,10 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             try:
                 control = json.loads(raw)
                 if not isinstance(control, dict):
+                    continue
+                if control.get("type") == "frame-ack":
+                    if stream.adaptive and pending_frame is not None and type(control.get("frame_id")) is int and control["frame_id"] == pending_frame:
+                        frame_ack.set()
                     continue
                 if control.get("type") == "refresh":
                     stream.force_frame = True
@@ -3640,6 +3720,9 @@ def ui_routes() -> list[Any]:
             methods=["POST"],
         ),
         Route(UI_API_PREFIX + "/gui/action", api_gui_action, methods=["POST"]),
+        Route(UI_API_PREFIX + "/jobs", api_jobs, methods=["GET"]),
+        Route(UI_API_PREFIX + "/jobs/output", api_job_output, methods=["GET"]),
+        Route(UI_API_PREFIX + "/jobs/{action}", api_job_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/terminals", api_terminals, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/read", api_terminal_read, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/{action}", api_terminal_action, methods=["POST"]),

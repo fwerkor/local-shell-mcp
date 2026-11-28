@@ -1288,3 +1288,82 @@ def test_worker_frame_ignores_non_string_error_messages():
         'errors': [False],
     })
     assert stream.frames.empty()
+
+
+def test_adaptive_pacer_downgrades_fast_and_recovers_gradually():
+    pacer = stream_module.AdaptivePacer()
+    assert pacer.level == 2
+    pacer.sample(48_000, 0.8)
+    assert pacer.level == 1
+    pacer.sample(20_000, 0.9)
+    assert pacer.level == 0
+    for _ in range(4):
+        pacer.sample(10_000, 0.025)
+    assert pacer.level == 0
+    pacer.sample(10_000, 0.025)
+    assert pacer.level == 1
+    for _ in range(40):
+        pacer.sample(10_000, 0.01)
+    assert pacer.level == len(stream_module.FRAME_PROFILES) - 1
+    for _ in range(8):
+        interval = pacer.interval(False)
+    assert interval == 0.9
+    assert pacer.interval(False, interactive=True) == pacer.profile.interval
+
+
+def test_adaptive_profiles_enforce_independent_jpeg_budgets(tmp_path):
+    path = tmp_path / 'frame.png'
+    Image.effect_noise((1920, 1080), 65).convert('RGB').save(path)
+    for profile in stream_module.FRAME_PROFILES:
+        data = stream_module.compress_frame(path, profile)
+        assert len(data) <= profile.max_bytes
+        with Image.open(io.BytesIO(data)) as image:
+            assert image.width <= profile.width
+            assert image.height <= profile.height
+
+
+def test_adaptive_worker_feedback_reduces_profile_when_image_queue_overflows():
+    stream = stream_module.DesktopStream('node', 'win', adaptive=True)
+    stream_module.STREAMS[stream.key] = stream
+    metadata = {'type': 'frame', 'bounds': {}, 'observation_id': 'one'}
+    body = {'frame': metadata, 'image': base64.b64encode(b'\xff\xd8\xfftest').decode()}
+    assert stream_module.worker_frame(stream.key, stream.secret, 'node', body)['profile_level'] == 2
+    assert stream_module.worker_frame(stream.key, stream.secret, 'node', body)['profile_level'] == 1
+    assert stream.frames.qsize() == 1
+    assert stream_module.worker_frame(stream.key, stream.secret, 'node', {'frame': metadata})['profile_level'] == 1
+
+
+def test_adaptive_desktop_waits_for_matching_browser_frame_ack(tmp_path, monkeypatch):
+    manager = FakeManager(tmp_path)
+    monkeypatch.setattr(stream_module, 'temp_dir', lambda: tmp_path)
+    monkeypatch.setattr(gui, 'get_gui_manager', lambda: manager)
+    with (TestClient(Starlette(routes=human_ui.ui_routes())) as client,
+          client.websocket_connect('/ui/ws/desktop?machine=local&window_id=win&adaptive=1') as ws):
+        assert ws.receive_json() == {'type': 'ready'}
+        first = ws.receive_json()
+        ws.receive_bytes()
+        assert first['frame_id'] == 1
+        ws.send_json({'type': 'frame-ack', 'frame_id': 2})
+        time.sleep(0.5)
+        assert manager.captured == 1
+        ws.send_json({'type': 'refresh'})
+        ws.send_json({'type': 'frame-ack', 'frame_id': 1})
+        second = ws.receive_json()
+        assert second['frame_id'] == 2
+        ws.receive_bytes()
+        ws.send_json({'type': 'frame-ack', 'frame_id': 2})
+
+
+def test_adaptive_minimum_profile_still_throttles_on_slow_links():
+    pacer = stream_module.AdaptivePacer(level=0)
+    pacer.sample(10_000, 2.0)
+    assert pacer.level == 0
+    assert pacer.network_interval == pytest.approx(2.3)
+    stream = stream_module.DesktopStream('node', 'win', adaptive=True, pacer=pacer)
+    stream_module.STREAMS[stream.key] = stream
+    feedback = stream_module.worker_frame(stream.key, stream.secret, 'node', {})
+    assert feedback['interval_s'] == pytest.approx(2.3)
+    for _ in range(30):
+        pacer.sample(10_000, 0.02)
+    assert pacer.level == len(stream_module.FRAME_PROFILES) - 1
+    assert pacer.network_interval == pacer.profile.interval

@@ -66,7 +66,7 @@ describe('unified settings', () => {
   ])('redirects legacy URL %s to the unified dialog', async (path, tab) => {
     mount(path);
     expect(await screen.findByRole('dialog', { name: tab })).toBeInTheDocument();
-    expect(screen.getByTestId('path')).toHaveTextContent('/control/overview');
+    expect(screen.getByTestId('path')).toHaveTextContent('/control/workspace');
     fireEvent.click(screen.getByText('Close'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });

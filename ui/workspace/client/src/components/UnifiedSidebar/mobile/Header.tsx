@@ -70,7 +70,7 @@ function Header({
       >
         <Sidebar className="icon-md" aria-hidden="true" />
       </Button>
-      <Link to="/control/overview" aria-label={localize('com_lsm_ui_controller_home')} className="flex size-9 items-center justify-center rounded-lg">
+      <Link to="/control/workspace" aria-label={localize('com_lsm_ui_controller_home')} className="flex size-9 items-center justify-center rounded-lg">
         <img src="/assets/logo.svg" alt="" className="size-7 rounded-lg" />
       </Link>
       <Switcher
