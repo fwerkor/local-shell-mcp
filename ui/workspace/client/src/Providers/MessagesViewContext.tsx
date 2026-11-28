@@ -44,11 +44,24 @@ const MessagesOperationsContext = createContext<MessagesOperations | undefined>(
  */
 const MessagesSubmittingContext = createContext(false);
 
+// History reconciliation / stream attachment is distinct from model generation.
+const MessagesLoadingTailContext = createContext(false);
+
+export function useMessagesLoadingTail(): boolean {
+  return useContext(MessagesLoadingTailContext);
+}
+
 // Export the contexts so they can be provided by other providers (e.g., ShareMessagesProvider)
 export { MessagesViewContext, MessagesOperationsContext, MessagesSubmittingContext };
 export type { MessagesViewContextValue, MessagesOperations };
 
-export function MessagesViewProvider({ children }: { children: React.ReactNode }) {
+export function MessagesViewProvider({
+  children,
+  isLoadingTail = false,
+}: {
+  children: React.ReactNode;
+  isLoadingTail?: boolean;
+}) {
   const chatContext = useChatContext();
 
   const {
@@ -121,7 +134,11 @@ export function MessagesViewProvider({ children }: { children: React.ReactNode }
   return (
     <MessagesOperationsContext.Provider value={messageOperations}>
       <MessagesSubmittingContext.Provider value={isSubmitting}>
-        <MessagesViewContext.Provider value={contextValue}>{children}</MessagesViewContext.Provider>
+        <MessagesLoadingTailContext.Provider value={isLoadingTail}>
+          <MessagesViewContext.Provider value={contextValue}>
+            {children}
+          </MessagesViewContext.Provider>
+        </MessagesLoadingTailContext.Provider>
       </MessagesSubmittingContext.Provider>
     </MessagesOperationsContext.Provider>
   );

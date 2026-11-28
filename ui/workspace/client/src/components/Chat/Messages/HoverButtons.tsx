@@ -10,9 +10,14 @@ import {
   ContinueIcon,
   TooltipAnchor,
   RegenerateIcon,
+  Spinner,
 } from '@librechat/client';
 import type { TConversation, TMessage } from 'librechat-data-provider';
-import { useMessagesIsSubmitting, useOptionalMessagesOperations } from '~/Providers';
+import {
+  useMessagesIsSubmitting,
+  useMessagesLoadingTail,
+  useOptionalMessagesOperations,
+} from '~/Providers';
 import { useGenerationsByLatest, useLocalize } from '~/hooks';
 import { hasEditablePart } from './Content/editableParts';
 import { revealedQueuedTurnFamily } from '~/store/steer';
@@ -143,6 +148,7 @@ const HoverButtons = ({
   /** Subscribed here rather than passed down: a send toggles the rerun controls on
    *  every row, and only this toolbar has to re-render for it. */
   const isSubmitting = useMessagesIsSubmitting();
+  const isLoadingTail = useMessagesLoadingTail();
   const [isCopied, setIsCopied] = useState(false);
   const [TextToSpeech] = useRecoilState<boolean>(store.textToSpeech);
   const { getMessages } = useOptionalMessagesOperations();
@@ -215,6 +221,17 @@ const HoverButtons = ({
   }
 
   const { isCreatedByUser, error } = message;
+  if (!isCreatedByUser && isLoadingTail && (isLast || message.messageId === latestMessageId)) {
+    return (
+      <span role="status" className="flex items-center gap-2 text-xs text-text-secondary">
+        <Spinner size={12} className="shrink-0" />
+        {localize('com_ui_loading')}
+      </span>
+    );
+  }
+  if (!isCreatedByUser && isSubmitting && message.messageId === latestMessageId) {
+    return null;
+  }
   const isSubagentThreadReadOnly = conversation.subagentThread != null;
 
   const onEdit = () => {
