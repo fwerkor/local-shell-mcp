@@ -1,4 +1,5 @@
 import { renderHook } from '@testing-library/react';
+import { EModelEndpoint } from 'librechat-data-provider';
 import type { TConversation } from 'librechat-data-provider';
 import useTokenLimits from './useTokenLimits';
 
@@ -9,7 +10,9 @@ let mockServerLimit: number | undefined;
 
 jest.mock('~/data-provider', () => ({
   useGetStartupConfig: () => ({ data: undefined }),
-  useTokenConfigQuery: () => ({ data: { Channel: { model: { context: 128000 } } } }),
+  useTokenConfigQuery: () => ({
+    data: { openAI: { model: { context: 128000 } }, Channel: { model: { context: 128000 } } },
+  }),
   useGetAgentByIdQuery: () => ({ data: mockAgent }),
   useGetEndpointsQuery: () => ({ data: { agents: { maxContextTokens: mockServerLimit } } }),
 }));
@@ -22,7 +25,14 @@ describe('effective context window', () => {
   });
 
   it('uses the server override instead of the catalog window', () => {
-    const conversation = { endpoint: 'Channel', model: 'model' } as TConversation;
+    const conversation = {
+      endpoint: EModelEndpoint.openAI,
+      model: 'model',
+      conversationId: 'test',
+      title: 'Test',
+      createdAt: '',
+      updatedAt: '',
+    } satisfies TConversation;
     const { result, rerender } = renderHook(() => useTokenLimits(conversation));
     expect(result.current.maxContextTokens).toBe(8192);
     mockServerLimit = undefined;
@@ -36,7 +46,14 @@ describe('effective context window', () => {
       model: 'model',
       model_parameters: { max_context_tokens: 4096 },
     };
-    const conversation = { endpoint: 'agents', agent_id: 'agent' } as TConversation;
+    const conversation = {
+      endpoint: EModelEndpoint.agents,
+      agent_id: 'agent',
+      conversationId: 'test',
+      title: 'Test',
+      createdAt: '',
+      updatedAt: '',
+    } satisfies TConversation;
     const { result } = renderHook(() => useTokenLimits(conversation));
     expect(result.current.maxContextTokens).toBe(4096);
   });
