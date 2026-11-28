@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Conversas e projetos
 
@@ -35,3 +35,7 @@ Não carregue credenciais, chaves privadas ou documentos que não tenha autoriza
 ## Preferências
 
 As preferências do usuário, como as opções de ferramentas e os atalhos de teclado, são gerenciadas através da WebUI e salvos no servidor onde estão implementados. É possível acessar as Configurações para configurar o comportamento do teclado; também é possível distinguir entre enviar uma mensagem e inserir uma pausa na mensagem. As opções de ferramentas do chat devem ser configuradas separadamente das permissões do agente. Consulte [Ferramentas e permissões](permissions.md) e [Memória e contexto](context.md).
+
+### Nomeação automática de conversas
+
+Em Configurações → Chat → Conversas, escolha entre não nomear automaticamente, nomear novas conversas uma vez ou renomeá-las após cada resposta concluída. Por padrão, novas conversas são nomeadas uma vez com o próprio modelo da conversa. Também é possível escolher outro modelo de um canal configurado. A nomeação ocorre somente após a conclusão da resposta principal; respostas com falha ou canceladas não a acionam. O título descreve brevemente a tarefa no idioma do usuário. A solicitação de nomeação é independente do contexto e não adiciona mensagens ao chat.

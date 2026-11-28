@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Rozmowy i projekty
 
@@ -35,3 +35,7 @@ Nie wysyłaj żadnych danych, kluczy prywatnych ani dokumentów, których nie ma
 ## Preferencje
 
 Preferencje użytkowników, takie jak przełączniki narzędzi i skróty klawiaturowe, są zarządzane za pomocą interfejsu WebUI. Te dane są przechowywane na serwerze, gdzie są one implementowane. W opcjach ustawień można konfigurować zachowanie klawiatury; należy odróżniać wysyłanie wiadomości od wpisywania spacji. Przełączniki narzędzi w czacie należy konfigurować osobno, w odniesieniu do uprawnień agenta. Zobacz [Narzędzia i uprawnienia](permissions.md) oraz [Pamięć i kontekst](context.md).
+
+### Automatyczne nazywanie rozmów
+
+W Ustawieniach → Czat → Rozmowy wybierz brak automatycznego nazywania, jednorazowe nazwanie nowego czatu lub zmianę nazwy po każdej zakończonej odpowiedzi. Domyślnie nowe czaty otrzymują nazwę raz za pomocą modelu rozmowy. Można też wybrać inny model ze skonfigurowanego kanału. Nadanie nazwy następuje dopiero po zakończeniu głównej odpowiedzi; nieudane lub anulowane odpowiedzi go nie uruchamiają. Tytuł krótko opisuje zadanie w języku użytkownika. Żądanie nazwania jest oddzielone od kontekstu i nie dodaje wiadomości do czatu.

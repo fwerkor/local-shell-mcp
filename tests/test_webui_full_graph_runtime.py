@@ -12,6 +12,7 @@ from local_shell_mcp.sqlite_store import shared_database
 from local_shell_mcp.webui import agent_runner
 from local_shell_mcp.webui.agent_runner import AgentRunner
 from local_shell_mcp.webui.agents import AgentRepository
+from local_shell_mcp.webui.conversation_titles import PROMPT as TITLE_PROMPT
 from local_shell_mcp.webui.generations import GenerationStore
 from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
 
@@ -288,6 +289,9 @@ async def test_graph_tool_approval_reuses_same_pause_claim_and_executor(context,
     calls = []
 
     async def model(profile, history, **kwargs):
+        if history and history[0].get("content") == TITLE_PROMPT:
+            yield "Recovered task"
+            return
         calls.append(profile.model)
         if profile.model == "parent" and not any(msg.get("role") == "tool" for msg in history):
             yield ModelToolCall("write-once", "file_write", {"path": "approved.txt", "content": "approved"})
@@ -404,6 +408,9 @@ async def test_cooperative_controller_shutdown_and_http_resume_real_graph(contex
     waiting, release = asyncio.Event(), asyncio.Event()
 
     async def model(profile, history, **kwargs):
+        if history and history[0].get("content") == TITLE_PROMPT:
+            yield "Recovered task"
+            return
         calls.append(profile.model)
         if profile.model == "child" and not release.is_set():
             waiting.set()

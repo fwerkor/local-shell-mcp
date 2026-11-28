@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import socket
 
@@ -33,13 +34,19 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
     requests = []
     async def fake_model(request):
         body = await request.json()
-        requests.append(body)
+        from local_shell_mcp.webui.conversation_titles import PROMPT as TITLE_PROMPT
+
+        naming = any(msg.get("content") == TITLE_PROMPT for msg in body.get("messages", []))
+        if not naming:
+            requests.append(body)
         expected_key = ({"independent-model": "secondary-private-token",
                          "recovered-model": "recovered-test-token"}.get(body["model"], "private-test-token"))
         assert request.headers.get("authorization") == "Bearer " + expected_key
         if reject_provider and body["model"] != "recovered-model":
             return JSONResponse({"error": {"message": "Invalid API key"}}, status_code=401)
-        return StreamingResponse(iter(['data: {"choices":[{"delta":{"content":"Model channel works."}}]}\n\n', 'data: [DONE]\n\n']), media_type="text/event-stream")
+        text = "Configured model verification" if naming else "Model channel works."
+        frame = json.dumps({"choices": [{"delta": {"content": text}}]})
+        return StreamingResponse(iter([f'data: {frame}\n\n', 'data: [DONE]\n\n']), media_type="text/event-stream")
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         model_port = probe.getsockname()[1]

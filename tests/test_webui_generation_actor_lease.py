@@ -13,6 +13,7 @@ from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui import generation_routes
 from local_shell_mcp.webui.agent_runtime import RuntimeSafetyError
 from local_shell_mcp.webui.checkpoints import SQLiteCheckpointSaver
+from local_shell_mcp.webui.conversation_titles import PROMPT as TITLE_PROMPT
 from local_shell_mcp.webui.generation_actor_lease import (
     ActorLease,
     active_run_ids,
@@ -107,6 +108,9 @@ async def test_sse_resume_reattaches_after_controller_crash_with_fresh_grants(co
     seen = []
 
     async def model(profile, messages, **kwargs):
+        if messages and messages[0].get("content") == TITLE_PROMPT:
+            yield "Recovered task"
+            return
         seen.append(messages)
         yield 'Successfully resumed on a fresh Controller.'
 
@@ -199,6 +203,9 @@ async def test_crash_after_steer_applied_before_first_checkpoint_replays_instruc
     observed = []
 
     async def model(profile, messages, **kwargs):
+        if messages and messages[0].get("content") == TITLE_PROMPT:
+            yield "Recovered task"
+            return
         observed.append(messages)
         assert sum(m.get('steerId') == ack['steerId'] for m in messages) == 1
         assert messages[-1]['content'] == 'Durable correction'

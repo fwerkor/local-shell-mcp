@@ -10,6 +10,7 @@ import pytest
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.sqlite_store import shared_database
 from local_shell_mcp.webui import generation_routes
+from local_shell_mcp.webui.conversation_titles import PROMPT as TITLE_PROMPT
 from local_shell_mcp.webui.generations import GenerationStore
 from local_shell_mcp.webui.providers import (
     ModelThought,
@@ -159,6 +160,9 @@ async def test_visible_prose_remains_between_reasoning_and_tool_rounds(tmp_path,
 
         async def provider(*args, **kwargs):
             nonlocal round_count
+            if args[1] and args[1][0].get("content") == TITLE_PROMPT:
+                yield "Recovered task"
+                return
             round_count += 1
             if round_count > 1:
                 snapshots.append(store.resume_snapshot('local', generation.run_id)[0]['aggregatedContent'])

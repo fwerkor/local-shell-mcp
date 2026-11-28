@@ -12,6 +12,7 @@ import pytest
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui import generation_routes
+from local_shell_mcp.webui.conversation_titles import PROMPT as TITLE_PROMPT
 from local_shell_mcp.webui.generations import GenerationStore
 from local_shell_mcp.webui.provider_multimodal import native_content_parts
 from local_shell_mcp.webui.provider_tool_protocols import native_messages
@@ -294,6 +295,9 @@ async def test_assembled_context_policy_checks_inlined_text_steer_before_provide
     exposed = []
 
     async def provider(profile, messages, **kwargs):
+        if messages and messages[0].get("content") == TITLE_PROMPT:
+            yield "Recovered task"
+            return
         exposed.append(messages)
         if len(exposed) == 1:
             SteeringStore(db).enqueue('local', {

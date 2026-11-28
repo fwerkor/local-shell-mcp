@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Conversations et projets
 
@@ -35,3 +35,7 @@ Ne téléversez pas de credences, de clés privées ou de documents pour lesquel
 ## Préférences
 
 Les conversations et les préférences des utilisateurs, comme les options de configuration et les raccourcis clavier, sont gérées via l’interface Web. Ces informations sont également stockées sur le serveur où elles sont implémentées. Vous pouvez ouvrir les Paramètres pour configurer le comportement du clavier ; il est important de distinguer entre l’envoi d’un message et l’insertion d’une ligne de séparation dans le texte envoyé. Configurez également les options de configuration liées aux conversations, indépendamment des permissions accordées à l’agent. Consultez les sections [Outils et permissions](permissions.md) et [Mémoire et contexte](context.md).
+
+### Nommage automatique des conversations
+
+Dans Paramètres → Chat → Conversations, choisissez de ne pas nommer automatiquement les discussions, de nommer une fois les nouvelles discussions ou de les renommer après chaque réponse terminée. Par défaut, les nouvelles discussions sont nommées une fois avec leur propre modèle. Vous pouvez choisir un autre modèle d’un canal configuré. Le nom est généré seulement après la fin de la réponse principale ; une réponse échouée ou annulée ne le déclenche pas. Le titre décrit brièvement la tâche dans la langue de l’utilisateur. La requête de nommage est distincte du contexte et n’ajoute aucun message.

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Konuşmalar ve projeler
 
@@ -35,3 +35,7 @@ Seçilen model sağlayıcısına göndermeye yetkin olmadığınız kimlik bilgi
 ## Tercihler
 
 Sohbet ve kullanıcı tercihleri, örneğin araçların açık/kapalı olması ve klavye kısayolları gibi özellikler, WebUI aracılığıyla yönetilir ve uygulandığı sunucuda saklanır. Klavye davranışlarını ayarlamak için Ayarlar bölümünü açın; mesaj göndermek ile satır sonu işlemlerini ayırt edin. Sohbetle ilgili araçların açık/kapalı olması gibi özellikleri, Agent yetkililerinden ayrı olarak ayarlayın. Daha fazla bilgi için [Araçlar ve yetkiler](permissions.md) ve [Bellek ve bağlam](context.md) bölümlerine bakın.
+
+### Otomatik konuşma adlandırma
+
+Ayarlar → Sohbet → Konuşmalar bölümünde otomatik adlandırmayı kapatmayı, yeni sohbetleri bir kez adlandırmayı veya tamamlanan her yanıttan sonra yeniden adlandırmayı seçin. Varsayılan olarak yeni sohbetler kendi konuşma modeliyle bir kez adlandırılır. Yapılandırılmış bir kanaldan başka bir model de seçebilirsiniz. Adlandırma yalnızca ana yanıt tamamlandıktan sonra çalışır; başarısız veya iptal edilen yanıtlar bunu tetiklemez. Başlık, görevi kullanıcının dilinde kısaca açıklar. Adlandırma isteği sohbet bağlamından ayrıdır ve sohbet mesajı eklemez.
