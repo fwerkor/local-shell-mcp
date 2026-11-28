@@ -9,7 +9,7 @@ const endpoints: TEndpointsConfig = {
   [EModelEndpoint.agents]: { order: 1 },
 };
 const models = { channel: ['model-a'] };
-const agents = {
+const agents: TAgentsMap = {
   'agent-a': {
     id: 'agent-a',
     name: 'Agent A',
@@ -18,9 +18,17 @@ const agents = {
     avatar: null,
     provider: EModelEndpoint.openAI,
     model: 'model-a',
-    model_parameters: {},
+    model_parameters: {
+      temperature: 1,
+      maxContextTokens: 4096,
+      max_context_tokens: 4096,
+      max_output_tokens: 1024,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    },
   },
-} as TAgentsMap;
+};
 const options = { favorites: [model, agent], endpoints, models, agents };
 
 describe('getPinnedSelection', () => {
