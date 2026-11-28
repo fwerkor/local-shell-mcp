@@ -11,6 +11,7 @@ import { cn } from '~/utils';
 interface ToolCardProps {
   item: AgentItem;
   selected: boolean;
+  disabled?: boolean;
   onToggle: (item: AgentItem) => void;
   onConfigure?: (item: AgentItem) => void;
   isFavorited?: boolean;
@@ -82,6 +83,7 @@ function ItemIconView({ item, size }: ItemIconProps) {
 function ToolCardImpl({
   item,
   selected,
+  disabled = false,
   onToggle,
   onConfigure,
   isFavorited = false,
@@ -119,11 +121,12 @@ function ToolCardImpl({
     >
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onToggle(item)}
         aria-pressed={selected}
         className={cn(
           'flex h-full w-full cursor-pointer flex-col gap-2 rounded-2xl p-4 text-left touch:pb-9',
-          'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring-primary',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring-primary disabled:cursor-not-allowed disabled:opacity-60',
         )}
       >
         <div className="flex w-full items-start gap-3">
