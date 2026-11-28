@@ -62,6 +62,12 @@ async def test_startup_config_is_public_but_private_endpoints_require_auth(tmp_p
         }
         endpoints = (await client.get("/api/endpoints", headers=alice)).json()
         assert endpoints["agents"]["type"] == "agents"
+        repo.save_setting("alice", "endpoints", {"agents": {"maxContextTokens": 8192}})
+        assert (await client.get("/api/endpoints", headers=alice)).json()["agents"]["maxContextTokens"] == 8192
+        assert "maxContextTokens" not in (await client.get("/api/endpoints", headers={"x-test-owner": "bob"})).json()["agents"]
+        repo.save_setting("alice", "endpoints", {"agents": {"maxContextTokens": True}})
+        assert "maxContextTokens" not in (await client.get("/api/endpoints", headers=alice)).json()["agents"]
+        repo.save_setting("alice", "endpoints", {})
         assert "openAI" in endpoints
         assert "very-private" not in str(endpoints)
         models = (await client.get("/api/models", headers=alice)).json()

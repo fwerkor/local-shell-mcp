@@ -1,7 +1,12 @@
 import { useMemo } from 'react';
 import { isAgentsEndpoint, resolveModelCatalogKey } from 'librechat-data-provider';
 import type { TConversation, TModelTokenomics } from 'librechat-data-provider';
-import { useGetStartupConfig, useTokenConfigQuery, useGetAgentByIdQuery } from '~/data-provider';
+import {
+  useGetStartupConfig,
+  useTokenConfigQuery,
+  useGetAgentByIdQuery,
+  useGetEndpointsQuery,
+} from '~/data-provider';
 import { getModelSpec } from '~/utils';
 
 export interface TokenLimits {
@@ -9,6 +14,7 @@ export interface TokenLimits {
   maxContextTokens?: number;
   rates?: TModelTokenomics;
   endpoint?: string;
+  channel?: string;
   model?: string;
 }
 
@@ -25,6 +31,7 @@ function toNumber(value: unknown): number | undefined {
 export default function useTokenLimits(conversation: TConversation | null): TokenLimits {
   const { data: startupConfig } = useGetStartupConfig();
   const { data: tokenConfig } = useTokenConfigQuery();
+  const { data: endpointsConfig } = useGetEndpointsQuery();
 
   const endpoint = conversation?.endpoint ?? '';
   const agentId = isAgentsEndpoint(endpoint) ? conversation?.agent_id : null;
@@ -46,15 +53,28 @@ export default function useTokenLimits(conversation: TConversation | null): Toke
       lookupEndpoint = specPreset.endpoint ?? lookupEndpoint;
       lookupModel = lookupModel || (specPreset.model ?? '');
     }
+    const channel = agentId && !agent ? undefined : lookupEndpoint;
     lookupEndpoint = resolveModelCatalogKey(lookupEndpoint, tokenConfig);
 
     const rates = tokenConfig?.[lookupEndpoint]?.[lookupModel];
     const maxContextTokens =
       toNumber(maxContextSetting) ??
+      toNumber(agent?.model_parameters?.max_context_tokens) ??
       toNumber(agent?.model_parameters?.maxContextTokens) ??
       toNumber(specPreset?.maxContextTokens) ??
+      toNumber(endpointsConfig?.agents?.maxContextTokens) ??
       rates?.context;
 
-    return { maxContextTokens, rates, endpoint: lookupEndpoint, model: lookupModel };
-  }, [endpoint, model, spec, maxContextSetting, agent, startupConfig, tokenConfig]);
+    return { maxContextTokens, rates, endpoint: lookupEndpoint, channel, model: lookupModel };
+  }, [
+    endpoint,
+    model,
+    spec,
+    maxContextSetting,
+    agent,
+    agentId,
+    startupConfig,
+    tokenConfig,
+    endpointsConfig,
+  ]);
 }

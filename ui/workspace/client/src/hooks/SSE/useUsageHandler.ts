@@ -174,8 +174,8 @@ export default function useUsageHandler(): UsageHandlers {
       const overhead = data.effectiveInstructionTokens ?? data.breakdown?.instructionTokens ?? 0;
       setModelOverhead(
         overheadKey(
-          submission.conversation?.endpoint,
-          submission.conversation?.model,
+          data.channel ?? submission.conversation?.endpoint,
+          data.model ?? submission.conversation?.model,
           data.agentId,
         ),
         overhead,
