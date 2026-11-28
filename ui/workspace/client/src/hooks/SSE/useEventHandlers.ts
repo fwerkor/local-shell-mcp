@@ -27,7 +27,7 @@ import type { TResData, TFinalResData, ConvoGenerator } from '~/common';
 import type { ConversationCursorData } from '~/utils';
 import {
   logger,
-  setDraft,
+  restoreSubmittedDraft,
   getConversationDraftId,
   scrollToEnd,
   hasRealTitle,
@@ -1011,7 +1011,7 @@ export default function useEventHandlers({
               [QueryKeys.messages, currentConvoId],
               abortMessages,
             );
-            setDraft({ id: currentConvoId, value: requestMessage?.text });
+            restoreSubmittedDraft({ id: currentConvoId, value: requestMessage?.text });
             restorePendingQuotes(currentConvoId, requestMessage?.quotes);
             return;
           }
@@ -1023,7 +1023,7 @@ export default function useEventHandlers({
           }
           setMessages([]);
           queryClient.setQueryData<TMessage[]>([QueryKeys.messages, Constants.NEW_CONVO], []);
-          setDraft({
+          restoreSubmittedDraft({
             id: getConversationDraftId(runIndex, Constants.NEW_CONVO),
             value: requestMessage?.text,
           });
@@ -1091,7 +1091,7 @@ export default function useEventHandlers({
             currentConvoId === Constants.NEW_CONVO;
 
           setFinalMessages(currentConvoId, isNewChat ? [] : [...messages]);
-          setDraft({
+          restoreSubmittedDraft({
             id: getConversationDraftId(runIndex, currentConvoId),
             value: requestMessage?.text,
           });
@@ -1120,7 +1120,11 @@ export default function useEventHandlers({
             (message) => message.messageId !== submission.initialResponse.messageId,
           );
         } else if (requestMessage != null) {
-          finalMessages = [...messages, requestMessage, ...(responseMessage ? [responseMessage] : [])];
+          finalMessages = [
+            ...messages,
+            requestMessage,
+            ...(responseMessage ? [responseMessage] : []),
+          ];
         } else if (
           responseMessage != null &&
           responseMessage.parentMessageId === submission.userMessage.messageId

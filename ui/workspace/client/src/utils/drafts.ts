@@ -1250,6 +1250,13 @@ export const setDraft = ({ id, value }: { id: string; value?: string }) => {
 export const getDraft = (id?: string): string | null =>
   decodeBase64((getLocalStorageItem(`${LocalStorageKeys.TEXT_DRAFT}${id ?? ''}`) ?? '') || '');
 
+/** Recover a failed submission only when there is no newer unsent text. */
+export const restoreSubmittedDraft = ({ id, value }: { id: string; value?: string }) => {
+  if (!getDraft(id) && value) {
+    setDraft({ id, value });
+  }
+};
+
 /** Discards a key's attachments while leaving its text where it is. New Chat deletes the uploads
  * the draft was holding, so restoring those chips would put back a file the server no longer has;
  * a typed message has no such resource behind it, and losing it is what made an unsaved chat the

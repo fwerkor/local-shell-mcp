@@ -26,6 +26,7 @@ import {
   migrateTextDraft,
   renewNewConversationDraftToken,
   setDraft,
+  restoreSubmittedDraft,
   setFilesDraft,
   removePendingTextAttachmentDraft,
   setPendingTextAttachmentDraft,
@@ -1120,5 +1121,18 @@ describe('clearDraft navigation ordering', () => {
     jest.advanceTimersByTime(3000);
     expect(getDraft('chat-a')).toBe('');
     expect(getDraft('chat-b')).toBe('');
+  });
+});
+
+describe('restoreSubmittedDraft', () => {
+  it('recovers an early aborted submission only when no follow-up is staged', () => {
+    const id = 'abort-recovery';
+    clearAllDrafts(id);
+    restoreSubmittedDraft({ id, value: 'submitted' });
+    expect(getDraft(id)).toBe('submitted');
+    setDraft({ id, value: 'unsent follow-up' });
+    restoreSubmittedDraft({ id, value: 'submitted' });
+    expect(getDraft(id)).toBe('unsent follow-up');
+    clearAllDrafts(id);
   });
 });

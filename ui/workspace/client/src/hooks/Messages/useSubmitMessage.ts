@@ -71,11 +71,15 @@ export default function useSubmitMessage() {
         return false;
       }
       const draftId = getConversationDraftId(index, conversation?.conversationId);
-      clearAllDrafts(draftId);
-      if (isNewConversationDraftId(draftId)) {
-        clearAllDrafts(getPendingDraftId(index));
+      // Explicit file overrides identify an independent queued submission.
+      // It must not consume the next message staged in the composer.
+      if (data.overrideFiles === undefined) {
+        clearAllDrafts(draftId);
+        if (isNewConversationDraftId(draftId)) {
+          clearAllDrafts(getPendingDraftId(index));
+        }
+        methods.reset();
       }
-      methods.reset();
     },
     [
       ask,
