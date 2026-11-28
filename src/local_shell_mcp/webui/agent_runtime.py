@@ -87,6 +87,10 @@ def _retryable_model_error(error: Exception) -> bool:
     """Retry transient transport failures and classified provider-side failures."""
     import httpx
 
+    from .virtual_channels import VirtualUnavailable
+
+    if isinstance(error, VirtualUnavailable):
+        return True
     if isinstance(error, ProviderStreamError):
         return error.retryable
 
@@ -251,14 +255,18 @@ async def run_agent_loop(
                             if reasoning and reasoning[-1].get('type') == 'thinking' and not reasoning[-1].get('signature'):
                                 reasoning[-1]['thinking'] += item.text
                             else:
-                                reasoning.append({'type': 'thinking', 'thinking': item.text})
+                                reasoning.append({'type': 'thinking', 'thinking': item.text,
+                                                  **({"route_scope": item.provider_data["route_scope"]}
+                                                     if (item.provider_data or {}).get("route_scope") else {})})
                             if item.text and on_thought is not None:
                                 await on_thought(item.text)
                         elif item.kind == 'signature':
                             if reasoning and reasoning[-1].get('type') == 'thinking':
                                 reasoning[-1]['signature'] = item.signature
                         elif item.kind == 'redacted_thinking':
-                            reasoning.append({'type': 'redacted_thinking', 'data': item.data})
+                            reasoning.append({'type': 'redacted_thinking', 'data': item.data,
+                                              **({"route_scope": item.provider_data["route_scope"]}
+                                                 if (item.provider_data or {}).get("route_scope") else {})})
                         elif item.kind == 'responses_item' and item.provider_data:
                             reasoning.append({'type': 'responses_item', **item.provider_data})
                     elif item:

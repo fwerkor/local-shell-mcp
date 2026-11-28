@@ -1,5 +1,5 @@
 /** @jest-environment-options {"url":"https://lsm.invalid/"} */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
 import ModelProviders, { isLoopback } from './ModelProviders';
@@ -267,4 +267,59 @@ it('localizes the manual account authorization instructions and callback control
     popup.mockRestore();
     mockLocale = 'en';
   }
+});
+
+it('creates a virtual channel in the existing inline editor with per-model member mappings', async () => {
+  const backup = { ...existing, name: 'Backup', models: ['pro'], model_contexts: { pro: 32768 } };
+  get.mockResolvedValue({ providers: [existing, backup] });
+  mount();
+  await screen.findByRole('button', { name: 'Edit DeepSeek' });
+  fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Virtual channel' }));
+  expect(screen.queryByLabelText('Model API base URL')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Channel name'), { target: { value: 'Pool' } });
+  fireEvent.change(screen.getByLabelText('Routing strategy'), { target: { value: 'weighted_round_robin' } });
+  expect(screen.getByRole('switch', { name: 'Session affinity' })).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Add model' }));
+  fireEvent.change(screen.getByLabelText('Model identifiers'), { target: { value: 'alias' } });
+  const members = screen.getByLabelText('Add member');
+  fireEvent.change(members, { target: { value: '1' } });
+  fireEvent.change(members, { target: { value: '1' } });
+  fireEvent.change(screen.getAllByLabelText('Weight')[0], { target: { value: '3' } });
+  expect(screen.getByText(/Context window: 32,768/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, {
+    name: 'Pool', provider: 'virtual', strategy: 'weighted_round_robin', session_affinity: true,
+    routes: { alias: [{ channel: 'DeepSeek', model: 'flash', weight: 3 }, { channel: 'Backup', model: 'pro', weight: 1 }] },
+    model_sampling: {},
+  });
+  expect(post).not.toHaveBeenCalled();
+});
+
+it('allows nested virtual members while excluding self and channels that would create cycles', async () => {
+  const virtual = (name: string, model: string, channel: string, target: string) => ({
+    ...existing, name, provider: 'virtual', models: [model], base_url: '',
+    model_contexts: { [model]: 32768 }, auto_discover: false,
+    routes: { [model]: [{ channel, model: target, weight: 1 }] },
+    strategy: 'priority', session_affinity: true,
+  });
+  const child = virtual('Child', 'child', 'DeepSeek', 'flash');
+  const parent = virtual('Parent', 'parent', 'Child', 'child');
+  const ancestor = virtual('Ancestor', 'ancestor', 'Parent', 'parent');
+  const independent = virtual('Independent', 'other', 'DeepSeek', 'old');
+  get.mockResolvedValue({ providers: [existing, child, parent, ancestor, independent] });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Parent' }));
+  const select = screen.getByLabelText('Add member');
+  expect(within(select).queryByRole('option', { name: 'Parent / parent' })).not.toBeInTheDocument();
+  expect(within(select).queryByRole('option', { name: 'Ancestor / ancestor' })).not.toBeInTheDocument();
+  const option = within(select).getByRole('option', { name: 'Independent / other' });
+  fireEvent.change(select, { target: { value: (option as HTMLOptionElement).value } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    routes: { parent: [{ channel: 'Child', model: 'child', weight: 1 },
+      { channel: 'Independent', model: 'other', weight: 1 }] },
+  }));
 });
