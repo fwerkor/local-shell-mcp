@@ -11,7 +11,7 @@ import type {
   TAssignConversationToProjectResponse,
 } from 'librechat-data-provider';
 import type { UseMutationResult } from '@tanstack/react-query';
-import { enqueue, invalidateConversationLists } from '~/utils';
+import { enqueue, invalidateConversationLists, updateConvoInAllQueries } from '~/utils';
 import { getSessionPrincipal } from '~/utils/session';
 import store from '~/store';
 
@@ -199,6 +199,14 @@ export const useAssignConversationToProjectMutation = (): UseMutationResult<
           updateActiveConversation(
             result.conversation.conversationId,
             result.conversation.chatProjectId ?? null,
+          );
+          updateConvoInAllQueries(
+            queryClient,
+            result.conversation.conversationId,
+            (conversation) => ({
+              ...conversation,
+              chatProjectId: result.conversation.chatProjectId ?? null,
+            }),
           );
         }
         [result.previousProjectId, result.projectId].forEach((projectId) => {
