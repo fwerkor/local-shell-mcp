@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
+<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kanal-kanal dan model-modelnya
 
@@ -42,6 +42,8 @@ Perlakukan URL callback sebagai kredensial: jangan pernah mengirimkannya di chat
 ## Penemuan model dan batasan konteks
 
 Aktifkan mekanisme penemuan otomatis untuk meminta informasi model dari penyedia layanan tersebut. Controller memperbarui informasi tersebut secara berkala (saat ini setiap sepuluh menit). Pengaturan manual juga tersedia. Jika penemuan model gagal, data model yang telah disimpan sebelumnya tetap akan dipertahankan. Jika penyedia layanan tidak memiliki endpoint yang sesuai untuk mengirimkan informasi model, maka aktivasi mekanisme penemuan harus dinonaktifkan, dan identifikasi model perlu dilakukan secara manual, satu per baris.
+
+Penemuan mengenali metadata jendela konteks eksplisit, termasuk `limit.context` bertingkat dari OpenCode Go/Zen, `context_length` dari OpenRouter, `max_model_len` dari vLLM, dan `inputTokenLimit` dari Gemini. Jika hanya panjang input maksimum yang dilaporkan, nilai tersebut digunakan sebagai cadangan; batas output dan nama model tidak menentukan kapasitas konteks. Jika keduanya tidak dilaporkan, jendela konteks tetap tidak diketahui.
 
 Tentukan nilai konteks untuk setiap model ketika model tersebut diketahui. Nilai yang ditentukan secara eksplisit akan menggantikan metadata yang ditemukan atau mengisi nilai yang hilang. Editor dapat menerima 1 hingga 2.000.000 token. Ini merupakan rentang konfigurasi, bukan jaminan bahwa penyedia layanan mendukung kapasitas tersebut. Gunakan batasan yang sesuai untuk deployment Anda, dengan memperhatikan konfigurasi server dan batasan model itu sendiri.
 

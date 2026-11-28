@@ -528,6 +528,43 @@ async def test_model_sampling_defaults_are_independent_and_validated(setup_profi
         assert provider_config("Research", "a").sampling == {}
 
 
+@pytest.mark.parametrize('kind,metadata,expected', [
+    ('openai', {'limit': {'context': 1000000, 'input': 616000, 'output': 384000}}, 1000000),
+    ('openai-responses', {'limit': {'context': 1050000, 'input': 922000}}, 1050000),
+    ('anthropic', {'limit': {'context': 200000}}, 200000),
+    ('openai', {'context_length': 128000, 'top_provider': {'context_length': 64000}}, 128000),
+    ('openai', {'top_provider': {'context_length': 64000, 'max_completion_tokens': 8192}}, 64000),
+    ('openai', {'max_model_len': 32768}, 32768),
+    ('openai', {'contextWindow': 262144}, 262144),
+    ('openai', {'limits': {'max_context_length': 131072}}, 131072),
+    ('openai', {'max_input_tokens': 60000, 'limit': {'context': 100000}}, 100000),
+    ('openai', {'limit': {'context': True}, 'max_input_tokens': 60000}, 60000),
+    ('openai', {'context_length': 0, 'limits': {'context': 2000000}}, 2000000),
+    ('openai', {'limit': {'input': 50000, 'output': 8192}}, 50000),
+    ('openai', {'maxInputTokens': 50000}, 50000),
+    ('anthropic', {'max_input_tokens': 200000}, 200000),
+    ('google', {'inputTokenLimit': 1048576, 'outputTokenLimit': 8192}, 1048576),
+    ('google', {'inputTokenLimit': True, 'limit': {'context': 65536}}, 65536),
+    ('openai', {'limit': {'output': 8192}, 'max_output_tokens': 8192}, None),
+    ('openai', {'meta': {'n_ctx_train': 131072}}, None),
+    ('openai', {'limit': {'context': '1000000', 'input': -1}}, None),
+    ('openai', {'limit': {'context': 2000001}, 'limits': {'context': 1.5}}, None),
+    ('openai', {'limit': 1000000, 'limits': [], 'top_provider': None}, None),
+    ('openai', {}, None),
+])
+def test_discovery_context_metadata_formats(kind, metadata, expected):
+    from local_shell_mcp.webui.model_discovery import _parse_page
+
+    if kind == 'google':
+        data = {'models': [{'name': 'models/test-model',
+                            'supportedGenerationMethods': ['generateContent'], **metadata}]}
+    else:
+        data = {'data': [{'id': 'test-model', **metadata}, {'id': 'test-model'}]}
+    models = {}
+    assert _parse_page(kind, data, models) == {}
+    assert models == {'test-model': expected}
+
+
 @pytest.mark.asyncio
 async def test_model_discovery_uses_saved_key_only_at_original_endpoint(setup_profiles, monkeypatch):
     _, app = setup_profiles

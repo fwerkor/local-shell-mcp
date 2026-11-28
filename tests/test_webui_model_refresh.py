@@ -24,6 +24,40 @@ def saved(database, name='Automatic'):
 
 
 @pytest.mark.asyncio
+async def test_saved_channel_refresh_recovers_nested_context_metadata(setup_profiles, monkeypatch):
+    _, app = setup_profiles
+    original = httpx.AsyncClient
+    items = [{'id': 'flash'}, {'id': 'pro'}, {'id': 'unknown'}]
+
+    def respond(request):
+        assert str(request.url) == BASE + '/models'
+        return httpx.Response(200, json={'data': items})
+
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(
+        transport=httpx.MockTransport(respond), **kw))
+    async with original(transport=httpx.ASGITransport(app=app),
+                        base_url='https://lsm.invalid', headers=_ADMIN) as client:
+        created = await client.put(PATH, json={
+            **CONNECTION, 'auto_discover': True, 'models': ['flash', 'pro', 'unknown'],
+            'model_contexts': {'pro': 32768},
+        })
+        assert created.status_code == 200, created.text
+        assert profile('Automatic')['model_contexts'] == {'pro': 32768}
+        items = [
+            {'id': 'flash', 'limit': {'context': 1000000, 'output': 384000}},
+            {'id': 'pro', 'limit': {'context': 1000000}},
+            {'id': 'unknown', 'limit': {'output': 8192}},
+        ]
+        await model_discovery.refresh_model_channels(routes._repo().database)
+        current = profile('Automatic')
+        assert current['discovered_model_contexts'] == {'flash': 1000000, 'pro': 1000000}
+        assert current['model_contexts'] == {'flash': 1000000, 'pro': 32768}
+        assert current['model_context_overrides'] == {'pro': 32768}
+        assert (await client.get('/api/endpoints/token-config')).json()['Automatic'] == {
+            'flash': {'context': 1000000}, 'pro': {'context': 32768}}
+
+
+@pytest.mark.asyncio
 async def test_automatic_catalog_save_refresh_toggle_and_failure(setup_profiles, monkeypatch):
     _, app = setup_profiles
     calls = []

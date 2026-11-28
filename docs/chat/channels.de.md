@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
+<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kanäle und Modelle
 
@@ -42,6 +42,8 @@ Behandeln Sie die Callback-URL wie Zugangsdaten: Senden Sie sie niemals in einem
 ## Entdeckung von Modellen und Kontextbegrenzungen
 
 Ermöglichen Sie die automatische Erforschung, um Informationen über das Modell vom Anbieter zu erhalten. Der Controller aktualisiert diese Daten regelmäßig – derzeit alle zehn Minuten. Es ist auch möglich, die Daten manuell zu aktualisieren. Bei Fehlern bei der Erforschung werden die bisher gespeicherten Modelldaten beibehalten. Falls der Anbieter kein kompatibles Endpunkt für die Listung von Modellen hat, sollten Sie die Erforschung deaktivieren und die Modellidentifikatoren manuell eingeben – jeweils eine Identifikationsnummer pro Zeile.
+
+Die Erkennung berücksichtigt explizite Metadaten zum Kontextfenster, darunter das verschachtelte `limit.context` von OpenCode Go/Zen, `context_length` von OpenRouter, `max_model_len` von vLLM und `inputTokenLimit` von Gemini. Wird nur die maximale Eingabelänge angegeben, dient sie als Ersatzwert; Ausgabelimits und Modellnamen bestimmen die Kontextkapazität nicht. Ohne beide Angaben bleibt das Kontextfenster unbekannt.
 
 Bestimmen Sie den Kontext für jedes Modell, sobald dieser bekannt ist. Eine explizit festgelegte Wertung übertrifft die ermittelten Metadaten oder ergänzt fehlende Werte. Der Editor kann 1 bis 2.000.000 Token verarbeiten. Dies ist jedoch nur eine Konfigurationsgrenze – es gibt keine Garantie dafür, dass der Anbieter diese Kapazität unterstützt. Verwenden Sie die für Ihre Implementierung geeignete Grenze, wobei Sie berücksichtigen sollten, dass sowohl die Serverseitige Konfiguration als auch die eigenen Grenzen des Modells eine Rolle spielen.
 

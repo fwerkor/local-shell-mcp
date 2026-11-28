@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
+<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kanallar ve modeller
 
@@ -42,6 +42,8 @@ Geri çağırma URL'sini kimlik bilgisi olarak ele alın; asla sohbette gönderm
 ## Model keşfi ve bağlam sınırları
 
 Model bilgilerini talep etmek için otomatik keşif özelliğini etkinleştirin. Controller, bu bilgileri periyodik olarak yeniler (şu an her on dakika bir kez); manuel olarak da bilgileri yenileyebilirsiniz. Başarısız olan keşiflerde, daha önce kaydedilen model verileri korunur. Eğer sağlayıcı uyumlu bir model listesi sunucusuna sahip değilse, keşif özelliğini devre dışı bırakın ve model tanımlamalarını manuel olarak girin.
+
+Keşif, OpenCode Go/Zen'in iç içe `limit.context` alanı, OpenRouter'ın `context_length` alanı, vLLM'in `max_model_len` alanı ve Gemini'nin `inputTokenLimit` alanı gibi açık bağlam penceresi meta verilerini tanır. Yalnızca azami giriş uzunluğu bildiriliyorsa yedek değer olarak kullanılır; çıkış sınırları ve model adları bağlam kapasitesini belirlemez. İki bilgi de bildirilmezse bağlam penceresi bilinmez.
 
 Her model için bağlam bilgilerini belirtin. Açıkça belirtilen değerler, keşfedilen meta verileri geçersiz kılar veya eksik olan değerleri doldurur. Editör, 1 ile 2.000.000 arası jeton kabul eder; bu bir yapılandırma aralığıdır ve sağlayıcının bu kapasiteyi desteklediğinin bir garantisi değildir. Kullandığınız sınırları belirleyin; bunu sunucu tarafı yapılandırmalarını ve modelin kendi sınırlarını göz önünde bulundurarak yapın.
 
