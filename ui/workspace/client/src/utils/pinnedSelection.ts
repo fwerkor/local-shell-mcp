@@ -30,20 +30,37 @@ export function getPinnedSelection({
   agents,
   startup,
 }: PinnedSelectionOptions): TPreset | undefined {
+  const allowedEndpoints = startup?.modelSpecs?.addedEndpoints ?? [];
+  const rawEndpointVisible = (endpoint: string) =>
+    startup?.interface?.modelSelect !== false &&
+    !!endpoints?.[endpoint] &&
+    (allowedEndpoints.length === 0 || allowedEndpoints.some((entry) => entry === endpoint));
   for (const favorite of orderPinnedFavorites(favorites, order)) {
     if (favorite.agentId) {
-      if (endpoints?.[EModelEndpoint.agents] && (agents == null || agents[favorite.agentId])) {
+      if (
+        rawEndpointVisible(EModelEndpoint.agents) &&
+        (agents == null || agents[favorite.agentId])
+      ) {
         return { endpoint: EModelEndpoint.agents, agent_id: favorite.agentId };
       }
     } else if (favorite.spec) {
       const spec = startup?.modelSpecs?.list?.find((entry) => entry.name === favorite.spec);
-      if (spec) {
-        return getModelSpecPreset(spec);
+      const preset = getModelSpecPreset(spec);
+      if (preset?.endpoint && endpoints?.[preset.endpoint]) {
+        if (preset.endpoint === EModelEndpoint.agents) {
+          if (preset.agent_id && (agents == null || agents[preset.agent_id])) {
+            return preset;
+          }
+        } else {
+          if (!preset.model || models == null || models[preset.endpoint]?.includes(preset.model)) {
+            return preset;
+          }
+        }
       }
     } else if (
       favorite.endpoint &&
       favorite.model &&
-      endpoints?.[favorite.endpoint] &&
+      rawEndpointVisible(favorite.endpoint) &&
       (models == null || models[favorite.endpoint]?.includes(favorite.model))
     ) {
       return {
