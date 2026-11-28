@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Canaux et modèles
 
@@ -46,6 +46,8 @@ Activer la découverte automatique afin de demander des informations sur le mod�
 La découverte reconnaît les métadonnées explicites de fenêtre de contexte, notamment `limit.context` imbriqué d’OpenCode Go/Zen, `context_length` d’OpenRouter, `max_model_len` de vLLM et `inputTokenLimit` de Gemini. Si seule la longueur maximale d’entrée est indiquée, elle sert de valeur de repli ; les limites de sortie et les noms de modèles ne déterminent pas la capacité de contexte. Sans ces deux informations, la fenêtre reste inconnue.
 
 Spécifiez la fenêtre de contexte pour chaque modèle, lorsque ce contexte est connu. Une valeur spécifique par modèle peut remplacer les métadonnées découvertes ou combler des valeurs manquantes. L’éditeur accepte de 1 à 2 000 000 de tokens ; il s’agit donc d’une plage de configuration, et non d’une garantie que le fournisseur prend en charge cette capacité. Utilisez la limite effective adaptée à votre déploiement, en tenant compte des configurations côté serveur ainsi que des limites propres au modèle lui-même.
+
+Pour les points d’accès officiels reconnus, les valeurs de contexte manquantes peuvent être complétées à partir du catalogue public models.dev en utilisant les identifiants exacts du fournisseur et du modèle. Les métadonnées du fournisseur priment sur ce repli, et les réglages manuels priment sur les deux. Le contrôleur partage un cache en mémoire du catalogue valable six heures ; en cas d’échec, il conserve le dernier cache valide et réessaie après dix minutes. Aucun identifiant d’accès de canal, URL ou identifiant de modèle n’est envoyé à models.dev. Les points d’accès inconnus et identifiants sans correspondance restent sans limite connue si le fournisseur n’en indique pas.
 
 ## Échantillonnage, raisonnement et utilisation
 

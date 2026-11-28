@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Canales y modelos
 
@@ -46,6 +46,8 @@ Habilite el descubrimiento automático para solicitar información sobre los mod
 El descubrimiento reconoce metadatos explícitos de la ventana de contexto, incluidos `limit.context` anidado de OpenCode Go/Zen, `context_length` de OpenRouter, `max_model_len` de vLLM e `inputTokenLimit` de Gemini. Si solo se informa de la longitud máxima de entrada, se utiliza como alternativa; los límites de salida y los nombres de los modelos no determinan la capacidad de contexto. Sin ninguno de estos datos, la ventana sigue siendo desconocida.
 
 Especificar la ventana de contexto para cada modelo, cuando esto sea posible. Una valor explícita por modelo puede reemplazar los metadatos descubiertos o completar los valores que faltan. El editor acepta entre 1 y 2,000,000 tokens; se trata de un rango de configuración, no una garantía de que el proveedor soporte esa capacidad. Utilice el límite efectivo adecuado para su implementación, teniendo en cuenta la configuración del lado del servidor y los límites propios del modelo.
+
+En los puntos de conexión oficiales reconocidos, los límites de contexto ausentes pueden completarse con el catálogo público models.dev mediante identificadores exactos del proveedor y del modelo. Los metadatos del proveedor tienen prioridad sobre esta alternativa y los ajustes manuales sobre ambos. El controlador comparte una caché del catálogo en memoria de seis horas; si falla la descarga, conserva la última caché válida y vuelve a intentarlo tras diez minutos. No se envían credenciales de canales, URL ni identificadores de modelos a models.dev. Los puntos de conexión desconocidos y los identificadores sin coincidencia siguen sin límite conocido si el proveedor no lo indica.
 
 ## Muestreo, razonamiento y uso
 

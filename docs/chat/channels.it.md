@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Canali e modelli
 
@@ -46,6 +46,8 @@ Trattare l’URL di callback come una credenziale: non inviarlo mai in una chat 
 Il rilevamento riconosce i metadati espliciti della finestra di contesto, tra cui `limit.context` annidato di OpenCode Go/Zen, `context_length` di OpenRouter, `max_model_len` di vLLM e `inputTokenLimit` di Gemini. Se è indicata solo la lunghezza massima dell’input, questa viene usata come ripiego; i limiti di output e i nomi dei modelli non determinano la capacità del contesto. In assenza di entrambe le informazioni, la finestra rimane sconosciuta.
 
 Specificare la finestra di contesto per ogni modello, quando questo è noto. Un valore esplicito per ogni modello può sovrascrivere i metadati scoperti o completare i valori mancanti. L’editor accetta da 1 a 2.000.000 di token; si tratta di un intervallo di configurazione, non una garanzia che il fornitore supporti tale capacità. Utilizzare il limite effettivo per la propria implementazione, tenendo conto delle configurazioni del server e dei limiti propri del modello stesso.
+
+Per gli endpoint ufficiali riconosciuti, i valori di contesto mancanti possono essere completati dal catalogo pubblico models.dev tramite gli ID esatti del fornitore e del modello. I metadati del fornitore hanno la precedenza su questo ripiego e le impostazioni manuali su entrambi. Il Controller condivide una cache in memoria del catalogo valida sei ore; in caso di errore conserva l’ultima cache valida e riprova dopo dieci minuti. Nessuna credenziale di canale, URL o ID di modello viene inviata a models.dev. Gli endpoint sconosciuti e gli ID senza corrispondenza restano senza un limite noto se il fornitore non lo comunica.
 
 ## Campionamento, ragionamento e utilizzo
 
