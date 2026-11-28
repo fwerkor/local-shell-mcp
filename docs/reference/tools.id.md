@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # Referensi tools
 
 Page ini dibangun dari MCP tool schemas yang sebenarnya. Jalankan `python scripts/generate-tools-reference.py` setelah mengubah public tool surface untuk memperbarui English reference.
@@ -41,11 +41,12 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `environment_get`
 
-Mengembalikan version, workspace, auth, policy, dan environment information secara lokal atau pada remote machine.
+Mengembalikan version, workspace, auth, policy, dan environment information secara lokal atau pada remote machine. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `skill_list`
 
-Mencantumkan installed Agent Skills tanpa memuat instructions. MCP tool surface tetap tetap; penambahan atau penghapusan Skill directories terlihat pada call berikutnya.
+Mencantumkan installed Agent Skills tanpa memuat instructions. MCP tool surface tetap tetap; penambahan atau penghapusan Skill directories terlihat pada call berikutnya. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-Memuat installed Skill dengan exact name yang dikembalikan `skill_list`. Mengembalikan instructions lengkap `SKILL.md` dan related file paths.
+Memuat installed Skill dengan exact name yang dikembalikan `skill_list`. Mengembalikan instructions lengkap `SKILL.md` dan related file paths. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-Kelola Goal mode opsional untuk Logical Session eksplisit. Plan aktif mengaktifkan continuation otomatis setelah 15 menit tanpa aktivitas agent, maksimal 10 percobaan. session_id harus sama dengan id durable yang dikembalikan session_manage. Action: start, get, update, block, resume, finish, cancel. start memerlukan objective dan steps; finish mengharuskan semua steps completed atau skipped.
+Kelola Goal mode opsional untuk Logical Session eksplisit. Plan aktif mengaktifkan continuation otomatis setelah 15 menit tanpa aktivitas agent, maksimal 10 percobaan. session_id harus sama dengan id durable yang dikembalikan session_manage. Action: start, get, update, block, resume, finish, cancel. start memerlukan objective dan steps; finish mengharuskan semua steps completed atau skipped. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -130,6 +133,7 @@ Kelola Goal mode opsional untuk Logical Session eksplisit. Plan aktif mengaktifk
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `shell_read`
 
-Membaca recent output dari persistent local/remote shell session.
+Membaca recent output dari persistent local/remote shell session. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `shell_stop`
 
-Menghentikan persistent local/remote shell session.
+Menghentikan persistent local/remote shell session. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `shell_list`
 
-Mencantumkan persistent shell sessions secara lokal atau pada remote machine.
+Mencantumkan persistent shell sessions secara lokal atau pada remote machine. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `job_list`
 
-Daftar ringkas pekerjaan dengan pekerjaan aktif terlebih dahulu. Gunakan next_offset untuk halaman berikutnya; data dibatasi 32 KiB.
+Daftar ringkas pekerjaan dengan pekerjaan aktif terlebih dahulu. Gunakan next_offset untuk halaman berikutnya; data dibatasi 32 KiB. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -299,6 +306,7 @@ Daftar ringkas pekerjaan dengan pekerjaan aktif terlebih dahulu. Gunakan next_of
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `file_list`
 
-Mencantumkan files dan directories secara lokal atau pada remote machine.
+Mencantumkan files dan directories secara lokal atau pada remote machine. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -378,6 +386,7 @@ Mencantumkan files dan directories secara lokal atau pada remote machine.
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `file_tree`
 
-Mengembalikan compact directory tree secara lokal atau pada remote machine.
+Mengembalikan compact directory tree secara lokal atau pada remote machine. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -394,6 +403,7 @@ Mengembalikan compact directory tree secara lokal atau pada remote machine.
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `file_grep`
 
-Mencari isi files secara lokal atau pada remote machine.
+Mencari isi files secara lokal atau pada remote machine. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -429,6 +439,7 @@ Mencari isi files secara lokal atau pada remote machine.
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `file_read`
 
-Membaca satu file atau list files secara lokal atau pada remote machine.
+Membaca satu file atau list files secara lokal atau pada remote machine. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -447,6 +458,7 @@ Membaca satu file atau list files secara lokal atau pada remote machine.
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-Mendaftarkan, mencantumkan, mengambil, mengaktifkan, menonaktifkan, refresh, menghapus, atau memperbarui isolated environment/headers dari dynamic MCP servers. Gunakan transport `stdio` dengan command/args/cwd atau `streamable_http` dengan url. Secret env/header values dipersist secara privat dan tidak pernah dikembalikan.
+Mendaftarkan, mencantumkan, mengambil, mengaktifkan, menonaktifkan, refresh, menghapus, atau memperbarui isolated environment/headers dari dynamic MCP servers. Gunakan transport `stdio` dengan command/args/cwd atau `streamable_http` dengan url. Secret env/header values dipersist secara privat dan tidak pernah dikembalikan. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -617,19 +629,21 @@ Mendaftarkan, mencantumkan, mengambil, mengaktifkan, menonaktifkan, refresh, men
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-Mencari cached lightweight tool summaries dari enabled dynamic MCP servers. Dynamic tools tetap di luar `tools/list` server ini; gunakan returned `<server>:<tool>` name dengan `mcp_tool_inspect` sebelum call.
+Mencari cached lightweight tool summaries dari enabled dynamic MCP servers. Dynamic tools tetap di luar `tools/list` server ini; gunakan returned `<server>:<tool>` name dengan `mcp_tool_inspect` sebelum call. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `browser_snapshot`
 
-Capture persistent browser page: title, URL, bounded visible text, interactive elements dengan stable short refs seperti `e1`, recent page/network errors, dan optional screenshot path. Gunakan refs langsung sebagai `browser_act` targets sampai page navigate atau snapshot baru diambil.
+Capture persistent browser page: title, URL, bounded visible text, interactive elements dengan stable short refs seperti `e1`, recent page/network errors, dan optional screenshot path. Gunakan refs langsung sebagai `browser_act` targets sampai page navigate atau snapshot baru diambil. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -698,6 +712,7 @@ Capture persistent browser page: title, URL, bounded visible text, interactive e
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `browser_act`
 
-Menjalankan structured actions dalam persistent browser session. Mendukung navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text, dan wait_for_url. `target` dapat berupa `browser_snapshot` ref seperti `e1` atau CSS selector. Gunakan `browser_run_script` hanya jika high-level actions tidak cukup.
+Menjalankan structured actions dalam persistent browser session. Mendukung navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text, dan wait_for_url. `target` dapat berupa `browser_snapshot` ref seperti `e1` atau CSS selector. Gunakan `browser_run_script` hanya jika high-level actions tidak cukup. Gunakan verbose=true untuk menyertakan metadata diagnostik lengkap.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -715,6 +730,7 @@ Menjalankan structured actions dalam persistent browser session. Mendukung navig
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

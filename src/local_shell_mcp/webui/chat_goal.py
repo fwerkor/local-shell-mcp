@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 
+from ..result_compaction import compact_native_result
 from ..session_runtime import get_session_runtime_manager
 
 log = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ def observe_result(database, owner: str, run_id: str, name: str,
     if not bind(database, owner, run_id, session_id, plan_id):
         return json.dumps({"ok": False, "message": "Chat Goal could not be activated"})
     data["plan"] = get_session_runtime_manager().plan_state(session_id, subject=owner)
-    return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(compact_native_result(name, arguments, payload), ensure_ascii=False)
 
 
 def continuation(database, owner: str, run_id: str, messages: list[dict]) -> dict | None:

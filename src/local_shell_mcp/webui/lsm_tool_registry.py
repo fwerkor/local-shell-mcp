@@ -223,7 +223,7 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
                 "Update progress, finish completed plans, or block with a concrete reason. "
                 "Actions: start, get, update, block, resume, finish, cancel. "
                 "Start requires objective and steps; finish requires all steps completed or skipped. "
-                "session_id must be returned by session_manage."
+                "session_id must be returned by session_manage. Use verbose=true for diagnostic metadata."
             )
         if tool.name == "browser_session":
             writable = any(level == "write" and _can_authorize(

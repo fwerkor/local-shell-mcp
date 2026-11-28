@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # Tools referansı
 
 Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface değiştiğinde English reference güncellemek için `python scripts/generate-tools-reference.py` çalıştırın.
@@ -41,11 +41,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `environment_get`
 
-Local veya remote machine için version, workspace, auth, policy ve environment information döndürür.
+Local veya remote machine için version, workspace, auth, policy ve environment information döndürür. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `skill_list`
 
-Instructions yüklemeden installed Agent Skills listeler. MCP tool surface sabit kalır; Skill directories ekleme/silme bir sonraki call’da görünür.
+Instructions yüklemeden installed Agent Skills listeler. MCP tool surface sabit kalır; Skill directories ekleme/silme bir sonraki call’da görünür. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-`skill_list` tarafından döndürülen exact name ile installed Skill yükler. Full `SKILL.md` instructions ve related file paths döndürür.
+`skill_list` tarafından döndürülen exact name ile installed Skill yükler. Full `SKILL.md` instructions ve related file paths döndürür. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-Açık Logical Sessionın isteğe bağlı Goal modeunu yönetir. Etkin plan, agent etkinliği olmadan 15 dakika geçince otomatik continuationı etkinleştirir ve en fazla 10 denemeyle sınırlar. session_id, session_manage tarafından döndürülen aynı kalıcı id olmalıdır. Actionlar: start, get, update, block, resume, finish, cancel. start objective ve steps gerektirir; finish tüm steps değerlerinin completed veya skipped olmasını gerektirir.
+Açık Logical Sessionın isteğe bağlı Goal modeunu yönetir. Etkin plan, agent etkinliği olmadan 15 dakika geçince otomatik continuationı etkinleştirir ve en fazla 10 denemeyle sınırlar. session_id, session_manage tarafından döndürülen aynı kalıcı id olmalıdır. Actionlar: start, get, update, block, resume, finish, cancel. start objective ve steps gerektirir; finish tüm steps değerlerinin completed veya skipped olmasını gerektirir. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -130,6 +133,7 @@ Açık Logical Sessionın isteğe bağlı Goal modeunu yönetir. Etkin plan, age
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_read`
 
-Persistent local/remote shell session recent output okur.
+Persistent local/remote shell session recent output okur. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_stop`
 
-Persistent local/remote shell session sonlandırır.
+Persistent local/remote shell session sonlandırır. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_list`
 
-Local veya remote machine üzerinde persistent shell sessions listeler.
+Local veya remote machine üzerinde persistent shell sessions listeler. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-Etkin işlerin önce geldiği özet iş listesi. next_offset ile sayfalayın; veriler 32 KiB ile sınırlıdır.
+Etkin işlerin önce geldiği özet iş listesi. next_offset ile sayfalayın; veriler 32 KiB ile sınırlıdır. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -299,6 +306,7 @@ Etkin işlerin önce geldiği özet iş listesi. next_offset ile sayfalayın; ve
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_list`
 
-Local veya remote machine üzerinde files/directories listeler.
+Local veya remote machine üzerinde files/directories listeler. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -378,6 +386,7 @@ Local veya remote machine üzerinde files/directories listeler.
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_tree`
 
-Local veya remote machine üzerinde compact directory tree döndürür.
+Local veya remote machine üzerinde compact directory tree döndürür. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -394,6 +403,7 @@ Local veya remote machine üzerinde compact directory tree döndürür.
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_grep`
 
-Local veya remote machine üzerinde file contents arar.
+Local veya remote machine üzerinde file contents arar. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -429,6 +439,7 @@ Local veya remote machine üzerinde file contents arar.
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_read`
 
-Local veya remote machine üzerinde bir file veya list files okur.
+Local veya remote machine üzerinde bir file veya list files okur. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -447,6 +458,7 @@ Local veya remote machine üzerinde bir file veya list files okur.
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-Dynamic MCP servers için isolated environment/headers register, list, get, enable, disable, refresh, remove veya update eder. Transport `stdio` ile command/args/cwd, `streamable_http` ile url kullanın. Secret env/header values private olarak persist edilir ve asla döndürülmez.
+Dynamic MCP servers için isolated environment/headers register, list, get, enable, disable, refresh, remove veya update eder. Transport `stdio` ile command/args/cwd, `streamable_http` ile url kullanın. Secret env/header values private olarak persist edilir ve asla döndürülmez. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -617,19 +629,21 @@ Dynamic MCP servers için isolated environment/headers register, list, get, enab
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-Enabled dynamic MCP servers üzerinden cached lightweight tool summaries arar. Dynamic tools bu server’ın `tools/list` listesinde yer almaz; call öncesi returned `<server>:<tool>` name ile `mcp_tool_inspect` kullanın.
+Enabled dynamic MCP servers üzerinden cached lightweight tool summaries arar. Dynamic tools bu server’ın `tools/list` listesinde yer almaz; call öncesi returned `<server>:<tool>` name ile `mcp_tool_inspect` kullanın. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_snapshot`
 
-Persistent browser page capture eder: title, URL, bounded visible text, `e1` gibi stable short refs içeren interactive elements, recent page/network errors ve optional screenshot path. Page navigate olana veya yeni snapshot alınana kadar refs’i doğrudan `browser_act` targets olarak kullanın.
+Persistent browser page capture eder: title, URL, bounded visible text, `e1` gibi stable short refs içeren interactive elements, recent page/network errors ve optional screenshot path. Page navigate olana veya yeni snapshot alınana kadar refs’i doğrudan `browser_act` targets olarak kullanın. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -698,6 +712,7 @@ Persistent browser page capture eder: title, URL, bounded visible text, `e1` gib
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_act`
 
-Persistent browser session içinde structured actions çalıştırır. navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text ve wait_for_url destekler. `target`, `browser_snapshot` ref’i `e1` veya CSS selector olabilir. High-level actions yeterli değilse `browser_run_script` kullanın.
+Persistent browser session içinde structured actions çalıştırır. navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text ve wait_for_url destekler. `target`, `browser_snapshot` ref’i `e1` veya CSS selector olabilir. High-level actions yeterli değilse `browser_run_script` kullanın. Tüm tanılama meta verilerini dahil etmek için verbose=true kullanın.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -715,6 +730,7 @@ Persistent browser session içinde structured actions çalıştırır. navigate,
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

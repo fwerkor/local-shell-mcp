@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # Tools reference
 
 यह page वास्तविक MCP tool schemas से बनती है। Public tool surface बदलने के बाद English reference update करने के लिए `python scripts/generate-tools-reference.py` चलाएँ।
@@ -41,11 +41,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `environment_get`
 
-Local या remote machine की version, workspace, auth, policy और environment information लौटाती है।
+Local या remote machine की version, workspace, auth, policy और environment information लौटाती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `skill_list`
 
-Installed Agent Skills को instructions load किए बिना सूचीबद्ध करती है। MCP tool surface स्थिर रहता है; Skill directories जोड़ने/हटाने का प्रभाव अगली call में दिखता है।
+Installed Agent Skills को instructions load किए बिना सूचीबद्ध करती है। MCP tool surface स्थिर रहता है; Skill directories जोड़ने/हटाने का प्रभाव अगली call में दिखता है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-`skill_list` से exact name द्वारा installed Skill load करती है। पूर्ण `SKILL.md` instructions और related file paths लौटाती है।
+`skill_list` से exact name द्वारा installed Skill load करती है। पूर्ण `SKILL.md` instructions और related file paths लौटाती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-Explicit Logical Session के optional Goal mode को प्रबंधित करें। active plan, agent activity न होने के 15 मिनट बाद automatic continuation सक्षम करता है, अधिकतम 10 attempts तक। session_id वही durable id होना चाहिए जो session_manage ने लौटाया है। Actions: start, get, update, block, resume, finish, cancel. start के लिए objective और steps आवश्यक हैं; finish के लिए सभी steps completed या skipped होने चाहिए।
+Explicit Logical Session के optional Goal mode को प्रबंधित करें। active plan, agent activity न होने के 15 मिनट बाद automatic continuation सक्षम करता है, अधिकतम 10 attempts तक। session_id वही durable id होना चाहिए जो session_manage ने लौटाया है। Actions: start, get, update, block, resume, finish, cancel. start के लिए objective और steps आवश्यक हैं; finish के लिए सभी steps completed या skipped होने चाहिए। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -130,6 +133,7 @@ Explicit Logical Session के optional Goal mode को प्रबंधि�
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_read`
 
-Persistent local/remote shell session का recent output पढ़ती है।
+Persistent local/remote shell session का recent output पढ़ती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_stop`
 
-Persistent local/remote shell session समाप्त करती है।
+Persistent local/remote shell session समाप्त करती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_list`
 
-Local या remote machine पर persistent shell sessions सूचीबद्ध करती है।
+Local या remote machine पर persistent shell sessions सूचीबद्ध करती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-सक्रिय कार्य पहले दिखाने वाली संक्षिप्त सूची। next_offset से अगले पृष्ठ पर जाएँ; डेटा 32 KiB तक सीमित है।
+सक्रिय कार्य पहले दिखाने वाली संक्षिप्त सूची। next_offset से अगले पृष्ठ पर जाएँ; डेटा 32 KiB तक सीमित है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -299,6 +306,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_list`
 
-Local या remote machine पर files और directories सूचीबद्ध करती है।
+Local या remote machine पर files और directories सूचीबद्ध करती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -378,6 +386,7 @@ Local या remote machine पर files और directories सूचीबद�
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_tree`
 
-Local या remote machine पर compact directory tree लौटाती है।
+Local या remote machine पर compact directory tree लौटाती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -394,6 +403,7 @@ Local या remote machine पर compact directory tree लौटाती ह
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_grep`
 
-Local या remote machine पर file contents खोजती है।
+Local या remote machine पर file contents खोजती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -429,6 +439,7 @@ Local या remote machine पर file contents खोजती है।
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_read`
 
-Local या remote machine पर एक file या files की list पढ़ती है।
+Local या remote machine पर एक file या files की list पढ़ती है। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -447,6 +458,7 @@ Local या remote machine पर एक file या files की list पढ�
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-Dynamic MCP servers के isolated environment/headers को register, list, get, enable, disable, refresh, remove या update करती है। Transport `stdio` के साथ command/args/cwd और `streamable_http` के साथ url उपयोग करें। Secret env/header values privately persist होते हैं और कभी लौटाए नहीं जाते।
+Dynamic MCP servers के isolated environment/headers को register, list, get, enable, disable, refresh, remove या update करती है। Transport `stdio` के साथ command/args/cwd और `streamable_http` के साथ url उपयोग करें। Secret env/header values privately persist होते हैं और कभी लौटाए नहीं जाते। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -617,19 +629,21 @@ Dynamic MCP servers के isolated environment/headers को register, list, g
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-Enabled dynamic MCP servers से cached lightweight tool summaries खोजती है। Dynamic tools इस server के `tools/list` में नहीं आतीं; call से पहले returned `<server>:<tool>` name को `mcp_tool_inspect` से inspect करें।
+Enabled dynamic MCP servers से cached lightweight tool summaries खोजती है। Dynamic tools इस server के `tools/list` में नहीं आतीं; call से पहले returned `<server>:<tool>` name को `mcp_tool_inspect` से inspect करें। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_snapshot`
 
-Persistent browser page capture करती है: title, URL, bounded visible text, `e1` जैसे stable short refs वाले interactive elements, recent page/network errors और optional screenshot path। Page navigate या नया snapshot होने तक refs को `browser_act` targets के रूप में सीधे उपयोग करें।
+Persistent browser page capture करती है: title, URL, bounded visible text, `e1` जैसे stable short refs वाले interactive elements, recent page/network errors और optional screenshot path। Page navigate या नया snapshot होने तक refs को `browser_act` targets के रूप में सीधे उपयोग करें। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -698,6 +712,7 @@ Persistent browser page capture करती है: title, URL, bounded visible
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_act`
 
-Persistent browser session में structured actions चलाती है। navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text और wait_for_url support करती है। `target` `browser_snapshot` ref जैसे `e1` या CSS selector हो सकता है। High-level actions पर्याप्त न हों तभी `browser_run_script` उपयोग करें।
+Persistent browser session में structured actions चलाती है। navigate, new_page, close_page, click, fill, type, select, press, check, uncheck, hover, wait, wait_for_text और wait_for_url support करती है। `target` `browser_snapshot` ref जैसे `e1` या CSS selector हो सकता है। High-level actions पर्याप्त न हों तभी `browser_run_script` उपयोग करें। पूरे नैदानिक मेटाडेटा के लिए verbose=true का उपयोग करें।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -715,6 +730,7 @@ Persistent browser session में structured actions चलाती है�
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

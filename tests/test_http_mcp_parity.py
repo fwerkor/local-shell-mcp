@@ -3,6 +3,7 @@ from conftest import python_shell_command
 from fastapi.testclient import TestClient
 
 from local_shell_mcp.http_app import build_http_app
+from local_shell_mcp.result_compaction import compact_native_result
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 
@@ -25,7 +26,11 @@ async def test_http_list_files_matches_mcp_payload(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
 
     http_payload = client.post("/tools/list_files", json={"path": "."}).json()
-    mcp_payload = _mcp_data(await build_mcp().call_tool("file_list", {"path": "."}))
+    mcp = build_mcp()
+    args = {"path": "."}
+    mcp_payload = _mcp_data(await mcp.call_tool("file_list", {**args, "verbose": True}))
+    compact = _mcp_data(await mcp.call_tool("file_list", args))
+    assert compact == compact_native_result("file_list", args, {"ok": True, "data": mcp_payload})["data"]
 
     def comparable_listing(rows):
         return sorted((item["path"], item["type"], item["size"]) for item in rows)
@@ -40,7 +45,10 @@ async def test_http_read_file_matches_mcp_payload(tmp_path, monkeypatch):
     args = {"path": "alpha.txt", "start_line": 2}
 
     http_payload = client.post("/tools/read_file", json=args).json()
-    mcp_payload = _mcp_data(await build_mcp().call_tool("file_read", args))
+    mcp = build_mcp()
+    mcp_payload = _mcp_data(await mcp.call_tool("file_read", {**args, "verbose": True}))
+    compact = _mcp_data(await mcp.call_tool("file_read", args))
+    assert compact == compact_native_result("file_read", args, {"ok": True, "data": mcp_payload})["data"]
 
     assert http_payload == mcp_payload
 

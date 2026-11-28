@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
+<!-- i18n-source-sha256: 0a001346d6c822445b8f5642ac02baa410a5550892c4a3954171187432918f1b -->
 # Tools reference
 
 このページは実際の MCP tool schema から構成されます。Public tool surface を変更した後は `python scripts/generate-tools-reference.py` を実行して English reference を更新します。
@@ -41,11 +41,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `environment_get`
 
-Local または remote machine の version、workspace、auth、policy、environment information を返します。
+Local または remote machine の version、workspace、auth、policy、environment information を返します。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -54,21 +55,23 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `skill_list`
 
-Instructions を読み込まず installed Agent Skills を列挙します。MCP tool surface は固定され、Skill directories の追加/削除は次の call に反映されます。
+Instructions を読み込まず installed Agent Skills を列挙します。MCP tool surface は固定され、Skill directories の追加/削除は次の call に反映されます。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `skill_load`
 
-`skill_list` が返した exact name で installed Skill を読み込み、完全な `SKILL.md` instructions と related file paths を返します。
+`skill_list` が返した exact name で installed Skill を読み込み、完全な `SKILL.md` instructions と related file paths を返します。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `name` | `string` | required |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -118,7 +121,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `plan_manage`
 
-明示的な Logical Session の optional Goal mode を管理します。active plan は agent activity が 15 分ない場合に automatic continuation を有効化し、最大 10 回まで試行します。session_id は session_manage が返した同じ durable id でなければならず。Action: start, get, update, block, resume, finish, cancel。start には objective と steps、finish には全 steps が completed または skipped であることが必要です。
+明示的な Logical Session の optional Goal mode を管理します。active plan は agent activity が 15 分ない場合に automatic continuation を有効化し、最大 10 回まで試行します。session_id は session_manage が返した同じ durable id でなければならず。Action: start, get, update, block, resume, finish, cancel。start には objective と steps、finish には全 steps が completed または skipped であることが必要です。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -130,6 +133,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `status` | `string \| null` | `null` |  |
 | `text` | `string \| null` | `null` |  |
 | `note` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
@@ -229,13 +233,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_read`
 
-Persistent local/remote shell session の recent output を読みます。
+Persistent local/remote shell session の recent output を読みます。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `lines` | `integer` | `200` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -244,13 +249,14 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_stop`
 
-Persistent local/remote shell session を終了します。
+Persistent local/remote shell session を終了します。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `idempotency_key` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,11 +265,12 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `shell_list`
 
-Local または remote machine の persistent shell sessions を列挙します。
+Local または remote machine の persistent shell sessions を列挙します。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -291,7 +298,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-ジョブの概要をアクティブな順で返します。next_offset でページを切り替え、データは最大 32 KiB に制限されます。
+ジョブの概要をアクティブな順で返します。next_offset でページを切り替え、データは最大 32 KiB に制限されます。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -299,6 +306,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `limit` | `integer` | `25` |  |
 | `offset` | `integer` | `0` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -370,7 +378,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_list`
 
-Local または remote machine の files/directories を列挙します。
+Local または remote machine の files/directories を列挙します。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -378,6 +386,7 @@ Local または remote machine の files/directories を列挙します。
 | `recursive` | `boolean` | `false` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -386,7 +395,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_tree`
 
-Local または remote machine の compact directory tree を返します。
+Local または remote machine の compact directory tree を返します。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -394,6 +403,7 @@ Local または remote machine の compact directory tree を返します。
 | `depth` | `integer` | `3` |  |
 | `max_entries` | `integer` | `500` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -418,7 +428,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_grep`
 
-Local または remote machine の file contents を検索します。
+Local または remote machine の file contents を検索します。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -429,6 +439,7 @@ Local または remote machine の file contents を検索します。
 | `case_sensitive` | `boolean` | `true` |  |
 | `max_results` | `integer \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -437,7 +448,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `file_read`
 
-Local または remote machine の file 1 個または file list を読み取ります。
+Local または remote machine の file 1 個または file list を読み取ります。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -447,6 +458,7 @@ Local または remote machine の file 1 個または file list を読み取り
 | `binary_preview` | `string \| null` | `null` |  |
 | `binary_preview_bytes` | `integer` | `256` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -599,7 +611,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `mcp_manage`
 
-Dynamic MCP servers の isolated environment/headers を register、list、get、enable、disable、refresh、remove、update します。`stdio` transport は command/args/cwd、`streamable_http` は url を使用します。Secret env/header values は private に persist され、返されません。
+Dynamic MCP servers の isolated environment/headers を register、list、get、enable、disable、refresh、remove、update します。`stdio` transport は command/args/cwd、`streamable_http` は url を使用します。Secret env/header values は private に persist され、返されません。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -617,19 +629,21 @@ Dynamic MCP servers の isolated environment/headers を register、list、get�
 | `refresh` | `boolean` | `true` |  |
 | `key` | `string \| null` | `null` |  |
 | `value` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 ### `mcp_tool_search`
 
-Enabled dynamic MCP servers の cached lightweight tool summaries を検索します。Dynamic tools はこの server の `tools/list` に入らないため、返された `<server>:<tool>` name を `mcp_tool_inspect` で inspect してから call します。
+Enabled dynamic MCP servers の cached lightweight tool summaries を検索します。Dynamic tools はこの server の `tools/list` に入らないため、返された `<server>:<tool>` name を `mcp_tool_inspect` で inspect してから call します。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `query` | `string` | `""` |  |
 | `server` | `string \| null` | `null` |  |
 | `limit` | `integer` | `20` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -686,7 +700,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_snapshot`
 
-Persistent browser page の title、URL、bounded visible text、`e1` など stable short refs 付き interactive elements、recent page/network errors、optional screenshot path を capture します。Page navigation または新 snapshot まで refs を `browser_act` targets に直接使えます。
+Persistent browser page の title、URL、bounded visible text、`e1` など stable short refs 付き interactive elements、recent page/network errors、optional screenshot path を capture します。Page navigation または新 snapshot まで refs を `browser_act` targets に直接使えます。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -698,6 +712,7 @@ Persistent browser page の title、URL、bounded visible text、`e1` など sta
 | `max_text_chars` | `integer` | `100000` |  |
 | `max_elements` | `integer` | `100` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -706,7 +721,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `browser_act`
 
-Persistent browser session で structured actions を実行します。navigate、new_page、close_page、click、fill、type、select、press、check、uncheck、hover、wait、wait_for_text、wait_for_url を support。Target は `browser_snapshot` の `e1` など ref または CSS selector。High-level actions が不足する場合だけ `browser_run_script` を使います。
+Persistent browser session で structured actions を実行します。navigate、new_page、close_page、click、fill、type、select、press、check、uncheck、hover、wait、wait_for_text、wait_for_url を support。Target は `browser_snapshot` の `e1` など ref または CSS selector。High-level actions が不足する場合だけ `browser_run_script` を使います。 詳細な診断メタデータを含めるには verbose=true を指定します。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -715,6 +730,7 @@ Persistent browser session で structured actions を実行します。navigate�
 | `page_id` | `string \| null` | `null` |  |
 | `timeout_ms` | `integer` | `30000` |  |
 | `machine` | `string \| null` | `null` |  |
+| `verbose` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
