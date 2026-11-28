@@ -1,10 +1,11 @@
-"""Dispatch a logical model to existing physical channels."""
+"""Dispatch logical models through a DAG of virtual and physical channels."""
 from __future__ import annotations
 
 import time
 from collections import OrderedDict
 from contextlib import aclosing
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 STRATEGIES = ("priority", "round_robin", "weighted_round_robin", "least_connections", "least_latency")
 
@@ -29,17 +30,45 @@ def member_key(member):
     return member["channel"], member["model"]
 
 
-def physical_members(value, model):
+def direct_members(value, model, *, lookup=None):
     from .provider_profiles import profile
 
+    if lookup is None:
+        lookup = lambda channel: profile(channel, effective=False)
     for member in (value.get("routes") or {}).get(model, []):
         try:
-            stored = profile(member["channel"], effective=False)
-            if stored["provider"] == "virtual" or member["model"] not in stored["models"]:
-                continue
-            yield member, stored
+            stored = lookup(member["channel"])
+            if member["model"] in stored["models"]:
+                yield member, stored
         except ValueError:
             continue
+
+
+def physical_members(value, model, *, lookup=None):
+    """Visit each reachable physical model once; never follow a cyclic branch."""
+    if lookup is None:
+        from .provider_profiles import profile
+
+        @lru_cache(maxsize=None)
+        def lookup(channel):
+            return profile(channel, effective=False)
+    visited = set()
+    leaves = set()
+
+    def walk(node, target, path):
+        name = node["name"]
+        key = (name, target)
+        if name in path or key in visited:
+            return
+        visited.add(key)
+        for member, stored in direct_members(node, target, lookup=lookup):
+            if stored["provider"] == "virtual":
+                yield from walk(stored, member["model"], path | {name})
+            elif member_key(member) not in leaves:
+                leaves.add(member_key(member))
+                yield member, stored
+
+    yield from walk(value, model, set())
 
 
 def context_windows(value):
@@ -141,44 +170,115 @@ def scoped_messages(messages, scope):
 
 async def stream_virtual(config, messages, *, tools=None, **kwargs):
     from .provider_profiles import profile
-    from .provider_responses import _scope
-    from .provider_tool_protocols import stream_native_tools
-    from .providers import (
-        ModelThought,
-        ModelToolCall,
-        ModelUsage,
-        provider_config,
-        stream_model,
-        stream_model_with_tools,
-    )
 
-    value = profile(config.virtual_channel)
+    value = profile(config.virtual_channel, effective=False)
     # Agent overrides and previously saved settings can bypass conversation admission.
     if kwargs.get("temperature") is not None and kwargs["temperature"] > 1:
         from .sampling import validate_channel_sampling
 
         validate_channel_sampling({"temperature": kwargs["temperature"]}, config.virtual_channel, config.model)
+
+    # All branches of one dispatch share the attempted physical leaves. A DAG
+    # can reach the same provider/model through multiple independent pools.
     tried = set()
-    last_error = None
-    while True:
-        candidates = []
-        for member, _ in physical_members(value, config.model):
-            key = member_key(member)
-            health = _health.setdefault(key, Health())
-            if key not in tried and health.cooldown <= time.monotonic():
-                candidates.append(member)
-        if not candidates:
-            raise VirtualUnavailable("No available member for virtual model " + config.model) from last_error
-        member = choose(value, config.model, candidates, config.virtual_session)
+    profiles = {value["name"]: value}
+
+    def lookup(channel):
+        if channel not in profiles:
+            profiles[channel] = profile(channel, effective=False)
+        return profiles[channel]
+
+    def available(node, target, path, memo, now):
+        key = (node["name"], target)
+        if node["name"] in path:
+            return False
+        if key not in memo:
+            memo[key] = any(eligible(member, stored, path | {node["name"]}, memo, now)
+                            for member, stored in direct_members(node, target, lookup=lookup))
+        return memo[key]
+
+    def eligible(member, stored, path, memo, now):
         key = member_key(member)
-        tried.add(key)
+        if stored["provider"] == "virtual":
+            return available(stored, key[1], path, memo, now)
+        return key not in tried and _health.setdefault(key, Health()).cooldown <= now
+
+    async def route(node, target, path):
+        key = (node["name"], target)
+        health = _health.setdefault(key, Health())
+        health.active += 1
+        started = time.monotonic()
+        emitted = False
+        try:
+            async with aclosing(dispatch(node, target, path | {node["name"]})) as source:
+                async for event in source:
+                    if not emitted:
+                        record_latency(health, started)
+                        emitted = True
+                    yield event
+        finally:
+            health.active -= 1
+
+    async def dispatch(node, target, path):
+        last_error = None
+        exhausted = set()
+        while True:
+            memo = {}
+            now = time.monotonic()
+            candidates = []
+            children = {}
+            for member, stored in direct_members(node, target, lookup=lookup):
+                key = member_key(member)
+                if key not in exhausted and eligible(member, stored, path, memo, now):
+                    candidates.append(member)
+                    children[key] = stored
+                    _health.setdefault(key, Health())
+            if not candidates:
+                raise VirtualUnavailable("No available member for virtual model " + target) from last_error
+            member = choose(node, target, candidates, config.virtual_session)
+            key = member_key(member)
+            exhausted.add(key)
+            stored = children[key]
+            nested = stored["provider"] == "virtual"
+            emitted = False
+            try:
+                if nested:
+                    source = route(stored, key[1], path)
+                else:
+                    tried.add(key)
+                    source = stream_physical(key)
+                async with aclosing(source):
+                    async for event in source:
+                        emitted = True
+                        yield event
+                if node.get("session_affinity", True) and config.virtual_session is not None:
+                    affinity_key = (node["name"], target, config.virtual_session)
+                    _affinity[affinity_key] = key
+                    _affinity.move_to_end(affinity_key)
+                    while len(_affinity) > 8192:
+                        _affinity.popitem(last=False)
+                return
+            except VirtualUnavailable as exc:
+                # A child pool has exhausted its usable leaves. Do not impose
+                # a separate cooldown on the pool: its leaves may recover first.
+                if emitted:
+                    raise
+                last_error = exc
+
+    async def stream_physical(key):
+        from .provider_responses import _scope
+        from .provider_tool_protocols import stream_native_tools
+        from .providers import (
+            ModelThought, ModelToolCall, ModelUsage, provider_config,
+            stream_model, stream_model_with_tools,
+        )
+
         health = _health[key]
         try:
             actual = replace(provider_config(*key), session_id=config.session_id)
         except ValueError as exc:
             health.cooldown = time.monotonic() + 60
-            last_error = exc
-            continue
+            raise VirtualUnavailable("Unavailable physical model " + key[1]) from exc
         scope = _scope(actual)
         prepared = scoped_messages(messages, scope)
         emitted = False
@@ -194,8 +294,7 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
             async with aclosing(source):
                 async for event in source:
                     if not emitted:
-                        elapsed = time.monotonic() - start
-                        health.latency = elapsed if health.latency is None else health.latency * .8 + elapsed * .2
+                        record_latency(health, start)
                         emitted = True
                     if isinstance(event, ModelUsage):
                         event = replace(event, channel=key[0], model=key[1])
@@ -204,20 +303,21 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
                     elif isinstance(event, ModelToolCall) and (event.provider_data or {}).get("thoughtSignature"):
                         event = replace(event, provider_data={**event.provider_data, "route_scope": scope})
                     yield event
-            if value.get("session_affinity", True) and config.virtual_session is not None:
-                affinity_key = (value["name"], config.model, config.virtual_session)
-                _affinity[affinity_key] = key
-                _affinity.move_to_end(affinity_key)
-                while len(_affinity) > 8192:
-                    _affinity.popitem(last=False)
-            return
         except Exception as exc:
             delay = cooldown_for(exc)
             if delay is not None:
                 health.cooldown = time.monotonic() + delay
-            # Once output is visible, replay would duplicate text/tool proposals.
             if emitted or delay is None:
                 raise
-            last_error = exc
+            raise VirtualUnavailable("Unavailable physical model " + key[1]) from exc
         finally:
             health.active -= 1
+
+    async with aclosing(route(value, config.model, set())) as source:
+        async for event in source:
+            yield event
+
+
+def record_latency(health, start):
+    elapsed = time.monotonic() - start
+    health.latency = elapsed if health.latency is None else health.latency * .8 + elapsed * .2

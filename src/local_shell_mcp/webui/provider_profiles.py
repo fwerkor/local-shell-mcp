@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from functools import lru_cache
 from urllib.parse import urlsplit, urlunsplit
 
 from starlette.exceptions import HTTPException
@@ -164,8 +165,43 @@ def validate_connection(body: dict) -> tuple[str, str, str | None]:
     return kind, base, (key.strip() or None) if key else None
 
 
-def _validate_virtual(body: dict) -> dict:
-    from .virtual_channels import STRATEGIES
+def _validate_virtual_graph(value, lookup):
+    """Check channel-level cycles, including references to currently missing models."""
+    active = set()
+    visited = set()
+    name = value["name"]
+
+    def visit(node):
+        channel = node["name"]
+        if channel in active:
+            raise ValueError("Recursive virtual channel reference: " + channel)
+        if channel in visited:
+            return
+        active.add(channel)
+        for members in node["routes"].values():
+            for member in members:
+                target = member["channel"]
+                if target == name:
+                    raise ValueError("Recursive virtual channel reference: " + name)
+                try:
+                    child = lookup(target)
+                except ValueError:
+                    continue
+                if child["provider"] == "virtual":
+                    visit(child)
+        active.remove(channel)
+        visited.add(channel)
+
+    visit(value)
+
+
+def _validate_virtual(body: dict, *, lookup=None) -> dict:
+    from .virtual_channels import STRATEGIES, physical_members
+
+    if lookup is None:
+        @lru_cache(maxsize=None)
+        def lookup(channel):
+            return profile(channel, effective=False)
     name = body.get("name")
     if not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or name.lower() in _RESERVED or name.lower().endswith("assistants"):
         raise ValueError("Invalid or reserved channel name")
@@ -175,7 +211,6 @@ def _validate_virtual(body: dict) -> dict:
     if strategy not in STRATEGIES or type(affinity) is not bool or not isinstance(routes, dict) or not 1 <= len(routes) <= 128:
         raise ValueError("Invalid virtual channel configuration")
     normalized = {}
-    member_providers = {}
     for model, members in routes.items():
         if not isinstance(model, str) or not model.strip() or model != model.strip() or len(model) > 200 or any(ord(c) < 32 for c in model):
             raise ValueError("Invalid virtual model identifier")
@@ -183,32 +218,34 @@ def _validate_virtual(body: dict) -> dict:
             raise ValueError("Every virtual model requires members")
         seen = set()
         normalized[model] = []
-        member_providers[model] = set()
         for member in members:
             if not isinstance(member, dict):
                 raise ValueError("Invalid virtual model member")
             channel, target, weight = member.get("channel"), member.get("model"), member.get("weight", 1)
             if not isinstance(channel, str) or not isinstance(target, str) or type(weight) is not int or not 1 <= weight <= 10000:
                 raise ValueError("Invalid virtual model member")
-            stored = profile(channel, effective=False)
-            if stored["provider"] == "virtual" or target not in stored["models"]:
-                raise ValueError("Members must reference existing physical channel models")
+            if channel == name:
+                raise ValueError("Recursive virtual channel reference: " + name)
+            stored = lookup(channel)
+            if target not in stored["models"]:
+                raise ValueError("Members must reference existing channel models")
             channel = stored.get("name") or stored["provider"]
             if channel == name or (channel, target) in seen:
                 raise ValueError("Duplicate or recursive virtual model member")
             seen.add((channel, target))
             normalized[model].append({"channel": channel, "model": target, "weight": weight})
-            member_providers[model].add(stored["provider"])
+    value = {"name": name, "provider": "virtual", "base_url": "", "api_key": None,
+             "models": list(normalized), "routes": normalized, "strategy": strategy,
+             "session_affinity": affinity, "auto_discover": False, "model_contexts": {}}
+    _validate_virtual_graph(value, lookup)
     sampling = body.get("model_sampling")
     if sampling is not None:
         if not isinstance(sampling, dict) or sampling.keys() - normalized.keys():
             raise ValueError("Sampling defaults must belong to configured models")
-        sampling = {model: validate_sampling(v, provider="anthropic" if "anthropic" in member_providers[model] else None)
-                    for model, v in sampling.items()}
-    return {"name": name, "provider": "virtual", "base_url": "", "api_key": None,
-            "models": list(normalized), "routes": normalized, "strategy": strategy,
-            "session_affinity": affinity, "auto_discover": False, "model_contexts": {},
-            "model_sampling": sampling}
+        sampling = {model: validate_sampling(v, provider="anthropic" if any(
+            stored["provider"] == "anthropic" for _, stored in physical_members(value, model, lookup=lookup)
+        ) else None) for model, v in sampling.items()}
+    return {**value, "model_sampling": sampling}
 
 
 def _validate(body: dict) -> dict:
@@ -408,6 +445,25 @@ async def provider_profiles(request):
                 if previous_connection != connection_identity(previous):
                     raise HTTPException(409, detail="Channel connection changed; retry saving")
                 apply_auto_save(value, previous, discovery)
+            if value["provider"] == "virtual":
+                # Validate again under the same writer lock as the save. Two
+                # concurrent edits must not introduce a cycle jointly.
+                snapshot = {ch["name"]: ch for ch in existing}
+                if renaming:
+                    snapshot.pop(old_name, None)
+                def lookup(channel):
+                    if channel in snapshot:
+                        return snapshot[channel]
+                    for kind, aliases in _LEGACY_ALIASES.items():
+                        if channel.strip().lower() in aliases:
+                            row = db.execute("SELECT value FROM settings WHERE owner=? AND key=?",
+                                             (_OWNER, _PREFIX + kind)).fetchone()
+                            return json.loads(row[0]) if row else _default_profile(kind)
+                    raise ValueError("Unknown model channel: " + channel)
+                try:
+                    _validate_virtual(value, lookup=lookup)
+                except ValueError as exc:
+                    raise HTTPException(400, detail=str(exc)) from exc
             db.execute("INSERT INTO settings(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) "
                        "DO UPDATE SET value=excluded.value", (_OWNER, key, json.dumps(value)))
             if renaming:

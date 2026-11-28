@@ -1,5 +1,5 @@
 /** @jest-environment-options {"url":"https://lsm.invalid/"} */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
 import ModelProviders, { isLoopback } from './ModelProviders';
@@ -295,4 +295,31 @@ it('creates a virtual channel in the existing inline editor with per-model membe
     model_sampling: {},
   });
   expect(post).not.toHaveBeenCalled();
+});
+
+it('allows nested virtual members while excluding self and channels that would create cycles', async () => {
+  const virtual = (name: string, model: string, channel: string, target: string) => ({
+    ...existing, name, provider: 'virtual', models: [model], base_url: '',
+    model_contexts: { [model]: 32768 }, auto_discover: false,
+    routes: { [model]: [{ channel, model: target, weight: 1 }] },
+    strategy: 'priority', session_affinity: true,
+  });
+  const child = virtual('Child', 'child', 'DeepSeek', 'flash');
+  const parent = virtual('Parent', 'parent', 'Child', 'child');
+  const ancestor = virtual('Ancestor', 'ancestor', 'Parent', 'parent');
+  const independent = virtual('Independent', 'other', 'DeepSeek', 'old');
+  get.mockResolvedValue({ providers: [existing, child, parent, ancestor, independent] });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Parent' }));
+  const select = screen.getByLabelText('Add member');
+  expect(within(select).queryByRole('option', { name: 'Parent / parent' })).not.toBeInTheDocument();
+  expect(within(select).queryByRole('option', { name: 'Ancestor / ancestor' })).not.toBeInTheDocument();
+  const option = within(select).getByRole('option', { name: 'Independent / other' });
+  fireEvent.change(select, { target: { value: (option as HTMLOptionElement).value } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    routes: { parent: [{ channel: 'Child', model: 'child', weight: 1 },
+      { channel: 'Independent', model: 'other', weight: 1 }] },
+  }));
 });
