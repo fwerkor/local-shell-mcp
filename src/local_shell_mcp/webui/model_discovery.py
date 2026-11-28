@@ -67,6 +67,54 @@ def _chat_compatible(model: str, item: dict, kind: str = "openai") -> bool:
     )
 
 
+def _context_limit(kind: str, item: dict) -> int | None:
+    # Prefer a full context window over an input-only limit. Catalogs do not
+    # share a schema: OpenCode uses limit.context, OpenRouter context_length,
+    # vLLM max_model_len, and Gemini inputTokenLimit.
+    context_fields = (
+        'context_window', 'context_length', 'max_model_len', 'max_context_tokens',
+        'max_context_length', 'context_window_tokens', 'contextWindow', 'contextLength',
+        'maxContextTokens', 'maxContextLength',
+    )
+    input_fields = (
+        'max_input_tokens', 'inputTokenLimit', 'input_token_limit', 'maxInputTokens',
+    )
+
+    def valid(value):
+        return value if type(value) is int and 0 < value <= 2_000_000 else None
+
+    if kind == 'google':
+        native = valid(item.get('inputTokenLimit'))
+        if native is not None:
+            return native
+
+    for key in context_fields:
+        value = valid(item.get(key))
+        if value is not None:
+            return value
+    for key in ('limit', 'limits', 'top_provider'):
+        nested = item.get(key)
+        if not isinstance(nested, dict):
+            continue
+        for field in (('context', *context_fields) if key != 'top_provider' else context_fields):
+            value = valid(nested.get(field))
+            if value is not None:
+                return value
+    for key in input_fields:
+        value = valid(item.get(key))
+        if value is not None:
+            return value
+    for key in ('limit', 'limits'):
+        nested = item.get(key)
+        if not isinstance(nested, dict):
+            continue
+        for field in ('input', *input_fields):
+            value = valid(nested.get(field))
+            if value is not None:
+                return value
+    return None
+
+
 def _parse_page(kind: str, data: dict, models: dict[str, int | None]) -> dict:
     items = data.get('models' if kind == 'google' else 'data')
     if not isinstance(items, list):
@@ -88,10 +136,7 @@ def _parse_page(kind: str, data: dict, models: dict[str, int | None]) -> dict:
             continue
         if kind in {'openai', 'openai-responses'} and not _chat_compatible(model, item, kind):
             continue
-        fields = ('inputTokenLimit',) if kind == 'google' else (
-            'context_window', 'context_length', 'max_model_len', 'max_context_tokens', 'max_input_tokens')
-        limit = next((item[key] for key in fields if type(item.get(key)) is int
-                      and 0 < item[key] <= 2_000_000), None)
+        limit = _context_limit(kind, item)
         if model not in models or limit is not None:
             models[model] = limit
         if len(models) > _MAX_MODELS:
