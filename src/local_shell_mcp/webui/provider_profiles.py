@@ -62,7 +62,7 @@ def _default_profile(provider: str) -> dict:
     return {"provider": provider, "base_url": base, "models": [model], "api_key": key}
 
 
-def profile(channel: str) -> dict:
+def profile(channel: str, *, effective: bool = True) -> dict:
     """Resolve a built-in alias or a named channel without ever silently rerouting."""
     if not isinstance(channel, str):
         raise ValueError("Invalid model channel")
@@ -76,16 +76,28 @@ def profile(channel: str) -> dict:
         return saved if isinstance(saved, dict) else _default_profile(normalized)
     saved = _repo().setting(_OWNER, _CHANNEL_PREFIX + channel)
     if isinstance(saved, dict) and saved.get("name") == channel:
-        return saved
+        return _effective_profile(saved) if effective else saved
     raise ValueError("Unsupported provider or Unknown model channel")
 
 
+def _effective_profile(value: dict) -> dict:
+    if value["provider"] == "virtual":
+        from .virtual_channels import context_windows
+        return {**value, "model_contexts": context_windows(value)}
+    return value
+
+
 def configured(value: dict) -> bool:
+    if value["provider"] == "virtual":
+        from .virtual_channels import physical_members
+        return any(configured(stored) for model in value["models"]
+                   for _, stored in physical_members(value, model))
     return bool(value["models"] and (value.get("api_key") or (value.get("oauth_id") and not value.get("oauth_error")) or (
         value["provider"] in {"openai", "openai-responses"} and urlsplit(value["base_url"]).hostname in {"127.0.0.1", "localhost", "::1"})))
 
 
 def _redact(value: dict) -> dict:
+    value = _effective_profile(value)
     parsed = urlsplit(value["base_url"])
     return {"provider": value["provider"],
             **({"name": value["name"]} if "name" in value else {}),
@@ -98,12 +110,13 @@ def _redact(value: dict) -> dict:
             "model_sync_at": value.get("model_sync_at"),
             "model_sync_error": value.get("model_sync_error"),
             "configured": configured(value),
+            **({k: value[k] for k in ("routes", "strategy", "session_affinity")} if value["provider"] == "virtual" else {}),
             **({"auth_method": value["auth_method"], "oauth_error": value.get("oauth_error")}
                if value.get("oauth_id") else {})}
 
 
 def all_profiles() -> list[dict]:
-    return [profile(kind) for kind in _DEFAULTS] + _stored_channels()
+    return [profile(kind) for kind in _DEFAULTS] + [_effective_profile(value) for value in _stored_channels()]
 
 
 def public_profiles() -> dict:
@@ -151,7 +164,56 @@ def validate_connection(body: dict) -> tuple[str, str, str | None]:
     return kind, base, (key.strip() or None) if key else None
 
 
+def _validate_virtual(body: dict) -> dict:
+    from .virtual_channels import STRATEGIES
+    name = body.get("name")
+    if not isinstance(name, str) or not _NAME.fullmatch(name) or name != name.strip() or name.lower() in _RESERVED or name.lower().endswith("assistants"):
+        raise ValueError("Invalid or reserved channel name")
+    routes = body.get("routes")
+    strategy = body.get("strategy", "priority")
+    affinity = body.get("session_affinity", True)
+    if strategy not in STRATEGIES or type(affinity) is not bool or not isinstance(routes, dict) or not 1 <= len(routes) <= 128:
+        raise ValueError("Invalid virtual channel configuration")
+    normalized = {}
+    member_providers = {}
+    for model, members in routes.items():
+        if not isinstance(model, str) or not model.strip() or model != model.strip() or len(model) > 200 or any(ord(c) < 32 for c in model):
+            raise ValueError("Invalid virtual model identifier")
+        if not isinstance(members, list) or not 1 <= len(members) <= 128:
+            raise ValueError("Every virtual model requires members")
+        seen = set()
+        normalized[model] = []
+        member_providers[model] = set()
+        for member in members:
+            if not isinstance(member, dict):
+                raise ValueError("Invalid virtual model member")
+            channel, target, weight = member.get("channel"), member.get("model"), member.get("weight", 1)
+            if not isinstance(channel, str) or not isinstance(target, str) or type(weight) is not int or not 1 <= weight <= 10000:
+                raise ValueError("Invalid virtual model member")
+            stored = profile(channel, effective=False)
+            if stored["provider"] == "virtual" or target not in stored["models"]:
+                raise ValueError("Members must reference existing physical channel models")
+            channel = stored.get("name") or stored["provider"]
+            if channel == name or (channel, target) in seen:
+                raise ValueError("Duplicate or recursive virtual model member")
+            seen.add((channel, target))
+            normalized[model].append({"channel": channel, "model": target, "weight": weight})
+            member_providers[model].add(stored["provider"])
+    sampling = body.get("model_sampling")
+    if sampling is not None:
+        if not isinstance(sampling, dict) or sampling.keys() - normalized.keys():
+            raise ValueError("Sampling defaults must belong to configured models")
+        sampling = {model: validate_sampling(v, provider="anthropic" if "anthropic" in member_providers[model] else None)
+                    for model, v in sampling.items()}
+    return {"name": name, "provider": "virtual", "base_url": "", "api_key": None,
+            "models": list(normalized), "routes": normalized, "strategy": strategy,
+            "session_affinity": affinity, "auto_discover": False, "model_contexts": {},
+            "model_sampling": sampling}
+
+
 def _validate(body: dict) -> dict:
+    if body.get("provider") == "virtual":
+        return _validate_virtual(body)
     kind, base, key = validate_connection(body)
     name = body.get("name")
     if kind == "openai-responses" and name is None:
@@ -220,6 +282,16 @@ def _reference_types(db, name: str, *, legacy: bool = False) -> list[str]:
             params = (name,)
         if db.execute(query, params).fetchone():
             used_by.append(label)
+    rows = db.execute("SELECT value FROM settings WHERE owner=? AND key LIKE ?",
+                      (_OWNER, _CHANNEL_PREFIX + "%")).fetchall()
+    for row in rows:
+        value = json.loads(row[0])
+        if value.get("provider") == "virtual" and any(
+            member["channel"] in (aliases if legacy else (name,))
+            for members in value.get("routes", {}).values() for member in members
+        ):
+            used_by.append("virtual channels")
+            break
     return used_by
 
 
