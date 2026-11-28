@@ -142,6 +142,12 @@ async def test_compact_history_hydrates_original_bodies_and_checks_owner(tmp_pat
                             {"type": "think", "think": "ignored"}],
                 "metadata": {"usage": {"input": 100 + i, "output": 10}},
             }
+            if i == 1:
+                payload["attachments"] = [
+                    {"type": "ui_resources", "ui_resources": [
+                        {"resourceId": "older-ui", "uri": "ui://old", "text": "<b>old</b>"}]},
+                    {"type": "file", "file_id": "unverified-file"},
+                ]
             parent = repo.add_message("alice", cid, payload)["messageId"]
         # Keep an older branch and its identity, rather than falsely rooting the
         # latest page at the first loaded message.
@@ -157,6 +163,9 @@ async def test_compact_history_hydrates_original_bodies_and_checks_owner(tmp_pat
         assert compact[-30:] == full[-30:]
         assert compact[-1]["messageId"] == branch["messageId"]
         assert all(row.get("historyStub") and "content" not in row for row in compact[:-30])
+        assert compact[1]["attachments"] == full[1]["attachments"] == [
+            {"type": "ui_resources", "ui_resources": [
+                {"resourceId": "older-ui", "uri": "ui://old", "text": "<b>old</b>"}]}]
         assert compact[0]["metadata"] == full[0]["metadata"]
         assert compact[0]["historyMetrics"] == {"chars": 28, "toolChars": 23, "resultChars": 12}
         assert len(compact[0]["text"]) == 512

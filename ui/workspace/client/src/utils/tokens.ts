@@ -301,11 +301,18 @@ function messageChars(message: Partial<TMessage>): number {
 export function toHistoryStub(message: TMessage): TMessage {
   if (message.historyStub) return message;
   const tools = messageToolChars(message);
-  const { content: _content, attachments: _attachments, ...metadata } = message;
+  const { content: _content, attachments, ...metadata } = message;
+  // UI resources are addressable from later turns; retain their lookup data,
+  // while releasing the old message body and unrelated attachment metadata.
+  const resources = attachments?.filter(
+    (attachment) =>
+      attachment?.type === Tools.ui_resources && Array.isArray(attachment[Tools.ui_resources]),
+  );
   return {
     ...metadata,
     text: message.text?.slice(0, 512) ?? '',
     historyStub: true,
+    ...(resources?.length ? { attachments: resources } : {}),
     historyMetrics: {
       chars: messageChars(message),
       toolChars: tools.chars,

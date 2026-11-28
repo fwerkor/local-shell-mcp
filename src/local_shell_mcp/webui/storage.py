@@ -10,9 +10,9 @@ import base64
 import json
 import secrets
 import threading
-from collections import OrderedDict
 import time
 import uuid
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -408,6 +408,8 @@ class WorkspaceRepository:
         The client hydrates visible turns and their parents before offering
         editing or regeneration. No history is modified on disk.
         """
+        from .tool_attachments import visible_response_attachments
+
         recent = max(1, min(int(recent), 100))
         with self.database.connect() as db:
             # Keep the index, revisions and usage metrics in one read snapshot.
@@ -469,8 +471,12 @@ class WorkspaceRepository:
             for row in rows:
                 if row["history_stub"]:
                     message = self._message(row)
-                    # Attachments are reconciled only when the complete body is read.
-                    message.pop("attachments", None)
+                    # Keep the cross-turn UI resource index available even when the
+                    # source body is not mounted. File links and other attachments
+                    # are reconciled only when the complete body is read.
+                    resources = visible_response_attachments([], message.pop("attachments", None))
+                    if resources:
+                        message["attachments"] = resources
                     message["historyStub"] = True
                     message["historyMetrics"] = metrics[row["id"]]
                     result.append(message)

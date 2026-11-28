@@ -1185,3 +1185,19 @@ describe('context snapshot input occupancy', () => {
     ).toBe(308450);
   });
 });
+
+test('retains cross-turn UI resource lookups when historical message bodies are evicted', () => {
+  const resource = {
+    type: 'ui_resources',
+    ui_resources: [{ resourceId: 'older-ui', uri: 'ui://old', text: '<b>old</b>' }],
+  };
+  const source = {
+    ...msg('old', 'u', false),
+    content: [{ type: 'text', text: 'old body' }],
+    attachments: [resource, { type: 'file', file_id: 'unrelated' }],
+  } as unknown as TMessage;
+  const stub = toHistoryStub(source);
+  expect(stub.content).toBeUndefined();
+  expect(stub.attachments).toEqual([resource]);
+  expect(toHistoryStub(stub)).toBe(stub);
+});
