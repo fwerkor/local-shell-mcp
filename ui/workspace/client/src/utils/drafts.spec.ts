@@ -26,6 +26,7 @@ import {
   migrateTextDraft,
   renewNewConversationDraftToken,
   setDraft,
+  restoreSubmittedDraft,
   setFilesDraft,
   removePendingTextAttachmentDraft,
   setPendingTextAttachmentDraft,
@@ -77,6 +78,8 @@ describe('getNewConversationDraftId', () => {
     expect(getComposerDraftId(1, Constants.NEW_CONVO)).toBe(`${Constants.NEW_CONVO}:1`);
     expect(getComposerDraftId(1, Constants.NEW_CONVO, true)).toBe(`${Constants.PENDING_CONVO}:1`);
     expect(getComposerDraftId(1, 'convo-side')).toBe('convo-side');
+    expect(getComposerDraftId(1, 'convo-side', true)).toBe('convo-side');
+    expect(getComposerDraftId(1, 'other-convo', true)).toBe('other-convo');
   });
 });
 
@@ -1118,5 +1121,18 @@ describe('clearDraft navigation ordering', () => {
     jest.advanceTimersByTime(3000);
     expect(getDraft('chat-a')).toBe('');
     expect(getDraft('chat-b')).toBe('');
+  });
+});
+
+describe('restoreSubmittedDraft', () => {
+  it('recovers an early aborted submission only when no follow-up is staged', () => {
+    const id = 'abort-recovery';
+    clearAllDrafts(id);
+    restoreSubmittedDraft({ id, value: 'submitted' });
+    expect(getDraft(id)).toBe('submitted');
+    setDraft({ id, value: 'unsent follow-up' });
+    restoreSubmittedDraft({ id, value: 'submitted' });
+    expect(getDraft(id)).toBe('unsent follow-up');
+    clearAllDrafts(id);
   });
 });

@@ -23,10 +23,9 @@ import type {
 } from 'librechat-data-provider';
 import type { EventHandlerParams } from './useEventHandlers';
 import type { TResData } from '~/common';
-import { clearComposerDrafts, applyPendingAction, findPendingActionMessageIndex } from '~/utils';
+import { applyPendingAction, findPendingActionMessageIndex } from '~/utils';
 import { pendingApprovalActionFamily } from '~/components/Chat/approval/state';
 import { useGetStartupConfig, useGetUserBalance } from '~/data-provider';
-import { startedAsNewConversation } from './useEventHandlers';
 import { useAuthContext } from '~/hooks/AuthContext';
 import useEventHandlers from './useEventHandlers';
 import useUsageHandler from './useUsageHandler';
@@ -131,9 +130,6 @@ export default function useSSE(
         /** A queued delta flush reading the older streaming copy must never
          * land on top of the server-final write. */
         cancelPendingDeltaFlush();
-        clearComposerDrafts(runIndex, submission.conversation?.conversationId, {
-          includeNewChatDraft: startedAsNewConversation(submission),
-        });
         try {
           finalHandler(data, submission as EventSubmission);
           finalizeUsage(data, { ...submission, userMessage });
