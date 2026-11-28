@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Conversaciones y proyectos.
 
@@ -35,3 +35,7 @@ No cargue credenciales, claves privadas ni documentos que no tenga autorización
 ## Preferencias
 
 Las preferencias del usuario, como los botones de configuración y las combinaciones de teclas, se gestionan a través de la interfaz web. Estas preferencias se almacenan en el servidor donde están implementadas. Para configurar el comportamiento del teclado, se puede acceder a los Ajustes. Es importante distinguir entre enviar un mensaje y insertar una línea nueva en el texto. Las configuraciones relacionadas con los botones de configuración deben realizarse por separado, en comparación con las permisos del agente. Consulte [Herramientas y permisos](permissions.md) y [Memoria y contexto](context.md).
+
+### Nombres automáticos de conversaciones
+
+En Ajustes → Chat → Conversaciones, elija entre no asignar nombres automáticamente, nombrar los chats nuevos una vez o cambiar el nombre tras cada respuesta completada. De forma predeterminada, se nombra cada chat nuevo una vez con su propio modelo. También puede seleccionar otro modelo de un canal configurado. El nombre se genera solo al terminar la respuesta principal; las respuestas fallidas o canceladas no lo activan. El título describe brevemente la tarea en el idioma del usuario. La solicitud de nombre es independiente del contexto y no añade mensajes al chat.

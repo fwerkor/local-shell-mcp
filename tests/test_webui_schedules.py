@@ -122,7 +122,7 @@ async def test_schedule_dispatch_creates_real_generation_and_settles(state, monk
         assert owner == 'alice' and kwargs['granted_scopes'] == frozenset(ALL_OAUTH_SCOPES)
         assert kwargs['mcp_enabled'] and kwargs['ask_user_enabled']
         assert kwargs['native_file_tools'] and kwargs['write_tools']
-        assert repo.conversation('alice', generation.conversation_id)['title'] == 'Generate a digest.'
+        assert repo.conversation('alice', generation.conversation_id)['title'] == 'New chat'
         # Claim retry does not execute the model twice.
         assert (await c.post('/api/schedules/' + created['id'] + '/run')).status_code == 409
         store.finish('alice', generation.run_id, status='complete', text='Digest')

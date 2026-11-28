@@ -985,6 +985,14 @@ export default function useEventHandlers({
         isTemporary: _isTemporary = false,
       } = submission;
       const serverConversation = conversation as TConversation;
+      if (serverConversation?.conversationId && typeof serverConversation.title === 'string') {
+        const { conversationId, title } = serverConversation;
+        updateConvoInAllQueries(queryClient, conversationId, (convo) => ({ ...convo, title }));
+        markTitleGenerationProcessed(conversationId);
+        if (location.pathname.includes(conversationId)) {
+          setDocumentTitle(title);
+        }
+      }
       setSubmissionStart(null);
 
       try {

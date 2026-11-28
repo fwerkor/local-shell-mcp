@@ -61,7 +61,7 @@ def test_conversation_context_is_live_and_not_persisted(runtime):
         return metadata[0]
 
     assert 'Current project:' not in context()
-    assert 'Current conversation: "initial message"' in context()
+    assert 'Current conversation: "New chat"' in context()
     project = repo.create_project('a', '项目 A', 'First description')
     repo.update_conversation('a', cid, {'projectId': project['id'], 'title': '新标题'})
     assert 'Current project: "项目 A"' in context()

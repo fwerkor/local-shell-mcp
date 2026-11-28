@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Thông tin về cuộc trò chuyện và dự án.
 
@@ -35,3 +35,7 @@ Xin đừng tải lên các thông tin cá nhân, khóa riêng hoặc các tài 
 ## Sở thích/Ưu tiên
 
 Các cuộc trò chuyện và các tùy chọn của người dùng, chẳng hạn như các tùy chọn liên quan đến công cụ và các phím tắt trên bàn phím, đều được quản lý thông qua giao diện WebUI. Các tùy chọn này được lưu trữ trên máy chủ nơi mà chúng được triển khai. Bạn có thể truy cập mục Cài đặt để điều chỉnh hành vi của bàn phím; cần phân biệt rõ việc gửi tin nhắn với việc nhập dòng mới. Các tùy chọn liên quan đến công cụ cũng nên được điều chỉnh riêng biệt, không nên kết hợp chúng với quyền truy cập của người dùng. Xem thêm mục [Công cụ và quyền truy cập](permissions.md) và [Bộ nhớ và ngữ cảnh](context.md).
+
+### Tự động đặt tên cuộc trò chuyện
+
+Trong Cài đặt → Trò chuyện → Cuộc trò chuyện, chọn không tự động đặt tên, đặt tên cuộc trò chuyện mới một lần hoặc đổi tên sau mỗi phản hồi hoàn tất. Mặc định, cuộc trò chuyện mới được đặt tên một lần bằng mô hình của cuộc trò chuyện. Bạn cũng có thể chọn một mô hình khác từ kênh đã cấu hình. Việc đặt tên chỉ chạy sau khi phản hồi chính hoàn tất; phản hồi thất bại hoặc bị hủy không kích hoạt tính năng này. Tiêu đề mô tả ngắn gọn nhiệm vụ bằng ngôn ngữ của người dùng. Yêu cầu đặt tên tách biệt khỏi ngữ cảnh và không thêm tin nhắn trò chuyện.

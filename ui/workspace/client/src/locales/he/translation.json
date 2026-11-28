@@ -3094,5 +3094,12 @@
   "com_lsm_channel_discover_manual_help": "כבה את הגילוי האוטומטי כדי להגדיר דגמים באופן ידני.",
   "com_lsm_channel_discover_interval": "רענון על ידי השרת כל 10 דקות. הנתונים הקיימים נשמרים אם הרענון נכשל.",
   "com_lsm_channel_discover_context_help": "השאר ריק כדי להשתמש במטא נתונים של API; הזן ערך כדי לעקוף אותו או למלא מגבלה לא ידועה.",
-  "com_lsm_channel_refreshed": "מידע על הדגם רענן."
+  "com_lsm_channel_refreshed": "מידע על הדגם רענן.",
+  "com_lsm_title_mode": "מתן שמות אוטומטי לשיחות",
+  "com_lsm_title_off": "ללא מתן שם אוטומטי",
+  "com_lsm_title_once": "מתן שם לשיחות חדשות פעם אחת",
+  "com_lsm_title_every": "שינוי שם לאחר כל תשובה",
+  "com_lsm_title_model": "מודל למתן שמות",
+  "com_lsm_title_original_model": "מודל השיחה",
+  "com_lsm_title_timing": "הכותרות נוצרות לאחר השלמת תשובת המודל."
 }

@@ -3094,5 +3094,12 @@
   "com_lsm_channel_discover_manual_help": "Deaktivieren Sie die automatische Erkennung, um Modelle manuell zu konfigurieren.",
   "com_lsm_channel_discover_interval": "Wird alle 10 Minuten vom Server aktualisiert. Vorhandene Daten bleiben erhalten, wenn eine Aktualisierung fehlschlägt.",
   "com_lsm_channel_discover_context_help": "Lassen Sie das Feld leer, um API-Metadaten zu verwenden. Geben Sie einen Wert ein, um ihn zu überschreiben, oder geben Sie einen unbekannten Grenzwert ein.",
-  "com_lsm_channel_refreshed": "Modellinformationen aktualisiert."
+  "com_lsm_channel_refreshed": "Modellinformationen aktualisiert.",
+  "com_lsm_title_mode": "Automatische Benennung von Unterhaltungen",
+  "com_lsm_title_off": "Nicht automatisch benennen",
+  "com_lsm_title_once": "Neue Unterhaltungen einmal benennen",
+  "com_lsm_title_every": "Nach jeder Antwort umbenennen",
+  "com_lsm_title_model": "Modell zur Benennung",
+  "com_lsm_title_original_model": "Unterhaltungsmodell",
+  "com_lsm_title_timing": "Titel werden nach Abschluss der Modellantwort erstellt."
 }

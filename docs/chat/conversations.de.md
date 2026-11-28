@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Gespräche und Projekte
 
@@ -35,3 +35,7 @@ Fügen Sie keine Zugangsdaten, privaten Schlüsseln oder Dokumente hinzu, die Si
 ## Präferenzen
 
 Chat- und Benutzervorlieben wie die Aktivierung von Funktionen sowie Tastaturshortcuts werden über die WebUI verwaltet und auf dem Server gespeichert, an dem diese Funktionen implementiert sind. In den Einstellungen können die Tastaturverhalten konfiguriert werden. Es ist wichtig zu unterscheiden zwischen dem Senden einer Nachricht und der Eingabe eines Zeilenumbruchs. Die Aktivierung der Chat-Funktionen sollte getrennt von den Berechtigungen des Agents konfiguriert werden. Weitere Informationen finden Sie in [Funktionen und Berechtigungen](permissions.md) sowie [Speicher und Kontext](context.md).
+
+### Automatische Benennung von Unterhaltungen
+
+Wählen Sie unter Einstellungen → Chat → Unterhaltungen, ob Chats unbenannt bleiben, neue Chats einmal benannt oder nach jeder abgeschlossenen Antwort umbenannt werden. Standardmäßig werden neue Chats einmal mit dem Modell der Unterhaltung benannt. Alternativ können Sie ein anderes Modell aus einem konfigurierten Kanal auswählen. Die Benennung erfolgt erst nach Abschluss der Hauptantwort; fehlgeschlagene oder abgebrochene Antworten lösen sie nicht aus. Der Titel beschreibt die Aufgabe kurz in der Sprache des Benutzers. Die Benennungsanfrage ist vom Chatkontext getrennt und fügt keine Chatnachricht hinzu.

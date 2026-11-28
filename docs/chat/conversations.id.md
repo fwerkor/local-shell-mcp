@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Percakapan dan proyek-proyek
 
@@ -35,3 +35,7 @@ Jangan mengunggah kredensial, kunci privat, atau dokumen-dokumen yang sebenarnya
 ## Pilihan/Penggunaan
 
 Preferensi pengguna, seperti pengaturan alat-alat yang dapat digunakan dan shortcut keyboard, dikelola melalui WebUI. Preferensi-preferensi tersebut juga disimpan di server tempat aplikasi ini diimplementasikan. Anda dapat mengatur perilaku keyboard dengan mengakses menu Pengaturan. Perlu dicatat bahwa pengiriman pesan berbeda dengan pengetikan baris baru. Pengaturan alat-alat yang dapat digunakan juga perlu dilakukan secara terpisah dari pengaturan akses pengguna terhadap alat-alat tersebut. Lihat dokumen [Alat dan akses](permissions.md) serta [Memori dan konteks](context.md) untuk informasi lebih lanjut.
+
+### Penamaan percakapan otomatis
+
+Di Pengaturan → Chat → Percakapan, pilih untuk tidak memberi nama otomatis, memberi nama percakapan baru sekali, atau mengganti nama setelah setiap respons selesai. Secara default, percakapan baru diberi nama sekali dengan model percakapan tersebut. Anda juga dapat memilih model lain dari kanal yang telah dikonfigurasi. Penamaan hanya berjalan setelah respons utama selesai; respons utama yang gagal atau dibatalkan tidak memicunya. Judul menjelaskan tugas secara singkat dalam bahasa pengguna. Permintaan penamaan terpisah dari konteks percakapan dan tidak menambahkan pesan.

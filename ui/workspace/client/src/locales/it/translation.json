@@ -3094,5 +3094,12 @@
   "com_lsm_channel_discover_manual_help": "Disattiva il rilevamento automatico per configurare i modelli manualmente.",
   "com_lsm_channel_discover_interval": "Aggiornato dal server ogni 10 minuti. I dati esistenti vengono conservati se un aggiornamento fallisce.",
   "com_lsm_channel_discover_context_help": "Lascia vuoto per utilizzare i metadati API; immettere un valore per sovrascriverlo o inserire un limite sconosciuto.",
-  "com_lsm_channel_refreshed": "Informazioni sul modello aggiornate."
+  "com_lsm_channel_refreshed": "Informazioni sul modello aggiornate.",
+  "com_lsm_title_mode": "Assegnazione automatica dei nomi alle conversazioni",
+  "com_lsm_title_off": "Non assegnare nomi automaticamente",
+  "com_lsm_title_once": "Assegna un nome alle nuove conversazioni una sola volta",
+  "com_lsm_title_every": "Rinomina dopo ogni risposta",
+  "com_lsm_title_model": "Modello per i nomi",
+  "com_lsm_title_original_model": "Modello della conversazione",
+  "com_lsm_title_timing": "I titoli vengono generati al termine della risposta del modello."
 }

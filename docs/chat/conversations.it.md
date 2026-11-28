@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 012f0d9f7b350fcf47e3fd6afdf2fc9e7044ff28cb2eca7c029c3d6af35f3b04 -->
+<!-- i18n-source-sha256: af41013e98ff8fbebf496514fd0034d1c97f3177d7e73f77f7c0c21f6022047b -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Conversazioni e progetti
 
@@ -35,3 +35,7 @@ Non caricare credenziali, chiavi private o documenti per i quali non si ha l’a
 ## Preferenze
 
 I messaggi di chat e le preferenze degli utenti, come gli opzioni da attivare o disattivare e i comandi di tastiera, vengono gestiti tramite l’interfaccia WebUI. Tali informazioni vengono memorizzate sul server in cui l’interfaccia è implementata. È possibile configurare il comportamento della tastiera; è importante distinguere tra la invio di un messaggio e l’inserimento di una riga di spazio. Le opzioni da attivare o disattivare vanno configurate separatamente dalle autorizzazioni dell’agente. Per ulteriori informazioni, consultare le sezioni [Strumenti e autorizzazioni](permissions.md) e [Memoria e contesto](context.md).
+
+### Denominazione automatica delle conversazioni
+
+In Impostazioni → Chat → Conversazioni, scegli se non assegnare nomi automaticamente, nominare una sola volta le nuove chat oppure rinominarle dopo ogni risposta completata. Per impostazione predefinita le nuove chat vengono nominate una volta con il proprio modello. Puoi scegliere un altro modello da un canale configurato. La denominazione avviene soltanto dopo il completamento della risposta principale; le risposte fallite o annullate non la attivano. Il titolo descrive brevemente il compito nella lingua dell’utente. La richiesta di denominazione è separata dal contesto e non aggiunge messaggi alla chat.

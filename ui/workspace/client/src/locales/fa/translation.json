@@ -3094,5 +3094,12 @@
   "com_lsm_channel_discover_manual_help": "برای پیکربندی دستی مدل‌ها، کشف خودکار را خاموش کنید.",
   "com_lsm_channel_discover_interval": "هر 10 دقیقه توسط سرور رفرش می شود. در صورت عدم موفقیت در به‌روزرسانی، داده‌های موجود حفظ می‌شوند.",
   "com_lsm_channel_discover_context_help": "برای استفاده از ابرداده API خالی بگذارید. مقداری را برای نادیده گرفتن آن یا پر کردن یک محدودیت ناشناخته وارد کنید.",
-  "com_lsm_channel_refreshed": "اطلاعات مدل به روز شد."
+  "com_lsm_channel_refreshed": "اطلاعات مدل به روز شد.",
+  "com_lsm_title_mode": "نام‌گذاری خودکار گفتگوها",
+  "com_lsm_title_off": "نام‌گذاری خودکار انجام نشود",
+  "com_lsm_title_once": "نام‌گذاری گفتگوهای جدید فقط یک بار",
+  "com_lsm_title_every": "تغییر نام پس از هر پاسخ",
+  "com_lsm_title_model": "مدل نام‌گذاری",
+  "com_lsm_title_original_model": "مدل گفتگو",
+  "com_lsm_title_timing": "عنوان‌ها پس از تکمیل پاسخ مدل تولید می‌شوند."
 }

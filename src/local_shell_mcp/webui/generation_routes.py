@@ -497,8 +497,19 @@ async def _run_model(
                     history_start = 0
             elif len(finished_messages) <= history_start:
                 history_start = 0
+        from .conversation_titles import generate_conversation_title
+
+        try:
+            title_update = await generate_conversation_title(
+                repo.database, owner, generation, profile, runner.partial_text, stream=stream_model)
+        except asyncio.CancelledError:
+            # The primary model already completed. Cancelling only the title
+            # request must not turn that successful answer into an abort.
+            title_update = None
+        check_wakeup_lease()
         repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text,
-                    model_steps=model_steps(finished_messages, history_start), actor_lease=actor_lease)
+                    model_steps=model_steps(finished_messages, history_start), actor_lease=actor_lease,
+                    title_update=title_update)
     except asyncio.CancelledError:
         if wakeup_lease is not None or event_delivery_lease is not None or actor_lease is not None:
             check_wakeup_lease()

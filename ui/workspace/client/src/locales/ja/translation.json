@@ -3094,5 +3094,12 @@
   "com_lsm_channel_discover_manual_help": "モデルを手動で構成するには、自動検出をオフにします。",
   "com_lsm_channel_discover_interval": "サーバーによって 10 分ごとに更新されます。更新が失敗した場合、既存のデータは保持されます。",
   "com_lsm_channel_discover_context_help": "API メタデータを使用する場合は空白のままにします。値を入力して上書きするか、不明な制限を入力します。",
-  "com_lsm_channel_refreshed": "モデル情報を更新しました。"
+  "com_lsm_channel_refreshed": "モデル情報を更新しました。",
+  "com_lsm_title_mode": "会話の自動命名",
+  "com_lsm_title_off": "自動命名しない",
+  "com_lsm_title_once": "新しい会話を一度だけ命名",
+  "com_lsm_title_every": "応答ごとに名前を変更",
+  "com_lsm_title_model": "命名用モデル",
+  "com_lsm_title_original_model": "会話のモデル",
+  "com_lsm_title_timing": "モデルの応答が完了した後にタイトルを生成します。"
 }

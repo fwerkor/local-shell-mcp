@@ -3094,5 +3094,12 @@
   "com_lsm_channel_discover_manual_help": "Norėdami rankiniu būdu konfigūruoti modelius, išjunkite automatinį aptikimą.",
   "com_lsm_channel_discover_interval": "Serveris atnaujina kas 10 minučių. Esami duomenys išsaugomi, jei nepavyksta atnaujinti.",
   "com_lsm_channel_discover_context_help": "Palikite tuščią, jei norite naudoti API metaduomenis; įveskite reikšmę, kad ją nepaisytumėte, arba užpildykite nežinomą ribą.",
-  "com_lsm_channel_refreshed": "Atnaujinta modelio informacija."
+  "com_lsm_channel_refreshed": "Atnaujinta modelio informacija.",
+  "com_lsm_title_mode": "Automatinis pokalbių pavadinimų suteikimas",
+  "com_lsm_title_off": "Nesuteikti pavadinimų automatiškai",
+  "com_lsm_title_once": "Naujiems pokalbiams pavadinimą suteikti vieną kartą",
+  "com_lsm_title_every": "Pervadinti po kiekvieno atsakymo",
+  "com_lsm_title_model": "Pavadinimų kūrimo modelis",
+  "com_lsm_title_original_model": "Pokalbio modelis",
+  "com_lsm_title_timing": "Pavadinimai generuojami modeliui baigus atsakyti."
 }

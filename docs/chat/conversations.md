@@ -33,3 +33,7 @@ Do not upload credentials, private keys or documents you are not authorized to s
 ## Preferences
 
 Chat and user preferences such as tool toggles and keyboard shortcuts are managed through the WebUI and persisted on the server where implemented. Open Settings to configure keyboard behavior; distinguish sending a message from inserting a line break. Configure the chat's tool toggles separately from Agent permissions. See [Tools and permissions](permissions.md) and [Memory and context](context.md).
+
+### Automatic conversation naming
+
+In Settings → Chat → Conversations, choose whether to leave chats unnamed, name new chats once, or rename after every completed reply. The default is to name new chats once using the conversation model. You can select a separate model from a configured channel instead. Naming runs only after the primary model finishes its reply; failed or cancelled primary replies do not trigger naming. The title is a short description of the task in the user's language. The naming request is separate from chat context and does not add a chat message.

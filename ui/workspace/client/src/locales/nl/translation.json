@@ -3094,5 +3094,12 @@
   "com_lsm_channel_discover_manual_help": "Schakel automatische detectie uit om modellen handmatig te configureren.",
   "com_lsm_channel_discover_interval": "Elke 10 minuten vernieuwd door de server. Bestaande gegevens blijven behouden als een vernieuwing mislukt.",
   "com_lsm_channel_discover_context_help": "Laat dit leeg om API-metagegevens te gebruiken; voer een waarde in om deze te overschrijven of vul een onbekende limiet in.",
-  "com_lsm_channel_refreshed": "Modelinformatie vernieuwd."
+  "com_lsm_channel_refreshed": "Modelinformatie vernieuwd.",
+  "com_lsm_title_mode": "Gesprekken automatisch benoemen",
+  "com_lsm_title_off": "Niet automatisch benoemen",
+  "com_lsm_title_once": "Nieuwe gesprekken één keer benoemen",
+  "com_lsm_title_every": "Na elk antwoord hernoemen",
+  "com_lsm_title_model": "Model voor naamgeving",
+  "com_lsm_title_original_model": "Gespreksmodel",
+  "com_lsm_title_timing": "Titels worden gegenereerd nadat het model zijn antwoord heeft voltooid."
 }
