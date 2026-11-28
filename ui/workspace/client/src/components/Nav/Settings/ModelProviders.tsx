@@ -582,7 +582,17 @@ export default function ModelProviders() {
                       const update = (next: Partial<VirtualModel>) => setDraft((old) => ({
                         ...old, virtualModels: old.virtualModels.map((m) => m.id === model.id ? { ...m, ...next } : m),
                       }));
-                      const candidates = channels.filter((p) => p.provider !== 'virtual').flatMap((p) =>
+                      // Exclude self and any channel that already reaches this channel.
+                      const blocked = new Set([draft.name.trim(), editor.original?.name]);
+                      const reachesSelf = (name: string, visited = new Set<string>()): boolean => {
+                        if (blocked.has(name)) return true;
+                        if (visited.has(name)) return false;
+                        visited.add(name);
+                        const channel = channels.find((p) => p.name === name);
+                        return Object.values(channel?.routes ?? {}).some((members) =>
+                          members.some((member) => reachesSelf(member.channel, visited)));
+                      };
+                      const candidates = channels.filter((p) => !reachesSelf(p.name ?? p.provider)).flatMap((p) =>
                         p.models.map((m) => ({ channel: p.name ?? p.provider, model: m, weight: 1 })));
                       const available = candidates.filter((c) => !model.members.some((m) => m.channel === c.channel && m.model === c.model));
                       const limits = model.members.map((m) => channels.find((p) => (p.name ?? p.provider) === m.channel)?.model_contexts?.[m.model]);
