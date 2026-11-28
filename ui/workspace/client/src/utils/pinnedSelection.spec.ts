@@ -1,5 +1,5 @@
 import { EModelEndpoint } from 'librechat-data-provider';
-import type { TAgentsMap, TEndpointsConfig } from 'librechat-data-provider';
+import type { TAgentsMap, TEndpointsConfig, TStartupConfig } from 'librechat-data-provider';
 import { favoriteEntryKey, getPinnedSelection } from './pinnedSelection';
 
 const model = { endpoint: 'channel', model: 'model-a' };
@@ -64,5 +64,39 @@ describe('getPinnedSelection', () => {
 
   it('keeps the existing default path when no model or agent is pinned', () => {
     expect(getPinnedSelection({ ...options, favorites: [], order: ['convo:old'] })).toBeUndefined();
+  });
+});
+
+describe('pinned target availability', () => {
+  it('skips a pinned spec with a deleted agent or disabled endpoint', () => {
+    const startup = {
+      modelSpecs: {
+        list: [
+          { name: 'deleted', preset: { endpoint: EModelEndpoint.agents, agent_id: 'missing' } },
+          { name: 'disabled', preset: { endpoint: EModelEndpoint.anthropic, model: 'claude' } },
+        ],
+      },
+    } as unknown as TStartupConfig;
+    expect(
+      getPinnedSelection({
+        ...options,
+        startup,
+        favorites: [{ spec: 'deleted' }, { spec: 'disabled' }, model],
+      }),
+    ).toMatchObject({ model: 'model-a' });
+  });
+  it('honors the raw selector endpoint allowlist and modelSelect setting', () => {
+    const startup = {
+      modelSpecs: { addedEndpoints: [EModelEndpoint.agents] },
+    } as unknown as TStartupConfig;
+    expect(getPinnedSelection({ ...options, startup })).toMatchObject({ agent_id: 'agent-a' });
+    expect(
+      getPinnedSelection({
+        ...options,
+        startup: {
+          interface: { modelSelect: false },
+        } as unknown as TStartupConfig,
+      }),
+    ).toBeUndefined();
   });
 });
