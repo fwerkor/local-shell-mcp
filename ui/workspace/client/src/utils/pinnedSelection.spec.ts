@@ -1,6 +1,6 @@
 import { EModelEndpoint } from 'librechat-data-provider';
 import type { TAgentsMap, TEndpointsConfig, TStartupConfig } from 'librechat-data-provider';
-import { getPinnedSelection } from './pinnedSelection';
+import { getPinnedSelection, pinnedSelectionAwaitsAgents } from './pinnedSelection';
 import { favoriteEntryKey } from './pinnedFavoritesOrder';
 
 const model = { endpoint: 'channel', model: 'model-a' };
@@ -100,4 +100,18 @@ describe('pinned target availability', () => {
       }),
     ).toBeUndefined();
   });
+});
+
+it('waits for the agent catalog when only an agent-backed spec is pinned', () => {
+  const startup = {
+    modelSpecs: {
+      list: [
+        { name: 'agent-spec', preset: { endpoint: EModelEndpoint.agents, agent_id: 'deleted' } },
+        { name: 'model-spec', preset: { endpoint: EModelEndpoint.openAI, model: 'test' } },
+      ],
+    },
+  } as unknown as TStartupConfig;
+  expect(pinnedSelectionAwaitsAgents([{ spec: 'agent-spec' }], startup)).toBe(true);
+  expect(pinnedSelectionAwaitsAgents([{ spec: 'model-spec' }], startup)).toBe(false);
+  expect(pinnedSelectionAwaitsAgents([{ spec: 'removed' }], startup)).toBe(false);
 });
