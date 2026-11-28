@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Không gian làm việc AI tự lưu trữ · Mặt phẳng điều khiển MCP</span>
 
@@ -56,7 +56,7 @@ Isolation boundary dự kiến là container hoặc VM chạy service.
 | Dùng Agent AI tích hợp | [WebUI Chat](chat/index.md) | Kênh, Agent, quyền, ngữ cảnh và tự động hóa |
 | Triển khai bộ điều khiển đầu tiên | [Quickstart](getting-started/quickstart.md) | Binary khuyến nghị, OAuth và phiên trình duyệt đầu tiên |
 | Chọn runtime layer | [Runtime choices](guides/deployment.md) | Giải thích Docker, VS Code, binary, Python và stdio là các runtime option riêng |
-| Kết nối Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Tính đủ điều kiện, URL HTTPS MCP, OAuth và thử nghiệm |
+| Kết nối Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | Tính đủ điều kiện, URL HTTPS MCP, OAuth và thử nghiệm |
 | Thêm ChatGPT làm client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, prompt an toàn đầu tiên, tool discovery |
 | Thêm LSM vào DeepSeek Harness | [Plugin DeepSeek Harness](clients/deepseek-harness.md) | Cài repository này như DSH bundle đồng thời giữ toàn bộ LSM tool và remote-worker surface |
 | Chạy từ VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime và lưu ý host safety |

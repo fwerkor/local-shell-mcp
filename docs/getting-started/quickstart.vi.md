@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2829baa9432161ba8a604bf9a6f18e428f797c9574495faf0768b6204b40d11f -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # Bắt đầu nhanh
 
 Hướng dẫn này khởi động Bộ điều khiển LSM và mở giao diện trình duyệt của nó. [unified web workspace](web-workspace.md) là trải nghiệm hàng ngày được đề xuất. ChatGPT, Gemini và các máy khách MCP bên ngoài khác có thể kết nối với cùng một Bộ điều khiển. Xem [runtime choices and deployment model](../guides/deployment.md).
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | Chạy bằng release binary | [Runtime binary độc lập](../installation/binary.md) |
 | Chạy bằng Python hoặc source checkout | [Python runtimes](../installation/python.md) |
 | Sử dụng giao diện điều khiển và trò chuyện thống nhất | [Unified web workspace](web-workspace.md) |
-| Thêm Gemini Spark làm khách hàng | [Gemini Custom Apps](gemini-spark.md) |
+| Thêm Gemini Task làm khách hàng | [Gemini Custom Apps](gemini-spark.md) |
 | Thêm ChatGPT làm client | [ChatGPT connector](chatgpt-connector.md) |
 | Chọn tools và viết prompt tốt hơn | [Mẫu sử dụng](../guides/usage-patterns.md) |
 | Gắn máy HPC, NPU/GPU hoặc NAT | [Worker từ xa](../guides/remote-workers.md) |

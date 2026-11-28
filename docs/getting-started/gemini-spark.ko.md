@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: b7c3dfd7dc21a498f8410a88a8a52094ca0349856dfa43d267e3fe7bb273685a -->
-# Gemini Spark/맞춤형 앱 연결
+<!-- i18n-source-sha256: 0d50677fe8bd21dbf6f3fff366adea800f15d50fdbc67ed3b77abf84437f73eb -->
+# Gemini Task / 맞춤형 앱 연결
 
-Gemini의 **사용자 정의 연결된 앱** 기능(이전의 **Spark**)을 사용하면 자격을 갖춘 Gemini 사용자가 원격 MCP 서버에 연결할 수 있습니다. LSM은 MCP 끝점을 제공할 수 있습니다. 이는 [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md) 및 기타 MCP 클라이언트에 대한 **대체 클라이언트 연결**입니다. LSM 컨트롤러를 교체하거나 배포하지 않습니다.
+Gemini의 **사용자 정의 연결된 앱** 기능을 사용하면 자격을 갖춘 Gemini 사용자가 원격 MCP 서버에 연결할 수 있습니다. LSM은 MCP 끝점을 제공할 수 있습니다. 이는 [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md) 및 기타 MCP 클라이언트에 대한 **대체 클라이언트 연결**입니다. LSM 컨트롤러를 교체하거나 배포하지 않습니다.
 
 Google은 현재 맞춤 앱을 **개인 Google 계정**으로 로그인하고 **활동 유지를 활성화**한 **미국의 18세 이상 사용자**로 제한하고 있습니다. 이 기능은 **영어**로 제공됩니다. 연결된 앱은 나중에 모바일에서 사용할 수 있지만 연결은 Gemini 웹 앱에서 생성되어야 합니다. 가용성 및 UI 라벨은 변경될 수 있습니다. [official Gemini custom apps instructions](https://support.google.com/gemini/answer/17209137)를 참조하세요.
 
@@ -30,6 +30,16 @@ https://your-public-host.example.com/mcp
 6. Gemini 대화에서 `@`를 입력하고 연결된 맞춤형 앱을 선택하여 LSM 도구를 요청하세요.
 
 "연결된 LSM 앱을 사용하여 환경을 검사하고 작업 공간 파일을 나열합니다. 아무것도 수정하지 마세요."로 시작하세요. 쓰기 작업을 시도하기 전에 도구 결과와 컨트롤러 감사를 확인하세요.
+
+## Task 모드(이전 Spark) 사용
+
+여러 단계의 개발, 디버깅, 서버 유지보수에는 일반 채팅보다 **Task**를 권장합니다. 작업을 계획하고 연결된 도구를 반복해서 사용하며 진행 상황을 확인할 수 있습니다. 속도나 품질을 실측으로 보장하는 것은 아닙니다.
+
+Gemini 홈 화면 입력란 아래의 **Task**를 선택하고 필요한 초기 설정을 완료합니다. `@`를 입력하여 LSM 앱이 표시되면 선택하고 목표, 대상 머신이나 작업공간, 완료 조건을 명시합니다.
+
+예: “LSM으로 저장소를 조사하고 실패한 테스트를 재현한 뒤 원인을 수정하고 테스트를 다시 실행하세요. 변경 파일과 결과를 보고하세요.”
+
+진행 상황을 확인하고 필요한 작업을 승인합니다. Controller 감사 로그에서 LSM 호출을 확인하세요. Gemini 자체 클라우드 컴퓨터는 LSM 작업공간이 아닙니다. Controller와 필요한 Worker를 온라인 상태로 유지하세요. Task와 맞춤형 앱의 사용 조건은 별개입니다. 메뉴가 없으면 [Task 공식 가이드](https://support.google.com/gemini/answer/17094507)를 참고하세요.
 
 ## 제한 사항 및 문제 해결
 

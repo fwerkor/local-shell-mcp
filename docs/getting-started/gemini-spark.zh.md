@@ -1,9 +1,9 @@
-<!-- i18n-source-sha256: b7c3dfd7dc21a498f8410a88a8a52094ca0349856dfa43d267e3fe7bb273685a -->
-# 接入 Gemini Spark / 自定义应用
+<!-- i18n-source-sha256: 0d50677fe8bd21dbf6f3fff366adea800f15d50fdbc67ed3b77abf84437f73eb -->
+# 接入 Gemini Task / 自定义应用
 
-Gemini 的 **自定义连接应用** 功能（之前称为 **Spark**）允许符合条件的 Gemini 用户连接远程 MCP 服务器。 LSM 可以提供 MCP 端点。这是到 [统一 Web 工作区](web-workspace.md)、[ChatGPT](chatgpt-connector.md) 和其他 MCP 客户端的**替代客户端连接**；它不会替换或部署 LSM 控制器。
+Gemini 的 **自定义连接应用** 功能允许符合条件的 Gemini 用户连接远程 MCP 服务器。 LSM 可以提供 MCP 端点。这是到 [统一 Web 工作区](web-workspace.md)、[ChatGPT](chatgpt-connector.md) 和其他 MCP 客户端的**替代客户端连接**；它不会替换或部署 LSM 控制器。
 
-Google 目前将自定义应用限制为**年满 18 岁的美国用户**、使用**个人 Google 帐户**登录并**开启 Keep Activity**。该功能以**英语**提供。连接必须在 Gemini Web 应用程序上创建，尽管连接的应用程序稍后可以在移动设备上使用。可用性和 UI 标签可能会发生变化；请参阅 [Gemini 自定义应用官方说明](https://support.google.com/gemini/answer/17209137)。
+Google 目前将自定义应用限制为**年满 18 岁的美国用户**、使用**个人 Google 帐户**登录并**开启 History（原 Keep Activity）**。该功能以**英语**提供。连接必须在 Gemini Web 应用程序上创建，尽管连接的应用程序稍后可以在移动设备上使用。可用性和 UI 标签可能会发生变化；请参阅 [Gemini 自定义应用官方说明](https://support.google.com/gemini/answer/17209137)。
 
 ## 连接前
 
@@ -23,13 +23,23 @@ https://your-public-host.example.com/mcp
 ## 连接Gemini
 
 1. 在计算机上，打开 [Gemini](https://gemini.google.com/) 并使用符合要求的个人 Google 账号登录。
-2. 打开 **设置和帮助 → 连接的应用程序**。根据当前界面，它可能位于**个人智能 → 连接的应用程序**下。
+2. 打开 **Settings → Connected Apps（设置 → 已连接的应用）**。根据当前界面，它可能位于**个人智能 → 连接的应用程序**下。
 3. 在 **自定义应用** 下，选择 **添加自定义应用** 或使用自定义应用 URL 字段。
 4. 粘贴 LSM HTTPS `/mcp` URL，然后选择 **下一步**。
 5. 使用 LSM 控制器完成 OAuth 和同意流程。 LSM 支持 OAuth 发现和动态客户端注册。如果 Gemini 请求手动 OAuth 客户端凭据，请在继续之前检查其高级选项和 LSM OAuth 设置。
 6. 在 Gemini 对话中，输入 `@` 并选择连接的自定义应用以请求 LSM 工具。
 
 首先：“使用连接的 LSM 应用程序检查环境并列出工作区文件。请勿修改任何内容。”在尝试写入操作之前检查工具结果和Controller 审计日志。
+
+## 使用 Task 模式（原 Spark）
+
+对于多步骤编程、故障排查或服务器维护，推荐优先使用 **Task** 而非普通聊天：它可以规划工作、反复调用已连接的工具，并在任务会话中展示进度。这是工作流建议，不代表经过实测的速度或质量保证。
+
+在 Gemini 首页输入框下方选择 **Task**，按提示完成首次启用。在输入框中键入 `@`，如果出现 LSM 自定义应用则选中它，并提交明确的目标、目标机器或工作区及完成标准。
+
+示例：“使用 LSM 检查仓库，复现失败的测试，修复根因并重新运行测试。报告修改过的文件和测试结果。”
+
+关注任务进度，按需确认操作。通过 Controller 审计日志核实 LSM 工具确实被调用：Gemini 自身的云端计算机并非你的 LSM 工作区。保持 Controller 和所需 Worker 在线。Task 与自定义应用的开放条件不同；若任一入口缺失，请查看 [Task 官方指南](https://support.google.com/gemini/answer/17094507)。
 
 ## 限制和故障排除
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">स्व-होस्टेड एआई कार्यक्षेत्र · एमसीपी नियंत्रण विमान</span>
 
@@ -56,7 +56,7 @@ Optional remote workers: outbound machine connections
 | अंतर्निहित AI एजेंट का उपयोग | [WebUI Chat](chat/index.md) | चैनल, एजेंट, अनुमतियाँ, संदर्भ और स्वचालन |
 | प्रथम नियंत्रक परिनियोजन | [Quickstart](getting-started/quickstart.md) | अनुशंसित बाइनरी, OAuth और पहला ब्राउज़र सत्र |
 | runtime layer चुनना | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python और stdio को अलग runtime options के रूप में समझाता है |
-| जेमिनी स्पार्क को जोड़ना | [Gemini Custom Apps](getting-started/gemini-spark.md) | पात्रता, HTTPS MCP URL, OAuth और परीक्षण |
+| Gemini Task को जोड़ना | [Gemini Custom Apps](getting-started/gemini-spark.md) | पात्रता, HTTPS MCP URL, OAuth और परीक्षण |
 | ChatGPT को client के रूप में जोड़ना | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, पहला safe prompt, tool discovery |
 | LSM को DeepSeek Harness में जोड़ना | [DeepSeek Harness plugin](clients/deepseek-harness.md) | इस repository को DSH bundle के रूप में install करें और पूर्ण LSM tool/remote-worker surface बनाए रखें |
 | VS Code से चलाना | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime और host safety notes |

@@ -55,7 +55,7 @@ The intended isolation boundary is the container or VM running the service.
 | Using the built-in AI agent | [WebUI Chat](chat/index.md) | Model channels, Agents, permissions, context and automation |
 | First Controller deployment | [Quickstart](getting-started/quickstart.md) | Recommended single-file binary, OAuth and the first browser session |
 | Choosing the runtime layer | [Runtime choices](guides/deployment.md) | Explains Docker, VS Code, binary, Python, and stdio as separate runtime options |
-| Connecting Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Eligibility, HTTPS MCP URL, OAuth and testing |
+| Connecting Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | Eligibility, HTTPS MCP URL, OAuth and testing |
 | Adding ChatGPT as a client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, first safe prompt, tool discovery |
 | Adding LSM to DeepSeek Harness | [DeepSeek Harness plugin](clients/deepseek-harness.md) | Install this repository as a DSH bundle while keeping the complete LSM tool and remote-worker surface |
 | Running from VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime and host-safety notes |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # 運行時選擇與部署模型
 
 `local-shell-mcp` 有兩個互補的決定：
@@ -52,13 +52,13 @@ pipx / 源碼 checkout             遠程 worker 出站加入           REST 風
 | 介面 | 需要公共 HTTPS | 使用 `/mcp` | 需要 OAuth | 典型運行時間 |
 |---|---:|---:|---:|---|
 | 統一 LSM Web 工作區 | 是的，用於遠端存取；也可以使用本地代理 | 內部 | LSM登入 | Controller |
-| Gemini Spark / 自訂應用程式 | 是的 | 是的 | 是的，供大眾使用 | 任何 HTTP 控制器 |
+| Gemini Task / 自訂應用程式 | 是的 | 是的 | 是的，供大眾使用 | 任何 HTTP 控制器 |
 | ChatGPT 自定義 MCP 連接器 | 是 | 是 | 公網使用時需要 | Docker、VS Code 擴展、二進制或 Python |
 | 通過 stdio 的通用本地 MCP 客戶端 | 否 | 否 | 否 | `local-shell-mcp --mode stdio` |
 | 通用 HTTP MCP 客戶端 | localhost 通常不需要；跨網絡需要 | 是 | localhost 之外建議開啓 | 任意 HTTP 運行時 |
 | VS Code 擴展輔助流程 | 只有 ChatGPT 需要連接時才需要 | 複製 ChatGPT URL 時使用 | 用於 ChatGPT 時建議開啓 | VS Code 啓動的運行時 |
 
-請參閱 [unified web workspace](../getting-started/web-workspace.md)、[Gemini Spark](../getting-started/gemini-spark.md)、[ChatGPT connector](../getting-started/chatgpt-connector.md)、[generic MCP clients](../clients/generic-mcp.md) 和 [network connectivity](../clients/connectivity.md)。
+請參閱 [unified web workspace](../getting-started/web-workspace.md)、[Gemini Task](../getting-started/gemini-spark.md)、[ChatGPT connector](../getting-started/chatgpt-connector.md)、[generic MCP clients](../clients/generic-mcp.md) 和 [network connectivity](../clients/connectivity.md)。
 
 ## 每種運行時控制什麼
 
@@ -121,7 +121,7 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 ## 客戶端頁面
 
 - [Unified web workspace](../getting-started/web-workspace.md)
-- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
+- [Gemini Task / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT 連接器](../getting-started/chatgpt-connector.md)
 - [通用 MCP 客戶端](../clients/generic-mcp.md)
 - [公開 HTTPS 暴露](../clients/connectivity.md)

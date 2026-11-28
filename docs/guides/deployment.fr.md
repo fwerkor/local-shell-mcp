@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Choix du runtime et modèle de déploiement
 
 `local-shell-mcp` a deux décisions complémentaires :
@@ -52,13 +52,13 @@ Local MCP client
 | Interface | Nécessite HTTPS public | Utilise `/mcp` | Nécessite OAuth | Durée d'exécution typique |
 |---|---:|---:|---:|---|
 | Espace de travail Web LSM unifié | Oui pour l'accès à distance ; proxy local également possible | En interne | Connexion LSM | Controller |
-| Gemini Spark / Applications personnalisées | Oui | Oui | Oui pour un usage public | N'importe quel contrôleur HTTP |
+| Gemini Task / Applications personnalisées | Oui | Oui | Oui pour un usage public | N'importe quel contrôleur HTTP |
 | ChatGPT custom MCP connector | Oui | Oui | Oui pour usage public | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Non | Non | Non | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | Généralement non en localhost ; oui entre réseaux | Oui | Recommandé hors localhost | Any HTTP runtime |
 | VS Code extension helper flow | Seulement si ChatGPT doit se connecter | Oui lors de la copie URL ChatGPT | Recommandé pour ChatGPT | VS Code-launched runtime |
 
-Voir les codes [unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) et [network connectivity](../clients/connectivity.md).
+Voir les codes [unified web workspace](../getting-started/web-workspace.md), [Gemini Task](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) et [network connectivity](../clients/connectivity.md).
 
 ## Ce que contrôle chaque runtime
 
@@ -121,7 +121,7 @@ N’ajoutez pas `/mcp` à `LOCAL_SHELL_MCP_PUBLIC_BASE_URL`.
 ## Pages client
 
 - [Unified web workspace](../getting-started/web-workspace.md)
-- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
+- [Gemini Task / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

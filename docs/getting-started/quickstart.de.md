@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2829baa9432161ba8a604bf9a6f18e428f797c9574495faf0768b6204b40d11f -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # Schnellstart
 
 Diese Anleitung startet einen LSM Controller und öffnet seine Browseroberfläche. Der [unified web workspace](web-workspace.md) ist das empfohlene tägliche Erlebnis. ChatGPT, Gemini und andere externe MCP-Clients können sich mit demselben Controller verbinden. Siehe [runtime choices and deployment model](../guides/deployment.md).
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | Mit einem Release-Binary ausführen | [Standalone-Binary-Runtime](../installation/binary.md) |
 | Mit Python oder Source Checkout ausführen | [Python runtimes](../installation/python.md) |
 | Nutzen Sie die einheitliche Chat- und Steuerungsoberfläche | [Unified web workspace](web-workspace.md) |
-| Fügen Sie Gemini Spark als Kunden hinzu | [Gemini Custom Apps](gemini-spark.md) |
+| Fügen Sie Gemini Task als Kunden hinzu | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT als Client hinzufügen | [ChatGPT connector](chatgpt-connector.md) |
 | Tools auswählen und bessere Prompts schreiben | [Nutzungsmuster](../guides/usage-patterns.md) |
 | Eine HPC-, NPU/GPU- oder NAT-Maschine anbinden | [Remote workers](../guides/remote-workers.md) |

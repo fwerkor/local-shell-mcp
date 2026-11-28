@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2829baa9432161ba8a604bf9a6f18e428f797c9574495faf0768b6204b40d11f -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # 快速開始
 
 本指南啟動 LSM 控制器並開啟其瀏覽器介面。 [unified web workspace](web-workspace.md)為推薦日常體驗。 ChatGPT、Gemini 和其他外部 MCP 用戶端可以連接到相同控制器。請參閱 [runtime choices and deployment model](../guides/deployment.md)。
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | 使用獨立二進制運行 | [獨立二進制運行時](../installation/binary.md) |
 | 使用 Python、pipx 或源碼運行 | [Python 運行時](../installation/python.md) |
 | 使用統一的聊天和控制介面 | [Unified web workspace](web-workspace.md) |
-| 新增 Gemini Spark 作為客戶端 | [Gemini Custom Apps](gemini-spark.md) |
+| 新增 Gemini Task 作為客戶端 | [Gemini Custom Apps](gemini-spark.md) |
 | 添加 ChatGPT 客戶端 | [ChatGPT 連接器](chatgpt-connector.md) |
 | 選擇工具並寫更好的提示詞 | [使用模式](../guides/usage-patterns.md) |
 | 連接 HPC、NPU/GPU 或 NAT 機器 | [遠程節點](../guides/remote-workers.md) |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Runtime の選択とデプロイモデル
 
 `local-shell-mcp` には 2 つの相補的な決定があります。
@@ -52,13 +52,13 @@ Local MCP client
 | インターフェース | パブリックHTTPSが必要です | `/mcp`を使用します | OAuthが必要です | 一般的なランタイム |
 |---|---:|---:|---:|---|
 | 統合 LSM Web ワークスペース | リモートアクセスの場合ははい。ローカルプロキシも可能 | 内部的に | LSMログイン | Controller |
-| Gemini Spark / カスタム アプリ | はい | はい | はい、公共使用可能 | 任意の HTTP コントローラー |
+| Gemini Task / カスタム アプリ | はい | はい | はい、公共使用可能 | 任意の HTTP コントローラー |
 | ChatGPT custom MCP connector | はい | はい | public 利用では必須 | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | いいえ | いいえ | いいえ | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | localhost では通常不要、network 越しでは必要 | はい | localhost 外では推奨 | Any HTTP runtime |
 | VS Code extension helper flow | ChatGPT を接続する場合のみ | ChatGPT URL を copy する場合は使用 | ChatGPT では推奨 | VS Code-launched runtime |
 
-[unified web workspace](../getting-started/web-workspace.md)、[Gemini Spark](../getting-started/gemini-spark.md)、[ChatGPT connector](../getting-started/chatgpt-connector.md)、[generic MCP clients](../clients/generic-mcp.md)、および [network connectivity](../clients/connectivity.md) を参照してください。
+[unified web workspace](../getting-started/web-workspace.md)、[Gemini Task](../getting-started/gemini-spark.md)、[ChatGPT connector](../getting-started/chatgpt-connector.md)、[generic MCP clients](../clients/generic-mcp.md)、および [network connectivity](../clients/connectivity.md) を参照してください。
 
 ## 各 runtime が制御するもの
 
@@ -121,7 +121,7 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 ## Client ページ
 
 - [Unified web workspace](../getting-started/web-workspace.md)
-- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
+- [Gemini Task / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

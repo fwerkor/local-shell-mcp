@@ -51,13 +51,13 @@ Local MCP client
 | Interface | Requires public HTTPS | Uses `/mcp` | Requires OAuth | Typical runtime |
 |---|---:|---:|---:|---|
 | Unified LSM web workspace | Yes for remote access; local proxy also possible | Internally | LSM login | Controller |
-| Gemini Spark / Custom Apps | Yes | Yes | Yes for public use | Any HTTP Controller |
+| Gemini Task / Custom Apps | Yes | Yes | Yes for public use | Any HTTP Controller |
 | ChatGPT custom MCP connector | Yes | Yes | Yes for public use | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | No | No | No | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | Usually no for localhost; yes across networks | Yes | Recommended outside localhost | Any HTTP runtime |
 | VS Code extension helper flow | Only if ChatGPT must connect | Yes when copying ChatGPT URL | Recommended for ChatGPT | VS Code-launched runtime |
 
-See the [unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md), and [network connectivity](../clients/connectivity.md).
+See the [unified web workspace](../getting-started/web-workspace.md), [Gemini Task](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md), and [network connectivity](../clients/connectivity.md).
 
 ## What each runtime controls
 
@@ -120,7 +120,7 @@ Do not append `/mcp` to `LOCAL_SHELL_MCP_PUBLIC_BASE_URL`.
 ## Client pages
 
 - [Unified web workspace](../getting-started/web-workspace.md)
-- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
+- [Gemini Task / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

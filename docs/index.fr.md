@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Espace de travail IA auto-hébergé · Plan de contrôle MCP</span>
 
@@ -56,7 +56,7 @@ La limite d’isolation prévue est le container ou la VM qui exécute le servic
 | Utiliser l’agent IA intégré | [WebUI Chat](chat/index.md) | Canaux, agents, autorisations, contexte et automatisation |
 | Déploiement du premier contrôleur | [Quickstart](getting-started/quickstart.md) | Binaire recommandé, OAuth et première session navigateur |
 | Choisir la couche runtime | [Runtime choices](guides/deployment.md) | Explique Docker, VS Code, binary, Python et stdio comme options de runtime distinctes |
-| Connecter Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Éligibilité, URL HTTPS MCP, OAuth et tests |
+| Connecter Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | Éligibilité, URL HTTPS MCP, OAuth et tests |
 | Ajouter ChatGPT comme client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, premier prompt sûr, tool discovery |
 | Ajouter LSM à DeepSeek Harness | [Plugin DeepSeek Harness](clients/deepseek-harness.md) | Installer ce repository comme bundle DSH tout en conservant toute la surface d’outils LSM et remote workers |
 | Exécuter depuis VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Runtime lancé depuis l’éditeur et notes de sécurité host |

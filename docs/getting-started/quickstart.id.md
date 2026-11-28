@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2829baa9432161ba8a604bf9a6f18e428f797c9574495faf0768b6204b40d11f -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # Mulai cepat
 
 Panduan ini memulai Pengontrol LSM dan membuka antarmuka browsernya. [unified web workspace](web-workspace.md) adalah pengalaman harian yang direkomendasikan. ChatGPT, Gemini, dan klien MCP eksternal lainnya dapat terhubung ke Pengontrol yang sama. Lihat [runtime choices and deployment model](../guides/deployment.md).
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | Jalankan dengan binary release | [Runtime binary mandiri](../installation/binary.md) |
 | Jalankan dengan Python atau source checkout | [Python runtimes](../installation/python.md) |
 | Gunakan antarmuka obrolan dan kontrol terpadu | [Unified web workspace](web-workspace.md) |
-| Tambahkan Gemini Spark sebagai klien | [Gemini Custom Apps](gemini-spark.md) |
+| Tambahkan Gemini Task sebagai klien | [Gemini Custom Apps](gemini-spark.md) |
 | Tambahkan ChatGPT sebagai client | [ChatGPT connector](chatgpt-connector.md) |
 | Pilih tools dan tulis prompt lebih baik | [Pola penggunaan](../guides/usage-patterns.md) |
 | Hubungkan mesin HPC, NPU/GPU, atau NAT | [Worker jarak jauh](../guides/remote-workers.md) |

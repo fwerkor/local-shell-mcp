@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Автономное рабочее пространство ИИ · Плоскость управления MCP</span>
 
@@ -56,7 +56,7 @@ Optional remote workers: outbound machine connections
 | Использовать встроенного ИИ-агента | [WebUI Chat](chat/index.md) | Каналы, агенты, разрешения, контекст и автоматизация |
 | Первое развертывание контроллера | [Quickstart](getting-started/quickstart.md) | Рекомендуемый бинарник, OAuth и первый вход |
 | Выбор runtime layer | [Runtime choices](guides/deployment.md) | Объясняет Docker, VS Code, binary, Python и stdio как отдельные runtime options |
-| Подключение Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Право на участие, URL-адрес HTTPS MCP, OAuth и тестирование |
+| Подключение Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | Право на участие, URL-адрес HTTPS MCP, OAuth и тестирование |
 | Добавить ChatGPT как client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, первый безопасный prompt, tool discovery |
 | Добавить LSM в DeepSeek Harness | [Плагин DeepSeek Harness](clients/deepseek-harness.md) | Установить repository как DSH bundle, сохранив полный набор LSM tools и remote-worker capabilities |
 | Запуск из VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime и заметки по host safety |

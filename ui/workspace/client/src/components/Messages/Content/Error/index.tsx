@@ -103,7 +103,7 @@ const Error = ({ text, message }: { text: string; message?: ErrorSource }) => {
     <ErrorBody>
       <ErrorContent text={text} message={message} />
       <ErrorDetails label={localize('com_error_details_diagnostic')}>
-        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono select-text">
+        <pre className="whitespace-pre-wrap break-all font-mono select-text">
           {details}
         </pre>
       </ErrorDetails>

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Opciones de runtime y modelo de despliegue
 
 `local-shell-mcp` tiene dos decisiones complementarias:
@@ -52,13 +52,13 @@ Local MCP client
 | Interfaz | Requiere HTTPS público | Utiliza `/mcp` | Requiere OAuth | Tiempo de ejecución típico |
 |---|---:|---:|---:|---|
 | Espacio de trabajo web unificado de LSM | Sí para acceso remoto; proxy local también es posible | Internamente | iniciar sesión LSM | Controller |
-| Gemini Spark / Aplicaciones personalizadas | si | si | Si para uso publico | Cualquier controlador HTTP |
+| Gemini Task / Aplicaciones personalizadas | si | si | Si para uso publico | Cualquier controlador HTTP |
 | ChatGPT custom MCP connector | Sí | Sí | Sí para uso público | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | No | No | No | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | Normalmente no en localhost; sí entre redes | Sí | Recomendado fuera de localhost | Any HTTP runtime |
 | VS Code extension helper flow | Solo si ChatGPT debe conectar | Sí al copiar URL de ChatGPT | Recomendado para ChatGPT | VS Code-launched runtime |
 
-Consulte [unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) y [network connectivity](../clients/connectivity.md).
+Consulte [unified web workspace](../getting-started/web-workspace.md), [Gemini Task](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) y [network connectivity](../clients/connectivity.md).
 
 ## Qué controla cada runtime
 
@@ -121,7 +121,7 @@ No añada `/mcp` a `LOCAL_SHELL_MCP_PUBLIC_BASE_URL`.
 ## Páginas de client
 
 - [Unified web workspace](../getting-started/web-workspace.md)
-- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
+- [Gemini Task / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

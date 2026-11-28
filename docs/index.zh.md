@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">自托管AI工作区·MCP控制平面</span>
 
@@ -56,7 +56,7 @@
 | 使用内置 AI 智能体 | [WebUI Chat](chat/index.md) | 渠道、智能体、权限、上下文和自动化 |
 | 第一个控制器部署 | [Quickstart](getting-started/quickstart.md) | 单文件二进制部署、OAuth 与首次浏览器使用 |
 | 选择运行时层 | [运行时选择](guides/deployment.md) | 把 Docker、VS Code、二进制、Python 和 stdio 与客户端接入分开说明 |
-| 连接 Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | 资格、HTTPS MCP URL、OAuth 和测试 |
+| 连接 Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | 资格、HTTPS MCP URL、OAuth 和测试 |
 | 把 ChatGPT 作为客户端接入 | [ChatGPT 连接器](getting-started/chatgpt-connector.md) | 端点、OAuth、首次安全提示和工具发现 |
 | 把 LSM 接入 DeepSeek Harness | [DeepSeek Harness 插件](clients/deepseek-harness.md) | 把本仓库作为 DSH bundle 安装，同时保留完整的 LSM 工具与远程 worker 能力 |
 | 从 VS Code 启动运行时 | [VS Code 扩展运行时](installation/vscode-extension.md) | 编辑器启动、设置和主机安全边界 |

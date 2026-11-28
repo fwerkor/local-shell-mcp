@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1bc4e389f6402043572bdfd2d140aa49fde7862e94a47dc9b837abab69493269 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">자체 호스팅 AI 작업 공간 · MCP 제어 평면</span>
 
@@ -56,7 +56,7 @@ Optional remote workers: outbound machine connections
 | 내장 AI 에이전트 사용 | [WebUI Chat](chat/index.md) | 채널, 에이전트, 권한, 컨텍스트, 자동화 |
 | 첫 번째 컨트롤러 배포 | [Quickstart](getting-started/quickstart.md) | 권장 바이너리, OAuth 및 첫 브라우저 실행 |
 | runtime layer 선택 | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python, stdio를 별도 runtime option으로 설명 |
-| Gemini Spark 연결하기 | [Gemini Custom Apps](getting-started/gemini-spark.md) | 자격, HTTPS MCP URL, OAuth 및 테스트 |
+| Gemini Task 연결하기 | [Gemini Custom Apps](getting-started/gemini-spark.md) | 자격, HTTPS MCP URL, OAuth 및 테스트 |
 | ChatGPT를 client로 추가 | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, 첫 안전 prompt, tool discovery |
 | LSM을 DeepSeek Harness에 추가 | [DeepSeek Harness plugin](clients/deepseek-harness.md) | 이 repository를 DSH bundle로 설치하면서 전체 LSM tool 및 remote-worker surface 유지 |
 | VS Code에서 실행 | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime 및 host safety 참고 |

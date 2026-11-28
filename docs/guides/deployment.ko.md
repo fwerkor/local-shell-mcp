@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 32e65d99f0c69e345ecde6e62dad65303a27247147767c551a9f1ec478280c23 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Runtime 선택과 deployment 모델
 
 `local-shell-mcp`에는 두 가지 보완적인 결정이 있습니다.
@@ -52,13 +52,13 @@ Local MCP client
 | 인터페이스 | 공개 HTTPS가 필요합니다 | `/mcp`를 사용합니다. | OAuth 필요 | 일반적인 런타임 |
 |---|---:|---:|---:|---|
 | 통합 LSM 웹 작업공간 | 예, 원격 액세스의 경우입니다. 로컬 프록시도 가능 | 내부적으로 | LSM 로그인 | Controller |
-| Gemini Spark / 맞춤형 앱 | 예 | 예 | 네, 공용으로 사용하세요 | 모든 HTTP 컨트롤러 |
+| Gemini Task / 맞춤형 앱 | 예 | 예 | 네, 공용으로 사용하세요 | 모든 HTTP 컨트롤러 |
 | ChatGPT custom MCP connector | 예 | 예 | public 사용 시 예 | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | 아니요 | 아니요 | 아니요 | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | localhost는 보통 아니요, 네트워크에서는 예 | 예 | localhost 밖에서는 권장 | Any HTTP runtime |
 | VS Code extension helper flow | ChatGPT 연결 시에만 | ChatGPT URL copy 시 예 | ChatGPT에서는 권장 | VS Code-launched runtime |
 
-[unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) 및 [network connectivity](../clients/connectivity.md)를 참조하세요.
+[unified web workspace](../getting-started/web-workspace.md), [Gemini Task](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) 및 [network connectivity](../clients/connectivity.md)를 참조하세요.
 
 ## 각 runtime이 제어하는 것
 
@@ -121,7 +121,7 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 ## Client 페이지
 
 - [Unified web workspace](../getting-started/web-workspace.md)
-- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
+- [Gemini Task / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: b7c3dfd7dc21a498f8410a88a8a52094ca0349856dfa43d267e3fe7bb273685a -->
-# Kết nối Gemini Spark / Ứng dụng tùy chỉnh
+<!-- i18n-source-sha256: 0d50677fe8bd21dbf6f3fff366adea800f15d50fdbc67ed3b77abf84437f73eb -->
+# Kết nối Gemini Task / ứng dụng tùy chỉnh
 
-Tính năng **ứng dụng được kết nối tùy chỉnh** của Gemini (trước đây được mô tả là **Spark**) cho phép người dùng Gemini đủ điều kiện kết nối máy chủ MCP từ xa. LSM có thể cung cấp điểm cuối MCP. Đây là **kết nối máy khách thay thế** với [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md) và các máy khách MCP khác; nó không thay thế hoặc triển khai Bộ điều khiển LSM.
+Tính năng **ứng dụng được kết nối tùy chỉnh** của Gemini cho phép người dùng Gemini đủ điều kiện kết nối máy chủ MCP từ xa. LSM có thể cung cấp điểm cuối MCP. Đây là **kết nối máy khách thay thế** với [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md) và các máy khách MCP khác; nó không thay thế hoặc triển khai Bộ điều khiển LSM.
 
 Google hiện hạn chế các ứng dụng tùy chỉnh đối với **người dùng từ 18 tuổi trở lên ở Hoa Kỳ**, đăng nhập bằng **Tài khoản Google cá nhân** và **Bật hoạt động**. Tính năng này có sẵn bằng **tiếng Anh**. Các kết nối phải được tạo trên ứng dụng web Gemini, mặc dù sau này các ứng dụng được kết nối có thể được sử dụng trên thiết bị di động. Tính khả dụng và nhãn giao diện người dùng có thể thay đổi; tham khảo [official Gemini custom apps instructions](https://support.google.com/gemini/answer/17209137).
 
@@ -30,6 +30,16 @@ Không nhập giao diện người dùng web (`/ui`), URL LibreChat hoặc ngu�
 6. Trong cuộc trò chuyện với Song Tử, hãy nhập `@` và chọn ứng dụng tùy chỉnh được kết nối để yêu cầu công cụ LSM.
 
 Bắt đầu bằng: "Sử dụng ứng dụng LSM được kết nối để kiểm tra môi trường và liệt kê các tệp không gian làm việc. Không sửa đổi bất cứ điều gì." Kiểm tra kết quả của công cụ và kiểm tra Bộ điều khiển trước khi thử thao tác ghi.
+
+## Sử dụng chế độ Task (trước đây là Spark)
+
+Đối với lập trình nhiều bước, gỡ lỗi và bảo trì máy chủ, nên dùng **Task** thay cho trò chuyện thông thường: có thể lập kế hoạch, gọi công cụ nhiều lần và theo dõi tiến độ. Đây không phải bảo đảm về tốc độ hay chất lượng đã đo lường.
+
+Trên màn hình chính Gemini, chọn **Task** bên dưới hộp nhập và hoàn tất thiết lập nếu được yêu cầu. Nhập `@`, chọn LSM nếu xuất hiện, rồi nêu mục tiêu, máy hoặc không gian làm việc và tiêu chí hoàn thành.
+
+Ví dụ: “Dùng LSM kiểm tra kho mã, tái hiện bài kiểm thử lỗi, sửa nguyên nhân và chạy lại các bài kiểm thử. Báo cáo các tệp đã đổi và kết quả.”
+
+Theo dõi tiến độ và xác nhận thao tác khi cần. Kiểm tra lệnh gọi LSM trong nhật ký kiểm toán Controller: máy tính đám mây của Gemini không phải không gian LSM của bạn. Giữ Controller và các Worker cần thiết trực tuyến. Task và ứng dụng tùy chỉnh có điều kiện truy cập riêng; nếu thiếu tùy chọn, xem [hướng dẫn Task chính thức](https://support.google.com/gemini/answer/17094507).
 
 ## Giới hạn và khắc phục sự cố
 

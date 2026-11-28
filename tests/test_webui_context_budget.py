@@ -735,7 +735,11 @@ async def test_summary_permanent_provider_failure_does_not_retry(ctx, monkeypatc
     assert state.messages == original
     assert not called_summary(store, run.run_id)
     from local_shell_mcp.webui.error_diagnostics import generation_failure
-    assert 'Context compaction failed' in json.loads(generation_failure(error.value, run.run_id))['message']
+    record = json.loads(generation_failure(error.value, run.run_id))
+    assert 'Context compaction failed' in record['message']
+    assert 'HTTP status: 401' in record['details']
+    assert 'Context limit: 8192' in record['details']
+    assert 'Caused by:' in record['details']
 
 
 def test_live_compaction_rejects_active_graph_agent(ctx):
@@ -761,3 +765,37 @@ def test_live_compaction_rejects_active_graph_agent(ctx):
     single, _ = store.begin('a', {'text': 'Run single agent'}, child)
     receipt = store.request_live_compaction('a', single.conversation_id)
     assert receipt['runId'] == single.run_id
+
+
+@pytest.mark.asyncio
+async def test_failed_summary_reports_earlier_attempts(ctx, monkeypatch):
+    from local_shell_mcp.webui.error_diagnostics import generation_failure
+
+    monkeypatch.setattr(agent_runtime, "_MODEL_RETRY_DELAYS", (0, 0))
+    db, store, repo, profile = ctx
+    run, _ = store.begin('a', {'text': 'Preserve context'})
+    repo.save_setting('a', 'endpoints', {'summarization': {
+        'trigger': {'type': 'token_ratio', 'value': 0.05}}})
+    attempts = []
+
+    async def summarize(*args, **kwargs):
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise httpx.ReadError('connection')
+        if len(attempts) == 2:
+            yield ''
+        else:
+            raise httpx.ReadTimeout('timeout')
+
+    runner = AgentRunner('a', run, db, store, scopes=set(), grant_expires=None,
+                         stream_tools=_empty_text, stream_text=summarize, on_text=_emit_noop,
+                         profile=profile)
+    original = [{'role': 'user', 'content': 'Preserve context'}, *_tool_exchange('initial', 600)]
+    state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 10000}), list(original))
+    with pytest.raises(CompactionFailed) as error:
+        await runner._before_model(state)
+    assert len(attempts) == 3 and state.messages == original
+    detail = json.loads(generation_failure(error.value, run.run_id))['details']
+    assert 'Earlier summary attempts:' in detail
+    assert 'ReadError' in detail and 'ReadTimeout' in detail
+    assert 'Summarization produced empty output' in detail
