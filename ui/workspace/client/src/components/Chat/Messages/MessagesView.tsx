@@ -232,13 +232,15 @@ export default function MessagesView({
   messagesTree,
   messages,
   isFetching = false,
+  isLoadingTail = false,
 }: {
   messagesTree?: TMessage[] | null;
   messages?: TMessage[] | null;
   isFetching?: boolean;
+  isLoadingTail?: boolean;
 }) {
   return (
-    <MessagesViewProvider>
+    <MessagesViewProvider isLoadingTail={isLoadingTail}>
       <MessagesViewContent
         messagesTree={messagesTree}
         messages={messages}

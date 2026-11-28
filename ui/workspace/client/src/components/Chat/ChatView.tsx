@@ -104,7 +104,12 @@ function ChatView({ index = 0, project }: { index?: number; project?: TChatProje
   // Wait for messages to load AND the warm-cache background revalidation to
   // settle: a stale invalidated cache mounts with isLoading false while the
   // refetch is in flight, and resume must not build from (or race) it.
-  useResumeOnLoad(conversationId, chatHelpers.getMessages, index, !isLoading && !isFetching);
+  const isResuming = useResumeOnLoad(
+    conversationId,
+    chatHelpers.getMessages,
+    index,
+    !isLoading && !isFetching,
+  );
 
   // Show a server-owned queued follow-up as the next user turn as soon as its
   // predecessor completes, ahead of the receipt and active-job polls.
@@ -135,7 +140,12 @@ function ChatView({ index = 0, project }: { index?: number; project?: TChatProje
     content = <LoadingSpinner />;
   } else if (!isLandingPage) {
     content = (
-      <MessagesView messagesTree={messagesTree} messages={messages} isFetching={isFetching} />
+      <MessagesView
+        messagesTree={messagesTree}
+        messages={messages}
+        isFetching={isFetching}
+        isLoadingTail={!isSubmitting && (isFetching || isResuming)}
+      />
     );
   } else {
     content = <Landing centerFormOnLanding={centerFormOnLanding} />;

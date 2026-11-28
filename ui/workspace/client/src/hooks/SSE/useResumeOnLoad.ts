@@ -839,6 +839,7 @@ export default function useResumeOnLoad(
     dataUpdatedAt: streamStatusUpdatedAt,
     isSuccess,
     isFetching,
+    isLoading,
   } = useStreamStatus(conversationId, shouldCheck);
 
   useEffect(() => {
@@ -1217,4 +1218,16 @@ export default function useResumeOnLoad(
     setSubmission,
     queryClient,
   ]);
+
+  // A restored snapshot can contain tool results but not the eventual answer.
+  // Keep the presentation pending until status is known and the live stream
+  // has taken ownership. The generation epoch bridges the resume/open gap.
+  return (
+    !isSubmitting &&
+    ((shouldCheck &&
+      (isLoading ||
+        isFetching ||
+        (isSuccess && streamStatus?.active === true && !!streamStatus.streamId))) ||
+      hasLiveSubmissionForThisConvo)
+  );
 }
