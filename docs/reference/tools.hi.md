@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # Tools reference
 
 यह page वास्तविक MCP tool schemas से बनती है। Public tool surface बदलने के बाद English reference update करने के लिए `python scripts/generate-tools-reference.py` चलाएँ।
@@ -790,7 +790,7 @@ OAuth क्षेत्र: `shell:read, shell:write, shell:execute, browser:us
 
 ### `remote_list`
 
-पंजीकृत remote workers, उनकी स्थिति और क्षमताओं की सूची दिखाता है। verbose=true निदान टेलीमेट्री शामिल करता है।
+पंजीकृत remote workers, उनकी स्थिति और संसाधन उपयोग की सूची दिखाता है। verbose=true निदान टेलीमेट्री शामिल करता है।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

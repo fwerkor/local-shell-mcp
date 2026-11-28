@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # Referensi tools
 
 Page ini dibangun dari MCP tool schemas yang sebenarnya. Jalankan `python scripts/generate-tools-reference.py` setelah mengubah public tool surface untuk memperbarui English reference.
@@ -790,7 +790,7 @@ Ketika `machine` diberikan, panggilan tersebut juga memerlukan `remote:use` dan 
 
 ### `remote_list`
 
-Menampilkan remote workers terdaftar, status, dan kemampuannya. verbose=true menyertakan telemetri diagnostik.
+Menampilkan remote workers terdaftar, status, dan penggunaan sumber dayanya. verbose=true menyertakan telemetri diagnostik.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

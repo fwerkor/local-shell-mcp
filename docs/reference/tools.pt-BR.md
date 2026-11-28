@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # Referência de ferramentas
 
 Esta página é construída a partir dos schemas MCP reais. Execute `python scripts/generate-tools-reference.py` após alterar a superfície pública de tools para atualizar a referência English.
@@ -789,7 +789,7 @@ Quando `machine` é informado, a chamada também exige `remote:use` e é executa
 
 ### `remote_list`
 
-Lista remote workers registrados, seus estados e capacidades. verbose=true inclui telemetria de diagnóstico.
+Lista remote workers registrados, seus estados e uso de recursos. verbose=true inclui telemetria de diagnóstico.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|

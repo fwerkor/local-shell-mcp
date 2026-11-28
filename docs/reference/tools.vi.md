@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -789,7 +789,7 @@ Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy q
 
 ### `remote_list`
 
-Liệt kê remote workers đã đăng ký, trạng thái và khả năng. verbose=true bao gồm dữ liệu đo từ xa phục vụ chẩn đoán.
+Liệt kê remote workers đã đăng ký, trạng thái và mức sử dụng tài nguyên. verbose=true bao gồm dữ liệu đo từ xa phục vụ chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

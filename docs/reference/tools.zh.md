@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # 工具参考
 
 本页由实际 MCP tool schema 生成。公开工具接口变更后，运行 `python scripts/generate-tools-reference.py` 更新 English 参考页。
@@ -789,7 +789,7 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_list`
 
-列出已注册的远程 Worker、状态与能力。verbose=true 时包含诊断遥测数据。
+列出已注册的远程 Worker、状态与资源用量。verbose=true 时包含诊断遥测数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|

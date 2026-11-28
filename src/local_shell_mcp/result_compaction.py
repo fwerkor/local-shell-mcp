@@ -78,14 +78,20 @@ def compact_native_result(name: str, arguments: dict, result: Any) -> Any:
         data = {**data, 'jobs': [_omit_defaults(row, defaults) if isinstance(row, dict)
                                  else row for row in data['jobs']]}
     elif (name == 'remote_list'
-          and not verbose and isinstance(data, dict) and isinstance(data.get('machines'), list)):
+          and isinstance(data, dict) and isinstance(data.get('machines'), list)):
         rows = []
         for row in data['machines']:
             if isinstance(row, dict):
-                row = {key: value for key, value in row.items()
-                       if key not in {'last_seen', 'offline_after_s', 'reset_generation'}}
-                if row.get('queue_depth') == 0:
-                    row = _omit_defaults(row, {'interactive_queue_depth': 0, 'transfer_queue_depth': 0})
+                row = {key: value for key, value in row.items() if key != 'capabilities'}
+                info = row.get('info')
+                if isinstance(info, dict):
+                    row['info'] = {key: value for key, value in info.items()
+                                   if key not in {'sample_generation', 'sample_sequence'}}
+                if not verbose:
+                    row = {key: value for key, value in row.items()
+                           if key not in {'last_seen', 'offline_after_s', 'reset_generation'}}
+                    if row.get('queue_depth') == 0:
+                        row = _omit_defaults(row, {'interactive_queue_depth': 0, 'transfer_queue_depth': 0})
             rows.append(row)
         data = {**data, 'machines': rows}
     if 'data' in compact:

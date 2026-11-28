@@ -785,7 +785,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `remote_list`
 
-List registered remote workers, including status and capabilities. Set verbose=true for diagnostic telemetry.
+List registered remote workers, including status and resource usage. Set verbose=true for diagnostic telemetry.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

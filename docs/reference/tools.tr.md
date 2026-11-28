@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # Tools referansı
 
 Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface değiştiğinde English reference güncellemek için `python scripts/generate-tools-reference.py` çalıştırın.
@@ -789,7 +789,7 @@ OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:sh
 
 ### `remote_list`
 
-Kayıtlı remote workers, durumları ve yeteneklerini listeler. verbose=true tanılama telemetrisini içerir.
+Kayıtlı remote workers, durumları ve kaynak kullanımlarını listeler. verbose=true tanılama telemetrisini içerir.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

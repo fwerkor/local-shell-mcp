@@ -4575,7 +4575,7 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(structured_output=True, meta=remote_meta, annotations=ToolAnnotations(readOnlyHint=True))
     async def remote_list(verbose: bool = False) -> ToolResult:
-        """List registered remote workers, including status and capabilities. Set verbose=true for diagnostic telemetry."""
+        """List registered remote workers, including status and resource usage. Set verbose=true for diagnostic telemetry."""
         return await _tool_call(lambda: remote_manager().list_machines())
 
     @mcp.tool(structured_output=True, meta=remote_meta)

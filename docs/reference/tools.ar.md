@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # مرجع الأدوات
 
 تُبنى هذه الصفحة من MCP tool schemas الفعلية. شغّل `python scripts/generate-tools-reference.py` بعد تغيير public tool surface لتحديث English reference.
@@ -789,7 +789,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_list`
 
-يعرض remote workers المسجلين وحالتهم وقدراتهم. استخدم verbose=true للحصول على بيانات القياس عن بعد للتشخيص.
+يعرض remote workers المسجلين وحالتهم واستخدام مواردهم. استخدم verbose=true للحصول على بيانات القياس عن بعد للتشخيص.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
