@@ -42,16 +42,67 @@ def bind_model_session(config: ProviderConfig, conversation_id: str, namespace: 
     return replace(config, session_id=session_id)
 
 
+def _official_endpoint(config: ProviderConfig, host: str, path: str, *, prefix: bool = False) -> bool:
+    url = urlsplit(config.url)
+    return (url.scheme == "https" and url.hostname == host and url.port in (None, 443)
+            and not url.username and not url.password
+            and (url.path.startswith(path) if prefix else url.path == path))
+
+
+def _chatgpt_session_endpoint(config: ProviderConfig) -> bool:
+    return config.provider == "openai-responses" and (
+        _official_endpoint(config, "chatgpt.com", "/backend-api/codex/responses")
+        or (config.auth_method == "chatgpt"
+            and _official_endpoint(config, "api.openai.com", "/v1/responses"))
+    )
+
+
+def _cache_session_id(config: ProviderConfig) -> str | None:
+    session_id = config.session_id
+    if session_id and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", session_id):
+        return sha256(session_id.encode()).hexdigest()
+    return session_id
+
+
 def model_request_headers(config: ProviderConfig) -> dict[str, str]:
     headers = {"accept": "text/event-stream", "content-type": "application/json",
                "User-Agent": MODEL_USER_AGENT}
-    url = urlsplit(config.url)
-    if (url.scheme == "https" and url.hostname == "opencode.ai"
-            and url.port in (None, 443) and url.path.startswith("/inference/")):
+    session_id = _cache_session_id(config)
+    if _official_endpoint(config, "opencode.ai", "/inference/", prefix=True):
         headers["x-opencode-client"] = "local-shell-mcp"
-        if config.session_id:
-            headers["x-opencode-session"] = config.session_id
+        if session_id:
+            headers["x-opencode-session"] = session_id
+    elif _official_endpoint(config, "openrouter.ai", "/api/v1/", prefix=True):
+        # Identify the application, not the operator's private deployment.
+        headers["HTTP-Referer"] = "https://github.com/fwerkor/local-shell-mcp"
+        headers["X-OpenRouter-Title"] = "Local Shell MCP"
+        if session_id:
+            headers["x-session-id"] = session_id
+    elif session_id and _chatgpt_session_endpoint(config):
+        headers["session-id"] = session_id
     return headers
+
+
+def _openai_legacy_cache_model(model: str) -> bool:
+    # GPT-5.6 and later route automatically. Leave unknown/future model
+    # families alone rather than guessing support for a vendor extension.
+    return bool(re.match(r"^(?:gpt-4o|gpt-4\.1|gpt-5(?:\.[0-5])?|o[134])(?:-|$)", model))
+
+
+def apply_model_cache_options(config: ProviderConfig, body: dict) -> None:
+    """Enable the official provider's cache mechanism without changing messages."""
+    session_id = _cache_session_id(config)
+    if not session_id:
+        return
+    if (config.provider in {"openai", "openai-responses"} and not _chatgpt_session_endpoint(config)
+            and any(_official_endpoint(config, "api.openai.com", path)
+                    for path in ("/v1/chat/completions", "/v1/responses"))
+            and _openai_legacy_cache_model(config.model)):
+        body["prompt_cache_key"] = session_id
+    elif config.provider == "anthropic" and _official_endpoint(config, "api.anthropic.com", "/v1/messages"):
+        # Automatic caching advances the breakpoint with conversation history;
+        # use the default ephemeral TTL rather than extending retention.
+        body["cache_control"] = {"type": "ephemeral"}
 
 
 def _require_https_or_loopback(value: str) -> str:
@@ -383,6 +434,7 @@ async def stream_model(
             body["generationConfig"]["topP"] = top_p
     else:
         raise ValueError("Unsupported model provider")
+    apply_model_cache_options(config, body)
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     usage_snapshot = None
     finish_reason = None
@@ -532,6 +584,7 @@ async def stream_model_with_tools(
         body["temperature"] = temperature
     if top_p is not None:
         body["top_p"] = top_p
+    apply_model_cache_options(config, body)
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     pending: dict[int, dict[str, str]] = {}
     usage_snapshot = None

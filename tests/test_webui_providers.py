@@ -218,3 +218,58 @@ def test_model_session_binding_is_stable_and_isolates_tasks():
     assert config.session_id is None
     assert "x-opencode-session" not in model_request_headers(config)
     assert model_request_headers(config)["x-opencode-client"] == "local-shell-mcp"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_tools", [False, True])
+@pytest.mark.parametrize("provider,model,url,expected_cache,expected_session", [
+    ("openai", "gpt-5.5", "https://api.openai.com/v1/chat/completions", "conversation-1", None),
+    ("openai", "gpt-5.6", "https://api.openai.com/v1/chat/completions", None, None),
+    ("openai", "gpt-6.2", "https://api.openai.com/v1/chat/completions", None, None),
+    ("openai", "gpt-5.5", "https://api.openai.com.example.org/v1/chat/completions", None, None),
+    ("openai", "gpt-5.5", "https://gateway.invalid/v1/chat/completions", None, None),
+    ("openai", "gpt-5.5", "https://openrouter.ai/api/v1/chat/completions", None, "conversation-1"),
+    ("anthropic", "claude-sonnet-4-6", "https://api.anthropic.com/v1/messages", {"type": "ephemeral"}, None),
+    ("anthropic", "claude-sonnet-4-6", "https://gateway.invalid/v1/messages", None, None),
+    ("anthropic", "anthropic/claude-sonnet-4-6", "https://openrouter.ai/api/v1/messages", None, "conversation-1"),
+])
+async def test_provider_cache_options_on_wire(monkeypatch, with_tools, provider, model, url,
+                                               expected_cache, expected_session):
+    from local_shell_mcp.webui.providers import bind_model_session, stream_model_with_tools
+
+    captured = {}
+    frames = (['data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}']
+              if provider == "anthropic" else ['data: {"choices":[{"delta":{"content":"OK"}}]}'])
+    _mock_client(monkeypatch, frames + ['data: [DONE]'], captured)
+    config = bind_model_session(ProviderConfig(provider, model, url, "key"), "conversation-1")
+    messages = [{"role": "system", "content": "Stable instructions"}, {"role": "user", "content": "Hi"}]
+    tools = [{"type": "function", "function": {"name": "test", "parameters": {"type": "object"}}}]
+    stream = stream_model_with_tools(config, messages, tools=tools) if with_tools else stream_model(config, messages)
+    assert await _collect(stream) == ["OK"]
+    headers = captured["request"].headers
+    body = json.loads(captured["request"].content)
+    assert body.get("cache_control" if provider == "anthropic" else "prompt_cache_key") == expected_cache
+    assert headers.get("x-session-id") == expected_session
+    assert headers.get("x-openrouter-title") == ("Local Shell MCP" if expected_session else None)
+    assert headers.get("http-referer") == ("https://github.com/fwerkor/local-shell-mcp" if expected_session else None)
+    assert headers.get("session-id") is None
+    assert headers.get("x-opencode-session") is None
+
+
+def test_cache_session_id_is_bounded_and_header_safe():
+    from local_shell_mcp.webui.providers import (
+        apply_model_cache_options,
+        bind_model_session,
+        model_request_headers,
+    )
+
+    long_id = "long-session-" * 20
+    config = bind_model_session(
+        ProviderConfig("openai", "gpt-5", "https://api.openai.com/v1/chat/completions", "key"), long_id)
+    body = {}
+    apply_model_cache_options(config, body)
+    assert len(body["prompt_cache_key"]) == 64
+    router = bind_model_session(
+        ProviderConfig("openai", "test", "https://openrouter.ai/api/v1/chat/completions", "key"), long_id)
+    assert model_request_headers(router)["x-session-id"] == body["prompt_cache_key"]
+    assert model_request_headers(bind_model_session(router, long_id, "child"))["x-session-id"] != body["prompt_cache_key"]
