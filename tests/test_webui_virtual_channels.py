@@ -62,7 +62,6 @@ def test_catalog_inherits_min_context_without_credentials(pool):
 
 
 @pytest.mark.parametrize("bad", [
-    [{"channel": "Pool", "model": "alias"}],
     [{"channel": "Primary", "model": "missing"}],
     [{"channel": "Primary", "model": "flash-free", "weight": 0}],
     [{"channel": "Primary", "model": "flash-free"}] * 2,
@@ -463,3 +462,138 @@ async def test_virtual_sampling_overrides_validate_selected_alias_before_dispatc
     with pytest.raises(ValueError, match="temperature"):
         _ = [item async for item in stream_model(provider_config("Pool", "alias"), [],
                                                   temperature=1.5)]
+
+
+def save_virtual(name, routes, **options):
+    value = _validate({"name": name, "provider": "virtual", "routes": routes, **options})
+    _repo().save_setting("__lsm_controller__", "model.channel." + name, value)
+    return value
+
+
+def member(channel, model, weight=1):
+    return {"channel": channel, "model": model, "weight": weight}
+
+
+def test_nested_catalog_context_and_cycle_detection(pool):
+    save_virtual("Middle", {"mid": [member("Pool", "alias")]})
+    save_virtual("Outer", {"outer": [member("Middle", "mid"), member("Backup", "flash")]})
+    assert profile("Outer")["model_contexts"] == {"outer": 128000}
+    assert _endpoint_models()["Outer"] == ["outer"]
+    assert [routing.member_key(m) for m, _ in routing.physical_members(profile("Outer"), "outer")] == [
+        ("Primary", "flash-free"), ("Backup", "flash"),
+    ]
+    with pytest.raises(ValueError, match="Recursive virtual channel"):
+        _validate({"name": "Pool", "provider": "virtual",
+                   "routes": {"other": [member("Outer", "outer")]}})
+    with pytest.raises(ValueError, match="Recursive virtual channel"):
+        _validate({"name": "NewPool", "provider": "virtual",
+                   "routes": {"alias": [member("NewPool", "alias")]}})
+    with _repo().database.connect() as db:
+        from local_shell_mcp.webui.provider_profiles import _reference_types
+        assert "virtual channels" in _reference_types(db, "Middle")
+    primary = profile("Primary")
+    primary["model_contexts"] = {}
+    _repo().save_setting("__lsm_controller__", "model.channel.Primary", primary)
+    assert profile("Outer")["model_contexts"] == {}
+
+
+def test_nested_sampling_uses_physical_protocol(pool):
+    claude = _validate({"name": "Claude", "provider": "anthropic", "base_url": "https://claude.invalid",
+                        "api_key": "test", "models": ["sonnet"]})
+    _repo().save_setting("__lsm_controller__", "model.channel.Claude", claude)
+    save_virtual("Middle", {"mid": [member("Claude", "sonnet")]})
+    with pytest.raises(ValueError, match="temperature"):
+        save_virtual("Outer", {"outer": [member("Middle", "mid")]},
+                     model_sampling={"outer": {"temperature": 1.5}})
+    save_virtual("Outer", {"outer": [member("Middle", "mid")]})
+    from local_shell_mcp.webui.sampling import validate_channel_sampling
+    with pytest.raises(ValueError, match="temperature"):
+        validate_channel_sampling({"temperature": 1.5}, "Outer", "outer")
+
+
+@pytest.mark.asyncio
+async def test_nested_independent_strategies_and_physical_usage(pool, monkeypatch):
+    from local_shell_mcp.webui import providers
+
+    save_virtual("Child", {"mid": pool["routes"]["alias"]},
+                 strategy="weighted_round_robin", session_affinity=False)
+    save_virtual("Outer", {"outer": [member("Child", "mid"), member("Backup", "flash")]},
+                 strategy="round_robin", session_affinity=False)
+    seen = []
+
+    async def reply(config, messages, **kwargs):
+        seen.append((config.model, config.session_id))
+        yield ModelUsage("openai", 10, 2)
+
+    monkeypatch.setattr(providers, "stream_model", reply)
+    config = replace(provider_config("Outer", "outer"), session_id="session",
+                     virtual_session=("owner", "conversation"))
+    outputs = []
+    for _ in range(6):
+        outputs.extend([event async for event in routing.stream_virtual(config, [])])
+    assert [m for m, _ in seen] == ["flash-free", "flash", "flash-free", "flash", "flash", "flash"]
+    assert all(session == "session" for _, session in seen)
+    assert [event.channel for event in outputs] == ["Primary", "Backup", "Primary", "Backup", "Backup", "Backup"]
+    assert all(h.active == 0 for h in routing._health.values())
+
+
+@pytest.mark.asyncio
+async def test_nested_exhaustion_deduplicates_shared_leaves_and_recovers(pool, monkeypatch):
+    from local_shell_mcp.webui import providers
+
+    save_virtual("Child", {"mid": [member("Primary", "flash-free")]})
+    save_virtual("Outer", {"outer": [member("Child", "mid"), member("Primary", "flash-free"),
+                                     member("Backup", "flash")]})
+    seen = []
+    fail = True
+
+    async def reply(config, messages, **kwargs):
+        seen.append(config.model)
+        if config.model == "flash-free" and fail:
+            raise httpx.ConnectError("down")
+        yield "ok"
+
+    monkeypatch.setattr(providers, "stream_model", reply)
+    config = provider_config("Outer", "outer")
+    assert [event async for event in routing.stream_virtual(config, [])] == ["ok"]
+    assert seen == ["flash-free", "flash"]
+    assert routing._health[("Child", "mid")].cooldown == 0
+    routing._health[("Primary", "flash-free")].cooldown = 0
+    fail = False
+    assert [event async for event in routing.stream_virtual(config, [])] == ["ok"]
+    assert seen[-1] == "flash-free"
+    assert all(h.active == 0 for h in routing._health.values())
+
+
+@pytest.mark.asyncio
+async def test_nested_affinity_and_partial_stream_never_replays(pool, monkeypatch):
+    from local_shell_mcp.webui import providers
+
+    save_virtual("Outer", {"outer": [member("Pool", "alias"), member("Backup", "flash")]})
+    seen = []
+    partial = False
+
+    async def reply(config, messages, **kwargs):
+        seen.append(config.model)
+        if config.model == "flash-free":
+            raise httpx.ConnectError("down")
+        yield "ok"
+        if partial:
+            raise httpx.ReadError("interrupted")
+
+    monkeypatch.setattr(providers, "stream_model", reply)
+    session = ("owner", "conversation")
+    config = replace(provider_config("Outer", "outer"), virtual_session=session)
+    assert [event async for event in routing.stream_virtual(config, [])] == ["ok"]
+    assert routing._affinity[("Outer", "outer", session)] == ("Pool", "alias")
+    assert routing._affinity[("Pool", "alias", session)] == ("Backup", "flash")
+    routing._health[("Primary", "flash-free")].cooldown = 0
+    partial = True
+    stream = routing.stream_virtual(config, [])
+    assert await anext(stream) == "ok"
+    assert routing._health[("Pool", "alias")].active == 1
+    assert routing._health[("Backup", "flash")].active == 1
+    with pytest.raises(httpx.ReadError):
+        await anext(stream)
+    assert seen == ["flash-free", "flash", "flash"]
+    assert all(h.active == 0 for h in routing._health.values())

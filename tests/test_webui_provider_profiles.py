@@ -738,3 +738,41 @@ async def test_endpoint_responses_routing_matches_channel_protocol(setup_profile
             assert endpoints[name]["responsesApiRouting"]["*"] == {
                 "default": responses, "on": responses, "off": responses}
             assert provider_config(name).url.endswith("/responses" if responses else "/chat/completions")
+
+
+@pytest.mark.asyncio
+async def test_nested_virtual_cycle_is_rechecked_in_write_transaction(setup_profiles, monkeypatch):
+    from local_shell_mcp.webui import provider_profiles as profiles
+
+    _, app = setup_profiles
+    def pool(name, channel):
+        return {"name": name, "provider": "virtual",
+                "routes": {"alias": [{"channel": channel, "model": "alias"}]}}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://lsm.invalid", headers=_ADMIN) as client:
+        url = "/api/lsm/providers"
+        physical = {"name": "Leaf", "provider": "openai", "base_url": "https://leaf.invalid",
+                    "models": ["alias"], "api_key": "key", "model_contexts": {"alias": 8192}}
+        for body in (physical, pool("First", "Leaf"), pool("Second", "Leaf")):
+            response = await client.put(url, json=body)
+            assert response.status_code == 200, response.text
+
+        original_validate = profiles._validate
+        def validate_then_concurrent_edit(body):
+            result = original_validate(body)
+            # The other edit independently passed validation before First was changed.
+            concurrent = original_validate(pool("Second", "First"))
+            routes._repo().save_setting("__lsm_controller__", "model.channel.Second", concurrent)
+            return result
+
+        monkeypatch.setattr(profiles, "_validate", validate_then_concurrent_edit)
+        response = await client.put(url, json=pool("First", "Second"))
+        assert response.status_code == 400, response.text
+        assert "Recursive virtual channel" in response.text
+        assert profiles.profile("First")["routes"]["alias"][0]["channel"] == "Leaf"
+        assert profiles.profile("Second")["model_contexts"] == {"alias": 8192}
+        monkeypatch.setattr(profiles, "_validate", original_validate)
+        response = await client.put(url, json=pool("Third", "Second"))
+        assert response.status_code == 200, response.text
+        assert profiles.profile("Third")["model_contexts"] == {"alias": 8192}

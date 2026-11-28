@@ -1,7 +1,8 @@
 /** @jest-environment-options {"url":"https://lsm.invalid/"} */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import ModelProviders, { isLoopback } from './ModelProviders';
 
 let mockLocale: 'en' | 'zh-Hans' = 'en';
@@ -64,7 +65,7 @@ beforeEach(() => {
 
 it('defaults to automatic mode and previews metadata; saves only explicit context overrides', async () => {
   await addChannel();
-  expect(toggle()).toBeChecked();
+  expect(within(screen.getByRole('dialog', { name: 'Add channel' })).getByRole('switch')).toBeChecked();
   expect(screen.queryByLabelText('Model identifiers')).not.toBeInTheDocument();
   await screen.findByText('Discovered 2 models');
   expect(post).toHaveBeenCalledWith(path + '/discover', {
@@ -74,6 +75,7 @@ it('defaults to automatic mode and previews metadata; saves only explicit contex
   fireEvent.change(screen.getByLabelText('Context window for pro'), { target: { value: '8192' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
   await screen.findByText('Channel saved.');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
     auto_discover: true, models: ['flash', 'pro'], model_contexts: { pro: 8192 },
   }));
@@ -269,13 +271,52 @@ it('localizes the manual account authorization instructions and callback control
   }
 });
 
-it('creates a virtual channel in the existing inline editor with per-model member mappings', async () => {
+
+it('opens the editor above settings and cancels without modifying the saved channel', async () => {
+  get.mockResolvedValue({ providers: [{ ...existing, auto_discover: false }] });
+  const closeSettings = jest.fn();
+  render(<QueryClientProvider client={new QueryClient()}>
+    <Dialog open onClose={closeSettings}>
+      <DialogPanel><DialogTitle>Settings</DialogTitle><ModelProviders /></DialogPanel>
+    </Dialog>
+  </QueryClientProvider>);
+  const parent = screen.getByRole('dialog', { name: 'Settings' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit DeepSeek' }));
+  const editor = screen.getByRole('dialog', { name: 'Edit DeepSeek' });
+  expect(editor).toBeInTheDocument();
+  expect(parent).not.toContainElement(editor);
+  fireEvent.change(within(editor).getByLabelText('Channel name'), { target: { value: 'Unsaved' } });
+  fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit DeepSeek' })).not.toBeInTheDocument());
+  expect(closeSettings).not.toHaveBeenCalled();
+  expect(put).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit DeepSeek' }));
+  expect(screen.getByLabelText('Channel name')).toHaveValue('DeepSeek');
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(screen.queryByRole('dialog', { name: 'Edit DeepSeek' })).not.toBeInTheDocument();
+});
+
+it('keeps the modal and draft visible when saving fails', async () => {
+  get.mockResolvedValue({ providers: [{ ...existing, auto_discover: false }] });
+  put.mockRejectedValueOnce(new Error('Unable to save channel'));
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit DeepSeek' }));
+  const editor = screen.getByRole('dialog', { name: 'Edit DeepSeek' });
+  fireEvent.change(within(editor).getByLabelText('Channel name'), { target: { value: 'Renamed' } });
+  fireEvent.click(within(editor).getByRole('button', { name: 'Save model channel' }));
+  expect(await within(editor).findByRole('alert')).toHaveTextContent('Unable to save channel');
+  expect(within(editor).getByLabelText('Channel name')).toHaveValue('Renamed');
+  expect(within(editor).getByRole('button', { name: 'Save model channel' })).toBeEnabled();
+});
+
+it('creates a virtual channel in the modal editor with per-model member mappings', async () => {
   const backup = { ...existing, name: 'Backup', models: ['pro'], model_contexts: { pro: 32768 } };
   get.mockResolvedValue({ providers: [existing, backup] });
   mount();
   await screen.findByRole('button', { name: 'Edit DeepSeek' });
   fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Virtual channel' }));
+  expect(screen.getByRole('dialog', { name: 'Add channel' })).toBeInTheDocument();
   expect(screen.queryByLabelText('Model API base URL')).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Channel name'), { target: { value: 'Pool' } });
   fireEvent.change(screen.getByLabelText('Routing strategy'), { target: { value: 'weighted_round_robin' } });
@@ -295,4 +336,31 @@ it('creates a virtual channel in the existing inline editor with per-model membe
     model_sampling: {},
   });
   expect(post).not.toHaveBeenCalled();
+});
+
+it('allows nested virtual members while excluding self and channels that would create cycles', async () => {
+  const virtual = (name: string, model: string, channel: string, target: string) => ({
+    ...existing, name, provider: 'virtual', models: [model], base_url: '',
+    model_contexts: { [model]: 32768 }, auto_discover: false,
+    routes: { [model]: [{ channel, model: target, weight: 1 }] },
+    strategy: 'priority', session_affinity: true,
+  });
+  const child = virtual('Child', 'child', 'DeepSeek', 'flash');
+  const parent = virtual('Parent', 'parent', 'Child', 'child');
+  const ancestor = virtual('Ancestor', 'ancestor', 'Parent', 'parent');
+  const independent = virtual('Independent', 'other', 'DeepSeek', 'old');
+  get.mockResolvedValue({ providers: [existing, child, parent, ancestor, independent] });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Parent' }));
+  const select = screen.getByLabelText('Add member');
+  expect(within(select).queryByRole('option', { name: 'Parent / parent' })).not.toBeInTheDocument();
+  expect(within(select).queryByRole('option', { name: 'Ancestor / ancestor' })).not.toBeInTheDocument();
+  const option = within(select).getByRole('option', { name: 'Independent / other' });
+  fireEvent.change(select, { target: { value: (option as HTMLOptionElement).value } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
+  await screen.findByText('Channel saved.');
+  expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
+    routes: { parent: [{ channel: 'Child', model: 'child', weight: 1 },
+      { channel: 'Independent', model: 'other', weight: 1 }] },
+  }));
 });
