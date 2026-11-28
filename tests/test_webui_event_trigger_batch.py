@@ -89,9 +89,15 @@ async def test_original_750ms_observational_child_batch_structured_and_receipts(
 
 
 @pytest.mark.asyncio
-async def test_batch_fills_at_eight_then_next_delivery_becomes_separate_root(environment):
+async def test_batch_fills_at_eight_then_next_delivery_becomes_separate_root(environment, monkeypatch):
+    from local_shell_mcp.webui import event_triggers
+
     db,child,key,binding=environment
-    ids=[submit(environment,i) for i in range(9)]
+    # Model nine arrivals inside one coalescing window independently of disk speed.
+    with monkeypatch.context() as clock:
+        arrival = event_triggers._now()
+        clock.setattr(event_triggers, '_now', lambda: arrival)
+        ids=[submit(environment,i) for i in range(9)]
     with db.connect() as conn:
         roots=conn.execute('SELECT id,batch_count,batch_root_id FROM agent_event_deliveries '
                            'WHERE batch_root_id IS NULL ORDER BY seq').fetchall()
