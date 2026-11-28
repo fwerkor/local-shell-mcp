@@ -789,7 +789,7 @@ OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_list`
 
-등록된 remote workers와 상태 및 기능을 나열합니다. verbose=true로 진단 원격 측정 데이터를 포함합니다.
+등록된 remote workers와 상태 및 리소스 사용량을 나열합니다. verbose=true로 진단 원격 측정 데이터를 포함합니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

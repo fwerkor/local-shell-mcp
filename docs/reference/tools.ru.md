@@ -789,7 +789,7 @@ OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, r
 
 ### `remote_list`
 
-Выводит зарегистрированные remote workers, их состояние и возможности. verbose=true включает диагностическую телеметрию.
+Выводит зарегистрированные remote workers, их состояние и использование ресурсов. verbose=true включает диагностическую телеметрию.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

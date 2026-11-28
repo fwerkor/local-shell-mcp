@@ -790,7 +790,7 @@ Lorsque `machine` est fourni, l'appel nécessite en outre `remote:use` et s'exé
 
 ### `remote_list`
 
-Liste les remote workers enregistrés, leur état et leurs capacités. verbose=true inclut la télémétrie de diagnostic.
+Liste les remote workers enregistrés, leur état et leur utilisation des ressources. verbose=true inclut la télémétrie de diagnostic.
 
 | Paramètre | Type | Requis/default | Description |
 |---|---|---|---|

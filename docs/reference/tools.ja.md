@@ -789,7 +789,7 @@ OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:s
 
 ### `remote_list`
 
-登録済みの remote workers とその状態・機能を一覧表示します。verbose=true を指定すると診断テレメトリも含まれます。
+登録済みの remote workers とその状態・リソース使用状況を一覧表示します。verbose=true を指定すると診断テレメトリも含まれます。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

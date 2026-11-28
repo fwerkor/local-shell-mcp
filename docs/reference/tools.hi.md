@@ -790,7 +790,7 @@ OAuth क्षेत्र: `shell:read, shell:write, shell:execute, browser:us
 
 ### `remote_list`
 
-पंजीकृत remote workers, उनकी स्थिति और क्षमताओं की सूची दिखाता है। verbose=true निदान टेलीमेट्री शामिल करता है।
+पंजीकृत remote workers, उनकी स्थिति और संसाधन उपयोग की सूची दिखाता है। verbose=true निदान टेलीमेट्री शामिल करता है।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

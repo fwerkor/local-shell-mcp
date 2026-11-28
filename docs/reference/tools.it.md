@@ -789,7 +789,7 @@ Quando viene fornito `machine`, la chiamata richiede inoltre `remote:use` e pass
 
 ### `remote_list`
 
-Elenca i remote worker registrati, il loro stato e le loro capacità. verbose=true include la telemetria diagnostica.
+Elenca i remote worker registrati, il loro stato e il loro utilizzo delle risorse. verbose=true include la telemetria diagnostica.
 
 | Parametro | Tipo | Obbligatorio/default | Descrizione |
 |---|---|---|---|

@@ -60,11 +60,18 @@ def test_machine_and_job_list_keep_actionable_metadata():
     row = {"name": "worker", "status": "online", "last_seen": 123,
            "offline_after_s": 30, "reset_generation": 1, "queue_depth": 0,
            "interactive_queue_depth": 0, "transfer_queue_depth": 0,
-           "capabilities": ["shell"], "info": {"gpu": "AMD"}}
+           "capabilities": ["shell"], "info": {"gpu": "AMD", "sample_generation": "runtime-a",
+                                              "sample_sequence": 3, "sampled_at": 123,
+                                              "cpu_percent": 25.0}}
     raw = _envelope({"machines": [row]})
+    before = copy.deepcopy(raw)
+    public_info = {"gpu": "AMD", "sampled_at": 123, "cpu_percent": 25.0}
     compact = compact_native_result("remote_list", {}, raw)["data"]["machines"][0]
-    assert compact == {key: row[key] for key in ("name", "status", "queue_depth", "capabilities", "info")}
-    assert compact_native_result("remote_list", {"verbose": True}, raw)["data"] == raw["data"]
+    assert compact == {"name": "worker", "status": "online", "queue_depth": 0, "info": public_info}
+    verbose = compact_native_result("remote_list", {"verbose": True}, raw)["data"]["machines"][0]
+    assert verbose == {**{key: value for key, value in row.items() if key != "capabilities"},
+                       "info": public_info}
+    assert raw == before
     assert compact_native_result("remote_manage", {"action": "reset"}, raw)["data"] == raw["data"]
     jobs = _envelope({"jobs": [{"job_id": "j", "command_truncated": True, "log_truncated": False,
                                 "name": None, "error": "failure"}], "next_offset": 2})
@@ -100,5 +107,22 @@ async def test_actual_mcp_schema_and_both_result_representations(tmp_path, monke
         jsonschema.validate(structured, tools["run_shell"].outputSchema)
         for name in ("job_tail", "session_manage", "remote_list"):
             assert tools[name].inputSchema["properties"]["verbose"]["default"] is False
+        machines = {"machines": [{"name": "worker", "status": "online",
+                                  "capabilities": ["shell"], "info": {"sample_generation": "runtime-a",
+                                                                     "sample_sequence": 2,
+                                                                     "cpu_percent": 10.0}}]}
+        class FakeRemoteManager:
+            def list_machines(self):
+                return machines
+
+        monkeypatch.setattr("local_shell_mcp.tools.remote_manager", FakeRemoteManager)
+        for arguments in ({}, {"verbose": True}):
+            content, structured = await mcp.call_tool("remote_list", arguments)
+            assert json.loads(content[0].text) == structured
+            assert structured["data"] == {"machines": [{"name": "worker", "status": "online",
+                                                        "info": {"cpu_percent": 10.0}}]}
+            jsonschema.validate(structured, tools["remote_list"].outputSchema)
+        assert machines["machines"][0]["capabilities"] == ["shell"]
+        assert machines["machines"][0]["info"]["sample_sequence"] == 2
     finally:
         get_settings.cache_clear()

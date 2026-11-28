@@ -789,7 +789,7 @@ OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:sh
 
 ### `remote_list`
 
-Kayıtlı remote workers, durumları ve yeteneklerini listeler. verbose=true tanılama telemetrisini içerir.
+Kayıtlı remote workers, durumları ve kaynak kullanımlarını listeler. verbose=true tanılama telemetrisini içerir.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

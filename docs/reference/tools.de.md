@@ -790,7 +790,7 @@ Wenn `machine` angegeben wird, erfordert der Aufruf zusätzlich `remote:use` und
 
 ### `remote_list`
 
-Listet registrierte Remote Workers einschließlich Status und Fähigkeiten auf. verbose=true liefert Diagnosetelemetrie.
+Listet registrierte Remote Workers einschließlich Status und Ressourcennutzung auf. verbose=true liefert Diagnosetelemetrie.
 
 | Parameter | Typ | Erforderlich/default | Beschreibung |
 |---|---|---|---|

@@ -789,7 +789,7 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_list`
 
-列出已注册的远程 Worker、状态与能力。verbose=true 时包含诊断遥测数据。
+列出已注册的远程 Worker、状态与资源用量。verbose=true 时包含诊断遥测数据。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|

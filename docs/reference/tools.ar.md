@@ -789,7 +789,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_list`
 
-يعرض remote workers المسجلين وحالتهم وقدراتهم. استخدم verbose=true للحصول على بيانات القياس عن بعد للتشخيص.
+يعرض remote workers المسجلين وحالتهم واستخدام مواردهم. استخدم verbose=true للحصول على بيانات القياس عن بعد للتشخيص.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|

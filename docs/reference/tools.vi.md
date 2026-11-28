@@ -789,7 +789,7 @@ Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy q
 
 ### `remote_list`
 
-Liệt kê remote workers đã đăng ký, trạng thái và khả năng. verbose=true bao gồm dữ liệu đo từ xa phục vụ chẩn đoán.
+Liệt kê remote workers đã đăng ký, trạng thái và mức sử dụng tài nguyên. verbose=true bao gồm dữ liệu đo từ xa phục vụ chẩn đoán.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

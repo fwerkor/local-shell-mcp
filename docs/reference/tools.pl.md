@@ -789,7 +789,7 @@ Po podaniu `machine` wywołanie wymaga także `remote:use` i przechodzi przez pr
 
 ### `remote_list`
 
-Wyświetla zarejestrowane remote workers, ich stan i możliwości. verbose=true uwzględnia telemetrię diagnostyczną.
+Wyświetla zarejestrowane remote workers, ich stan i wykorzystanie zasobów. verbose=true uwzględnia telemetrię diagnostyczną.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

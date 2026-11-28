@@ -790,7 +790,7 @@ Ketika `machine` diberikan, panggilan tersebut juga memerlukan `remote:use` dan 
 
 ### `remote_list`
 
-Menampilkan remote workers terdaftar, status, dan kemampuannya. verbose=true menyertakan telemetri diagnostik.
+Menampilkan remote workers terdaftar, status, dan penggunaan sumber dayanya. verbose=true menyertakan telemetri diagnostik.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
