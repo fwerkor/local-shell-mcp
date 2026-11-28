@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
+<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Canaux et modèles
 
@@ -42,6 +42,8 @@ Traitez l’URL de retour comme un identifiant secret : ne l’envoyez jamais da
 ## Découverte de modèles et limites liées au contexte
 
 Activer la découverte automatique afin de demander des informations sur le modèle au fournisseur. Le Controller met à jour ces informations périodiquement (actuellement tous les dix minutes) ; il est également possible de procéder à une mise à jour manuelle. En cas d’échec de la découverte, les données du modèle sauvegardées précédemment sont conservées. Si le fournisseur ne dispose pas d’un endpoint correspondant pour afficher la liste des modèles, désactiver la fonction de découverte et entrer manuellement les identifiants des modèles, un par ligne.
+
+La découverte reconnaît les métadonnées explicites de fenêtre de contexte, notamment `limit.context` imbriqué d’OpenCode Go/Zen, `context_length` d’OpenRouter, `max_model_len` de vLLM et `inputTokenLimit` de Gemini. Si seule la longueur maximale d’entrée est indiquée, elle sert de valeur de repli ; les limites de sortie et les noms de modèles ne déterminent pas la capacité de contexte. Sans ces deux informations, la fenêtre reste inconnue.
 
 Spécifiez la fenêtre de contexte pour chaque modèle, lorsque ce contexte est connu. Une valeur spécifique par modèle peut remplacer les métadonnées découvertes ou combler des valeurs manquantes. L’éditeur accepte de 1 à 2 000 000 de tokens ; il s’agit donc d’une plage de configuration, et non d’une garantie que le fournisseur prend en charge cette capacité. Utilisez la limite effective adaptée à votre déploiement, en tenant compte des configurations côté serveur ainsi que des limites propres au modèle lui-même.
 

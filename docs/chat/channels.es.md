@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
+<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Canales y modelos
 
@@ -42,6 +42,8 @@ Trate la URL de devolución de llamada como una credencial: nunca la envíe en u
 ## Modelo de descubrimiento y limitaciones del contexto
 
 Habilite el descubrimiento automático para solicitar información sobre los modelos del proveedor. El controlador actualiza esta información periódicamente (actualmente cada diez minutos); también es posible realizar una actualización manual. En caso de fallo en el proceso de descubrimiento, los datos del modelo guardados anteriormente se mantienen. Si el proveedor no cuenta con un endpoint compatible para listar los modelos, desactive el proceso de descubrimiento y introduzca los identificadores de los modelos manualmente, uno por línea.
+
+El descubrimiento reconoce metadatos explícitos de la ventana de contexto, incluidos `limit.context` anidado de OpenCode Go/Zen, `context_length` de OpenRouter, `max_model_len` de vLLM e `inputTokenLimit` de Gemini. Si solo se informa de la longitud máxima de entrada, se utiliza como alternativa; los límites de salida y los nombres de los modelos no determinan la capacidad de contexto. Sin ninguno de estos datos, la ventana sigue siendo desconocida.
 
 Especificar la ventana de contexto para cada modelo, cuando esto sea posible. Una valor explícita por modelo puede reemplazar los metadatos descubiertos o completar los valores que faltan. El editor acepta entre 1 y 2,000,000 tokens; se trata de un rango de configuración, no una garantía de que el proveedor soporte esa capacidad. Utilice el límite efectivo adecuado para su implementación, teniendo en cuenta la configuración del lado del servidor y los límites propios del modelo.
 

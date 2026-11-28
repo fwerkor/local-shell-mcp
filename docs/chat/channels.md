@@ -41,6 +41,8 @@ Treat the callback URL as a credential; never send it in a chat or post it publi
 
 Enable automatic discovery to request model information from the provider. The Controller refreshes it periodically (currently every ten minutes); a manual refresh is also available. Failed discovery retains previously saved model data. If the provider lacks a compatible model-list endpoint, turn off discovery and enter model identifiers manually, one per line.
 
+Discovery recognizes explicit context-window metadata (including OpenCode Go/Zen’s nested `limit.context`, OpenRouter’s `context_length`, vLLM’s `max_model_len`, and Gemini’s `inputTokenLimit`). When only a maximum input length is reported, it is used as a fallback; output limits and model names do not establish context capacity. Providers that report neither leave the context window unknown.
+
 Specify the context window for each model when it is known. An explicit per-model value overrides discovered metadata or fills a missing value. The editor accepts 1 to 2,000,000 tokens; this is a configuration range, not a guarantee that a provider supports that capacity. Use the effective limit for your deployment, accounting for server-side configuration and the model's own limits.
 
 ## Sampling, reasoning and usage
