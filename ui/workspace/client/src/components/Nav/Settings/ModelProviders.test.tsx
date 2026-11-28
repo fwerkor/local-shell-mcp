@@ -1,7 +1,8 @@
 /** @jest-environment-options {"url":"https://lsm.invalid/"} */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { request } from 'librechat-data-provider';
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import ModelProviders, { isLoopback } from './ModelProviders';
 
 let mockLocale: 'en' | 'zh-Hans' = 'en';
@@ -64,7 +65,7 @@ beforeEach(() => {
 
 it('defaults to automatic mode and previews metadata; saves only explicit context overrides', async () => {
   await addChannel();
-  expect(toggle()).toBeChecked();
+  expect(within(screen.getByRole('dialog', { name: 'Add channel' })).getByRole('switch')).toBeChecked();
   expect(screen.queryByLabelText('Model identifiers')).not.toBeInTheDocument();
   await screen.findByText('Discovered 2 models');
   expect(post).toHaveBeenCalledWith(path + '/discover', {
@@ -74,6 +75,7 @@ it('defaults to automatic mode and previews metadata; saves only explicit contex
   fireEvent.change(screen.getByLabelText('Context window for pro'), { target: { value: '8192' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save model channel' }));
   await screen.findByText('Channel saved.');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(put).toHaveBeenCalledWith(path, expect.objectContaining({
     auto_discover: true, models: ['flash', 'pro'], model_contexts: { pro: 8192 },
   }));
@@ -267,4 +269,42 @@ it('localizes the manual account authorization instructions and callback control
     popup.mockRestore();
     mockLocale = 'en';
   }
+});
+
+
+it('opens the editor above settings and cancels without modifying the saved channel', async () => {
+  get.mockResolvedValue({ providers: [{ ...existing, auto_discover: false }] });
+  const closeSettings = jest.fn();
+  render(<QueryClientProvider client={new QueryClient()}>
+    <Dialog open onClose={closeSettings}>
+      <DialogPanel><DialogTitle>Settings</DialogTitle><ModelProviders /></DialogPanel>
+    </Dialog>
+  </QueryClientProvider>);
+  const parent = screen.getByRole('dialog', { name: 'Settings' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit DeepSeek' }));
+  const editor = screen.getByRole('dialog', { name: 'Edit DeepSeek' });
+  expect(editor).toBeInTheDocument();
+  expect(parent).not.toContainElement(editor);
+  fireEvent.change(within(editor).getByLabelText('Channel name'), { target: { value: 'Unsaved' } });
+  fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit DeepSeek' })).not.toBeInTheDocument());
+  expect(closeSettings).not.toHaveBeenCalled();
+  expect(put).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit DeepSeek' }));
+  expect(screen.getByLabelText('Channel name')).toHaveValue('DeepSeek');
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(screen.queryByRole('dialog', { name: 'Edit DeepSeek' })).not.toBeInTheDocument();
+});
+
+it('keeps the modal and draft visible when saving fails', async () => {
+  get.mockResolvedValue({ providers: [{ ...existing, auto_discover: false }] });
+  put.mockRejectedValueOnce(new Error('Unable to save channel'));
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit DeepSeek' }));
+  const editor = screen.getByRole('dialog', { name: 'Edit DeepSeek' });
+  fireEvent.change(within(editor).getByLabelText('Channel name'), { target: { value: 'Renamed' } });
+  fireEvent.click(within(editor).getByRole('button', { name: 'Save model channel' }));
+  expect(await within(editor).findByRole('alert')).toHaveTextContent('Unable to save channel');
+  expect(within(editor).getByLabelText('Channel name')).toHaveValue('Renamed');
+  expect(within(editor).getByRole('button', { name: 'Save model channel' })).toBeEnabled();
 });

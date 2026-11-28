@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
+import { X } from 'lucide-react';
 import useLocalize from '~/hooks/useLocalize';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import { useQueryClient } from '@tanstack/react-query';
@@ -127,6 +129,12 @@ export default function ModelProviders() {
     setForceDelete(null);
     setError('');
     setSuccess('');
+  };
+  const closeEditor = () => {
+    if (busy) return;
+    setEditor(null);
+    setDraft(newDraft());
+    setError('');
   };
   const beginEdit = (profile: Profile) => {
     setEditor({ original: profile });
@@ -426,8 +434,8 @@ export default function ModelProviders() {
         </div>}
       </div>
     </div>
-    {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
-    {success && <p role="status" className="text-sm text-text-primary">{success}</p>}
+    {!editor && error && <p role="alert" className="text-sm text-status-error">{error}</p>}
+    {!editor && success && <p role="status" className="text-sm text-text-primary">{success}</p>}
     {loading ? <p className="text-sm text-text-secondary">{localize('com_lsm_channel_loading')}</p> : (
       channels.length ? <ul aria-label={localize('com_lsm_channel_configured')} className="divide-y divide-border-light rounded-lg border border-border-light">
         {channels.map((profile) => <li key={channelId(profile)} className="flex flex-wrap items-center justify-between gap-3 p-3">
@@ -500,84 +508,102 @@ export default function ModelProviders() {
         </details>}
         <button type="button" className={button} disabled={oauthBusy} onClick={() => void cancelOAuth()}>{localize('com_ui_cancel')}</button>
       </div>)}
-    {editor && <form aria-label={localize('com_lsm_channel_configuration')} className="space-y-4 rounded-lg border border-border-medium bg-surface-secondary p-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <h3 className="font-semibold text-text-primary">{editor.original ? localize('com_lsm_channel_edit_name', { name: channelLabel(editor.original) }) : localize('com_lsm_channel_add')}</h3>
-      <div inert={busy ? '' : undefined} className="grid min-w-0 gap-4 sm:grid-cols-2">
-        {(!editor.original || editor.original.name) && <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_name')}</span>
-          <input aria-label={localize('com_lsm_channel_name')} className={input} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={localize('com_lsm_channel_name_example')} maxLength={64} required />
-        </label>}
-        <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_protocol')}</span>
-          <select aria-label={localize('com_lsm_channel_provider')} className={input} value={draft.provider} disabled={Boolean(editor.original)} onChange={(event) => {
-            const provider = event.target.value as Kind;
-            setDraft({ ...draft, provider, base: kinds.find((kind) => kind.value === provider)?.defaultUrl ?? '' });
-          }}>
-            {kinds.map((kind) => <option key={kind.value} value={kind.value}>{localize(kind.label)}</option>)}
-          </select>
-        </label>
-        <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_base_url')}</span>
-          <input aria-label={localize('com_lsm_channel_model_base_url')} className={input} value={draft.base} disabled={Boolean(original?.auth_method)} onChange={(event) => setDraft({ ...draft, base: event.target.value })} required />
-        </label>
-        {original?.auth_method ? <div className="space-y-1 text-sm text-text-primary">
-          <span>{localize('com_lsm_channel_oauth_authorization')}</span>
-          <p className="text-text-secondary">{original.oauth_error ? localize('com_lsm_channel_oauth_required') : localize('com_lsm_channel_oauth_auto_refresh')}</p>
-        </div> : <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_key')}</span>
-          <input type="password" autoComplete="new-password" aria-label={localize('com_lsm_channel_model_key')} className={input} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={editor.original?.configured ? localize('com_lsm_channel_keep_key') : localize('com_lsm_channel_optional_key')} />
-        </label>}
-        <div className="space-y-3 sm:col-span-2">
-          <label className="flex items-center justify-between gap-3 text-sm font-medium text-text-primary">
-            <span>{localize('com_lsm_channel_discover_toggle')}</span>
-            <input type="checkbox" role="switch" aria-label={localize('com_lsm_channel_discover_toggle')}
-              checked={draft.autoDiscover} onChange={(event) => toggleDiscovery(event.target.checked)} />
-          </label>
-          {draft.autoDiscover ? <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-text-secondary" role="status">
-                {preview === 'loading' ? localize('com_lsm_channel_discover_loading') : preview === 'ready' ?
-                  localize('com_lsm_channel_discover_ready', { count: draftModels.length }) : preview === 'error' ?
-                  localize('com_lsm_channel_discover_failed') : localize('com_lsm_channel_discover_count', { count: draftModels.length })}
-              </p>
-              <button type="button" disabled={busy || preview === 'loading' || !base}
-                onClick={() => setPreviewRevision((value) => value + 1)} className={button}
-                aria-label={localize('com_lsm_channel_discover_refresh')}>{localize('com_ui_refresh')}</button>
+    {editor && <Dialog open onClose={closeEditor} className="relative z-[60]">
+      <div className="fixed inset-0 bg-black/50" aria-hidden="true" />
+      <div className="fixed inset-0 flex items-center justify-center p-2 sm:p-4">
+        <DialogPanel className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border-medium bg-surface-dialog shadow-2xl">
+          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border-light px-4 py-3">
+            <DialogTitle className="min-w-0 break-words font-semibold text-text-primary">{editor.original ? localize('com_lsm_channel_edit_name', { name: channelLabel(editor.original) }) : localize('com_lsm_channel_add')}</DialogTitle>
+            <button type="button" disabled={busy} onClick={closeEditor} aria-label={localize('com_ui_close')} className="shrink-0 rounded-lg p-1 text-text-secondary hover:bg-surface-hover disabled:opacity-40">
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </header>
+          <form aria-label={localize('com_lsm_channel_configuration')} className="flex min-h-0 flex-col" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
+              {success && <p role="status" className="text-sm text-text-primary">{success}</p>}
+              <div inert={busy ? '' : undefined} className="grid min-w-0 gap-4 sm:grid-cols-2">
+                {(!editor.original || editor.original.name) && <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_name')}</span>
+                  <input aria-label={localize('com_lsm_channel_name')} className={input} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={localize('com_lsm_channel_name_example')} maxLength={64} required />
+                </label>}
+                <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_protocol')}</span>
+                  <select aria-label={localize('com_lsm_channel_provider')} className={input} value={draft.provider} disabled={Boolean(editor.original)} onChange={(event) => {
+                    const provider = event.target.value as Kind;
+                    setDraft({ ...draft, provider, base: kinds.find((kind) => kind.value === provider)?.defaultUrl ?? '' });
+                  }}>
+                    {kinds.map((kind) => <option key={kind.value} value={kind.value}>{localize(kind.label)}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_base_url')}</span>
+                  <input aria-label={localize('com_lsm_channel_model_base_url')} className={input} value={draft.base} disabled={Boolean(original?.auth_method)} onChange={(event) => setDraft({ ...draft, base: event.target.value })} required />
+                </label>
+                {original?.auth_method ? <div className="space-y-1 text-sm text-text-primary">
+                  <span>{localize('com_lsm_channel_oauth_authorization')}</span>
+                  <p className="text-text-secondary">{original.oauth_error ? localize('com_lsm_channel_oauth_required') : localize('com_lsm_channel_oauth_auto_refresh')}</p>
+                </div> : <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_key')}</span>
+                  <input type="password" autoComplete="new-password" aria-label={localize('com_lsm_channel_model_key')} className={input} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={editor.original?.configured ? localize('com_lsm_channel_keep_key') : localize('com_lsm_channel_optional_key')} />
+                </label>}
+                <div className="space-y-3 sm:col-span-2">
+                  <label className="flex items-center justify-between gap-3 text-sm font-medium text-text-primary">
+                    <span>{localize('com_lsm_channel_discover_toggle')}</span>
+                    <input type="checkbox" role="switch" aria-label={localize('com_lsm_channel_discover_toggle')}
+                      checked={draft.autoDiscover} onChange={(event) => toggleDiscovery(event.target.checked)} />
+                  </label>
+                  {draft.autoDiscover ? <>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-text-secondary" role="status">
+                        {preview === 'loading' ? localize('com_lsm_channel_discover_loading') : preview === 'ready' ?
+                          localize('com_lsm_channel_discover_ready', { count: draftModels.length }) : preview === 'error' ?
+                          localize('com_lsm_channel_discover_failed') : localize('com_lsm_channel_discover_count', { count: draftModels.length })}
+                      </p>
+                      <button type="button" disabled={busy || preview === 'loading' || !base}
+                        onClick={() => setPreviewRevision((value) => value + 1)} className={button}
+                        aria-label={localize('com_lsm_channel_discover_refresh')}>{localize('com_ui_refresh')}</button>
+                    </div>
+                    {previewError && <p role="alert" className="text-xs text-status-error">{previewError} {localize('com_lsm_channel_discover_manual_help')}</p>}
+                    <p className="text-xs text-text-tertiary">{localize('com_lsm_channel_discover_interval')}</p>
+                  </> : <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_models')}</span>
+                    <textarea aria-label={localize('com_lsm_channel_identifiers')} className={input} value={draft.models}
+                      onChange={(event) => setDraft({ ...draft, models: event.target.value })} rows={3} required />
+                  </label>}
+                  {draftModels.length > 0 && <div className="max-h-80 space-y-2 overflow-y-auto">
+                    <p className="text-sm text-text-primary">{localize('com_lsm_channel_context_window')}</p>
+                    {draftModels.map((model) => <label key={model} className="flex items-center gap-3 text-xs text-text-secondary">
+                      <span className="min-w-0 flex-1 break-all">{model}
+                        {draft.autoDiscover && draft.reportedContexts[model] != null &&
+                          <span className="block text-text-tertiary">API: {draft.reportedContexts[model].toLocaleString()}</span>}
+                      </span>
+                      <input className={input + ' max-w-40'} type="number" min={1} max={2000000}
+                        placeholder={draft.autoDiscover && draft.reportedContexts[model] != null ?
+                          String(draft.reportedContexts[model]) : localize('com_ui_unknown')}
+                        aria-label={localize('com_lsm_channel_context_model', { model })} value={draft.contexts[model] ?? ''}
+                        onChange={(event) => setDraft({ ...draft,
+                          contexts: { ...draft.contexts, [model]: event.target.value } })} />
+                    </label>)}
+                    {draft.autoDiscover && <p className="text-xs text-text-tertiary">{localize('com_lsm_channel_discover_context_help')}</p>}
+                  </div>}
+                </div>
+                {draftModels.length > 0 && <details className="space-y-3 rounded-lg border border-border-light p-3 sm:col-span-2">
+                  <summary className="cursor-pointer text-sm font-medium text-text-primary">{localize('com_lsm_channel_defaults')}</summary>
+                  {draftModels.map((model) => <div key={model} className="space-y-2">
+                    <p className="break-all text-sm text-text-secondary">{model}</p>
+                    <SamplingFields provider={draft.provider} prefix={model} value={draft.sampling[model] ?? samplingDraft()}
+                      onChange={(value) => setDraft((previous) => ({ ...previous,
+                        sampling: { ...previous.sampling, [model]: value } }))} />
+                  </div>)}
+                </details>}
+              </div>
+              <p className="text-xs text-text-secondary">{editor.original?.name ? localize('com_lsm_channel_rename_help') : ''}{' '}{localize('com_lsm_channel_key_help')}</p>
             </div>
-            {previewError && <p role="alert" className="text-xs text-status-error">{previewError} {localize('com_lsm_channel_discover_manual_help')}</p>}
-            <p className="text-xs text-text-tertiary">{localize('com_lsm_channel_discover_interval')}</p>
-          </> : <label className="space-y-1 text-sm text-text-primary"><span>{localize('com_lsm_channel_models')}</span>
-            <textarea aria-label={localize('com_lsm_channel_identifiers')} className={input} value={draft.models}
-              onChange={(event) => setDraft({ ...draft, models: event.target.value })} rows={3} required />
-          </label>}
-          {draftModels.length > 0 && <div className="max-h-80 space-y-2 overflow-y-auto">
-            <p className="text-sm text-text-primary">{localize('com_lsm_channel_context_window')}</p>
-            {draftModels.map((model) => <label key={model} className="flex items-center gap-3 text-xs text-text-secondary">
-              <span className="min-w-0 flex-1 break-all">{model}
-                {draft.autoDiscover && draft.reportedContexts[model] != null &&
-                  <span className="block text-text-tertiary">API: {draft.reportedContexts[model].toLocaleString()}</span>}
-              </span>
-              <input className={input + ' max-w-40'} type="number" min={1} max={2000000}
-                placeholder={draft.autoDiscover && draft.reportedContexts[model] != null ?
-                  String(draft.reportedContexts[model]) : localize('com_ui_unknown')}
-                aria-label={localize('com_lsm_channel_context_model', { model })} value={draft.contexts[model] ?? ''}
-                onChange={(event) => setDraft({ ...draft,
-                  contexts: { ...draft.contexts, [model]: event.target.value } })} />
-            </label>)}
-            {draft.autoDiscover && <p className="text-xs text-text-tertiary">{localize('com_lsm_channel_discover_context_help')}</p>}
-          </div>}
-        </div>
-        {draftModels.length > 0 && <details className="space-y-3 rounded-lg border border-border-light p-3 sm:col-span-2">
-          <summary className="cursor-pointer text-sm font-medium text-text-primary">{localize('com_lsm_channel_defaults')}</summary>
-          {draftModels.map((model) => <div key={model} className="space-y-2">
-            <p className="break-all text-sm text-text-secondary">{model}</p>
-            <SamplingFields provider={draft.provider} prefix={model} value={draft.sampling[model] ?? samplingDraft()}
-              onChange={(value) => setDraft((previous) => ({ ...previous,
-                sampling: { ...previous.sampling, [model]: value } }))} />
-          </div>)}
-        </details>}
+            <footer className="shrink-0 space-y-2 border-t border-border-light p-4">
+              {error && <p role="alert" className="break-words text-sm text-status-error">{error}</p>}
+              <div className="flex flex-wrap justify-end gap-2">
+                <button type="button" disabled={busy} className={button} onClick={closeEditor}>{localize('com_ui_cancel')}</button>
+                <button type="submit" disabled={busy || !draft.base.trim()} className={button}>{busy ? localize('com_lsm_channel_saving') : localize('com_lsm_channel_save')}</button>
+              </div>
+            </footer>
+          </form>
+        </DialogPanel>
       </div>
-      <p className="text-xs text-text-secondary">{editor.original?.name ? localize('com_lsm_channel_rename_help') : ''}{' '}{localize('com_lsm_channel_key_help')}</p>
-      <div className="flex flex-wrap gap-2">
-        <button type="submit" disabled={busy || !draft.base.trim()} className={button}>{busy ? localize('com_lsm_channel_saving') : localize('com_lsm_channel_save')}</button>
-        <button type="button" disabled={busy} className={button} onClick={() => { setEditor(null); setError(''); }}>{localize('com_ui_cancel')}</button>
-      </div>
-    </form>}
+    </Dialog>}
   </div>;
 }
