@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: b7c3dfd7dc21a498f8410a88a8a52094ca0349856dfa43d267e3fe7bb273685a -->
-# Conecte Gemini Spark / Aplicaciones personalizadas
+<!-- i18n-source-sha256: 0d50677fe8bd21dbf6f3fff366adea800f15d50fdbc67ed3b77abf84437f73eb -->
+# Conectar Gemini Task / aplicaciones personalizadas
 
-La función **aplicaciones conectadas personalizadas** de Gemini (anteriormente descrita como **Spark**) permite a un usuario elegible de Gemini conectarse a un servidor MCP remoto. LSM puede proporcionar el punto final MCP. Esta es una **conexión de cliente alternativa** para [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md) y otros clientes MCP; no reemplaza ni implementa el controlador LSM.
+La función **aplicaciones conectadas personalizadas** de Gemini permite a un usuario elegible de Gemini conectarse a un servidor MCP remoto. LSM puede proporcionar el punto final MCP. Esta es una **conexión de cliente alternativa** para [unified web workspace](web-workspace.md), [ChatGPT](chatgpt-connector.md) y otros clientes MCP; no reemplaza ni implementa el controlador LSM.
 
 Actualmente, Google restringe las aplicaciones personalizadas a **usuarios mayores de 18 años en los Estados Unidos**, que hayan iniciado sesión con una **cuenta personal de Google** y **Mantener actividad habilitada**. La función está disponible en **inglés**. Las conexiones deben crearse en la aplicación web Gemini, aunque las aplicaciones conectadas se pueden utilizar posteriormente en el móvil. Las etiquetas de disponibilidad y UI pueden cambiar; consultar el [official Gemini custom apps instructions](https://support.google.com/gemini/answer/17209137).
 
@@ -30,6 +30,16 @@ No ingrese a la interfaz de usuario web (`/ui`), la URL de LibreChat o el origen
 6. En una conversación de Gemini, escriba `@` y seleccione la aplicación personalizada conectada para solicitar una herramienta LSM.
 
 Comience con: "Utilice la aplicación LSM conectada para inspeccionar el entorno y enumerar los archivos del espacio de trabajo. No modifique nada". Verifique los resultados de la herramienta y la auditoría del controlador antes de intentar operaciones de escritura.
+
+## Usar el modo Task (antes Spark)
+
+Para programación de varios pasos, depuración y mantenimiento de servidores, se recomienda **Task** en lugar del chat normal: permite planificar, usar herramientas conectadas repetidamente y consultar el progreso. No es una garantía de velocidad o calidad medida.
+
+En la pantalla inicial de Gemini, selecciona **Task** debajo del cuadro de texto y completa la configuración si se solicita. Escribe `@`, selecciona LSM si aparece y especifica el objetivo, la máquina o el espacio de trabajo y los criterios de finalización.
+
+Ejemplo: «Usa LSM para inspeccionar el repositorio, reproducir la prueba fallida, corregir la causa y volver a ejecutar las pruebas. Informa de los archivos modificados y los resultados».
+
+Supervisa el progreso y confirma las acciones necesarias. Comprueba las llamadas a LSM en el registro de auditoría del Controller: el ordenador en la nube de Gemini no es tu espacio LSM. Mantén el Controller y los Workers necesarios en línea. Task y las aplicaciones personalizadas tienen requisitos distintos; consulta la [guía oficial de Task](https://support.google.com/gemini/answer/17094507) si falta alguna opción.
 
 ## Límites y solución de problemas
 

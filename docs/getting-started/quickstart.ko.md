@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
+<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
 # 빠른 시작
 
 이 가이드는 LSM 컨트롤러를 시작하고 해당 브라우저 인터페이스를 엽니다. [unified web workspace](web-workspace.md)는 권장되는 일일 경험입니다. 이는 별도로 배포된 선택적 채팅 스택입니다. ChatGPT, Gemini 및 기타 외부 MCP 클라이언트는 동일한 컨트롤러에 연결할 수 있습니다. [runtime choices and deployment model](../guides/deployment.md)를 참조하세요.
@@ -145,7 +145,7 @@ curl -i http://127.0.0.1:8765/healthz
 | release binary로 실행 | [Standalone binary runtime](../installation/binary.md) |
 | Python 또는 source checkout으로 실행 | [Python runtimes](../installation/python.md) |
 | 통합 채팅 및 제어 인터페이스 사용 | [Unified web workspace](web-workspace.md) |
-| Gemini Spark를 클라이언트로 추가 | [Gemini Custom Apps](gemini-spark.md) |
+| Gemini Task를 클라이언트로 추가 | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT를 client로 추가 | [ChatGPT connector](chatgpt-connector.md) |
 | tool 선택과 더 나은 prompt 작성 | [Usage patterns](../guides/usage-patterns.md) |
 | HPC, NPU/GPU 또는 NAT machine 연결 | [Remote workers](../guides/remote-workers.md) |

@@ -17,7 +17,7 @@ nav:
       - Python / pipx / source: installation/python.md
       - Stdio mode: installation/stdio.md
   - Client connections:
-      - Gemini Spark / Custom Apps: getting-started/gemini-spark.md
+      - Gemini Task / Custom Apps: getting-started/gemini-spark.md
       - ChatGPT connector: getting-started/chatgpt-connector.md
       - DeepSeek Harness (DSH): clients/deepseek-harness.md
       - Generic MCP clients: clients/generic-mcp.md
@@ -83,7 +83,7 @@ plugins:
             Stdio mode: stdio 模式
             Client connections: Client 接入
             ChatGPT connector: ChatGPT 连接器
-            Gemini Spark / Custom Apps: Gemini Spark / 自定义应用
+            Gemini Task / Custom Apps: Gemini Task / 自定义应用
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: 通用 MCP Client
             Network connectivity: 网络连通性
@@ -122,7 +122,7 @@ plugins:
             Stdio mode: stdio 模式
             Client connections: Client 連線
             ChatGPT connector: ChatGPT 連接器
-            Gemini Spark / Custom Apps: Gemini Spark / 自訂應用程式
+            Gemini Task / Custom Apps: Gemini Task / 自訂應用程式
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: 通用 MCP Client
             Network connectivity: 網路連通性
@@ -161,7 +161,7 @@ plugins:
             Stdio mode: stdio モード
             Client connections: Client 接続
             ChatGPT connector: ChatGPT コネクタ
-            Gemini Spark / Custom Apps: Gemini Spark / カスタムアプリ
+            Gemini Task / Custom Apps: Gemini Task / カスタムアプリ
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: 汎用 MCP Client
             Network connectivity: ネットワーク接続
@@ -200,7 +200,7 @@ plugins:
             Stdio mode: stdio 모드
             Client connections: Client 연결
             ChatGPT connector: ChatGPT 커넥터
-            Gemini Spark / Custom Apps: Gemini Spark / 맞춤 앱
+            Gemini Task / Custom Apps: Gemini Task / 맞춤 앱
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: 일반 MCP Client
             Network connectivity: 네트워크 연결
@@ -239,7 +239,7 @@ plugins:
             Stdio mode: Modo stdio
             Client connections: Conexiones de Client
             ChatGPT connector: Conector de ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / aplicaciones personalizadas
+            Gemini Task / Custom Apps: Gemini Task / aplicaciones personalizadas
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Clientes MCP genéricos
             Network connectivity: Conectividad de red
@@ -278,7 +278,7 @@ plugins:
             Stdio mode: Mode stdio
             Client connections: Connexions Client
             ChatGPT connector: Connecteur ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / applications personnalisées
+            Gemini Task / Custom Apps: Gemini Task / applications personnalisées
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Clients MCP génériques
             Network connectivity: Connectivité réseau
@@ -317,7 +317,7 @@ plugins:
             Stdio mode: stdio-Modus
             Client connections: Client-Verbindungen
             ChatGPT connector: ChatGPT-Connector
-            Gemini Spark / Custom Apps: Gemini Spark / benutzerdefinierte Apps
+            Gemini Task / Custom Apps: Gemini Task / benutzerdefinierte Apps
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Generische MCP-Clients
             Network connectivity: Netzwerkverbindung
@@ -356,7 +356,7 @@ plugins:
             Stdio mode: Режим stdio
             Client connections: Подключения Client
             ChatGPT connector: Коннектор ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / пользовательские приложения
+            Gemini Task / Custom Apps: Gemini Task / пользовательские приложения
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Общие MCP-клиенты
             Network connectivity: Сетевая доступность
@@ -395,7 +395,7 @@ plugins:
             Stdio mode: Modo stdio
             Client connections: Conexões Client
             ChatGPT connector: Conector ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / apps personalizados
+            Gemini Task / Custom Apps: Gemini Task / apps personalizados
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Clientes MCP genéricos
             Network connectivity: Conectividade de rede
@@ -434,7 +434,7 @@ plugins:
             Stdio mode: Modalità stdio
             Client connections: Connessioni Client
             ChatGPT connector: Connettore ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / app personalizzate
+            Gemini Task / Custom Apps: Gemini Task / app personalizzate
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Client MCP generici
             Network connectivity: Connettività di rete
@@ -473,7 +473,7 @@ plugins:
             Stdio mode: وضع stdio
             Client connections: اتصالات Client
             ChatGPT connector: موصل ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / تطبيقات مخصصة
+            Gemini Task / Custom Apps: Gemini Task / تطبيقات مخصصة
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: عملاء MCP عامون
             Network connectivity: اتصال الشبكة
@@ -512,7 +512,7 @@ plugins:
             Stdio mode: stdio मोड
             Client connections: Client कनेक्शन
             ChatGPT connector: ChatGPT कनेक्टर
-            Gemini Spark / Custom Apps: Gemini Spark / कस्टम ऐप्स
+            Gemini Task / Custom Apps: Gemini Task / कस्टम ऐप्स
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: सामान्य MCP Client
             Network connectivity: नेटवर्क कनेक्टिविटी
@@ -551,7 +551,7 @@ plugins:
             Stdio mode: Mode stdio
             Client connections: Koneksi Client
             ChatGPT connector: Konektor ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / aplikasi khusus
+            Gemini Task / Custom Apps: Gemini Task / aplikasi khusus
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Client MCP generik
             Network connectivity: Konektivitas jaringan
@@ -590,7 +590,7 @@ plugins:
             Stdio mode: Chế độ stdio
             Client connections: Kết nối Client
             ChatGPT connector: Trình kết nối ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / ứng dụng tùy chỉnh
+            Gemini Task / Custom Apps: Gemini Task / ứng dụng tùy chỉnh
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Client MCP chung
             Network connectivity: Kết nối mạng
@@ -629,7 +629,7 @@ plugins:
             Stdio mode: stdio modu
             Client connections: Client bağlantıları
             ChatGPT connector: ChatGPT bağlayıcısı
-            Gemini Spark / Custom Apps: Gemini Spark / özel uygulamalar
+            Gemini Task / Custom Apps: Gemini Task / özel uygulamalar
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Genel MCP Client
             Network connectivity: Ağ bağlantısı
@@ -668,7 +668,7 @@ plugins:
             Stdio mode: Tryb stdio
             Client connections: Połączenia Client
             ChatGPT connector: Łącznik ChatGPT
-            Gemini Spark / Custom Apps: Gemini Spark / aplikacje niestandardowe
+            Gemini Task / Custom Apps: Gemini Task / aplikacje niestandardowe
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Ogólne klienty MCP
             Network connectivity: Łączność sieciowa

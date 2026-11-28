@@ -335,15 +335,22 @@ export default function useChatFunctions({
       return false;
     }
 
-    const conversation = cloneDeep(immutableConversation);
-    const latestCodeApprovalMode = getConversation()?.codeApprovalMode;
+    // Read the current selection at the moment of submission, including
+    // clicks on historical retry buttons, rather than a previous render.
+    const currentConversation = getConversation();
+    const conversation = cloneDeep(
+      currentConversation?.conversationId === immutableConversation?.conversationId
+        ? currentConversation
+        : immutableConversation,
+    );
+    const latestCodeApprovalMode = currentConversation?.codeApprovalMode;
     const codeApprovalMode =
       latestCodeApprovalMode != null && codeApprovalModes.includes(latestCodeApprovalMode)
         ? latestCodeApprovalMode
         : fallbackCodeApprovalMode;
-    const latestCodeWorkspaces = getConversation()?.codeWorkspaces ?? conversation?.codeWorkspaces;
+    const latestCodeWorkspaces = currentConversation?.codeWorkspaces ?? conversation?.codeWorkspaces;
     const latestCodeEnvironmentMode =
-      getConversation()?.codeEnvironmentMode ?? conversation?.codeEnvironmentMode;
+      currentConversation?.codeEnvironmentMode ?? conversation?.codeEnvironmentMode;
     const workspaceSubmission = codeWorkspaceState.resolveSubmission(
       latestCodeWorkspaces,
       latestCodeEnvironmentMode,

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
+<!-- i18n-source-sha256: ca97dc84c0c0fed91b1440fbdc7a381102e0c8699fb47419a9464b020f796fe7 -->
 # خيارات Runtime ونموذج النشر
 
 يحتوي `local-shell-mcp` على قرارين متكاملين:
@@ -58,7 +58,7 @@ Local MCP client
 | Generic HTTP MCP client | غالبًا لا على localhost؛ نعم عبر الشبكات | نعم | موصى به خارج localhost | Any HTTP runtime |
 | VS Code extension helper flow | فقط إذا كان ChatGPT سيتصل | نعم عند نسخ ChatGPT URL | موصى به لـ ChatGPT | VS Code-launched runtime |
 
-راجع [unified web workspace](../getting-started/web-workspace.md)، و[Gemini Spark](../getting-started/gemini-spark.md)، و[ChatGPT connector](../getting-started/chatgpt-connector.md)، و[generic MCP clients](../clients/generic-mcp.md)، و[network connectivity](../clients/connectivity.md).
+راجع [unified web workspace](../getting-started/web-workspace.md)، و[Gemini Task](../getting-started/gemini-spark.md)، و[ChatGPT connector](../getting-started/chatgpt-connector.md)، و[generic MCP clients](../clients/generic-mcp.md)، و[network connectivity](../clients/connectivity.md).
 
 ## ما الذي يتحكم فيه كل Runtime
 
@@ -121,7 +121,7 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 ## صفحات Client
 
 - [Unified web workspace](../getting-started/web-workspace.md)
-- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
+- [Gemini Task / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)
