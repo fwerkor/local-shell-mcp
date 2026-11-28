@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
+<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kanały i modele
 
@@ -42,6 +42,8 @@ Traktuj URL wywołania zwrotnego jak dane uwierzytelniające: nigdy nie przesył
 ## Oznaczanie modeli i ograniczenia kontekstowe
 
 Włącz automatyczne odkrywanie, aby uzyskać informacje o modelach od dostawcy. Kontroler aktualizuje te dane regularnie (obecnie co dziesięć minut); możliwe jest również manualne aktualizowanie danych. W przypadku niepowodzenia w odkrywaniu, dane z wcześniej zapisanych modeli pozostają zachowane. Jeśli dostawca nie posiada kompatybilnego endpointu do przesyłania listy modeli, wyłącz funkcję odkrywania i wprowadź identyfikatory modeli ręcznie, po jednym na wiersz.
+
+Wykrywanie rozpoznaje jawne metadane okna kontekstu, w tym zagnieżdżone `limit.context` OpenCode Go/Zen, `context_length` OpenRouter, `max_model_len` vLLM i `inputTokenLimit` Gemini. Jeśli podano jedynie maksymalną długość wejścia, jest ona wartością zastępczą; limity wyjścia i nazwy modeli nie określają pojemności kontekstu. Bez obu informacji okno kontekstu pozostaje nieznane.
 
 Należy określić okno kontekstowe dla każdego modelu, gdy jest to konieczne. Wartość wyraźnie określona dla każdego modelu zastępuje metadane znalezione wcześniej lub uzupełnia brakującą wartość. Edytor akceptuje te dane. 1 do 2,000,000 To jest tylko zakres konfiguracji, a nie gwarancja, że dany dostawca będzie w stanie obsłużyć taką liczbę użytkowników. Należy uwzględnić efektywny limit dostępny dla danej konfiguracji, a także ograniczenia związane z samym modelem.
 

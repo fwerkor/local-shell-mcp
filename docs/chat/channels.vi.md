@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
+<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kênh truyền và các mô hình
 
@@ -42,6 +42,8 @@ Coi URL callback là thông tin xác thực: không bao giờ gửi nó trong cu
 ## Mô hình khám phá và các giới hạn liên quan đến bối cảnh
 
 Hãy bật tính năng tự động tìm kiếm để yêu cầu thông tin về mô hình từ nhà cung cấp dịch vụ. Thực thể Controller sẽ tự động cập nhật thông tin này định kỳ (hiện tại là mỗi mười phút). Người dùng cũng có thể tự động cập nhật thông tin đó. Nếu việc tìm kiếm không thành công, dữ liệu về mô hình vẫn được lưu giữ như trước. Nếu nhà cung cấp dịch vụ không có endpoint để truy xuất danh sách các mô hình phù hợp, hãy tắt tính năng tự động tìm kiếm và nhập các mã định danh của mô hình một lần cho mỗi dòng.
+
+Tính năng khám phá nhận diện siêu dữ liệu cửa sổ ngữ cảnh rõ ràng, gồm `limit.context` lồng nhau của OpenCode Go/Zen, `context_length` của OpenRouter, `max_model_len` của vLLM và `inputTokenLimit` của Gemini. Nếu chỉ có độ dài đầu vào tối đa thì dùng làm giá trị dự phòng; giới hạn đầu ra và tên mô hình không xác định dung lượng ngữ cảnh. Nếu thiếu cả hai thông tin thì cửa sổ ngữ cảnh vẫn chưa xác định.
 
 Hãy xác định rõ cửa sổ con của từng mô hình khi chúng được biết đến. Giá trị cụ thể cho từng mô hình sẽ thay thế các thông tin meta trong cơ sở dữ liệu, hoặc bù đắp cho những giá trị còn thiếu. Trình soạn thảo chấp nhận việc sử dụng từ 1 đến 2.000.000 ký tự; đây chỉ là phạm vi cấu hình, chứ không phải là đảm bảo rằng nhà cung cấp hỗ trợ khả năng xử lý như vậy. Hãy sử dụng giới hạn thực tế cho việc triển khai của bạn, đồng thời xem xét đến các thiết lập trên phía máy chủ và những giới hạn của chính mô hình đó.
 

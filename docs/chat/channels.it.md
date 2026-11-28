@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 158a01475edc97cea1a70bc0d7b9a7330f7240dce14e7269635e675d044eedae -->
+<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Canali e modelli
 
@@ -42,6 +42,8 @@ Trattare l’URL di callback come una credenziale: non inviarlo mai in una chat 
 ## Scoperta dei modelli e limiti legati al contesto
 
 È possibile abilitare la scoperta automatica per richiedere informazioni sul modello al fornitore. Il controller aggiorna tali informazioni periodicamente (attualmente ogni dieci minuti); è anche possibile effettuare aggiornamenti manuali. I dati non trovati vengono comunque conservati. Se il fornitore non dispone di un endpoint per l’elenco dei modelli compatibili, è necessario disattivare la funzione di scoperta e inserire manualmente gli identificatori dei modelli, uno per riga.
+
+Il rilevamento riconosce i metadati espliciti della finestra di contesto, tra cui `limit.context` annidato di OpenCode Go/Zen, `context_length` di OpenRouter, `max_model_len` di vLLM e `inputTokenLimit` di Gemini. Se è indicata solo la lunghezza massima dell’input, questa viene usata come ripiego; i limiti di output e i nomi dei modelli non determinano la capacità del contesto. In assenza di entrambe le informazioni, la finestra rimane sconosciuta.
 
 Specificare la finestra di contesto per ogni modello, quando questo è noto. Un valore esplicito per ogni modello può sovrascrivere i metadati scoperti o completare i valori mancanti. L’editor accetta da 1 a 2.000.000 di token; si tratta di un intervallo di configurazione, non una garanzia che il fornitore supporti tale capacità. Utilizzare il limite effettivo per la propria implementazione, tenendo conto delle configurazioni del server e dei limiti propri del modello stesso.
 
