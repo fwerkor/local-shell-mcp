@@ -42,7 +42,7 @@ import { NotificationSeverity } from '~/common';
 import useAuthRedirect from './useAuthRedirect';
 import temporaryStore from '~/store/temporary';
 import store from '~/store';
-import { getPinnedSelection } from '~/utils/pinnedSelection';
+import { getPinnedSelection, pinnedSelectionAwaitsAgents } from '~/utils/pinnedSelection';
 
 const isValidChatProjectId = (projectId: string | null): projectId is string =>
   projectId != null && /^[a-f\d]{24}$/i.test(projectId);
@@ -235,7 +235,7 @@ export default function ChatRoute() {
         (agentsMap == null &&
           endpointsQuery.data?.[EModelEndpoint.agents] &&
           agentsQuery.isLoading &&
-          favoritesQuery.data?.some((favorite) => favorite.agentId)))
+          pinnedSelectionAwaitsAgents(favoritesQuery.data, startupConfig)))
     ) {
       return;
     }

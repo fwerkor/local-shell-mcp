@@ -25,6 +25,20 @@ export const favoriteEntryKey = (favorite: Favorite): string => {
   return `model:${endpoint.length}:${endpoint}:${favorite.model ?? ''}`;
 };
 
+export function pinnedSelectionAwaitsAgents(
+  favorites: Favorite[] | undefined,
+  startup: TStartupConfig | undefined,
+): boolean {
+  return (
+    favorites?.some((favorite) => {
+      if (favorite.agentId) return true;
+      if (!favorite.spec) return false;
+      const spec = startup?.modelSpecs?.list?.find((entry) => entry.name === favorite.spec);
+      return getModelSpecPreset(spec)?.endpoint === EModelEndpoint.agents;
+    }) ?? false
+  );
+}
+
 type PinnedSelectionOptions = {
   favorites?: Favorite[];
   order?: string[];
