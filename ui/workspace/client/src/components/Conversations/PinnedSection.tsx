@@ -27,6 +27,7 @@ import useFavoritesData from '~/components/Nav/Favorites/useFavoritesData';
 import FavoriteItem from '~/components/Nav/Favorites/FavoriteItem';
 import { useLocalize, useLocalStorage } from '~/hooks';
 import { getSpecAgentAvatarURL, cn } from '~/utils';
+import { favoriteEntryKey } from '~/utils/pinnedSelection';
 import { NotificationSeverity } from '~/common';
 import { Collapse } from '~/components/ui';
 import { focusFirstRow } from './focus';
@@ -43,22 +44,6 @@ const REORDER_SHORTCUTS = 'Alt+ArrowUp Alt+ArrowDown';
 const PINNED_ROW_DROP_RESULT = { pinnedRowReorder: true } as const;
 
 const noop = () => {};
-
-/** A key identifies a row everywhere in this section, so the encoding has to be
- *  injective. The favorites API accepts any string for an endpoint or a model,
- *  so a plain `endpoint::model` join collides: `a::b` + `c` and `a` + `b::c`
- *  both read back as `a::b::c`, and the dedupe below would then hide one of two
- *  distinct favorites. Length-prefixing the endpoint makes the split exact. */
-export const favoriteEntryKey = (favorite: Favorite): string => {
-  if (favorite.agentId) {
-    return `agent:${favorite.agentId}`;
-  }
-  if (favorite.spec) {
-    return `spec:${favorite.spec}`;
-  }
-  const endpoint = favorite.endpoint ?? '';
-  return `model:${endpoint.length}:${endpoint}:${favorite.model ?? ''}`;
-};
 
 const convoEntryKey = (conversationId: string): string => `convo:${conversationId}`;
 

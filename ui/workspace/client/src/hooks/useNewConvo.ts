@@ -1,9 +1,11 @@
 import { useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGetModelsQuery } from 'librechat-data-provider/react-query';
 import { useRecoilState, useRecoilValue, useSetRecoilState, useRecoilCallback } from 'recoil';
 import {
   Constants,
+  QueryKeys,
   FileSources,
   Permissions,
   EModelEndpoint,
@@ -57,6 +59,8 @@ import { useAgentsMapContext } from '~/Providers';
 import { usePauseGlobalAudio } from './Audio';
 import { useHasAccess } from '~/hooks';
 import store from '~/store';
+import type { FavoritesState } from '~/store/favorites';
+import { getPinnedSelection } from '~/utils/pinnedSelection';
 
 export function clearInheritedAgentWorkspace(
   conversation: TConversation,
@@ -74,6 +78,7 @@ export function clearInheritedAgentWorkspace(
 
 const useNewConvo = (index = 0) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const { data: startupConfig } = useGetStartupConfig();
   const getConversation = useGetConversation(index);
@@ -373,6 +378,21 @@ const useNewConvo = (index = 0) => {
       };
 
       let preset = _preset;
+      if (
+        !preset &&
+        buildDefault &&
+        !keepComposerState &&
+        Object.keys(_template).every((key) => key === 'chatProjectId')
+      ) {
+        preset = getPinnedSelection({
+          favorites: queryClient.getQueryData<FavoritesState>([QueryKeys.favorites]),
+          order: queryClient.getQueryData<string[]>([QueryKeys.pinnedOrder]),
+          endpoints: endpointsConfig,
+          models: modelsData ?? modelsQuery.data,
+          agents: agentsMap,
+          startup: startupConfig,
+        });
+      }
       const result = getDefaultModelSpec(startupConfig, endpointsConfig, agentsMap);
       const defaultModelSpec = result?.default ?? result?.last ?? result?.softDefault;
       const shouldApplyModelSpec =
@@ -526,6 +546,8 @@ const useNewConvo = (index = 0) => {
     },
     [
       index,
+      queryClient,
+      modelsQuery.data,
       files,
       setFiles,
       agentsMap,

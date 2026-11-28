@@ -22,6 +22,8 @@ import {
 } from '~/utils';
 import {
   useGetConvoIdQuery,
+  useGetFavoritesQuery,
+  useGetPinnedOrderQuery,
   useGetStartupConfig,
   useGetEndpointsQuery,
   useListAgentsQuery,
@@ -40,6 +42,7 @@ import { NotificationSeverity } from '~/common';
 import useAuthRedirect from './useAuthRedirect';
 import temporaryStore from '~/store/temporary';
 import store from '~/store';
+import { getPinnedSelection } from '~/utils/pinnedSelection';
 
 const isValidChatProjectId = (projectId: string | null): projectId is string =>
   projectId != null && /^[a-f\d]{24}$/i.test(projectId);
@@ -142,6 +145,8 @@ export default function ChatRoute() {
       (!hasSetConversation.current || routeState.pending),
   });
   const endpointsQuery = useGetEndpointsQuery({ enabled: isAuthenticated });
+  const favoritesQuery = useGetFavoritesQuery({ enabled: isAuthenticated });
+  const pinnedOrderQuery = useGetPinnedOrderQuery({ enabled: isAuthenticated });
   const assistantListMap = useAssistantListMap();
   /** The map comes from Root's shared context (one mapping pass app-wide); the
    * select-less observer only tracks settle state. Only a loaded list may
@@ -222,6 +227,19 @@ export default function ChatRoute() {
       return;
     }
 
+    if (
+      isNewConvo &&
+      !hasModelSelection(querySettings) &&
+      (favoritesQuery.isLoading ||
+        pinnedOrderQuery.isLoading ||
+        (agentsMap == null &&
+          endpointsQuery.data?.[EModelEndpoint.agents] &&
+          agentsQuery.isLoading &&
+          favoritesQuery.data?.some((favorite) => favorite.agentId)))
+    ) {
+      return;
+    }
+
     const getNewConvoPreset = () => {
       // An unsubmitted /c/new chat has no server record yet. Restore its own
       // model selection on reload instead of replacing it with the default spec.
@@ -230,7 +248,8 @@ export default function ChatRoute() {
         Object.keys(querySettings).length === 0 &&
         draft?.conversationId === Constants.NEW_CONVO &&
         (draft.chatProjectId ?? null) === chatProjectId &&
-        draft.endpoint && endpointsQuery.data?.[draft.endpoint] &&
+        draft.endpoint &&
+        endpointsQuery.data?.[draft.endpoint] &&
         hasModelSelection(draft)
       ) {
         return draft as TPreset;
@@ -243,6 +262,20 @@ export default function ChatRoute() {
       const urlSpec = querySettings.spec
         ? startupConfig?.modelSpecs?.list?.find((spec) => spec.name === querySettings.spec)
         : undefined;
+
+      const pinned = !hasModelSelection(querySettings)
+        ? getPinnedSelection({
+            favorites: favoritesQuery.data,
+            order: pinnedOrderQuery.data,
+            endpoints: endpointsQuery.data,
+            models: modelsQuery.data,
+            agents: agentsMap,
+            startup: startupConfig,
+          })
+        : undefined;
+      if (pinned) {
+        return { ...pinned, ...querySettings };
+      }
 
       const result = urlSpec
         ? undefined
@@ -336,6 +369,11 @@ export default function ChatRoute() {
     roles,
     agentsMap,
     agentsQuery.isError,
+    agentsQuery.isLoading,
+    favoritesQuery.data,
+    favoritesQuery.isLoading,
+    pinnedOrderQuery.data,
+    pinnedOrderQuery.isLoading,
     startupConfig,
     initialConvoQuery.data,
     initialConvoQuery.isError,
