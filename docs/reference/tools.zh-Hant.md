@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # 工具參考
 
 本頁由實際 MCP tool schema 產生。公開工具介面變更後，執行 `python scripts/generate-tools-reference.py` 更新 English 參考頁。

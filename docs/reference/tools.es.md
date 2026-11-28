@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # Referencia de herramientas
 
 Esta página se construye a partir de los schemas reales de las tools MCP. Ejecute `python scripts/generate-tools-reference.py` después de cambiar la superficie pública de tools para actualizar la referencia English.

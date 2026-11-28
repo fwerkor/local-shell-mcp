@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 916fbd0162a44cfef33269512625498029953129144cc9480c33fa08a6c78c60 -->
+<!-- i18n-source-sha256: 2f56a2488717dcea2bdca15f83321af961d12a4ba5a3f35a393abda3c9eae3c3 -->
 # Tools reference
 
 이 페이지는 실제 MCP tool schema에서 구성됩니다. Public tool surface를 변경한 뒤 `python scripts/generate-tools-reference.py`를 실행해 English reference를 갱신하십시오.
