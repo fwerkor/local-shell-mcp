@@ -24,13 +24,21 @@ def validate_sampling(value: object, *, provider: str | None = None) -> dict:
     return result
 
 
-def validate_channel_sampling(value: object, channel: str | None) -> dict:
+def validate_channel_sampling(value: object, channel: str | None, model: str | None = None) -> dict:
     result = validate_sampling(value)
     if result.get('temperature', 0) <= 1 or not channel:
         return result
     from .provider_profiles import profile
 
-    return validate_sampling(result, provider=profile(channel)['provider'])
+    stored = profile(channel)
+    provider = stored['provider']
+    if provider == 'virtual':
+        from .virtual_channels import physical_members
+
+        selected = model or next(iter(stored['models']), None)
+        if any(member['provider'] == 'anthropic' for _, member in physical_members(stored, selected)):
+            provider = 'anthropic'
+    return validate_sampling(result, provider=provider)
 
 
 def merge_sampling(defaults: dict, overrides: dict) -> dict:

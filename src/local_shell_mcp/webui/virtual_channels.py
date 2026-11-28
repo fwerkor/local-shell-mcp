@@ -153,6 +153,11 @@ async def stream_virtual(config, messages, *, tools=None, **kwargs):
     )
 
     value = profile(config.virtual_channel)
+    # Agent overrides and previously saved settings can bypass conversation admission.
+    if kwargs.get("temperature") is not None and kwargs["temperature"] > 1:
+        from .sampling import validate_channel_sampling
+
+        validate_channel_sampling({"temperature": kwargs["temperature"]}, config.virtual_channel, config.model)
     tried = set()
     last_error = None
     while True:
