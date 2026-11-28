@@ -134,7 +134,9 @@ function ChatView({ index = 0, project }: { index?: number; project?: TChatProje
   } else if ((isLoading || isNavigating) && !isLandingPage) {
     content = <LoadingSpinner />;
   } else if (!isLandingPage) {
-    content = <MessagesView messagesTree={messagesTree} messages={messages} />;
+    content = (
+      <MessagesView messagesTree={messagesTree} messages={messages} isFetching={isFetching} />
+    );
   } else {
     content = <Landing centerFormOnLanding={centerFormOnLanding} />;
   }

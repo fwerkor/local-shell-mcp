@@ -24,6 +24,7 @@ import { useChatContext, useChatFormContext } from '~/Providers';
 import store from '~/store';
 
 const PROJECT_ID_SEARCH_PARAM = 'projectId';
+const MESSAGE_SEARCH_PARAM = 'message';
 
 const injectAgentIntoAgentsMap = (queryClient: QueryClient, agent: any) => {
   const editCacheKey = [QueryKeys.agents, { requiredPermission: PermissionBits.EDIT }];
@@ -80,6 +81,8 @@ export default function useQueryParams({
     if (projectId) {
       preservedParams.set(PROJECT_ID_SEARCH_PARAM, projectId);
     }
+    const messageId = searchParams.get(MESSAGE_SEARCH_PARAM);
+    if (messageId) preservedParams.set(MESSAGE_SEARCH_PARAM, messageId);
     return preservedParams;
   }, [searchParams]);
 
@@ -255,6 +258,7 @@ export default function useQueryParams({
       delete queryParams.q;
       delete queryParams.submit;
       delete queryParams[PROJECT_ID_SEARCH_PARAM];
+      delete queryParams[MESSAGE_SEARCH_PARAM];
       const validSettings = processValidSettings(queryParams);
 
       return { decodedPrompt, validSettings, shouldAutoSubmit };

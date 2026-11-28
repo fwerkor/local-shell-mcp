@@ -112,3 +112,58 @@ async def test_conversation_mutation_rejects_missing_fields_and_unknown_fork(tmp
         fork = await client.post("/api/convos/fork", json={"conversationId": cid, "messageId": child["messageId"]})
         assert fork.status_code == 201
         assert len(fork.json()["messages"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_compact_history_hydrates_original_bodies_and_checks_owner(tmp_path, monkeypatch):
+    monkeypatch.setattr(routes, "get_settings", lambda: SimpleNamespace(auth_mode="oauth", state_dir=tmp_path))
+    app = Starlette(routes=[*conversation_routes.conversation_routes(), *routes.webui_routes()])
+
+    async def as_owner(scope, receive, send):
+        if scope.get("type") == "http":
+            name = next((v.decode() for k, v in scope.get("headers", []) if k == b"x-test-owner"), None)
+            if name:
+                scope.setdefault("state", {})["principal"] = SimpleNamespace(subject=name)
+        await app(scope, receive, send)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=as_owner), base_url="http://localhost") as client:
+        alice = {"x-test-owner": "alice"}
+        bob = {"x-test-owner": "bob"}
+        cid = (await client.post("/api/convos", json={"title": "Long"}, headers=alice)).json()["conversationId"]
+        repo = routes._repo()
+        parent = None
+        for i in range(42):
+            role = "user" if i % 2 == 0 else "assistant"
+            payload = {
+                "role": role, "isCreatedByUser": role == "user",
+                "text": "😀" * 700, "parentMessageId": parent,
+                "content": [{"type": "text", "text": "😀abc"},
+                            {"type": "tool_call", "tool_call": {"name": "tool", "args": {"a": 1}, "output": "large result"}},
+                            {"type": "think", "think": "ignored"}],
+                "metadata": {"usage": {"input": 100 + i, "output": 10}},
+            }
+            parent = repo.add_message("alice", cid, payload)["messageId"]
+        # Keep an older branch and its identity, rather than falsely rooting the
+        # latest page at the first loaded message.
+        full = (await client.get(f"/api/messages/{cid}", headers=alice)).json()
+        branch = repo.add_message("alice", cid, {
+            "role": "assistant", "isCreatedByUser": False,
+            "text": "other branch", "parentMessageId": full[0]["messageId"],
+        })
+        full = (await client.get(f"/api/messages/{cid}", headers=alice)).json()
+        compact = (await client.get(f"/api/messages/{cid}?compact=1", headers=alice)).json()
+        assert [row["messageId"] for row in compact] == [row["messageId"] for row in full]
+        assert [row["parentMessageId"] for row in compact] == [row["parentMessageId"] for row in full]
+        assert compact[-30:] == full[-30:]
+        assert compact[-1]["messageId"] == branch["messageId"]
+        assert all(row.get("historyStub") and "content" not in row for row in compact[:-30])
+        assert compact[0]["metadata"] == full[0]["metadata"]
+        assert compact[0]["historyMetrics"] == {"chars": 28, "toolChars": 23, "resultChars": 12}
+        assert len(compact[0]["text"]) == 512
+        ids = [compact[0]["messageId"], compact[1]["messageId"]]
+        response = await client.post(f"/api/messages/{cid}/history-bodies", json={"messageIds": ids}, headers=alice)
+        assert response.status_code == 200
+        assert response.json() == full[:2]
+        assert (await client.get(f"/api/messages/{cid}?compact=1", headers=bob)).status_code == 404
+        assert (await client.post(f"/api/messages/{cid}/history-bodies", json={"messageIds": ids}, headers=bob)).status_code == 404
+        assert (await client.post(f"/api/messages/{cid}/history-bodies", json={"messageIds": []}, headers=alice)).status_code == 400

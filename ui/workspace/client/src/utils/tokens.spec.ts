@@ -2,6 +2,7 @@ import { Constants, Providers } from 'librechat-data-provider';
 import type { TMessage, TResponseUsage } from 'librechat-data-provider';
 import {
   buildIndex,
+  toHistoryStub,
   upsertEntries,
   migrateIndex,
   clearIndex,
@@ -1091,4 +1092,37 @@ describe('per-message usage index (branch + total)', () => {
     /** A turn that did not summarize keeps its whole response. */
     expect(latestExchangeTokens(CONVO, 'a1', false)).toBe(509);
   });
+});
+
+test('releasing message bodies preserves the usage and context index', () => {
+  const original = [
+    { ...msg('u', Constants.NO_PARENT, true), text: 'user text '.repeat(100) },
+    {
+      ...msg('a', 'u', false),
+      text: 'preview',
+      content: [
+        { type: 'text', text: 'text '.repeat(200) },
+        {
+          type: 'tool_call',
+          tool_call: { name: 'shell', args: { cmd: 'ls' }, output: 'x'.repeat(5000) },
+        },
+        { type: 'think', think: 'ignored' },
+      ],
+      metadata: { usage: USAGE_A },
+    } as unknown as TMessage,
+  ];
+  try {
+    buildIndex(CONVO, original);
+    const expected = sumBranch(CONVO, 'a');
+    const total = sumTotalUsage(CONVO);
+    const compact = original.map(toHistoryStub);
+    expect(compact[0].text.length).toBe(512);
+    expect(compact[1].content).toBeUndefined();
+    expect(compact[1].historyStub).toBe(true);
+    buildIndex(CONVO, compact);
+    expect(sumBranch(CONVO, 'a')).toEqual(expected);
+    expect(sumTotalUsage(CONVO)).toEqual(total);
+  } finally {
+    clearIndex(CONVO);
+  }
 });

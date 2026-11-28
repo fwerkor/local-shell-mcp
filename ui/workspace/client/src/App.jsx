@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { RecoilRoot } from 'recoil';
 import { DndProvider } from 'react-dnd';
 import { RouterProvider } from 'react-router-dom';
@@ -15,6 +15,10 @@ import { serverPreferences } from '~/store/serverPreferences';
 import { initializeFontSize } from '~/store/fontSize';
 import { LiveAnnouncer } from '~/a11y';
 import { router } from './routes';
+import {
+  configureMessageCache,
+  installMessageCacheBudget,
+} from '~/data-provider/Messages/cacheBudget';
 
 const readAppearance = () => {
   const appearance = serverPreferences.get('theme', 'system');
@@ -44,25 +48,33 @@ const App = () => {
   const { setError } = useApiErrorBoundary();
   useInputModality();
 
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        // Always attempt network requests, even when navigator.onLine is false
-        // This is needed because localhost is reachable without WiFi
-        networkMode: 'always',
+  const errorRef = useRef(setError);
+  errorRef.current = setError;
+  const [queryClient] = useState(() => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: {
+          // Always attempt network requests, even when navigator.onLine is false
+          // This is needed because localhost is reachable without WiFi
+          networkMode: 'always',
+        },
+        mutations: {
+          networkMode: 'always',
+        },
       },
-      mutations: {
-        networkMode: 'always',
-      },
-    },
-    queryCache: new QueryCache({
-      onError: (error) => {
-        if (error?.response?.status === 401) {
-          setError(error);
-        }
-      },
-    }),
+      queryCache: new QueryCache({
+        onError: (error) => {
+          if (error?.response?.status === 401) {
+            errorRef.current(error);
+          }
+        },
+      }),
+    });
+    configureMessageCache(client);
+    return client;
   });
+
+  useEffect(() => installMessageCacheBudget(queryClient), [queryClient]);
 
   useEffect(() => {
     return initializeFontSize();

@@ -196,7 +196,13 @@ export default function ChatRoute() {
 
     const queryParams: Record<string, string> = {};
     searchParams.forEach((value, key) => {
-      if (key !== 'prompt' && key !== 'q' && key !== 'submit' && key !== 'projectId') {
+      if (
+        key !== 'prompt' &&
+        key !== 'q' &&
+        key !== 'submit' &&
+        key !== 'projectId' &&
+        key !== 'message'
+      ) {
         queryParams[key] = value;
       }
     });
@@ -230,7 +236,8 @@ export default function ChatRoute() {
         Object.keys(querySettings).length === 0 &&
         draft?.conversationId === Constants.NEW_CONVO &&
         (draft.chatProjectId ?? null) === chatProjectId &&
-        draft.endpoint && endpointsQuery.data?.[draft.endpoint] &&
+        draft.endpoint &&
+        endpointsQuery.data?.[draft.endpoint] &&
         hasModelSelection(draft)
       ) {
         return draft as TPreset;
