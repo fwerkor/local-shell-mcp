@@ -93,7 +93,9 @@ export const getComposerDraftId = (
   conversationId?: string | null,
   isSubmitting = false,
 ): string =>
-  isSubmitting ? getPendingDraftId(index) : getConversationDraftId(index, conversationId);
+  isSubmitting && isNewConversationDraftId(getConversationDraftId(index, conversationId))
+    ? getPendingDraftId(index)
+    : getConversationDraftId(index, conversationId);
 
 const getReplacedLength = (pendingPaste: PendingTextAttachmentDraft): number => {
   if (pendingPaste.replacedText != null && pendingPaste.replacedText.length > 0) {
@@ -457,7 +459,8 @@ const resolveBrowserTabId = (): string => {
     }
     const navigationType =
       typeof performance.getEntriesByType === 'function'
-        ? (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type
+        ? (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)
+            ?.type
         : undefined;
     if (
       stored != null &&

@@ -6,13 +6,19 @@ import { useChatContext, useChatFormContext, useAddedChatContext } from '~/Provi
 import { useGetLatestMessage } from '~/hooks/Messages/useLatestMessage';
 import { useAuthContext } from '~/hooks/AuthContext';
 import { mainTextareaId } from '~/common';
+import {
+  clearAllDrafts,
+  getConversationDraftId,
+  getPendingDraftId,
+  isNewConversationDraftId,
+} from '~/utils/drafts';
 import store from '~/store';
 
 export default function useSubmitMessage() {
   const { user } = useAuthContext();
   const methods = useChatFormContext();
   const { conversation: addedConvo } = useAddedChatContext();
-  const { ask, index, getMessages, setMessages } = useChatContext();
+  const { ask, index, conversation, getMessages, setMessages } = useChatContext();
   const getLatestMessage = useGetLatestMessage(index);
 
   const autoSendPrompts = useRecoilValue(store.autoSendPrompts);
@@ -64,9 +70,23 @@ export default function useSubmitMessage() {
       if (submitted === false) {
         return false;
       }
+      const draftId = getConversationDraftId(index, conversation?.conversationId);
+      clearAllDrafts(draftId);
+      if (isNewConversationDraftId(draftId)) {
+        clearAllDrafts(getPendingDraftId(index));
+      }
       methods.reset();
     },
-    [ask, methods, addedConvo, setMessages, getMessages, getLatestMessage],
+    [
+      ask,
+      methods,
+      addedConvo,
+      setMessages,
+      getMessages,
+      getLatestMessage,
+      index,
+      conversation?.conversationId,
+    ],
   );
 
   const submitPrompt = useCallback(

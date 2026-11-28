@@ -77,6 +77,8 @@ describe('getNewConversationDraftId', () => {
     expect(getComposerDraftId(1, Constants.NEW_CONVO)).toBe(`${Constants.NEW_CONVO}:1`);
     expect(getComposerDraftId(1, Constants.NEW_CONVO, true)).toBe(`${Constants.PENDING_CONVO}:1`);
     expect(getComposerDraftId(1, 'convo-side')).toBe('convo-side');
+    expect(getComposerDraftId(1, 'convo-side', true)).toBe('convo-side');
+    expect(getComposerDraftId(1, 'other-convo', true)).toBe('other-convo');
   });
 });
 

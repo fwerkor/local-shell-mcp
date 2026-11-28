@@ -8,6 +8,7 @@ import type {
   UseFormGetValues,
   UseFormHandleSubmit,
   UseFormSetValue,
+  UseFormWatch,
 } from 'react-hook-form';
 
 interface FormContextValue<TFieldValues extends FieldValues> {
@@ -18,6 +19,7 @@ interface FormContextValue<TFieldValues extends FieldValues> {
   setValue: UseFormSetValue<TFieldValues>;
   handleSubmit: UseFormHandleSubmit<TFieldValues>;
   reset: UseFormReset<TFieldValues>;
+  watch: UseFormWatch<TFieldValues>;
 }
 
 function createFormContext<TFieldValues extends FieldValues>() {
@@ -44,11 +46,12 @@ function createFormContext<TFieldValues extends FieldValues>() {
     getValues,
     handleSubmit,
     reset,
+    watch,
     children,
   }: PropsWithChildren<FormContextValue<TFieldValues>>): ReactElement => {
     const value = useMemo(
-      () => ({ register, control, getValues, setValue, handleSubmit, reset }),
-      [register, control, setValue, getValues, handleSubmit, reset],
+      () => ({ register, control, getValues, setValue, handleSubmit, reset, watch }),
+      [register, control, setValue, getValues, handleSubmit, reset, watch],
     );
 
     return <context.Provider value={value}>{children}</context.Provider>;

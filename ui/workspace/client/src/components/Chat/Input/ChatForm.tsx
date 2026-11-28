@@ -14,8 +14,6 @@ import {
   hasIncompleteFiles,
   removeFocusRings,
   getComposerDraftId,
-  getPendingDraftId,
-  clearAllDrafts,
   getFilesDraftCached,
   isPastedTextFileMarked,
 } from '~/utils';
@@ -634,18 +632,12 @@ const ChatForm = memo(function ChatForm({
             {
               answerMode,
               steering,
-              submitMessage: (message) => {
-                const result = submitMessage(message);
-                if (result !== false) {
-                  clearAllDrafts(getPendingDraftId(index));
-                }
-                return result;
-              },
+              submitMessage,
               reset: () => methods.reset(),
             },
             data,
           ),
-    [answerMode, steering, submitMessage, methods, index, endpoint, hasConfiguredModels],
+    [answerMode, steering, submitMessage, methods, endpoint, hasConfiguredModels],
   );
 
   return (
