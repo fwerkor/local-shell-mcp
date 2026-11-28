@@ -27,24 +27,87 @@ RETAINED_OBSERVATIONS = 3
 MAX_WORKER_ACTION_RESPONSE_BYTES = 512 * 1024
 
 
-def compress_frame(path: Path) -> bytes:
+@dataclass(frozen=True)
+class FrameProfile:
+    width: int
+    height: int
+    quality: int
+    max_bytes: int
+    interval: float
+
+
+# A small ladder allows rapid downgrade and cautious recovery. All levels
+# stay within the existing wire-size limit and screenshot policy.
+FRAME_PROFILES = (
+    FrameProfile(480, 300, 30, 12 * 1024, 0.9),
+    FrameProfile(800, 500, 38, 32 * 1024, 0.55),
+    FrameProfile(1280, 800, 46, 64 * 1024, 0.35),
+    FrameProfile(1600, 1000, 56, 96 * 1024, 0.22),
+    FrameProfile(1920, 1080, 66, MAX_FRAME_BYTES, 0.15),
+)
+ADAPTIVE_OBSERVATIONS = 12
+FRAME_ACK_TIMEOUT_S = 10.0
+
+
+@dataclass
+class AdaptivePacer:
+    level: int = 2
+    healthy: int = 0
+    unchanged: int = 0
+    delivery_s: float = 0.0
+
+    @property
+    def profile(self) -> FrameProfile:
+        return FRAME_PROFILES[self.level]
+
+    def congested(self) -> None:
+        self.level = max(0, self.level - 1)
+        self.healthy = 0
+
+    def sample(self, size: int, elapsed: float) -> None:
+        if size <= 0 or elapsed <= 0:
+            return
+        # Observed delivery time includes transport, queueing and decoding.
+        # React immediately to slower service and recover gradually.
+        self.delivery_s = max(elapsed, 0.75 * self.delivery_s + 0.25 * elapsed)
+        if elapsed > max(0.25, self.profile.interval * 0.85):
+            self.congested()
+        elif elapsed < self.profile.interval * 0.45:
+            self.healthy += 1
+            if self.healthy >= 5:
+                self.level = min(len(FRAME_PROFILES) - 1, self.level + 1)
+                self.healthy = 0
+        else:
+            self.healthy = 0
+
+    @property
+    def network_interval(self) -> float:
+        return max(self.profile.interval, min(4.0, self.delivery_s * 1.15))
+
+    def interval(self, changed: bool, interactive: bool = False) -> float:
+        self.unchanged = 0 if changed or interactive else min(8, self.unchanged + 1)
+        # Idle capture is cheap and bounded; input/refresh restores normal pacing.
+        return max(self.network_interval, min(0.9, 0.15 * self.unchanged))
+
+
+def compress_frame(path: Path, profile: FrameProfile | None = None) -> bytes:
     from PIL import Image
     with Image.open(path) as opened:
         image = opened.convert("RGB")
-        image.thumbnail((FRAME_WIDTH, FRAME_HEIGHT), Image.Resampling.LANCZOS)
+        image.thumbnail((profile.width, profile.height) if profile else (FRAME_WIDTH, FRAME_HEIGHT), Image.Resampling.LANCZOS)
         output = io.BytesIO()
         for _ in range(5):
-            for quality in (FRAME_QUALITY, 32, 22):
+            for quality in ((profile.quality, min(32, profile.quality), 22) if profile else (FRAME_QUALITY, 32, 22)):
                 output.seek(0)
                 output.truncate(0)
                 image.save(output, "JPEG", quality=quality, optimize=True)
-                if output.tell() <= MAX_FRAME_BYTES:
+                if output.tell() <= (profile.max_bytes if profile else MAX_FRAME_BYTES):
                     return output.getvalue()
             image.thumbnail((max(240, image.width * 3 // 4), max(160, image.height * 3 // 4)))
     raise ValueError("Desktop frame could not fit the transfer budget")
 
 
-async def capture_frame(manager: Any, window_id: str) -> tuple[dict[str, Any], bytes]:
+async def capture_frame(manager: Any, window_id: str, profile: FrameProfile | None = None) -> tuple[dict[str, Any], bytes]:
     data = await manager.frame(window_id)
     started = time.monotonic()
     path = Path(str(data["screenshot_path"])).expanduser()
@@ -55,7 +118,7 @@ async def capture_frame(manager: Any, window_id: str) -> tuple[dict[str, Any], b
         await manager.discard_frame_observation(window_id, data["observation_id"])
         raise ValueError("Desktop frame is not an internal GUI screenshot")
     try:
-        image = await asyncio.to_thread(compress_frame, path)
+        image = await asyncio.to_thread(compress_frame, path, profile) if profile else await asyncio.to_thread(compress_frame, path)
         data["observation_ttl_s"] = max(
             0.0, float(data["observation_ttl_s"]) - (time.monotonic() - started)
         )
@@ -97,12 +160,16 @@ class DesktopStream:
     pending_live_actions: dict[int, str] = field(default_factory=dict)
     last_contact: float | None = None
     force_frame: bool = False
+    adaptive: bool = False
+    pacer: AdaptivePacer = field(default_factory=AdaptivePacer)
 
     def enqueue_frame(self, metadata: dict[str, Any], image: bytes) -> None:
         if metadata.get("type") == "frame":
             metadata = {**metadata, "_queued_at": time.monotonic()}
         if self.frames.full():
             _, queued_image = self.frames.get_nowait()
+            if self.adaptive and image and queued_image:
+                self.pacer.congested()
             if not image and metadata.get("type") == "frame":
                 image = queued_image
         self.frames.put_nowait((metadata, image))
@@ -176,7 +243,11 @@ def worker_frame(stream_id: str, secret: str, machine: str, body: dict[str, Any]
         })
     refresh = stream.force_frame
     stream.force_frame = False
-    return {"actions": stream.drain_actions(), "refresh": refresh}
+    result = {"actions": stream.drain_actions(), "refresh": refresh}
+    if stream.adaptive:
+        result["profile_level"] = stream.pacer.level
+        result["interval_s"] = stream.pacer.network_interval
+    return result
 
 
 _WORKER_STREAM_TASKS: dict[str, asyncio.Task[None]] = {}
@@ -216,6 +287,24 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
     force_frame = True
     pending_errors: list[str] = []
     pending_acks: list[dict[str, Any]] = []
+    adaptive = False
+    pacer = AdaptivePacer()
+    controller_level = len(FRAME_PROFILES) - 1
+    controller_interval = 0.0
+
+    def feedback(result: dict[str, Any], size: int, elapsed: float) -> None:
+        nonlocal adaptive, controller_level, controller_interval
+        level = result.get("profile_level")
+        if type(level) is int and 0 <= level < len(FRAME_PROFILES):
+            adaptive = True
+            controller_level = level
+            interval = result.get("interval_s")
+            controller_interval = (max(FRAME_PROFILES[level].interval, min(4.0, interval))
+                                   if type(interval) in (int, float) and 0 < interval <= 4.0
+                                   else FRAME_PROFILES[level].interval)
+            if size:
+                pacer.sample(size, elapsed)
+
     try:
         manager = get_gui_manager()
         capabilities = (await manager.list_windows()).get("capabilities", {})
@@ -229,6 +318,7 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                 if pending_acks:
                     payload["acks"] = pending_acks
                 result = await asyncio.to_thread(_post_frame, url, payload, secret)
+                feedback(result, 0, 0)
                 pending_errors = []
                 pending_acks = []
                 for entry in result.get("actions", []):
@@ -246,11 +336,12 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                         if isinstance(entry.get("request_id"), int):
                             pending_acks.append({"request_id": entry["request_id"], "ok": True})
                 force_frame = force_frame or bool(result.get("refresh"))
-                await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
+                await asyncio.sleep(max(0.05, (min(0.35, pacer.profile.interval) if adaptive else FRAME_INTERVAL_S) - (time.monotonic() - started)))
                 continue
-            if len(observations) >= RETAINED_OBSERVATIONS:
+            if len(observations) >= (ADAPTIVE_OBSERVATIONS if adaptive else RETAINED_OBSERVATIONS):
                 await manager.discard_frame_observation(window_id, observations.pop(0))
-            data, image = await capture_frame(manager, window_id)
+            profile = FRAME_PROFILES[min(pacer.level, controller_level)] if adaptive else None
+            data, image = await capture_frame(manager, window_id, profile) if profile else await capture_frame(manager, window_id)
             observation = data["observation_id"]
             changed = force_frame or hashlib.blake2s(image).digest() != previous_image
             payload: dict[str, Any] = {"frame": frame_metadata(data)}
@@ -264,7 +355,9 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                 payload["image"] = base64.b64encode(image).decode("ascii")
                 previous_image = hashlib.blake2s(image).digest()
             try:
+                sent_at = time.monotonic()
                 result = await asyncio.to_thread(_post_frame, url, payload, secret)
+                feedback(result, len(payload.get("image", "")), time.monotonic() - sent_at)
                 force_frame = bool(result.get("refresh"))
                 for entry in result.get("actions", []):
                     if not isinstance(entry, dict):
@@ -284,7 +377,8 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                             pending_acks.append({"request_id": entry["request_id"], "ok": True})
             finally:
                 observations.append(observation)
-            await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
+            interval = max(controller_interval, pacer.interval(changed, bool(result.get("actions")) or force_frame)) if adaptive else FRAME_INTERVAL_S
+            await asyncio.sleep(max(0.05, interval - (time.monotonic() - started)))
     except asyncio.CancelledError:
         raise
     except Exception as exc:

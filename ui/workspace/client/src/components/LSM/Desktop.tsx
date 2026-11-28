@@ -6,7 +6,7 @@ import { workspaceSocket, type WorkspaceConnection } from './workspaceTransport'
 import type { RecordValue } from './api';
 
 type Bounds = { x: number; y: number; width: number; height: number };
-type Frame = { type: 'frame'; observation_id: string; bounds: Bounds; ttl_s: number; coordinate_input: boolean; image: boolean };
+type Frame = { type: 'frame'; observation_id: string; bounds: Bounds; ttl_s: number; coordinate_input: boolean; image: boolean; frame_id?: number };
 type Observation = Frame & { expires: number };
 const toolButton = 'rounded p-1.5 hover:bg-surface-hover disabled:opacity-40';
 
@@ -47,7 +47,7 @@ export default function Desktop({ machine, windowId, connection }: { machine: st
     const connect = () => {
       if (stopped) return;
       setStatus('connecting');
-      const ws = workspaceSocket(connection, token, 'desktop', { machine, window_id: windowId });
+      const ws = workspaceSocket(connection, token, 'desktop', { machine, window_id: windowId, adaptive: '1' });
       ws.binaryType = 'arraybuffer';
       socket.current = ws;
       ws.onopen = () => { if (!stopped && socket.current === ws) setError(''); };
@@ -57,7 +57,13 @@ export default function Desktop({ machine, windowId, connection }: { machine: st
           if (!pending) return;
           const next = URL.createObjectURL(new Blob([event.data], { type: 'image/jpeg' }));
           const version = frameVersion;
+          const frameId = pending.frame_id;
           pending = null;
+          const acknowledge = () => {
+            if (!stopped && socket.current === ws && ws.readyState === WebSocket.OPEN && typeof frameId === 'number') {
+              ws.send(JSON.stringify({ type: 'frame-ack', frame_id: frameId }));
+            }
+          };
           const decoded = new Image();
           decoded.onload = () => {
             if (stopped || socket.current !== ws || version !== frameVersion || !latest) { URL.revokeObjectURL(next); return; }
@@ -69,8 +75,9 @@ export default function Desktop({ machine, windowId, connection }: { machine: st
             setCoordinateInput(latest.coordinate_input);
             setStatus('connected');
             delay = 500;
+            acknowledge();
           };
-          decoded.onerror = () => URL.revokeObjectURL(next);
+          decoded.onerror = () => { URL.revokeObjectURL(next); ws.close(); };
           decoded.src = next;
           return;
         }

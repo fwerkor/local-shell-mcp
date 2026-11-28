@@ -3443,6 +3443,8 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
 
     from .desktop_stream import (
         FRAME_INTERVAL_S,
+        FRAME_ACK_TIMEOUT_S,
+        ADAPTIVE_OBSERVATIONS,
         RETAINED_OBSERVATIONS,
         STREAM_IDLE_S,
         STREAMS,
@@ -3451,7 +3453,7 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
         frame_metadata,
     )
 
-    stream = DesktopStream(machine, window_id)
+    stream = DesktopStream(machine, window_id, adaptive=websocket.query_params.get("adaptive") == "1")
     if len(STREAMS) >= max(1, get_settings().ui_terminal_max_sessions):
         await websocket.close(code=4429, reason="Too many desktop streams")
         return
@@ -3467,6 +3469,9 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
     is_remote = machine != "local"
     manager = None
     send_lock = asyncio.Lock()
+    frame_ack = asyncio.Event()
+    frame_serial = 0
+    pending_frame: int | None = None
 
     def live_credential_valid() -> bool:
         if live_credentials is None:
@@ -3479,6 +3484,14 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             await websocket.send_text(json.dumps(control, separators=(",", ":")))
 
     async def emit(metadata: dict[str, Any], image: bytes) -> None:
+        nonlocal frame_serial, pending_frame
+        started = time.monotonic()
+        acknowledge = stream.adaptive and bool(image)
+        if acknowledge:
+            frame_serial += 1
+            pending_frame = frame_serial
+            frame_ack.clear()
+            metadata = {**metadata, "frame_id": frame_serial}
         async with send_lock:
             if metadata.get("type") == "frame" and isinstance(metadata.get("ttl_s"), (int, float)):
                 metadata = dict(metadata)
@@ -3487,6 +3500,16 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             await websocket.send_text(json.dumps({**metadata, "image": bool(image)}, separators=(",", ":")))
             if image:
                 await websocket.send_bytes(image)
+        if acknowledge:
+            try:
+                # Do not queue another image behind an undecoded browser frame.
+                await asyncio.wait_for(frame_ack.wait(), timeout=FRAME_ACK_TIMEOUT_S)
+                stream.pacer.sample(len(image), time.monotonic() - started)
+            except TimeoutError:
+                stream.pacer.congested()
+                raise RuntimeError("Desktop frame acknowledgement timed out")
+            finally:
+                pending_frame = None
 
     async def ack_sender() -> None:
         while True:
@@ -3547,17 +3570,19 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                             continue
                         refresh_event.clear()
                     started = time.monotonic()
-                    if len(recent) >= RETAINED_OBSERVATIONS:
+                    if len(recent) >= (ADAPTIVE_OBSERVATIONS if stream.adaptive else RETAINED_OBSERVATIONS):
                         await manager.discard_frame_observation(window_id, recent.pop(0))
-                    data, image = await capture_frame(manager, window_id)
+                    data, image = await capture_frame(manager, window_id, stream.pacer.profile) if stream.adaptive else await capture_frame(manager, window_id)
                     observation_id = data["observation_id"]
                     recent.append(observation_id)
                     digest = hashlib.blake2s(image).digest()
                     force_frame = stream.force_frame
                     stream.force_frame = False
-                    await emit(frame_metadata(data), image if digest != last_digest or force_frame else b"")
+                    changed = digest != last_digest or force_frame
+                    await emit(frame_metadata(data), image if changed else b"")
                     last_digest = digest
-                    await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
+                    interval = stream.pacer.interval(changed, stream.force_frame) if stream.adaptive else FRAME_INTERVAL_S
+                    await asyncio.sleep(max(0.05, interval - (time.monotonic() - started)))
             finally:
                 for observation_id in recent:
                     with contextlib.suppress(Exception):
@@ -3578,6 +3603,10 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             try:
                 control = json.loads(raw)
                 if not isinstance(control, dict):
+                    continue
+                if control.get("type") == "frame-ack":
+                    if stream.adaptive and pending_frame is not None and type(control.get("frame_id")) is int and control["frame_id"] == pending_frame:
+                        frame_ack.set()
                     continue
                 if control.get("type") == "refresh":
                     stream.force_frame = True
