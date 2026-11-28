@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Desactiveu la detecció automàtica per configurar models manualment.",
   "com_lsm_channel_discover_interval": "Actualitzat pel servidor cada 10 minuts. Les dades existents es conserven si falla una actualització.",
   "com_lsm_channel_discover_context_help": "Deixa en blanc per utilitzar les metadades de l'API; introduïu un valor per anul·lar-lo o empleneu un límit desconegut.",
-  "com_lsm_channel_refreshed": "Informació del model actualitzada."
+  "com_lsm_channel_refreshed": "Informació del model actualitzada.",
+  "com_lsm_title_mode": "Assignació automàtica de noms a les converses",
+  "com_lsm_title_off": "No assignis noms automàticament",
+  "com_lsm_title_once": "Anomena les converses noves una vegada",
+  "com_lsm_title_every": "Canvia el nom després de cada resposta",
+  "com_lsm_title_model": "Model per als noms",
+  "com_lsm_title_original_model": "Model de la conversa",
+  "com_lsm_title_timing": "Els títols es generen quan el model ha acabat de respondre."
 }

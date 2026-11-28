@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "قم بإيقاف تشغيل الاكتشاف التلقائي لتكوين النماذج يدويًا.",
   "com_lsm_channel_discover_interval": "يتم التحديث بواسطة الخادم كل 10 دقائق. يتم الاحتفاظ بالبيانات الموجودة في حالة فشل التحديث.",
   "com_lsm_channel_discover_context_help": "اتركه فارغًا لاستخدام البيانات التعريفية لواجهة برمجة التطبيقات؛ أدخل قيمة لتجاوزها أو ملء حد غير معروف.",
-  "com_lsm_channel_refreshed": "تم تحديث معلومات النموذج."
+  "com_lsm_channel_refreshed": "تم تحديث معلومات النموذج.",
+  "com_lsm_title_mode": "تسمية المحادثات تلقائيًا",
+  "com_lsm_title_off": "عدم التسمية تلقائيًا",
+  "com_lsm_title_once": "تسمية المحادثات الجديدة مرة واحدة",
+  "com_lsm_title_every": "إعادة التسمية بعد كل رد",
+  "com_lsm_title_model": "نموذج التسمية",
+  "com_lsm_title_original_model": "نموذج المحادثة",
+  "com_lsm_title_timing": "تُنشأ العناوين بعد اكتمال رد النموذج."
 }

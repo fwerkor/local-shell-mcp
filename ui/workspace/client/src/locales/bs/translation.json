@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_interval": "Osvježava server svakih 10 minuta. Postojeći podaci se zadržavaju ako osvježavanje ne uspije.",
   "com_lsm_channel_discover_context_help": "Ostavite prazno za korištenje API metapodataka; unesite vrijednost da je nadjačate ili popunite nepoznato ograničenje.",
   "com_lsm_channel_refreshed": "Informacije o modelu su osvježene.",
-  "com_ui_tool_name_sleep": "Čekanje"
+  "com_ui_tool_name_sleep": "Čekanje",
+  "com_lsm_title_mode": "Automatsko imenovanje razgovora",
+  "com_lsm_title_off": "Bez automatskog imenovanja",
+  "com_lsm_title_once": "Imenuj nove razgovore jednom",
+  "com_lsm_title_every": "Preimenuj nakon svakog odgovora",
+  "com_lsm_title_model": "Model za imenovanje",
+  "com_lsm_title_original_model": "Model razgovora",
+  "com_lsm_title_timing": "Naslovi se generišu nakon potpunog odgovora modela."
 }

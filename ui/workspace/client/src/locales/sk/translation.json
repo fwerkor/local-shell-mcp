@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Ak chcete modely nakonfigurovať manuálne, vypnite automatické zisťovanie.",
   "com_lsm_channel_discover_interval": "Server obnovuje každých 10 minút. Ak obnovenie zlyhá, existujúce údaje sa zachovajú.",
   "com_lsm_channel_discover_context_help": "Ak chcete použiť metadáta API, nechajte prázdne. zadajte hodnotu, ktorá ju prepíše, alebo vyplňte neznámy limit.",
-  "com_lsm_channel_refreshed": "Informácie o modeli boli aktualizované."
+  "com_lsm_channel_refreshed": "Informácie o modeli boli aktualizované.",
+  "com_lsm_title_mode": "Automatické pomenovanie konverzácií",
+  "com_lsm_title_off": "Nepomenúvať automaticky",
+  "com_lsm_title_once": "Pomenovať nové konverzácie raz",
+  "com_lsm_title_every": "Premenovať po každej odpovedi",
+  "com_lsm_title_model": "Model na pomenovanie",
+  "com_lsm_title_original_model": "Model konverzácie",
+  "com_lsm_title_timing": "Názvy sa generujú po dokončení odpovede modelu."
 }

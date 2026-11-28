@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Izslēdziet automātisko atrašanu, lai manuāli konfigurētu modeļus.",
   "com_lsm_channel_discover_interval": "Serveris atsvaidzina ik pēc 10 minūtēm. Esošie dati tiek saglabāti, ja atsvaidzināšana neizdodas.",
   "com_lsm_channel_discover_context_help": "Atstājiet tukšu, lai izmantotu API metadatus; ievadiet vērtību, lai to ignorētu, vai aizpildiet nezināmu ierobežojumu.",
-  "com_lsm_channel_refreshed": "Modeļa informācija ir atjaunināta."
+  "com_lsm_channel_refreshed": "Modeļa informācija ir atjaunināta.",
+  "com_lsm_title_mode": "Automātiska sarunu nosaukumu piešķiršana",
+  "com_lsm_title_off": "Nepiešķirt nosaukumus automātiski",
+  "com_lsm_title_once": "Piešķirt jaunām sarunām nosaukumu vienreiz",
+  "com_lsm_title_every": "Pārdēvēt pēc katras atbildes",
+  "com_lsm_title_model": "Nosaukumu veidošanas modelis",
+  "com_lsm_title_original_model": "Sarunas modelis",
+  "com_lsm_title_timing": "Nosaukumi tiek ģenerēti pēc modeļa atbildes pabeigšanas."
 }

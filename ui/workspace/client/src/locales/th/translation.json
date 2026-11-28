@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "ปิดการค้นหาอัตโนมัติเพื่อกำหนดค่าโมเดลด้วยตนเอง",
   "com_lsm_channel_discover_interval": "รีเฟรชโดยเซิร์ฟเวอร์ทุกๆ 10 นาที ข้อมูลที่มีอยู่จะถูกเก็บไว้หากการรีเฟรชล้มเหลว",
   "com_lsm_channel_discover_context_help": "เว้นว่างไว้เพื่อใช้ข้อมูลเมตา API ป้อนค่าเพื่อแทนที่หรือกรอกค่าจำกัดที่ไม่ทราบ",
-  "com_lsm_channel_refreshed": "รีเฟรชข้อมูลโมเดลแล้ว"
+  "com_lsm_channel_refreshed": "รีเฟรชข้อมูลโมเดลแล้ว",
+  "com_lsm_title_mode": "ตั้งชื่อการสนทนาอัตโนมัติ",
+  "com_lsm_title_off": "ไม่ตั้งชื่ออัตโนมัติ",
+  "com_lsm_title_once": "ตั้งชื่อการสนทนาใหม่ครั้งเดียว",
+  "com_lsm_title_every": "เปลี่ยนชื่อหลังทุกคำตอบ",
+  "com_lsm_title_model": "โมเดลสำหรับตั้งชื่อ",
+  "com_lsm_title_original_model": "โมเดลของการสนทนา",
+  "com_lsm_title_timing": "ระบบจะสร้างชื่อหลังจากที่โมเดลตอบเสร็จแล้ว"
 }

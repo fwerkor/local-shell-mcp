@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Slökktu á sjálfvirkri uppgötvun til að stilla gerðir handvirkt.",
   "com_lsm_channel_discover_interval": "Uppfært af þjóninum á 10 mínútna fresti. Fyrirliggjandi gögn eru varðveitt ef endurnýjun mistekst.",
   "com_lsm_channel_discover_context_help": "Skildu eftir autt til að nota API lýsigögn; sláðu inn gildi til að hnekkja því eða fylla inn óþekkt mörk.",
-  "com_lsm_channel_refreshed": "Fyrirmyndarupplýsingar endurnýjaðar."
+  "com_lsm_channel_refreshed": "Fyrirmyndarupplýsingar endurnýjaðar.",
+  "com_lsm_title_mode": "Sjálfvirk nafngift samtala",
+  "com_lsm_title_off": "Ekki nefna sjálfvirkt",
+  "com_lsm_title_once": "Nefna ný samtöl einu sinni",
+  "com_lsm_title_every": "Endurnefna eftir hvert svar",
+  "com_lsm_title_model": "Líkan til nafngiftar",
+  "com_lsm_title_original_model": "Líkan samtalsins",
+  "com_lsm_title_timing": "Titlar eru búnir til eftir að líkanið lýkur svari sínu."
 }

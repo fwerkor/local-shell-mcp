@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Modelleri manuel olarak yapılandırmak için otomatik bulmayı kapatın.",
   "com_lsm_channel_discover_interval": "Sunucu tarafından her 10 dakikada bir yenilenir. Yenileme başarısız olursa mevcut veriler korunur.",
   "com_lsm_channel_discover_context_help": "API meta verilerini kullanmak için boş bırakın; geçersiz kılmak için bir değer girin veya bilinmeyen bir sınırı doldurun.",
-  "com_lsm_channel_refreshed": "Model bilgileri yenilendi."
+  "com_lsm_channel_refreshed": "Model bilgileri yenilendi.",
+  "com_lsm_title_mode": "Otomatik sohbet adlandırma",
+  "com_lsm_title_off": "Otomatik adlandırma yapma",
+  "com_lsm_title_once": "Yeni sohbetleri bir kez adlandır",
+  "com_lsm_title_every": "Her yanıttan sonra yeniden adlandır",
+  "com_lsm_title_model": "Adlandırma modeli",
+  "com_lsm_title_original_model": "Sohbet modeli",
+  "com_lsm_title_timing": "Başlıklar modelin yanıtı tamamlandıktan sonra oluşturulur."
 }

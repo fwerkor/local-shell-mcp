@@ -3080,5 +3080,12 @@
   "com_lsm_channel_refreshed": "དཔེ་སྟོན་གྱི་ཆ་འཕྲིན་གསར་བརྗེ་བྱས།",
   "com_lsm_channel_oauth_account": "{{name}} རྩིས་ཁྲ།",
   "com_lsm_channel_synced": "{{date}} ལ་མཉམ་སྒྲིག་བྱས།",
-  "com_lsm_channel_refresh_name": "{{name}} གསར་བརྗེ་བྱེད།"
+  "com_lsm_channel_refresh_name": "{{name}} གསར་བརྗེ་བྱེད།",
+  "com_lsm_title_mode": "གླེང་མོལ་གྱི་མིང་རང་འགུལ་གྱིས་འདོགས་པ།",
+  "com_lsm_title_off": "རང་འགུལ་གྱིས་མིང་མི་འདོགས།",
+  "com_lsm_title_once": "གླེང་མོལ་གསར་པར་ཐེངས་གཅིག་མིང་འདོགས།",
+  "com_lsm_title_every": "ལན་རེའི་རྗེས་མིང་བསྐྱར་འདོགས།",
+  "com_lsm_title_model": "མིང་འདོགས་པའི་དཔེ་གཞི།",
+  "com_lsm_title_original_model": "གླེང་མོལ་གྱི་དཔེ་གཞི།",
+  "com_lsm_title_timing": "དཔེ་གཞིའི་ལན་ཆ་ཚང་རྫོགས་རྗེས་ཁ་བྱང་བཟོ་བ།"
 }

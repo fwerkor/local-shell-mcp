@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Slå automatisk registrering fra for at konfigurere modeller manuelt.",
   "com_lsm_channel_discover_interval": "Opdateres af serveren hvert 10. minut. Eksisterende data bevares, hvis en opdatering mislykkes.",
   "com_lsm_channel_discover_context_help": "Lad tom for at bruge API-metadata; indtast en værdi for at tilsidesætte den eller udfyld en ukendt grænse.",
-  "com_lsm_channel_refreshed": "Modeloplysninger opdateret."
+  "com_lsm_channel_refreshed": "Modeloplysninger opdateret.",
+  "com_lsm_title_mode": "Automatisk navngivning af samtaler",
+  "com_lsm_title_off": "Navngiv ikke automatisk",
+  "com_lsm_title_once": "Navngiv nye samtaler én gang",
+  "com_lsm_title_every": "Omdøb efter hvert svar",
+  "com_lsm_title_model": "Model til navngivning",
+  "com_lsm_title_original_model": "Samtalens model",
+  "com_lsm_title_timing": "Titler genereres, når modellen har afsluttet sit svar."
 }

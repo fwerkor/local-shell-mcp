@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Nonaktifkan penemuan otomatis untuk mengonfigurasi model secara manual.",
   "com_lsm_channel_discover_interval": "Disegarkan oleh server setiap 10 menit. Data yang ada dipertahankan jika penyegaran gagal.",
   "com_lsm_channel_discover_context_help": "Biarkan kosong untuk menggunakan metadata API; masukkan nilai untuk menimpanya atau mengisi batas yang tidak diketahui.",
-  "com_lsm_channel_refreshed": "Informasi model disegarkan."
+  "com_lsm_channel_refreshed": "Informasi model disegarkan.",
+  "com_lsm_title_mode": "Penamaan percakapan otomatis",
+  "com_lsm_title_off": "Jangan beri nama secara otomatis",
+  "com_lsm_title_once": "Beri nama percakapan baru sekali",
+  "com_lsm_title_every": "Ubah nama setelah setiap balasan",
+  "com_lsm_title_model": "Model penamaan",
+  "com_lsm_title_original_model": "Model percakapan",
+  "com_lsm_title_timing": "Judul dibuat setelah balasan model selesai."
 }

@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Izklopite samodejno odkrivanje za ročno konfiguracijo modelov.",
   "com_lsm_channel_discover_interval": "Strežnik osveži vsakih 10 minut. Obstoječi podatki se ohranijo, če osvežitev ne uspe.",
   "com_lsm_channel_discover_context_help": "Pustite prazno za uporabo metapodatkov API-ja; vnesite vrednost, da jo preglasite, ali zapolnite neznano mejo.",
-  "com_lsm_channel_refreshed": "Informacije o modelu so osvežene."
+  "com_lsm_channel_refreshed": "Informacije o modelu so osvežene.",
+  "com_lsm_title_mode": "Samodejno poimenovanje pogovorov",
+  "com_lsm_title_off": "Ne poimenuj samodejno",
+  "com_lsm_title_once": "Nove pogovore poimenuj enkrat",
+  "com_lsm_title_every": "Preimenuj po vsakem odgovoru",
+  "com_lsm_title_model": "Model za poimenovanje",
+  "com_lsm_title_original_model": "Model pogovora",
+  "com_lsm_title_timing": "Naslovi se ustvarijo po končanem odgovoru modela."
 }

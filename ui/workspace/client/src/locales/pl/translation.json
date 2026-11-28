@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Wyłącz automatyczne wykrywanie, aby ręcznie skonfigurować modele.",
   "com_lsm_channel_discover_interval": "Odświeżane przez serwer co 10 minut. Jeśli odświeżenie się nie powiedzie, istniejące dane zostaną zachowane.",
   "com_lsm_channel_discover_context_help": "Pozostaw puste, aby użyć metadanych API; wprowadź wartość, aby ją zastąpić lub uzupełnij nieznany limit.",
-  "com_lsm_channel_refreshed": "Odświeżono informacje o modelu."
+  "com_lsm_channel_refreshed": "Odświeżono informacje o modelu.",
+  "com_lsm_title_mode": "Automatyczne nadawanie nazw rozmowom",
+  "com_lsm_title_off": "Nie nadawaj nazw automatycznie",
+  "com_lsm_title_once": "Nadaj nazwę nowym rozmowom raz",
+  "com_lsm_title_every": "Zmieniaj nazwę po każdej odpowiedzi",
+  "com_lsm_title_model": "Model do nadawania nazw",
+  "com_lsm_title_original_model": "Model rozmowy",
+  "com_lsm_title_timing": "Tytuły są generowane po zakończeniu odpowiedzi modelu."
 }

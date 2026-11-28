@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Stäng av automatisk upptäckt för att konfigurera modeller manuellt.",
   "com_lsm_channel_discover_interval": "Uppdateras av servern var tionde minut. Befintlig data behålls om en uppdatering misslyckas.",
   "com_lsm_channel_discover_context_help": "Lämna tomt för att använda API-metadata; ange ett värde för att åsidosätta det eller fyll i en okänd gräns.",
-  "com_lsm_channel_refreshed": "Modellinformation uppdaterad."
+  "com_lsm_channel_refreshed": "Modellinformation uppdaterad.",
+  "com_lsm_title_mode": "Automatisk namngivning av konversationer",
+  "com_lsm_title_off": "Namnge inte automatiskt",
+  "com_lsm_title_once": "Namnge nya konversationer en gång",
+  "com_lsm_title_every": "Byt namn efter varje svar",
+  "com_lsm_title_model": "Modell för namngivning",
+  "com_lsm_title_original_model": "Konversationens modell",
+  "com_lsm_title_timing": "Titlar genereras när modellen har slutfört sitt svar."
 }

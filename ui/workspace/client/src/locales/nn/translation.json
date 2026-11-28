@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Slå av automatisk oppdaging for å konfigurere modellar manuelt.",
   "com_lsm_channel_discover_interval": "Tenaren oppdaterer kvart 10. minutt. Eksisterande data blir beheldne viss oppdateringa mislukkast.",
   "com_lsm_channel_discover_context_help": "Lat feltet stå tomt for å bruke metadata frå API-et. Skriv inn ein verdi for å overstyre dei eller fylle inn ei ukjend grense.",
-  "com_lsm_channel_refreshed": "Modellinformasjonen er oppdatert."
+  "com_lsm_channel_refreshed": "Modellinformasjonen er oppdatert.",
+  "com_lsm_title_mode": "Automatisk namngjeving av samtalar",
+  "com_lsm_title_off": "Ikkje gje namn automatisk",
+  "com_lsm_title_once": "Gje nye samtalar namn éin gong",
+  "com_lsm_title_every": "Endre namn etter kvart svar",
+  "com_lsm_title_model": "Modell for namngjeving",
+  "com_lsm_title_original_model": "Samtalemodellen",
+  "com_lsm_title_timing": "Titlar blir genererte når modellen er ferdig med svaret."
 }

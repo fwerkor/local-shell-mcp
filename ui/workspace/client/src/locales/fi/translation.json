@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Poista automaattinen etsintä käytöstä, jos haluat määrittää mallit manuaalisesti.",
   "com_lsm_channel_discover_interval": "Palvelin päivittää 10 minuutin välein. Olemassa olevat tiedot säilytetään, jos päivitys epäonnistuu.",
   "com_lsm_channel_discover_context_help": "Jätä tyhjäksi, jos haluat käyttää API-metatietoja. syötä arvo ohittaaksesi sen tai täytä tuntematon raja.",
-  "com_lsm_channel_refreshed": "Mallitiedot päivitetty."
+  "com_lsm_channel_refreshed": "Mallitiedot päivitetty.",
+  "com_lsm_title_mode": "Keskustelujen automaattinen nimeäminen",
+  "com_lsm_title_off": "Älä nimeä automaattisesti",
+  "com_lsm_title_once": "Nimeä uudet keskustelut kerran",
+  "com_lsm_title_every": "Nimeä uudelleen jokaisen vastauksen jälkeen",
+  "com_lsm_title_model": "Nimeämismalli",
+  "com_lsm_title_original_model": "Keskustelun malli",
+  "com_lsm_title_timing": "Otsikot luodaan mallin vastauksen valmistuttua."
 }

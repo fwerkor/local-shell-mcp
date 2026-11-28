@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Mudelite käsitsi konfigureerimiseks lülitage automaatne leidmine välja.",
   "com_lsm_channel_discover_interval": "Server värskendab seda iga 10 minuti järel. Kui värskendamine ebaõnnestub, säilitatakse olemasolevad andmed.",
   "com_lsm_channel_discover_context_help": "API metaandmete kasutamiseks jätke tühjaks; selle tühistamiseks sisestage väärtus või täitke tundmatu limiit.",
-  "com_lsm_channel_refreshed": "Mudeliteave värskendatud."
+  "com_lsm_channel_refreshed": "Mudeliteave värskendatud.",
+  "com_lsm_title_mode": "Vestluste automaatne nimetamine",
+  "com_lsm_title_off": "Ära nimeta automaatselt",
+  "com_lsm_title_once": "Nimeta uued vestlused üks kord",
+  "com_lsm_title_every": "Nimeta ümber pärast iga vastust",
+  "com_lsm_title_model": "Nimetamise mudel",
+  "com_lsm_title_original_model": "Vestluse mudel",
+  "com_lsm_title_timing": "Pealkirjad luuakse pärast mudeli vastuse lõppemist."
 }

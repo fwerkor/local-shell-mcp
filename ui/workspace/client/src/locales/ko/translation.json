@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "모델을 수동으로 구성하려면 자동 검색을 끄세요.",
   "com_lsm_channel_discover_interval": "10분마다 서버에서 새로 고쳐집니다. 새로 고침이 실패해도 기존 데이터는 유지됩니다.",
   "com_lsm_channel_discover_context_help": "API 메타데이터를 사용하려면 비워 두세요. 값을 입력하여 재정의하거나 알 수 없는 한계를 입력하세요.",
-  "com_lsm_channel_refreshed": "모델 정보가 새로 고쳐졌습니다."
+  "com_lsm_channel_refreshed": "모델 정보가 새로 고쳐졌습니다.",
+  "com_lsm_title_mode": "대화 자동 제목 지정",
+  "com_lsm_title_off": "자동으로 제목을 지정하지 않음",
+  "com_lsm_title_once": "새 대화의 제목을 한 번 지정",
+  "com_lsm_title_every": "응답마다 제목 변경",
+  "com_lsm_title_model": "제목 생성 모델",
+  "com_lsm_title_original_model": "대화 모델",
+  "com_lsm_title_timing": "모델의 응답이 완료된 후 제목이 생성됩니다."
 }

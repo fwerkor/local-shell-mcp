@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "A modellek kézi konfigurálásához kapcsolja ki az automatikus felderítést.",
   "com_lsm_channel_discover_interval": "A szerver 10 percenként frissíti. A meglévő adatok megmaradnak, ha a frissítés sikertelen.",
   "com_lsm_channel_discover_context_help": "Hagyja üresen az API metaadatok használatához; adjon meg egy értéket a felülbíráláshoz, vagy töltse ki az ismeretlen korlátot.",
-  "com_lsm_channel_refreshed": "A modell információi frissítve."
+  "com_lsm_channel_refreshed": "A modell információi frissítve.",
+  "com_lsm_title_mode": "Beszélgetések automatikus elnevezése",
+  "com_lsm_title_off": "Ne nevezze el automatikusan",
+  "com_lsm_title_once": "Új beszélgetések egyszeri elnevezése",
+  "com_lsm_title_every": "Átnevezés minden válasz után",
+  "com_lsm_title_model": "Elnevezési modell",
+  "com_lsm_title_original_model": "A beszélgetés modellje",
+  "com_lsm_title_timing": "A címek a modell válaszának befejezése után jönnek létre."
 }

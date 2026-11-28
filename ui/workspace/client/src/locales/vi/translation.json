@@ -3080,5 +3080,12 @@
   "com_lsm_channel_discover_manual_help": "Tắt tính năng phát hiện tự động để định cấu hình mô hình theo cách thủ công.",
   "com_lsm_channel_discover_interval": "Được máy chủ làm mới cứ sau 10 phút. Dữ liệu hiện có được giữ lại nếu việc làm mới không thành công.",
   "com_lsm_channel_discover_context_help": "Để trống để sử dụng siêu dữ liệu API; nhập một giá trị để ghi đè lên nó hoặc điền vào một giới hạn không xác định.",
-  "com_lsm_channel_refreshed": "Thông tin mô hình được làm mới."
+  "com_lsm_channel_refreshed": "Thông tin mô hình được làm mới.",
+  "com_lsm_title_mode": "Tự động đặt tên cuộc trò chuyện",
+  "com_lsm_title_off": "Không tự động đặt tên",
+  "com_lsm_title_once": "Đặt tên cuộc trò chuyện mới một lần",
+  "com_lsm_title_every": "Đổi tên sau mỗi câu trả lời",
+  "com_lsm_title_model": "Mô hình đặt tên",
+  "com_lsm_title_original_model": "Mô hình của cuộc trò chuyện",
+  "com_lsm_title_timing": "Tiêu đề được tạo sau khi mô hình hoàn tất câu trả lời."
 }
