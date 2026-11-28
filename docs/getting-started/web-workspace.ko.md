@@ -1,73 +1,67 @@
-<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
-# 통합된 웹 작업공간
+<!-- i18n-source-sha256: 01cf883cb71925e93fabc21d32315ef8c869ee2ea548e54a0347e2f6b730a327 -->
+<!-- Machine-assisted translation; English source is authoritative. -->
+# WebUI 채팅 빠른 시작
 
-**통합 LSM 웹 작업공간**은 local-shell-mcp를 일상적으로 사용하는 데 권장되는 방법입니다. 수정된 벤더 LibreChat 프런트엔드를 기반으로 AI 채팅, 프로젝트 기록 및 LSM 제어 평면을 하나의 반응형 인터페이스에 결합합니다. [ChatGPT](chatgpt-connector.md) 또는 [Gemini](gemini-spark.md)와 같은 외부 MCP 클라이언트를 계속 연결할 수 있습니다.
+통합된 LSM 웹 작업 공간은 AI 채팅 기능, 프로젝트, 에이전트, 그리고 컨트롤러의 운영 페이지를 하나로 통합합니다. 이 시스템은 Python Controller를 통해 구동되며, 인증 및 SQLite 데이터베이스를 사용합니다. 별도의 채팅 서버는 필요하지 않습니다. [ChatGPT](chatgpt-connector.md)나 [Gemini](gemini-spark.md)와 같은 외부 MCP 클라이언트들도 여전히 지원됩니다.
 
-작업 영역은 **자체 호스팅되며 선택적으로 설치됩니다**. 이는 최소 컨트롤러 이미지, 독립 실행형 실행 파일 또는 원격 작업자 번들의 일부가 아닌 별도의 웹 서비스입니다. 컨트롤러 전용 배포는 원래 브라우저 UI 및 OpenTUI를 유지합니다.
+## 1. Controller 시작하기
 
-## 작업실에는 무엇이 있나요?
-
-| 면적 | 당신이 할 수 있는 일 |
-|---|---|
-| 채팅 및 프로젝트 | 구성된 모델을 선택하고, 대화를 만들고, 프로젝트를 구성하고, 지난 채팅을 찾고, 대화를 보관하세요. 기록은 서버에 남아있습니다. |
-| 컨트롤러 개요 | 상태, 최근 활동 및 연결된 컴퓨터를 봅니다. |
-| 파일 | 로컬 또는 원격 파일을 찾아보고 관리합니다. |
-| 터미널 | 컨트롤러 또는 작업자의 영구 터미널을 사용하여 작업합니다. |
-| 데스크탑 | 원격 GUI 세션을 검사하고 제어합니다. |
-| 세션 | 내구성 있는 LSM 작업과 해당 수명 주기를 검사합니다. |
-| 리모콘 | 아웃바운드 작업자를 연결하고 관리합니다. |
-| 감사 | 모델에서 생성된 도구 활동을 검사합니다. |
-| 중첩된 MCP | LSM 뒤에 있는 외부 MCP 서버를 등록, 편집, 활성화, 비활성화, 새로 고침 및 제거합니다. |
-
-컨트롤러 경로는 `/control/overview`, `/control/files`, `/control/terminals`, `/control/desktop`, `/control/sessions`, `/control/remotes` 및 `/control/audit`입니다. 채팅은 `/c/new`에서 열립니다. LSM MCP 관리자는 **LSM의 중첩 MCP 레지스트리**를 제어합니다. LibreChat에서는 두 번째 레지스트리를 생성하지 않습니다.
-
-## 선택적 채팅 스택 배포
-
-1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
-2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
-3. To override the defaults, configure the Controller service environment:
+원하는 실행 환경에 맞게 [설치 가이드](quickstart.md)를 따르세요. WebUI가 활성화되어 있고, 영구적인 저장소가 사용되고 있는지 확인하세요. 다음은 일반적으로 사용되는 기본 설정들입니다:
 
 ```env
 LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
 LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. Start the Controller from its Python package or standalone executable:
+서비스 환경을 내보낸 후, Controller를 실행하세요.
 
 ```sh
 local-shell-mcp --mode mcp
 ```
 
-5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
+단일 파일로 배포하는 경우, 다운로드한 실행 파일을 사용해야 합니다. 설치된 Controller는 컴파일된 프론트엔드를 제공합니다. JavaScript 빌드 도구는 소스 코드를 빌드하는 데만 필요합니다. 자세한 내용은 [WebUI 빌드 지침](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md)을 참조하세요.
 
-Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
+## 2. 브라우저 워크스페이스 열기
 
-**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
+열기 `http://127.0.0.1:8765/ui` 컨트롤러 호스트에서, 또는 설정된 HTTPS URL에서 접속할 수 있습니다. `/ui`해당 배포 환경에 설정된 LSM 인증을 사용하여 로그인하세요. 원격 접근에는 인증된 HTTPS를 사용해야 합니다. 채팅 및 제어 페이지는 같은 origins를 공유합니다.
 
-## 로그인하고 채팅을 사용하세요
+## 3. 모델 채널 추가하기
 
-1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
-2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
-3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
-4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
-5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
+모델 선택기와 채널 관리 기능을 열어보세요. API 채널을 추가하거나 지원되는 계정을 연결할 수 있습니다. OpenAI와 호환되는 일반적인 엔드포인트의 경우, 채널 이름을 입력하고, Chat Completions를 선택한 뒤, API 기본 URL과 자격 증명을 입력합니다. 그런 다음 모델을 찾거나 알려진 모델 ID를 직접 입력할 수도 있습니다. 설정을 저장한 후, 원하는 모델을 선택하세요.
 
-채팅 업로드(최대 32MiB)는 컨트롤러 작업 영역에 저장되며 절대 경로가 모델에 제공됩니다. 브라우저 업로드는 추가 파일 권한을 부여하지 않습니다. 모델 지향 도구 호출은 LSM 인증, 감사 및 원격 작업자 라우터를 통과합니다.
+로컬 인식 서비스를 사용할 경우, 브라우저만을 사용하는 것이 아니라, Controller에서 접근할 수 있는 주소를 사용해야 합니다. 예를 들어, 인식 서비스가 Controller의 네트워크 이름공간 내에서 해당 주소를 통해 수신하도록 설정된다면, `http://127.0.0.1:8080/v1`이 적합합니다. 프로토콜, 계정 권한 부여, 모델 발견, 컨텍스트 제한에 대해서는 [Channels and models](../chat/channels.md)을 참조하십시오.
 
-## 외부 MCP, 보안 및 데이터
+## 4. 첫 작업 실행하기
 
-작업공간 MCP 사이드바를 사용하여 중첩된 외부 MCP 서버를 관리하세요. 이는 별도의 개인 환경 변수 및 요청 헤더를 포함하여 로컬 stdio 서버 및 HTTP 서버를 지원합니다. 비밀은 브라우저에 반환되지 않습니다. **외부 MCP** 채팅 토글을 사용하면 중첩된 도구를 검색, 검사 및 호출할 수 있습니다. 기본 LSM 도구가 비활성화된 경우 모델 `mcp_manage`를 부여하지 않습니다. UI 관리는 일반 컨트롤러 인증으로 보호됩니다.
+채팅을 시작하여, 간단한 질문을 던져서 모델의 연결 상태를 확인해보세요. 그 다음에는 읽기 전용 도구를 사용해보세요.
 
-Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
+```text
+Controller 워크스페이스의 루트에 있는 파일들을 나열해 주세요.
+제발, 어떤 기계를 점검했는지 알려주세요. 그리고 그 점검 결과를 간단히 설명해 주세요.
+파일을 수정하거나 어떤 작업도 수행하지 마세요.
+```
 
-The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
+실제 도구의 결과를 확인해보세요. 만약 특정 도구가 없다면, 채팅창의 도구 설정, 에이전트 설정, 그리고 머신 권한을 확인해보세요. 반복적인 작업에는 저장된 에이전트를 사용하고, 그 에이전트의 접근 권한을 명확하게 설정해야 합니다. 자세한 내용은 [도구와 권한](../chat/permissions.md)을 참조하세요.
 
-## 문제 해결
+![웹 UI를 통한 채팅 – 데모 대화 예시](../assets/chat/chat-workspace.png)
 
-- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
-- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
-- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
-- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
-- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
+이 가이드와 다음 페이지에 나와 있는 스크린샷들은, 데모 모델을 사용하는 별도의 컨트롤러에서 캡처된 것입니다. 이러한 스크린샷들에는 실제 운영 환경에서 사용되는 자격증이나 대화 내용은 포함되어 있지 않습니다. 영어로 표시된 UI 레이블들은 선택된 언어와는 다를 수 있습니다.
 
-구현 세부정보 및 업데이트는 [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) 및 [human interface guide](../guides/human-interface.md)를 참조하세요.
+## 5. 워크스페이스 살펴보기
+
+| 영역/지역 | 그것을 무엇에 사용할 수 있을까요? |
+|---|---|
+| 채팅 및 프로젝트 관리 | 채팅을 시작하거나 검색할 수 있으며, 프로젝트, 태그, 메시지 북마크를 정리할 수 있습니다. |
+| Agents | 재사용 가능한 모델, 지침, 도구 구성 요소들 |
+| 기억과 기술들 | 재사용 가능한 지식과 지침을 관리합니다. |
+| 예약된 채팅 기능 | 저장된 Agent를 반복적으로 실행시킵니다. |
+| 파일 및 터미널 관리 | Controller 및 Worker 환경을 점검하거나 수정해 주세요. |
+| 데스크톱 관리 | 지원되는 원격 GUI 세션을 검사하고 제어할 수 있습니다. |
+| 세션, 작업 및 감사 | 지속 가능한 작업들, 진행 상황, 그리고 도구의 활동 상태를 점검해야 합니다. |
+| 기계들과 외부의 MCP들 | Workers와 중첩된 MCP 서버들을 관리합니다. |
+
+정확한 제어 방법은 사용자의 배포 환경, 계정 상태, 그리고 활성화된 기능에 따라 달라집니다. 브라우저를 닫는다고 해서 서버 측의 작업이 자동으로 중단되는 것은 아닙니다. 작업을 중단해야 할 경우에는 ‘중지’ 기능을 사용해야 합니다.
+
+## 다음 단계는…
+
+전체 작업 흐름에 대해서는 [WebUI 채팅 가이드](../chat/index.md)을 참조하세요. 또한, 실제 운영 환경에서의 설정, 백업 및 오류 복구 방법에 대해서는 [관리 및 문제 해결](../chat/administration.md)을 참조하시기 바랍니다.

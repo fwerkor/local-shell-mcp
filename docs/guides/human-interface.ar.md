@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # واجهة المستخدم
 
-[unified web workspace](../getting-started/web-workspace.md) هي واجهة المتصفح الموصى بها. فهو يجمع بين دردشة الذكاء الاصطناعي والمشاريع وصفحات وحدة تحكم LSM في واجهة مستخدم LibreChat معدلة واحدة، باستخدام نفس ترخيص LSM وواجهات برمجة تطبيقات الأدوات. إنها خدمة اختيارية يتم نشرها بشكل منفصل.
+[unified web workspace](../getting-started/web-workspace.md) هي واجهة المتصفح الموصى بها. فهو يجمع بين دردشة الذكاء الاصطناعي والمشاريع وصفحات وحدة تحكم LSM في واجهة مستخدم LibreChat معدلة واحدة، باستخدام نفس ترخيص LSM وواجهات برمجة تطبيقات الأدوات. يقدم Controller هذه الواجهة مباشرةً.
 
 تحتفظ وحدة التحكم خفيفة الوزن أيضًا بواجهتين بشريتين احتياطيتين متوافقتين فوق نفس واجهة برمجة التطبيقات ومساحة العمل والسجل الطرفي المستمر وسجل العمال عن بعد وسجل تدقيق MCP:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 يتيح Plan اختياري عبر `plan_manage` وضع Goal mode للـ Session. إذا كان Plan في حالة active ولم يحدث agent activity لمدة 15 دقيقة، يمكن لـ Live Workspace المرتبط أن يطلب من ChatGPT المتابعة. تستأنف continuation نفس `session_id` الصريحة وتقتصر على 10 محاولات سواء قُبلت أم رُفضت. لا تتم متابعة Plans ذات الحالات blocked أو completed أو cancelled تلقائيًا؛ ويظل Plan active الذي أصبحت كل steps فيه completed أو skipped مؤهلًا لـ continuation ختامية حتى يتمكن الـ Agent المستأنف من إنهاء Plan. تعدّل أدوات pause/resume/cancel البشرية الـ Plan المملوك للـ Session بدلًا من حالة Live Workspace المؤقتة.
 
-راجع [Hosted Chat](hosted-chat.md) للتعرف على مضيف النموذج الاختياري المستضاف ذاتيًا وعميل MCP Apps.
+راجع [WebUI Chat](hosted-chat.md) لمساحة عمل النماذج والوكلاء المدمجة.
 
 ## واجهة المتصفح
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Runtime binary mandiri
 
 Direkomendasikan **satu berkas executable Controller** dari GitHub Releases tanpa Python, Docker atau checkout source.
@@ -108,7 +108,7 @@ Pasang apa yang dibutuhkan task Anda:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Binary berisi Controller; alat eksternal dan browser bersifat opsional. Chat dan riwayat memerlukan [web workspace](../getting-started/web-workspace.md) dan database terpisah.
+Binary berisi Controller; alat eksternal dan browser bersifat opsional. Chat dan riwayat tersedia dalam [web workspace](../getting-started/web-workspace.md) terintegrasi dengan SQLite.
 
 ## Layanan jangka panjang
 

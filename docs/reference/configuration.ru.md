@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # Конфигурация
 
 Repository поставляет один копируемый стартовый файл: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose автоматически читает получившийся `.env`, а другие runtime могут использовать те же environment variables `LOCAL_SHELL_MCP_`. YAML остаётся optional advanced input для binary/source deployments; явно создайте файл и выберите его через `LOCAL_SHELL_MCP_CONFIG` или `--config`. Environment variables override YAML values, поэтому не определяйте одну настройку в обоих местах, если override не нужен намеренно. YAML keys используют field names ниже.
@@ -44,7 +44,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | При true отключает workspace/path restrictions; используйте только внутри disposable boundary. |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | Отключает controller host как shell/file/browser execution target. Remote workers и control-plane services остаются доступны. |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | Делает controller пригодным для ephemeral/serverless instances: подразумевает `disable_local`, отключает local file links/wallpaper caching и по умолчанию ставит `state_backend=memory`. При `auth_mode=oauth` явно задайте сильный `oauth_jwt_secret`. |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file`, `memory` или `redis`. Redis нужен, когда serverless controller state должен переживать cold starts. |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file`, `memory` или `redis`. Redis нужен, когда serverless controller state должен переживать cold starts. |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | Redis connection URL при `state_backend=redis`. Redacted в diagnostics. |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Namespace для memory/Redis control-plane state. |
 

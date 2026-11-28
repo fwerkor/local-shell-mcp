@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # ヒューマンインターフェース
 
-[unified web workspace](../getting-started/web-workspace.md) は、推奨されるブラウザー インターフェイスです。同じ LSM 認証とツール API を使用して、AI チャット、プロジェクト、LSM コントローラー ページを 1 つの修正された LibreChat UI に結合します。別途導入されるオプションサービスです。
+[unified web workspace](../getting-started/web-workspace.md) は、推奨されるブラウザー インターフェイスです。同じ LSM 認証とツール API を使用して、AI チャット、プロジェクト、LSM コントローラー ページを 1 つの修正された LibreChat UI に結合します。Controller が直接提供します。
 
 軽量のコントローラーは、同じ API、ワークスペース、永続ターミナル レジストリ、リモート ワーカー レジストリ、および MCP 監査ログ上に 2 つの互換性のあるフォールバック ヒューマン インターフェイスも保持します。
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 任意の `plan_manage` Plan で Session の Goal mode を有効にできます。Plan が active で agent activity が 15 分ない場合、関連付けられた Live Workspace は ChatGPT に continuation を要求できます。continuation は同じ明示的な `session_id` を resume し、accepted/rejected を問わず最大 10 回です。blocked、completed、cancelled の Plan は自動 continuation されません。すべての step が completed/skipped の active Plan は、resumed agent が Plan を正式に finish できるよう、cleanup continuation の対象に残ります。人間の pause/resume/cancel control は一時的な Live Workspace state ではなく Session 所有の Plan を更新します。
 
-オプションのセルフホスト モデルのホストと MCP アプリ クライアントについては、[Hosted Chat](hosted-chat.md) を参照してください。
+統合されたモデルとエージェントの作業環境は [WebUI Chat](hosted-chat.md) を参照してください。
 
 ## ブラウザーインターフェース
 

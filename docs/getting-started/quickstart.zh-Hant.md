@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # 快速開始
 
-本指南啟動 LSM 控制器並開啟其瀏覽器介面。 [unified web workspace](web-workspace.md)為推薦日常體驗；它是一個單獨部署的、可選的聊天堆疊。 ChatGPT、Gemini 和其他外部 MCP 用戶端可以連接到相同控制器。請參閱 [runtime choices and deployment model](../guides/deployment.md)。
+本指南啟動 LSM 控制器並開啟其瀏覽器介面。 [unified web workspace](web-workspace.md)為推薦日常體驗。 ChatGPT、Gemini 和其他外部 MCP 用戶端可以連接到相同控制器。請參閱 [runtime choices and deployment model](../guides/deployment.md)。
 
 推薦從 [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) 下載 **Controller 單檔可執行程式**直接部署。Controller 不需預裝 Python、Docker 或複製原始碼。以下為 **Linux x86_64** 指令；Windows、macOS 或 ARM64 請參閱 [二進位安裝指南](../installation/binary.md)。
 

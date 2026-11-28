@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # 獨立二進制運行時
 
 推薦從 GitHub Releases 下載 **Controller 單檔可執行程式**直接部署。Controller 不需預裝 Python、Docker 或複製原始碼。
@@ -108,7 +108,7 @@ local-shell-mcp --config /path/to/config.yaml
 | 瀏覽器自動化 | Playwright 瀏覽器二進制和系統依賴 |
 | 文檔轉換 | LibreOffice、Pandoc、Poppler 工具 |
 
-單檔程式包含 Controller，工作所需工具仍由主機提供；瀏覽器相依套件可按需安裝。整合聊天與歷史記錄需另外部署 [統一 Web 工作區](../getting-started/web-workspace.md) 及資料庫。
+單檔程式包含 Controller，工作所需工具仍由主機提供；瀏覽器相依套件可按需安裝。 整合聊天與歷史記錄由內建 [統一 Web 工作區](../getting-started/web-workspace.md) 提供，採用 SQLite。
 
 ## 長時間服務
 

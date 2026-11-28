@@ -1,72 +1,65 @@
-# Unified web workspace
+# WebUI Chat quickstart
 
-The **unified LSM web workspace** is the recommended way to use local-shell-mcp day to day. It combines AI chat, project history and the LSM control plane in one responsive interface, based on a modified, vendored LibreChat frontend. You can still connect external MCP clients such as [ChatGPT](chatgpt-connector.md) or [Gemini](gemini-spark.md).
+The unified LSM web workspace integrates AI chat, projects, Agents and the Controller's operational pages. It is served by the Python Controller and uses its authentication and SQLite database. No separate chat server is needed. External MCP clients such as [ChatGPT](chatgpt-connector.md) and [Gemini](gemini-spark.md) remain supported.
 
-The workspace is included with the single LSM Controller, not deployed as a separate service. Python and SQLite own all server data.
+## 1. Start the Controller
 
-## What is in the workspace?
-
-| Area | What you can do |
-|---|---|
-| Chat and projects | Choose a configured model, create conversations, organize projects, find past chats and archive conversations. History remains on the server. |
-| Controller overview | View health, recent activity and connected machines. |
-| Files | Browse and manage local or remote files. |
-| Terminals | Work with persistent terminals on the Controller or Workers. |
-| Desktop | Inspect and control remote GUI sessions. |
-| Sessions | Inspect durable LSM tasks and their lifecycle. |
-| Remotes | Connect and administer outbound Workers. |
-| Audit | Inspect model-originated tool activity. |
-| Nested MCP | Register, edit, enable, disable, refresh and remove external MCP servers behind LSM. |
-
-The Controller routes are `/control/overview`, `/control/files`, `/control/terminals`, `/control/desktop`, `/control/sessions`, `/control/remotes` and `/control/audit`. Chat opens at `/c/new`. The LSM MCP manager controls **LSM's nested MCP registry**; it does not create a second registry in LibreChat.
-
-## Deploy the optional chat stack
-
-1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
-2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
-3. To override the defaults, configure the Controller service environment:
+Follow the [installation quickstart](quickstart.md) for your preferred runtime. Ensure the WebUI is enabled and use persistent storage. The following are the normal defaults:
 
 ```env
 LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
 LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. Start the Controller from its Python package or standalone executable:
+After exporting your service environment, start the Controller:
 
 ```sh
 local-shell-mcp --mode mcp
 ```
 
-5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
+For the single-file release use the downloaded executable instead. The installed Controller serves the compiled frontend; the JavaScript build toolchain is only needed for source builds. See [WebUI build instructions](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
 
-Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
+## 2. Open the browser workspace
 
-**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
+Open `http://127.0.0.1:8765/ui` from the Controller host, or the configured HTTPS URL ending in `/ui`. Sign in with the LSM authentication configured for that deployment. Use authenticated HTTPS for remote access. The chat and control pages share the same origin.
 
-## Sign in and use chat
+## 3. Add a model channel
 
-1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
-2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
-3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
-4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
-5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
+Open the model selector and channel management. Add an API channel or connect a supported account. For a typical OpenAI-compatible endpoint enter a channel name, choose Chat Completions, enter the API base URL and credential, and discover models or supply a known model ID manually. Save the configuration and select a model.
 
-Chat uploads (up to 32 MiB) are stored under the Controller workspace and their absolute paths are supplied to the model. Browser uploads do not grant additional file permissions. Model-facing tool calls pass through LSM authorization, audit and the remote-worker router.
+For a local inference service, use an address reachable from the Controller, not just your browser. For example, `http://127.0.0.1:8080/v1` is appropriate if the inference service listens on that address inside the Controller's network namespace. See [Channels and models](../chat/channels.md) for protocols, account authorization, model discovery and context limits.
 
-## External MCP, security and data
+## 4. Run a first task
 
-Use the workspace MCP sidebar to manage nested external MCP servers. This supports local stdio servers and HTTP servers, including separate private environment variables and request headers. Secrets are not returned to the browser. The **External MCP** chat toggle allows search, inspection and invocation of nested tools; it does not grant the model `mcp_manage` when native LSM tools are disabled. UI management is protected by normal Controller authorization.
+Start a chat and ask a simple question to test model connectivity. Then try a read-only tool request:
 
-Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
+```text
+List the files in the Controller workspace root.
+Tell me which machine you inspected and summarize the result.
+Do not modify files or run any writes.
+```
 
-The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
+Inspect the actual tool result. If a tool is missing, check the chat's tool toggles, Agent settings and machine permissions. Use a saved Agent for recurring tasks and configure its access explicitly. See [Tools and permissions](../chat/permissions.md).
 
-## Troubleshooting
+![WebUI Chat with a demonstration conversation](../assets/chat/chat-workspace.png)
 
-- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
-- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
-- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
-- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
-- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
+The screenshots in this guide and the following pages were captured in an isolated Controller with a demonstration model. They contain no production credentials or conversations. The English UI labels may differ from the selected language.
 
-For implementation details and updates, see [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) and the [human interface guide](../guides/human-interface.md).
+## 5. Explore the workspace
+
+| Area | What to use it for |
+|---|---|
+| Chat and projects | Start and search chats, organize projects, tags and message bookmarks |
+| Agents | Reusable model, instruction and tool configurations |
+| Memory and Skills | Manage reusable knowledge and instructions |
+| Scheduled chats | Run a saved Agent with a recurring prompt |
+| Files and terminals | Inspect or operate on Controller and Worker environments |
+| Desktop | Inspect and control supported remote GUI sessions |
+| Sessions, jobs and audit | Inspect durable tasks, execution progress and tool activity |
+| Machines and external MCP | Manage Workers and nested MCP servers |
+
+The exact set of controls depends on your deployment, account and enabled capabilities. Closing the browser does not by itself cancel a server-side generation; use the stop control when you need to interrupt work.
+
+## Next steps
+
+Read the [WebUI Chat guide](../chat/index.md) for the complete workflow, and [Administration and troubleshooting](../chat/administration.md) for production setup, backup and error recovery.

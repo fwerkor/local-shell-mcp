@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Kendi kendine barındırılan yapay zeka çalışma alanı · MCP kontrol düzlemi</span>
 
@@ -53,6 +53,7 @@ Amaçlanan isolation boundary, service’in çalıştığı container veya VM’
 | Senaryo | Buradan başla | Neden |
 |---|---|---|
 | Birincil tarayıcı çalışma alanı | [Unified web workspace](getting-started/web-workspace.md) | Paylaşılan oturum açmayla sohbet, projeler ve LSM kontrol sayfaları |
+| Yerleşik AI ajanını kullanma | [WebUI Chat](chat/index.md) | Kanallar, ajanlar, izinler, bağlam ve otomasyon |
 | İlk Denetleyici dağıtımı | [Quickstart](getting-started/quickstart.md) | Önerilen ikili, OAuth ve ilk tarayıcı oturumu |
 | runtime layer seçimi | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python ve stdio’yu ayrı runtime options olarak açıklar |
 | Gemini Task'ı Bağlama | [Gemini Custom Apps](getting-started/gemini-spark.md) | Uygunluk, HTTPS MCP URL'si, OAuth ve test |

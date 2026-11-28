@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # 人机界面
 
-[unified web workspace](../getting-started/web-workspace.md) 是推荐的浏览器界面。它使用相同的 LSM 授权和工具 API，将 AI 聊天、项目和 LSM 控制器页面结合在一个修改后的 LibreChat UI 中。它是一项单独部署的可选服务。
+[unified web workspace](../getting-started/web-workspace.md) 是推荐的浏览器界面。它使用相同的 LSM 授权和工具 API，将 AI 聊天、项目和 LSM 控制器页面结合在一个修改后的 LibreChat UI 中。由 Python Controller 直接提供。
 
 轻量级控制器还在相同的 API、工作区、持久终端注册表、远程工作注册表和 MCP 审核日志之上保留了两个兼容的后备人机界面：
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 可选的 `plan_manage` Plan 会为 Session 启用 Goal mode。Plan active 且 15 分钟没有 agent activity 时，已关联的 Live Workspace 可以要求 ChatGPT 继续；续跑会 resume 同一个明确的 `session_id`，并限制为最多 10 次 continuation attempt（无论接受还是拒绝）。blocked、completed、cancelled Plan 不自动续跑；如果 active Plan 的所有 step 都已 completed/skipped，仍可触发一次用于收尾的 continuation，让 resumed agent 正式 finish Plan。人类的 pause/resume/cancel 控制修改的是 Session 持有的 Plan，而不是临时 Live Workspace state。
 
-有关可选的自托管模型主机和 MCP 应用程序客户端，请参阅 [Hosted Chat](hosted-chat.md)。
+集成模型与智能体工作区参见 [WebUI Chat](hosted-chat.md)。
 
 ## 浏览器界面
 

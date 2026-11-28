@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # 設定
 
 Repository にはコピー可能な starter file [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example) が含まれます。Docker Compose は作成した `.env` を自動的に読み取り、他の runtime でも同じ `LOCAL_SHELL_MCP_` environment variables を使用できます。YAML は binary/source deployment 向けの optional advanced input です。File を明示的に作成し、`LOCAL_SHELL_MCP_CONFIG` または `--config` で選択します。Environment variables は YAML values を override するため、意図的な override でない限り同じ setting を両方に定義しないでください。YAML keys は以下の field names を使います。
@@ -44,7 +44,7 @@ Local-only testing では `auth_bypass_localhost` が default で有効です。
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | True のとき workspace/path restrictions を無効化します。Disposable boundary 内だけで使用してください。 |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | Controller host を shell/file/browser execution target として無効化します。Remote workers と control-plane services は引き続き利用できます。 |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | Controller を ephemeral/serverless instances 向けにします。`disable_local` を含み、local file links/wallpaper caching を無効化し、`state_backend` は default で `memory` になります。Default `auth_mode=oauth` では強い `oauth_jwt_secret` を明示設定してください。 |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file`、`memory`、`redis`。Serverless controller state を cold start 後も保持する必要がある場合は Redis を使用します。 |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file`、`memory`、`redis`。Serverless controller state を cold start 後も保持する必要がある場合は Redis を使用します。 |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | `state_backend=redis` 時の Redis connection URL。Diagnostics では redacted されます。 |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Memory/Redis control-plane state の namespace。 |
 

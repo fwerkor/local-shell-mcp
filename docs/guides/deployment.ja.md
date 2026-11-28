@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ca97dc84c0c0fed91b1440fbdc7a381102e0c8699fb47419a9464b020f796fe7 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Runtime の選択とデプロイモデル
 
 `local-shell-mcp` には 2 つの相補的な決定があります。
@@ -51,7 +51,7 @@ Local MCP client
 
 | インターフェース | パブリックHTTPSが必要です | `/mcp`を使用します | OAuthが必要です | 一般的なランタイム |
 |---|---:|---:|---:|---|
-| 統合 LSM Web ワークスペース | リモートアクセスの場合ははい。ローカルプロキシも可能 | 内部的に | LSMログイン | コントローラーと個別の Web スタック |
+| 統合 LSM Web ワークスペース | リモートアクセスの場合ははい。ローカルプロキシも可能 | 内部的に | LSMログイン | Controller |
 | Gemini Task / カスタム アプリ | はい | はい | はい、公共使用可能 | 任意の HTTP コントローラー |
 | ChatGPT custom MCP connector | はい | はい | public 利用では必須 | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | いいえ | いいえ | いいえ | `local-shell-mcp --mode stdio` |

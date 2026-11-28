@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ca97dc84c0c0fed91b1440fbdc7a381102e0c8699fb47419a9464b020f796fe7 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Lựa chọn runtime và mô hình deployment
 
 `local-shell-mcp` có hai quyết định bổ sung:
@@ -51,7 +51,7 @@ Local MCP client
 
 | Giao diện | Yêu cầu HTTPS công khai | Sử dụng `/mcp` | Yêu cầu OAuth | Thời gian chạy điển hình |
 |---|---:|---:|---:|---|
-| Không gian làm việc web LSM hợp nhất | Có để truy cập từ xa; proxy cục bộ cũng có thể | Nội bộ | Đăng nhập LSM | Bộ điều khiển cộng với ngăn xếp web riêng biệt |
+| Không gian làm việc web LSM hợp nhất | Có để truy cập từ xa; proxy cục bộ cũng có thể | Nội bộ | Đăng nhập LSM | Controller |
 | Gemini Task / Ứng dụng tùy chỉnh | Có | Có | Có để sử dụng công cộng | Bất kỳ bộ điều khiển HTTP nào |
 | ChatGPT custom MCP connector | Có | Có | Có khi dùng công khai | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Không | Không | Không | `local-shell-mcp --mode stdio` |

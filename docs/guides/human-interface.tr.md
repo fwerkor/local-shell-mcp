@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # Kullanıcı arayüzü
 
-[unified web workspace](../getting-started/web-workspace.md) önerilen tarayıcı arayüzüdür. Aynı LSM yetkilendirme ve araç API'lerini kullanarak AI sohbeti, projeleri ve LSM Denetleyici sayfalarını değiştirilmiş tek bir LibreChat kullanıcı arayüzünde birleştirir. Ayrı olarak dağıtılan isteğe bağlı bir hizmettir.
+[unified web workspace](../getting-started/web-workspace.md) önerilen tarayıcı arayüzüdür. Aynı LSM yetkilendirme ve araç API'lerini kullanarak AI sohbeti, projeleri ve LSM Denetleyici sayfalarını değiştirilmiş tek bir LibreChat kullanıcı arayüzünde birleştirir. Controller doğrudan sunar.
 
 Basit Denetleyici ayrıca aynı API'nin üzerinde iki uyumlu yedek insan arayüzünü, çalışma alanını, kalıcı terminal kaydını, uzak çalışan kaydını ve MCP denetim günlüğünü korur:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 İsteğe bağlı bir `plan_manage` Planı Session için Goal modeu etkinleştirir. Plan active durumdaysa ve 15 dakika agent activity olmazsa ilişkili Live Workspace ChatGPT’den devam etmesini isteyebilir. Continuation aynı açık `session_id` değerini resume eder ve kabul veya ret durumuna bakılmaksızın 10 denemeyle sınırlıdır. blocked, completed ve cancelled Planlar otomatik devam ettirilmez; tüm steps değerleri completed veya skipped olan active bir Plan, resumed agentın Planı bitirebilmesi için kapanış continuationına uygun kalır. İnsan pause/resume/cancel kontrolleri geçici Live Workspace state yerine Sessionın sahip olduğu Planı günceller.
 
-İsteğe bağlı kendi kendine barındırılan model ana bilgisayar ve MCP Uygulama istemcisi için [Hosted Chat](hosted-chat.md) konusuna bakın.
+Bütünleşik model ve ajan çalışma alanı için [WebUI Chat](hosted-chat.md) sayfasına bakın.
 
 ## Tarayıcı arayüzü
 

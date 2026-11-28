@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 904d7693f34a70368f2bb3b15a4f3f0b354fd084ff22e4e6375bd561113acc25 -->
+<!-- i18n-source-sha256: 1995bc140c1aa92a88494f9ca947c1e767884c94f950874758a6206dbe9c0c04 -->
 # Inicio rápido
 
-Esta guía inicia un controlador LSM y abre su interfaz de navegador. El [unified web workspace](web-workspace.md) es la experiencia diaria recomendada; es una pila de chat opcional implementada por separado. ChatGPT, Gemini y otros clientes MCP externos pueden conectarse al mismo controlador. Ver [runtime choices and deployment model](../guides/deployment.md).
+Esta guía inicia un controlador LSM y abre su interfaz de navegador. El [unified web workspace](web-workspace.md) es la experiencia diaria recomendada. ChatGPT, Gemini y otros clientes MCP externos pueden conectarse al mismo controlador. Ver [runtime choices and deployment model](../guides/deployment.md).
 
 Se recomienda el **ejecutable único del Controller** de [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest), sin Python, Docker ni repositorio fuente. Este ejemplo es para **Linux x86_64**; otras plataformas: [binarios](../installation/binary.md).
 

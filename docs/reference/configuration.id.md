@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # Konfigurasi
 
 Repository menyediakan satu starter file yang dapat disalin: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose membaca `.env` hasilnya secara otomatis, dan runtime lain dapat memakai environment variables `LOCAL_SHELL_MCP_` yang sama. YAML tetap menjadi optional advanced input untuk deployment binary atau source; buat file secara eksplisit dan pilih dengan `LOCAL_SHELL_MCP_CONFIG` atau `--config`. Environment variables override YAML values, jadi hindari mendefinisikan setting yang sama di keduanya kecuali override memang disengaja. YAML keys menggunakan field names di bawah.
@@ -44,7 +44,7 @@ Untuk local-only testing, `auth_bypass_localhost` aktif secara default. Jangan e
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | Menonaktifkan workspace/path restrictions ketika true; gunakan hanya dalam disposable boundaries. |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | Menonaktifkan controller host sebagai target eksekusi shell/file/browser. Remote workers dan control-plane services tetap tersedia. |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | Membuat controller cocok untuk instance ephemeral/serverless: mengimplikasikan `disable_local`, menonaktifkan local file links/wallpaper caching, dan default `state_backend` menjadi `memory`. Dengan `auth_mode=oauth`, konfigurasi `oauth_jwt_secret` yang kuat secara eksplisit. |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file`, `memory`, atau `redis`. Gunakan Redis jika serverless controller state harus bertahan melewati cold starts. |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file`, `memory`, atau `redis`. Gunakan Redis jika serverless controller state harus bertahan melewati cold starts. |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | Redis connection URL saat `state_backend=redis`. Redacted dalam diagnostics. |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Namespace untuk memory/Redis control-plane state. |
 

@@ -1,73 +1,67 @@
-<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
-# Единое веб-рабочее пространство
+<!-- i18n-source-sha256: 01cf883cb71925e93fabc21d32315ef8c869ee2ea548e54a0347e2f6b730a327 -->
+<!-- Machine-assisted translation; English source is authoritative. -->
+# Краткое руководство по использованию WebUI Chat
 
-**унифицированное веб-рабочее пространство LSM** — это рекомендуемый способ повседневного использования local-shell-mcp. Он объединяет чат AI, историю проекта и плоскость управления LSM в одном адаптивном интерфейсе, основанном на модифицированном интерфейсе LibreChat. Вы по-прежнему можете подключать внешние клиенты MCP, такие как [ChatGPT](chatgpt-connector.md) или [Gemini](gemini-spark.md).
+Унифицированное веб-пространство LSM объединяет в себе функции чата с использованием искусственного интеллекта, проекты, агентов, а также страницы для управления операциями контроллера. Это пространство работает на основе Python-контроллера; при этом используется его механизм авторизации и база данных SQLite. Не требуется использование отдельного сервера для обработки чата. Внешние клиенты, такие как [ChatGPT](chatgpt-connector.md) и [Gemini](gemini-spark.md), по-прежнему поддерживаются.
 
-Рабочая область **самостоятельная и необязательная для установки**: это отдельная веб-служба, а не часть минимального образа контроллера, отдельного исполняемого файла или пакета удаленного рабочего процесса. При развертывании только для контроллера сохраняется исходный пользовательский интерфейс браузера и OpenTUI.
+## 1. Запуск Controller
 
-## Что находится на рабочем месте?
-
-| Площадь | Что вы можете сделать |
-|---|---|
-| Чат и проекты | Выбирайте настроенную модель, создавайте беседы, систематизируйте проекты, находите прошлые чаты и архивируйте беседы. История остаётся на сервере. |
-| Обзор контроллера | Просматривайте состояние здоровья, недавнюю активность и подключенные машины. |
-| Файлы | Просматривайте и управляйте локальными или удаленными файлами. |
-| Терминалы | Работайте с постоянными терминалами на Контроллере или Воркёрах. |
-| Рабочий стол | Проверяйте и контролируйте удаленные сеансы графического интерфейса. |
-| Сессии | Изучите долгосрочные задачи LSM и их жизненный цикл. |
-| Пульты | Подключайте и администрируйте исходящие рабочие процессы. |
-| Аудит | Проверьте активность инструмента, созданного моделью. |
-| Вложенный MCP | Регистрируйте, редактируйте, включайте, отключайте, обновляйте и удаляйте внешние серверы MCP за LSM. |
-
-Маршруты контроллера: `/control/overview`, `/control/files`, `/control/terminals`, `/control/desktop`, `/control/sessions`, `/control/remotes` и `/control/audit`. Чат откроется по адресу `/c/new`. Менеджер LSM MCP управляет **вложенным реестром MCP LSM**; он не создает второй реестр в LibreChat.
-
-## Разверните дополнительный стек чата
-
-1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
-2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
-3. To override the defaults, configure the Controller service environment:
+Следуйте инструкциям из раздела [Краткое руководство по установке](quickstart.md), чтобы выбрать подходящую среду выполнения программы. Убедитесь, что функция WebUI активирована, а также использование постоянного хранилища данных. Все настройки принимаются по умолчанию.
 
 ```env
 LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
 LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. Start the Controller from its Python package or standalone executable:
+После экспорта вашего сервисного окружения можно запустить контроллер.
 
 ```sh
 local-shell-mcp --mode mcp
 ```
 
-5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
+Для выполнения процесса с одной строкой команды используйте загруженную вами исполняемую программу. Установленный контроллер обеспечивает работу компилированного фронтенда; инструменты для сборки JavaScript необходимы только для сборки исходного кода. См. инструкции по созданию WebUI: [WebUI build instructions](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
 
-Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
+## 2. Открытие рабочего пространства в браузере
 
-**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
+Открыть `http://127.0.0.1:8765/ui` Из хоста-контроллера, или по зарегистрированному адресу HTTPS, который заканчивается на… `/ui`Войдите с использованием аутентификации LSM, настроенной для данной развертывания. Для удаленного доступа используйте протокол HTTPS с аутентификацией. Страницы чата и управления имеют одинаковое происхождение.
 
-## Войдите и используйте чат
+## 3. Добавление канала модели
 
-1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
-2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
-3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
-4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
-5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
+Откройте меню для выбора моделей и управления каналами. Добавьте новый канал через API или подключите поддерживаемый аккаунт. Для использования типичного endpoints OpenAI необходимо ввести имя канала, выбрать опцию “Chat Completions”, ввести базовую URL-адрес API и учетные данные. Также можно вручную указать ID модели или другую модель для использования. Сохраните настройки и выберите подходящую модель.
 
-Загрузки чата (до 32 МБ) хранятся в рабочей области контроллера, а их абсолютные пути передаются в модель. Загрузка через браузер не предоставляет дополнительных разрешений для файлов. Вызовы инструментов, ориентированных на модель, проходят через авторизацию LSM, аудит и маршрутизатор удаленных работников.
+Для локального сервиса инференции используйте адрес, доступный из Controller. Не следует использовать только адрес в браузере. Например, `http://127.0.0.1:8080/v1` является подходящим адресом для сервиса инференции, если он слушает на этом адресе в сетевом пространстве Controller. Подробнее о протоколах, авторизации учетных записей, обнаружении моделей и ограничениях контекста можно узнать в разделе [Каналы и модели](../chat/channels.md).
 
-## Внешний MCP, безопасность и данные
+## 4. Выполнение первой задачи
 
-Используйте боковую панель MCP рабочей области для управления вложенными внешними серверами MCP. Это поддерживает локальные серверы stdio и HTTP-серверы, включая отдельные переменные частной среды и заголовки запросов. Секреты не возвращаются в браузер. Переключатель чата **Внешний MCP** позволяет осуществлять поиск, проверку и вызов вложенных инструментов; он не предоставляет модель `mcp_manage`, когда встроенные инструменты LSM отключены. Управление пользовательским интерфейсом защищено обычной авторизацией контроллера.
+Запустите обсуждение и задайте простой вопрос, чтобы проверить связность модели. Затем попробуйте использовать инструмент для получения информации только в режиме чтения.
 
-Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
+```text
+Перечислите файлы, находящиеся в корневой папке рабочего пространства Controller.
+Скажите мне, какую саму машину вы проверили, и кратко опишите результаты своих работ.
+Не изменяйте файлы и не выполняйте никаких операций с данными в файлах.
+```
 
-The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
+Проверьте результат работы самого инструмента. Если какой-либо инструмент отсутствует, проверьте настройки связанных с этим инструментом параметров в чате, настройки агента и разрешения на использование данного инструмента. Для повторяющихся задач используйте сохраненный агент и явно задать ему необходимые права доступа. См. раздел [Инструменты и разрешения](../chat/permissions.md).
 
-## Устранение неполадок
+![Веб-интерфейс для чата с демонстрационной беседой](../assets/chat/chat-workspace.png)
 
-- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
-- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
-- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
-- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
-- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
+Скриншоты в этом руководстве, а также на следующих страницах были сняты в изолированной среде, используя демонстрационную модель. В этих скриншотах отсутствуют производственные учетные данные и информация о взаимодействии между различными элементами системы. Английские метки на интерфейсе могут отличаться от меток на выбранном языке.
 
-Подробности реализации и обновления см. в разделах [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) и [human interface guide](../guides/human-interface.md).
+## 5. Знакомство с рабочим пространством
+
+| Площадь | Для чего использовать это средство? |
+|---|---|
+| Чаты и проекты | Открытие и поиск чатов, организация проектов, использование тегов и закладок сообщений. |
+| Agents | Повторно используемые модели, инструкции и параметры инструментов. |
+| Память и навыки | Управление повторно используемым знанием и инструкциями. |
+| Упорядоченные чаты. | Запустите сохраненного агента с повторяющимся приказом. |
+| Файлы и терминалы | Необходимо проверить или обработать состояние среды Controller и Worker. |
+| Рабочий стол. | Настройка и управление удаленными сессиями графического интерфейса. |
+| Сессии, задачи и аудит | Надзор за устойчивостью работы системы, прогрессом выполнения задач, а также активностью инструментов. |
+| Машины и внешние устройства MCP | Управление рабочими и вложенными серверами типа MCP |
+
+Точный набор контрольных функций зависит от конфигурации, используемых учетных записей и доступных возможностей. Завершение работы браузера само по себе не отменяет процесса обработки данных на сервере; использовать функцию остановки необходимо в случае необходимости прерывания работы системы.
+
+## Следующие шаги…
+
+Чтобы ознакомиться с полным процессом работы, ознакомьтесь с руководством по использованию WebUI Chat (см. раздел [WebUI Chat guide](../chat/index.md)). Что касается настройки производственной среды, создания резервных копий и устранения ошибок, обратитесь к разделу [Administration and troubleshooting](../chat/administration.md).

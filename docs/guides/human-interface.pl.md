@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
+<!-- i18n-source-sha256: cf3a4edc159991c86aa5186d0a37bb8bcfaa59dda6f2f3c7da9070eb8bd8da51 -->
 # Interfejs użytkownika
 
-Zalecanym interfejsem przeglądarki jest [unified web workspace](../getting-started/web-workspace.md). Łączy czat AI, projekty i strony kontrolera LSM w jednym zmodyfikowanym interfejsie użytkownika LibreChat, korzystając z tej samej autoryzacji LSM i interfejsów API narzędzi. Jest to oddzielnie wdrażana usługa opcjonalna.
+Zalecanym interfejsem przeglądarki jest [unified web workspace](../getting-started/web-workspace.md). Łączy czat AI, projekty i strony kontrolera LSM w jednym zmodyfikowanym interfejsie użytkownika LibreChat, korzystając z tej samej autoryzacji LSM i interfejsów API narzędzi. Controller udostępnia ją bezpośrednio.
 
 Lekki kontroler zachowuje również dwa kompatybilne awaryjne interfejsy ludzkie na tym samym interfejsie API, obszarze roboczym, trwałym rejestrze terminali, rejestrze pracowników zdalnych i dzienniku audytu MCP:
 
@@ -41,7 +41,7 @@ workspace_open(session_id=...)
 
 Opcjonalny Plan `plan_manage` włącza Goal mode dla Session. Jeśli Plan jest active i przez 15 minut nie ma agent activity, powiązany Live Workspace może poprosić ChatGPT o kontynuowanie. Continuation wznawia ten sam jawny `session_id` i jest ograniczona do 10 prób, zaakceptowanych lub odrzuconych. Plans blocked, completed i cancelled nie są automatycznie kontynuowane; active Plan, którego wszystkie steps są completed lub skipped, pozostaje dostępny dla końcowej continuation, aby wznowiony agent mógł zakończyć Plan. Kontrolki pause/resume/cancel obsługiwane przez człowieka aktualizują Plan należący do Session, a nie ulotny stan Live Workspace.
 
-Zobacz [Hosted Chat](hosted-chat.md), aby zapoznać się z opcjonalnym hostem modelu na własnym serwerze i klientem aplikacji MCP.
+Zobacz [WebUI Chat](hosted-chat.md), aby poznać zintegrowaną przestrzeń modeli i agentów.
 
 ## Interfejs przeglądarkowy
 

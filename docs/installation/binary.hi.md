@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
+<!-- i18n-source-sha256: 82ce274658cd32db1ede81a091f89cfc7a8baf230fac17072f569ac062db0fd5 -->
 # Standalone binary runtime
 
 GitHub Releases से **Controller की एकल executable फ़ाइल** उपयोग करना अनुशंसित है। Python, Docker या source checkout की जरूरत नहीं।
@@ -108,7 +108,7 @@ Binary Python application package करता है, हर developer tool न
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-बाइनरी में Controller शामिल है; बाहरी टूल और ब्राउज़र वैकल्पिक हैं। चैट और हिस्ट्री के लिए अलग [वेब वर्कस्पेस](../getting-started/web-workspace.md) और डेटाबेस चाहिए।
+बाइनरी में Controller शामिल है; बाहरी टूल और ब्राउज़र वैकल्पिक हैं। चैट और हिस्ट्री एकीकृत [वेब वर्कस्पेस](../getting-started/web-workspace.md) में SQLite के साथ उपलब्ध हैं।
 
 ## Long-running service
 

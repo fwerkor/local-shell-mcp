@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
+<!-- i18n-source-sha256: c1cfa361dfdb7f4978bfa08063ae9f64997a8f4b79f719a3b2f88755c10e5681 -->
 # الإعدادات
 
 يوفر repository ملف بدء واحدًا قابلًا للنسخ: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). يقرأ Docker Compose ملف `.env` الناتج تلقائيًا، ويمكن لبقية runtimes استخدام environment variables نفسها ذات prefix `LOCAL_SHELL_MCP_`. يبقى YAML input متقدمًا اختياريًا لـ binary/source deployments؛ أنشئ ملفًا صراحة واختره عبر `LOCAL_SHELL_MCP_CONFIG` أو `--config`. تتغلب environment variables على قيم YAML، لذا تجنب تعريف setting نفسه في الاثنين إلا إذا كان override مقصودًا. تستخدم YAML keys أسماء fields المبينة أدناه.
@@ -44,7 +44,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | يعطّل قيود workspace/path عند true؛ استخدمه فقط داخل disposable boundaries. |
 | `disable_local` | `LOCAL_SHELL_MCP_DISABLE_LOCAL` | `False` | يعطّل controller host كهدف لتنفيذ shell/file/browser. تبقى remote workers وcontrol-plane services متاحة. |
 | `stateless_controller` | `LOCAL_SHELL_MCP_STATELESS_CONTROLLER` | `False` | يجعل controller مناسبًا لـ ephemeral/serverless instances: يتضمن `disable_local`، يعطّل local file links/wallpaper caching، ويستخدم `memory` افتراضيًا كـ `state_backend`. مع `auth_mode=oauth` اضبط `oauth_jwt_secret` قويًا صراحة. |
-| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'file'` | `file` أو `memory` أو `redis`. استخدم Redis عندما يجب أن ينجو serverless controller state من cold starts. |
+| `state_backend` | `LOCAL_SHELL_MCP_STATE_BACKEND` | `'sqlite'` | `sqlite`, `file` أو `memory` أو `redis`. استخدم Redis عندما يجب أن ينجو serverless controller state من cold starts. |
 | `state_backend_url` | `LOCAL_SHELL_MCP_STATE_BACKEND_URL` | `None` | Redis connection URL عندما `state_backend=redis`. يتم redaction في diagnostics. |
 | `state_backend_prefix` | `LOCAL_SHELL_MCP_STATE_BACKEND_PREFIX` | `'local-shell-mcp'` | Namespace لـ memory/Redis control-plane state. |
 

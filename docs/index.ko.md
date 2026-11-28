@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">자체 호스팅 AI 작업 공간 · MCP 제어 평면</span>
 
@@ -53,6 +53,7 @@ Optional remote workers: outbound machine connections
 | 시나리오 | 시작 페이지 | 이유 |
 |---|---|---|
 | 기본 브라우저 작업공간 | [Unified web workspace](getting-started/web-workspace.md) | 공유 로그인이 포함된 채팅, 프로젝트 및 LSM 제어 페이지 |
+| 내장 AI 에이전트 사용 | [WebUI Chat](chat/index.md) | 채널, 에이전트, 권한, 컨텍스트, 자동화 |
 | 첫 번째 컨트롤러 배포 | [Quickstart](getting-started/quickstart.md) | 권장 바이너리, OAuth 및 첫 브라우저 실행 |
 | runtime layer 선택 | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python, stdio를 별도 runtime option으로 설명 |
 | Gemini Task 연결하기 | [Gemini Custom Apps](getting-started/gemini-spark.md) | 자격, HTTPS MCP URL, OAuth 및 테스트 |

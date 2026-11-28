@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ca97dc84c0c0fed91b1440fbdc7a381102e0c8699fb47419a9464b020f796fe7 -->
+<!-- i18n-source-sha256: e25cea686e6bef077a7c05f551efc5bf0e5df04b81404ce17744c900ad6af180 -->
 # Pilihan runtime dan model deployment
 
 `local-shell-mcp` memiliki dua keputusan yang saling melengkapi:
@@ -51,7 +51,7 @@ Local MCP client
 
 | Antarmuka | Membutuhkan HTTPS publik | Menggunakan `/mcp` | Membutuhkan OAuth | Waktu proses yang khas |
 |---|---:|---:|---:|---|
-| Ruang kerja web LSM terpadu | Ya untuk akses jarak jauh; proxy lokal juga dimungkinkan | Secara internal | login LSM | Pengontrol ditambah tumpukan web terpisah |
+| Ruang kerja web LSM terpadu | Ya untuk akses jarak jauh; proxy lokal juga dimungkinkan | Secara internal | login LSM | Controller |
 | Gemini Task / Aplikasi Khusus | Ya | Ya | Ya untuk kepentingan umum | Pengontrol HTTP apa pun |
 | ChatGPT custom MCP connector | Ya | Ya | Ya untuk penggunaan publik | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Tidak | Tidak | Tidak | `local-shell-mcp --mode stdio` |

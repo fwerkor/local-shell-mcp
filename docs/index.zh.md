@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 291ac9a1ed5f09d3d692c6ed708f8c26c5306cce513c9d0ee02d57d334658454 -->
+<!-- i18n-source-sha256: d20c92a19ea76974c27a4466685f3168215587ccf6224e9222952ee7d20e27ee -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">自托管AI工作区·MCP控制平面</span>
 
@@ -53,6 +53,7 @@
 | 场景 | 阅读页面 | 原因 |
 |---|---|---|
 | 主浏览器工作区 | [Unified web workspace](getting-started/web-workspace.md) | 具有共享登录名的聊天、项目和 LSM 控制页面 |
+| 使用内置 AI 智能体 | [WebUI Chat](chat/index.md) | 渠道、智能体、权限、上下文和自动化 |
 | 第一个控制器部署 | [Quickstart](getting-started/quickstart.md) | 单文件二进制部署、OAuth 与首次浏览器使用 |
 | 选择运行时层 | [运行时选择](guides/deployment.md) | 把 Docker、VS Code、二进制、Python 和 stdio 与客户端接入分开说明 |
 | 连接 Gemini Task | [Gemini Custom Apps](getting-started/gemini-spark.md) | 资格、HTTPS MCP URL、OAuth 和测试 |
