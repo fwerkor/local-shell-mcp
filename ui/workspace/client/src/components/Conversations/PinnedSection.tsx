@@ -1,14 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useDrag, useDragLayer, useDrop } from 'react-dnd';
-import { Skeleton, useMediaQuery, useToastContext, buttonVariants } from '@librechat/client';
-import type { TConversation, TEndpointsConfig } from 'librechat-data-provider';
-import type {
-  SelectEndpointHandler,
-  SelectSpecHandler,
-} from '~/components/Nav/Favorites/useFavoritesData';
+import { useMediaQuery, useToastContext, buttonVariants } from '@librechat/client';
+import type { TConversation } from 'librechat-data-provider';
 import type { ConversationDragItem } from './dnd';
-import type { Favorite } from '~/store/favorites';
 import {
   CONVERSATION_DRAG_TYPE,
   beginPinnedDrag,
@@ -23,17 +18,11 @@ import {
   usePinConversationMutation,
   useUpdatePinnedOrderMutation,
 } from '~/data-provider';
-import useFavoritesData from '~/components/Nav/Favorites/useFavoritesData';
-import FavoriteItem from '~/components/Nav/Favorites/FavoriteItem';
 import { useLocalize, useLocalStorage } from '~/hooks';
-import { getSpecAgentAvatarURL, cn } from '~/utils';
-import { favoriteEntryKey } from '~/utils/pinnedSelection';
+import { cn } from '~/utils';
 import { NotificationSeverity } from '~/common';
 import { Collapse } from '~/components/ui';
-import { focusFirstRow } from './focus';
 import Convo from './Convo';
-
-const FAVORITE_ROW_DRAG_TYPE = 'favorite-item';
 
 /** Declared on each row's focus target: a screen-reader user tabbing straight
  *  to a row would otherwise never meet the section's written hint, leaving the
@@ -47,19 +36,8 @@ const noop = () => {};
 
 const convoEntryKey = (conversationId: string): string => `convo:${conversationId}`;
 
-type PinnedEntry =
-  | { key: string; kind: 'favorite'; favorite: Favorite }
-  | { key: string; kind: 'convo'; conversationId: string };
-
+type PinnedEntry = { key: string; conversationId: string };
 type PinnedRowDragItem = ConversationDragItem & { key: string };
-
-/** Mirrors a favorite row (h-9, icon, title) so the loading swap keeps height. */
-const FavoriteRowSkeleton = () => (
-  <div className="flex w-full items-center rounded-lg p-2" aria-hidden="true">
-    <Skeleton className="mr-2 h-5 w-5 rounded-full" />
-    <Skeleton className="h-4 w-24" />
-  </div>
-);
 
 interface DraggablePinnedRowProps {
   entry: PinnedEntry;
@@ -91,11 +69,7 @@ const DraggablePinnedRow = ({
   const ref = useRef<HTMLDivElement>(null);
   const hasHoverPointer = useMediaQuery('(hover: hover)');
   const [{ handlerId }, drop] = useDrop<PinnedRowDragItem, unknown, { handlerId: unknown }>({
-    /* A row only takes a drag of its own kind, so a pinned chat never shifts a
-     * pinned agent or model out of the way — not even as a preview. The two
-     * groups are ordered independently, and the drag layer shows no
-     * displacement for a target that cannot receive it. */
-    accept: entry.kind === 'convo' ? CONVERSATION_DRAG_TYPE : FAVORITE_ROW_DRAG_TYPE,
+    accept: CONVERSATION_DRAG_TYPE,
     /* A release on a row ends a reorder; it files nothing. The row has to stay
      * droppable to get there — the HTML5 backend reports hover only for targets
      * that could receive the drag, and the hover is what reorders — so it names
@@ -135,17 +109,15 @@ const DraggablePinnedRow = ({
   });
 
   const [{ isDragging }, drag] = useDrag<PinnedRowDragItem, unknown, { isDragging: boolean }>({
-    type: entry.kind === 'convo' ? CONVERSATION_DRAG_TYPE : FAVORITE_ROW_DRAG_TYPE,
+    type: CONVERSATION_DRAG_TYPE,
     item: (): PinnedRowDragItem => {
       beginPinnedDrag();
-      return entry.kind === 'convo'
-        ? {
-            key: entry.key,
-            conversationId: entry.conversationId,
-            chatProjectId: conversation?.chatProjectId ?? null,
-            pinned: conversation?.pinned === true,
-          }
-        : { key: entry.key, conversationId: '', chatProjectId: null, pinned: false };
+      return {
+        key: entry.key,
+        conversationId: entry.conversationId,
+        chatProjectId: conversation?.chatProjectId ?? null,
+        pinned: conversation?.pinned === true,
+      };
     },
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
     /* A drop the list itself answered is a reorder and keeps the arrangement.
@@ -194,86 +166,9 @@ const DraggablePinnedRow = ({
   );
 };
 
-interface FavoriteRowProps {
-  favorite: Favorite;
-  agentsMap: ReturnType<typeof useFavoritesData>['agentsMap'];
-  specsMap: ReturnType<typeof useFavoritesData>['specsMap'];
-  endpointsConfig: TEndpointsConfig;
-  isAgentsLoading: boolean;
-  onSelectEndpoint: SelectEndpointHandler;
-  onSelectSpec: SelectSpecHandler;
-  onRemoveFocus: () => void;
-  keyShortcuts?: string;
-}
-
-/** One pinned favorite; skeleton while its agent is
- *  still resolving, nothing if the agent or spec is gone (cleanup handles the
- *  latter asynchronously). */
-const FavoriteRow = ({
-  favorite,
-  agentsMap,
-  specsMap,
-  endpointsConfig,
-  isAgentsLoading,
-  onSelectEndpoint,
-  onSelectSpec,
-  onRemoveFocus,
-  keyShortcuts,
-}: FavoriteRowProps) => {
-  if (favorite.agentId) {
-    const agent = agentsMap[favorite.agentId];
-    if (!agent) {
-      if (isAgentsLoading) {
-        return <FavoriteRowSkeleton />;
-      }
-      return null;
-    }
-    return (
-      <FavoriteItem
-        item={agent}
-        type="agent"
-        onSelectEndpoint={onSelectEndpoint}
-        onRemoveFocus={onRemoveFocus}
-        keyShortcuts={keyShortcuts}
-      />
-    );
-  }
-  if (favorite.spec) {
-    const spec = specsMap[favorite.spec];
-    if (!spec) {
-      return null;
-    }
-    return (
-      <FavoriteItem
-        item={spec}
-        type="spec"
-        onSelectSpec={onSelectSpec}
-        endpointsConfig={endpointsConfig}
-        agentAvatarURL={getSpecAgentAvatarURL(spec, agentsMap)}
-        onRemoveFocus={onRemoveFocus}
-        keyShortcuts={keyShortcuts}
-      />
-    );
-  }
-  if (favorite.model && favorite.endpoint) {
-    return (
-      <FavoriteItem
-        item={{ model: favorite.model, endpoint: favorite.endpoint }}
-        type="model"
-        onSelectEndpoint={onSelectEndpoint}
-        endpointsConfig={endpointsConfig}
-        onRemoveFocus={onRemoveFocus}
-        keyShortcuts={keyShortcuts}
-      />
-    );
-  }
-  return null;
-};
-
 interface PinnedSectionProps {
   conversations: TConversation[];
   toggleNav: () => void;
-  isSmallScreen?: boolean;
   /** True when the conversation membership is complete: no bookmark filter,
    *  and the pinned query has finished draining. Only then can keys the
    *  section cannot resolve be treated as gone rather than merely unseen. */
@@ -284,29 +179,20 @@ interface PinnedSectionProps {
   membershipUpdatedAt?: number;
 }
 
-/** Pinned favorites and conversations have separate sidebar sections and
- *  independent collapse states. Their ordering still shares the persisted
- *  pinned-order key format for backward compatibility, while drag and keyboard
- *  reorder remain scoped to the row kind. */
+/** The sidebar owns only pinned conversations. Model pins live in the selector. */
 const PinnedSection = ({
   conversations,
   toggleNav,
-  isSmallScreen,
   membershipComplete = false,
   membershipUpdatedAt = 0,
 }: PinnedSectionProps) => {
   const localize = useLocalize();
-  const [areFavoritesExpanded, setFavoritesExpanded] = useLocalStorage(
-    'pinnedFavoritesSectionExpanded',
-    true,
-  );
   // Preserve the previous collapse preference for the pinned conversations section.
   const [areConversationsExpanded, setConversationsExpanded] = useLocalStorage(
     'pinnedSectionExpanded',
     true,
   );
   const { data: activeJobsData } = useActiveJobs();
-  const favoritesData = useFavoritesData();
   /* Gated on success, not on the fetch having been attempted: a failed GET
    * still reports as fetched while leaving the order undefined, and merging
    * against that `?? []` then cancelling the retry would post only the visible
@@ -324,7 +210,6 @@ const PinnedSection = ({
   const updatePinnedOrder = useUpdatePinnedOrderMutation();
   const pinMutation = usePinConversationMutation();
   const { showToast } = useToastContext();
-  const favoriteSectionRef = useRef<HTMLDivElement | null>(null);
   const activeJobIds = useMemo(
     () => new Set(activeJobsData?.activeJobIds ?? []),
     [activeJobsData?.activeJobIds],
@@ -375,22 +260,10 @@ const PinnedSection = ({
     (monitor) => monitor.isDragging() && monitor.getItemType() === CONVERSATION_DRAG_TYPE,
   );
 
-  /** Natural order: favorites in their stored order, then pinned chats. Keys
-   *  identify a row everywhere here, so a repeat has to be dropped rather than
-   *  rendered: the `/favorites` payload validator accepts a duplicate entry,
-   *  and one would give two rows the same React key, point every drag at the
-   *  first copy, and make the order endpoint reject the write outright. */
+  /** Deduplicate conversation membership before ordering. */
   const naturalEntries = useMemo<PinnedEntry[]>(() => {
     const entries: PinnedEntry[] = [];
     const seen = new Set<string>();
-    for (const favorite of favoritesData.favorites) {
-      const key = favoriteEntryKey(favorite);
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      entries.push({ key, kind: 'favorite', favorite });
-    }
     for (const convo of conversations) {
       const conversationId = convo.conversationId;
       if (!conversationId) {
@@ -401,17 +274,12 @@ const PinnedSection = ({
         continue;
       }
       seen.add(key);
-      entries.push({ key, kind: 'convo', conversationId });
+      entries.push({ key, conversationId });
     }
     return entries;
-  }, [favoritesData.favorites, conversations]);
+  }, [conversations]);
 
-  /** Stored keys order the entries they still resolve to; the rest append in
-   *  natural order, so a stale order never hides an item. Kinds stay grouped —
-   *  pinned agents and models first, then pinned chats — because neither kind
-   *  can be dragged through the other: an order saved before that rule, with
-   *  the two interleaved, would otherwise leave a row walled in by neighbours
-   *  it is not allowed to swap with. */
+  /** Stored keys order the conversations; new pins append in membership order. */
   const orderedEntries = useMemo<PinnedEntry[]>(() => {
     if (!storedOrder || storedOrder.length === 0) {
       return naturalEntries;
@@ -421,7 +289,7 @@ const PinnedSection = ({
     const placed = new Set<string>();
     for (const key of storedOrder) {
       const entry = byKey.get(key);
-      if (entry) {
+      if (entry && !placed.has(key)) {
         ordered.push(entry);
         placed.add(key);
       }
@@ -431,10 +299,7 @@ const PinnedSection = ({
         ordered.push(entry);
       }
     }
-    return [
-      ...ordered.filter((entry) => entry.kind === 'favorite'),
-      ...ordered.filter((entry) => entry.kind === 'convo'),
-    ];
+    return ordered;
   }, [storedOrder, naturalEntries]);
 
   /* The live list the drag mutates; keyed ordering only, so a refetch under a
@@ -491,14 +356,11 @@ const PinnedSection = ({
    * still holds, and releasing would save something no longer on screen. */
   const arrangementRef = useRef(0);
 
-  /** A move only ever swaps two rows of the same kind. Chats and favorites are
-   *  two independently ordered groups, so the position announced for the
-   *  keyboard path counts within the moved row's own group. */
   const moveEntry = useCallback((dragKey: string, hoverKey: string) => {
     const list = [...dragEntriesRef.current];
     const from = list.findIndex((entry) => entry.key === dragKey);
     const to = list.findIndex((entry) => entry.key === hoverKey);
-    if (from < 0 || to < 0 || from === to || list[from].kind !== list[to].kind) {
+    if (from < 0 || to < 0 || from === to) {
       return;
     }
     const [moved] = list.splice(from, 1);
@@ -521,20 +383,18 @@ const PinnedSection = ({
       const list = [...dragEntriesRef.current];
       const from = list.findIndex((entry) => entry.key === key);
       const to = from + delta;
-      if (from < 0 || to < 0 || to >= list.length || list[from].kind !== list[to].kind) {
+      if (from < 0 || to < 0 || to >= list.length) {
         return;
       }
-      const kind = list[from].kind;
       const [moved] = list.splice(from, 1);
       list.splice(to, 0, moved);
       dragEntriesRef.current = list;
       hasReorderedRef.current = true;
       arrangementRef.current += 1;
       setLiveEntries(list);
-      const group = list.filter((entry) => entry.kind === kind);
-      const position = group.findIndex((entry) => entry.key === key) + 1;
+      const position = to + 1;
       setAnnouncement(
-        localize('com_ui_moved_to_position', { 0: `${position}`, 1: `${group.length}` }),
+        localize('com_ui_moved_to_position', { 0: `${position}`, 1: `${list.length}` }),
       );
       commitOrderRef.current();
     },
@@ -570,25 +430,17 @@ const PinnedSection = ({
        * draining. Once the visible list is known to be the whole list, those
        * keys really are gone and replacing prunes them: merging forever would
        * grow the array until the endpoint's size guard rejected every write. */
-      /* Every membership source has to have actually delivered, not merely
-       * stopped loading: a favorites fetch that exhausted its retries leaves
-       * the list empty, and pruning against that would drop every favorite key
-       * from the stored order. */
-      /* Current enough, too, and not merely settled: the pinned query holds its
-       * data for five minutes while the order has no such window, so focusing a
-       * tab reconciles the order on its own. Pruning that newer order against
-       * the older membership beside it would drop the position of a favorite
-       * or conversation another tab pinned in between. Until both membership
-       * sources catch up, merging keeps those keys. */
-      const membershipCurrent = membershipComplete && membershipUpdatedAt >= orderUpdatedAt;
-      /* Reconciled membership can arrive while the live arrangement is frozen.
-       * Its keys are not necessarily represented by that older snapshot. */
       const canPrune =
-        membershipCurrent &&
-        favoritesData.isLoaded &&
-        favoritesData.dataUpdatedAt >= orderUpdatedAt &&
+        membershipComplete &&
+        membershipUpdatedAt >= orderUpdatedAt &&
         dragMembershipRef.current === naturalEntries;
-      const nextOrder = canPrune ? visibleKeys : mergeVisibleOrder(storedOrder ?? [], visibleKeys);
+      // Preserve every model/agent key: this view only owns conversation membership.
+      const retained = canPrune
+        ? (storedOrder ?? []).filter(
+            (key) => !key.startsWith('convo:') || visibleKeys.includes(key),
+          )
+        : (storedOrder ?? []);
+      const nextOrder = mergeVisibleOrder(retained, visibleKeys);
 
       updatePinnedOrder.mutate(nextOrder, {
         /* `pinnedOrder` is the only ordering the section reads: no consumer of
@@ -620,8 +472,6 @@ const PinnedSection = ({
       membershipUpdatedAt,
       orderUpdatedAt,
       naturalEntries,
-      favoritesData.isLoaded,
-      favoritesData.dataUpdatedAt,
       showToast,
       localize,
     ],
@@ -642,31 +492,6 @@ const PinnedSection = ({
     }
   }, [orderLoaded]);
 
-  /* On favorite removal, keep focus within the favorites section. */
-  const handleRemoveFocus = useCallback(() => {
-    focusFirstRow(favoriteSectionRef.current);
-  }, []);
-
-  const handleSelectEndpoint = useCallback<SelectEndpointHandler>(
-    (...args) => {
-      favoritesData.onSelectEndpoint?.(...args);
-      if (isSmallScreen) {
-        toggleNav();
-      }
-    },
-    [favoritesData, isSmallScreen, toggleNav],
-  );
-
-  const handleSelectSpec = useCallback<SelectSpecHandler>(
-    (...args) => {
-      favoritesData.onSelectSpec?.(...args);
-      if (isSmallScreen) {
-        toggleNav();
-      }
-    },
-    [favoritesData, isSmallScreen, toggleNav],
-  );
-
   const conversationByKey = useMemo(
     () => new Map(conversations.map((convo) => [convo.conversationId ?? '', convo])),
     [conversations],
@@ -680,87 +505,15 @@ const PinnedSection = ({
     [pinDropRef],
   );
 
-  /* Render each group only with rows, while loading, or as a live drop target. */
-  if (naturalEntries.length === 0 && !favoritesData.isLoading && !draggingConversation) {
+  /* Render only when there are pinned chats or a live drop target. */
+  if (naturalEntries.length === 0 && !draggingConversation) {
     return null;
   }
 
-  const favoriteEntries = displayEntries.filter((entry) => entry.kind === 'favorite');
-  const conversationEntries = displayEntries.filter((entry) => entry.kind === 'convo');
+  const conversationEntries = displayEntries;
 
   return (
     <>
-      {(favoriteEntries.length > 0 || favoritesData.isLoading) && (
-        <div
-          ref={favoriteSectionRef}
-          className="flex flex-col px-3 text-sm"
-          role="region"
-          data-pinned-section="favorites"
-          aria-label={localize('com_ui_pinned_favorites')}
-        >
-          <div className="flex h-8 w-full items-center pr-2">
-            <button
-              onClick={() => setFavoritesExpanded(!areFavoritesExpanded)}
-              className={cn(buttonVariants({ variant: 'section-header' }), 'group min-w-0 flex-1')}
-              type="button"
-              aria-expanded={areFavoritesExpanded}
-            >
-              <span className="select-none truncate">{localize('com_ui_pinned_favorites')}</span>
-              <ChevronDown
-                className={cn(
-                  'h-3 w-3 shrink-0 transition-transform duration-200',
-                  areFavoritesExpanded ? '' : '-rotate-90',
-                )}
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-          <Collapse open={areFavoritesExpanded}>
-            <div className="pt-0.5">
-              <p className="sr-only">{localize('com_ui_pinned_reorder_hint')}</p>
-              <p className="sr-only" role="status" aria-live="polite">
-                {announcement}
-              </p>
-              <ul className="m-0 list-none p-0">
-                {favoritesData.isLoading && favoritesData.favorites.length === 0 && (
-                  <li className="list-none">
-                    <FavoriteRowSkeleton />
-                  </li>
-                )}
-                {favoriteEntries.map((entry) => {
-                  if (entry.kind !== 'favorite') {
-                    return null;
-                  }
-                  return (
-                    <li key={entry.key} className="list-none">
-                      <DraggablePinnedRow
-                        entry={entry}
-                        indexOfKey={indexOfKey}
-                        moveEntry={moveEntry}
-                        moveEntryBy={moveEntryBy}
-                        onDrop={commitOrder}
-                        canDrag={orderLoaded}
-                      >
-                        <FavoriteRow
-                          favorite={entry.favorite}
-                          agentsMap={favoritesData.agentsMap}
-                          specsMap={favoritesData.specsMap}
-                          endpointsConfig={favoritesData.endpointsConfig}
-                          isAgentsLoading={favoritesData.isAgentsLoading}
-                          onSelectEndpoint={handleSelectEndpoint}
-                          onSelectSpec={handleSelectSpec}
-                          onRemoveFocus={handleRemoveFocus}
-                          keyShortcuts={orderLoaded ? REORDER_SHORTCUTS : undefined}
-                        />
-                      </DraggablePinnedRow>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </Collapse>
-        </div>
-      )}
       {(conversationEntries.length > 0 || draggingConversation) && (
         <div
           ref={setConversationSectionRef}
@@ -814,9 +567,6 @@ const PinnedSection = ({
               </p>
               <ul className="m-0 list-none p-0">
                 {conversationEntries.map((entry) => {
-                  if (entry.kind !== 'convo') {
-                    return null;
-                  }
                   const convo = conversationByKey.get(entry.conversationId);
                   if (!convo) {
                     return null;

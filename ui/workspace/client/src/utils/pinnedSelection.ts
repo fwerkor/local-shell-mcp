@@ -9,21 +9,7 @@ import type {
 import type { Favorite } from '~/store/favorites';
 import { getModelSpecPreset } from './endpoints';
 
-/** A key identifies a row everywhere in this section, so the encoding has to be
- *  injective. The favorites API accepts any string for an endpoint or a model,
- *  so a plain `endpoint::model` join collides: `a::b` + `c` and `a` + `b::c`
- *  both read back as `a::b::c`, and the dedupe below would then hide one of two
- *  distinct favorites. Length-prefixing the endpoint makes the split exact. */
-export const favoriteEntryKey = (favorite: Favorite): string => {
-  if (favorite.agentId) {
-    return `agent:${favorite.agentId}`;
-  }
-  if (favorite.spec) {
-    return `spec:${favorite.spec}`;
-  }
-  const endpoint = favorite.endpoint ?? '';
-  return `model:${endpoint.length}:${endpoint}:${favorite.model ?? ''}`;
-};
+import { orderPinnedFavorites } from './pinnedFavoritesOrder';
 
 type PinnedSelectionOptions = {
   favorites?: Favorite[];
@@ -34,7 +20,7 @@ type PinnedSelectionOptions = {
   startup?: TStartupConfig;
 };
 
-/** Use the same persisted order as the sidebar; new favorites not yet in that
+/** Use the same persisted order as the model selector; new favorites not yet in that
  * order append in membership order. Conversation pins are never model picks. */
 export function getPinnedSelection({
   favorites = [],
@@ -44,13 +30,7 @@ export function getPinnedSelection({
   agents,
   startup,
 }: PinnedSelectionOptions): TPreset | undefined {
-  const byKey = new Map(favorites.map((favorite) => [favoriteEntryKey(favorite), favorite]));
-  const keys = new Set([...order, ...byKey.keys()]);
-  for (const key of keys) {
-    const favorite = byKey.get(key);
-    if (!favorite) {
-      continue;
-    }
+  for (const favorite of orderPinnedFavorites(favorites, order)) {
     if (favorite.agentId) {
       if (endpoints?.[EModelEndpoint.agents] && (agents == null || agents[favorite.agentId])) {
         return { endpoint: EModelEndpoint.agents, agent_id: favorite.agentId };

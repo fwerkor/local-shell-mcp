@@ -18,6 +18,7 @@ import { ModelSelectorChatProvider } from './ModelSelectorChatContext';
 import { getSelectedIcon, getDisplayValue } from './utils';
 import { CustomMenu as Menu } from './CustomMenu';
 import DialogManager from './DialogManager';
+import PinnedModels from './components/PinnedModels';
 import { useConversationSampling } from './ConversationSamplingDialog';
 import { useLocalize } from '~/hooks';
 
@@ -137,6 +138,7 @@ function ModelSelectorContent() {
           renderSearchResults(searchResults, localize, searchValue)
         ) : (
           <>
+            <PinnedModels />
             {/* Render ungrouped modelSpecs (no group field) */}
             {renderModelSpecs(
               modelSpecs?.filter((spec) => !spec.group) || [],

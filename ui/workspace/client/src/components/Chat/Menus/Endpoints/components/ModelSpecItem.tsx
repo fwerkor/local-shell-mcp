@@ -17,9 +17,16 @@ interface ModelSpecItemProps {
   /** Set when the sibling model list is virtualized; see `VirtualizedModelList`. */
   posInSet?: number;
   setSize?: number;
+  reorderEnabled?: boolean;
 }
 
-export function ModelSpecItem({ spec, isSelected, posInSet, setSize }: ModelSpecItemProps) {
+export function ModelSpecItem({
+  spec,
+  isSelected,
+  posInSet,
+  setSize,
+  reorderEnabled,
+}: ModelSpecItemProps) {
   const localize = useLocalize();
   const { handleSelectSpec, endpointsConfig, agentsMap } = useModelSelectorContext();
   const { isFavoriteSpec, toggleFavoriteSpec } = useFavorites();
@@ -40,6 +47,7 @@ export function ModelSpecItem({ spec, isSelected, posInSet, setSize }: ModelSpec
       ref={itemRef}
       onClick={() => handleSelectSpec(spec)}
       aria-selected={isSelected || undefined}
+      aria-keyshortcuts={reorderEnabled ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
       aria-posinset={posInSet}
       aria-setsize={setSize}
       className="group flex w-full cursor-pointer items-center justify-between rounded-lg px-2 text-sm"

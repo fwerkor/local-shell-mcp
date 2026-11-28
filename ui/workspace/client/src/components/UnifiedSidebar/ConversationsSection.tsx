@@ -200,7 +200,6 @@ const ConversationsSection = memo(() => {
               <PinnedSection
                 conversations={pinnedConversations}
                 toggleNav={toggleNav}
-                isSmallScreen={isSmallScreen}
                 /* Only a successful drain proves the list is whole: a failed later
                  page still publishes partial data and stops fetching. The Chats filters
                  never reach this query, so nothing else can truncate it. */
