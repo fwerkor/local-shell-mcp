@@ -439,3 +439,27 @@ async def test_oauth_member_reauthorization_fails_over(pool, monkeypatch, alread
     assert routing._health[("Codex", "test")].cooldown > 0
     assert all(h.active == 0 for h in routing._health.values())
     assert routing.cooldown_for(ValueError("Unrelated configuration failure")) is None
+
+
+@pytest.mark.asyncio
+async def test_virtual_sampling_overrides_validate_selected_alias_before_dispatch(pool, monkeypatch):
+    from local_shell_mcp.webui.sampling import validate_channel_sampling
+
+    routes = _anthropic_member(pool)
+    routes["other"] = [{"channel": "Backup", "model": "flash"}]
+    _repo().save_setting("__lsm_controller__", "model.channel.Pool",
+                         _validate({"name": "Pool", "provider": "virtual", "routes": routes}))
+    assert validate_channel_sampling({"temperature": 1.5}, "Pool", "other") == {"temperature": 1.5}
+    assert validate_channel_sampling({"temperature": 1}, "Pool", "alias") == {"temperature": 1}
+    with pytest.raises(ValueError, match="temperature"):
+        validate_channel_sampling({"temperature": 1.5}, "Pool", "alias")
+    with pytest.raises(ValueError, match="temperature"):
+        validate_channel_sampling({"temperature": 1.5}, "Pool")
+
+    def unexpected_client(**kwargs):
+        pytest.fail("invalid override reached provider transport")
+
+    monkeypatch.setattr(httpx, "AsyncClient", unexpected_client)
+    with pytest.raises(ValueError, match="temperature"):
+        _ = [item async for item in stream_model(provider_config("Pool", "alias"), [],
+                                                  temperature=1.5)]
