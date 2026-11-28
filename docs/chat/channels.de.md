@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kanäle und Modelle
 
@@ -46,6 +46,8 @@ Ermöglichen Sie die automatische Erforschung, um Informationen über das Modell
 Die Erkennung berücksichtigt explizite Metadaten zum Kontextfenster, darunter das verschachtelte `limit.context` von OpenCode Go/Zen, `context_length` von OpenRouter, `max_model_len` von vLLM und `inputTokenLimit` von Gemini. Wird nur die maximale Eingabelänge angegeben, dient sie als Ersatzwert; Ausgabelimits und Modellnamen bestimmen die Kontextkapazität nicht. Ohne beide Angaben bleibt das Kontextfenster unbekannt.
 
 Bestimmen Sie den Kontext für jedes Modell, sobald dieser bekannt ist. Eine explizit festgelegte Wertung übertrifft die ermittelten Metadaten oder ergänzt fehlende Werte. Der Editor kann 1 bis 2.000.000 Token verarbeiten. Dies ist jedoch nur eine Konfigurationsgrenze – es gibt keine Garantie dafür, dass der Anbieter diese Kapazität unterstützt. Verwenden Sie die für Ihre Implementierung geeignete Grenze, wobei Sie berücksichtigen sollten, dass sowohl die Serverseitige Konfiguration als auch die eigenen Grenzen des Modells eine Rolle spielen.
+
+Bei erkannten offiziellen Anbieter-Endpunkten lassen sich fehlende Kontextwerte anhand exakter Anbieter- und Modell-IDs aus dem öffentlichen Katalog models.dev ergänzen. Anbieter-Metadaten haben Vorrang vor diesem Ersatzwert, manuelle Vorgaben vor beiden. Der Controller verwendet einen gemeinsamen sechs Stunden gültigen Katalog-Cache im Arbeitsspeicher; bei einem Abruffehler bleibt der letzte gültige Stand erhalten, und nach zehn Minuten wird erneut versucht. Kanal-Zugangsdaten, URLs und Modell-IDs werden nicht an models.dev gesendet. Unbekannte Endpunkte und nicht passende IDs bleiben ohne Limit, wenn der Anbieter keines meldet.
 
 ## Auswahl, Rechentätigkeit und Nutzung
 

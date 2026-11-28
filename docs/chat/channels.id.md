@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kanal-kanal dan model-modelnya
 
@@ -46,6 +46,8 @@ Aktifkan mekanisme penemuan otomatis untuk meminta informasi model dari penyedia
 Penemuan mengenali metadata jendela konteks eksplisit, termasuk `limit.context` bertingkat dari OpenCode Go/Zen, `context_length` dari OpenRouter, `max_model_len` dari vLLM, dan `inputTokenLimit` dari Gemini. Jika hanya panjang input maksimum yang dilaporkan, nilai tersebut digunakan sebagai cadangan; batas output dan nama model tidak menentukan kapasitas konteks. Jika keduanya tidak dilaporkan, jendela konteks tetap tidak diketahui.
 
 Tentukan nilai konteks untuk setiap model ketika model tersebut diketahui. Nilai yang ditentukan secara eksplisit akan menggantikan metadata yang ditemukan atau mengisi nilai yang hilang. Editor dapat menerima 1 hingga 2.000.000 token. Ini merupakan rentang konfigurasi, bukan jaminan bahwa penyedia layanan mendukung kapasitas tersebut. Gunakan batasan yang sesuai untuk deployment Anda, dengan memperhatikan konfigurasi server dan batasan model itu sendiri.
+
+Untuk endpoint resmi penyedia yang dikenali, nilai konteks yang hilang dapat dilengkapi dari katalog publik models.dev dengan ID penyedia dan model yang persis cocok. Metadata penyedia lebih diutamakan daripada cadangan ini, dan pengaturan manual lebih diutamakan daripada keduanya. Controller menggunakan cache katalog bersama dalam memori selama enam jam; kegagalan pengambilan mempertahankan cache terakhir yang valid dan mencoba lagi setelah sepuluh menit. Kredensial kanal, URL, dan ID model tidak dikirim ke models.dev. Endpoint yang tidak dikenal dan ID yang tidak cocok tetap tidak memiliki batas yang diketahui jika penyedia tidak melaporkannya.
 
 ## Pengambilan sampel, proses penalaran, dan penggunaan
 

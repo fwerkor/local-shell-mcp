@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kanallar ve modeller
 
@@ -46,6 +46,8 @@ Model bilgilerini talep etmek için otomatik keşif özelliğini etkinleştirin.
 Keşif, OpenCode Go/Zen'in iç içe `limit.context` alanı, OpenRouter'ın `context_length` alanı, vLLM'in `max_model_len` alanı ve Gemini'nin `inputTokenLimit` alanı gibi açık bağlam penceresi meta verilerini tanır. Yalnızca azami giriş uzunluğu bildiriliyorsa yedek değer olarak kullanılır; çıkış sınırları ve model adları bağlam kapasitesini belirlemez. İki bilgi de bildirilmezse bağlam penceresi bilinmez.
 
 Her model için bağlam bilgilerini belirtin. Açıkça belirtilen değerler, keşfedilen meta verileri geçersiz kılar veya eksik olan değerleri doldurur. Editör, 1 ile 2.000.000 arası jeton kabul eder; bu bir yapılandırma aralığıdır ve sağlayıcının bu kapasiteyi desteklediğinin bir garantisi değildir. Kullandığınız sınırları belirleyin; bunu sunucu tarafı yapılandırmalarını ve modelin kendi sınırlarını göz önünde bulundurarak yapın.
+
+Tanınan resmi sağlayıcı uç noktalarında eksik bağlam değerleri, tam sağlayıcı ve model kimlikleri kullanılarak genel models.dev kataloğundan tamamlanabilir. Sağlayıcı meta verileri bu yedek kaynaktan, elle ayarlanan değerler ise her ikisinden önceliklidir. Denetleyici altı saatlik ortak bellek içi katalog önbelleği kullanır; getirme başarısız olursa son geçerli önbelleği korur ve on dakika sonra yeniden dener. Kanal kimlik bilgileri, URL'ler veya model kimlikleri models.dev'e gönderilmez. Bilinmeyen uç noktalar ve eşleşmeyen kimlikler, sağlayıcı bir sınır bildirmediğinde bilinmeyen olarak kalır.
 
 ## Örnek alma, mantık yürütme ve kullanım
 

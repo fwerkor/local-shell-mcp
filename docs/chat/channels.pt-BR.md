@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Canais e modelos
 
@@ -46,6 +46,8 @@ Ative a descoberta automática para solicitar informações sobre o modelo do pr
 A descoberta reconhece metadados explícitos da janela de contexto, incluindo `limit.context` aninhado do OpenCode Go/Zen, `context_length` do OpenRouter, `max_model_len` do vLLM e `inputTokenLimit` do Gemini. Quando apenas o comprimento máximo de entrada é informado, ele é usado como alternativa; limites de saída e nomes de modelos não determinam a capacidade de contexto. Sem esses dois dados, a janela permanece desconhecida.
 
 Especifique a janela de contexto para cada modelo, quando ela for conhecida. Um valor explícito por modelo substitui os metadados descobertos ou preenche valores faltantes. O editor aceita de 1 a 2.000.000 de tokens; isso é um intervalo de configuração, e não uma garantia de que o provedor suportará essa capacidade. Use o limite efetivo para sua implementação, levando em consideração as configurações do lado do servidor e os limites próprios do modelo.
+
+Para endpoints oficiais reconhecidos, valores de contexto ausentes podem ser preenchidos pelo catálogo público models.dev usando IDs exatos do provedor e do modelo. Os metadados do provedor têm prioridade sobre essa alternativa, e os ajustes manuais sobre ambos. O controlador compartilha um cache do catálogo em memória por seis horas; uma falha na obtenção preserva o último cache válido e tenta novamente após dez minutos. Credenciais de canais, URLs e IDs de modelos não são enviados ao models.dev. Endpoints desconhecidos e IDs sem correspondência continuam sem limite conhecido se o provedor não o informar.
 
 ## Amostragem, raciocínio e uso
 

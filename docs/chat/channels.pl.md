@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kanały i modele
 
@@ -46,6 +46,8 @@ Włącz automatyczne odkrywanie, aby uzyskać informacje o modelach od dostawcy.
 Wykrywanie rozpoznaje jawne metadane okna kontekstu, w tym zagnieżdżone `limit.context` OpenCode Go/Zen, `context_length` OpenRouter, `max_model_len` vLLM i `inputTokenLimit` Gemini. Jeśli podano jedynie maksymalną długość wejścia, jest ona wartością zastępczą; limity wyjścia i nazwy modeli nie określają pojemności kontekstu. Bez obu informacji okno kontekstu pozostaje nieznane.
 
 Należy określić okno kontekstowe dla każdego modelu, gdy jest to konieczne. Wartość wyraźnie określona dla każdego modelu zastępuje metadane znalezione wcześniej lub uzupełnia brakującą wartość. Edytor akceptuje te dane. 1 do 2,000,000 To jest tylko zakres konfiguracji, a nie gwarancja, że dany dostawca będzie w stanie obsłużyć taką liczbę użytkowników. Należy uwzględnić efektywny limit dostępny dla danej konfiguracji, a także ograniczenia związane z samym modelem.
+
+Dla rozpoznanych oficjalnych punktów końcowych brakujące wartości kontekstu można uzupełnić z publicznego katalogu models.dev na podstawie dokładnych identyfikatorów dostawcy i modelu. Metadane dostawcy mają pierwszeństwo przed tym źródłem zastępczym, a ustawienia ręczne przed oboma. Kontroler korzysta ze wspólnej pamięci podręcznej katalogu w pamięci operacyjnej przez sześć godzin; po błędzie pobierania zachowuje ostatnią poprawną wersję i ponawia próbę po dziesięciu minutach. Dane uwierzytelniające kanałów, adresy URL ani identyfikatory modeli nie są wysyłane do models.dev. Nieznane punkty końcowe i niedopasowane identyfikatory pozostają bez znanego limitu, jeśli dostawca go nie podaje.
 
 ## Próbkowanie, rozumowanie i wykorzystanie danych
 

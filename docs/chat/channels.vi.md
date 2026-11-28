@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a40a962d4db93cc0aac03601ffd13b21ab3a504c9bff930ab4b8173c4cfa4537 -->
+<!-- i18n-source-sha256: bb7b6aa220cafcc7318d2cc50e01ae98fb5ea2f1ff04c87d5cc7b90a7b322134 -->
 <!-- Machine-assisted translation; English source is authoritative. -->
 # Kênh truyền và các mô hình
 
@@ -46,6 +46,8 @@ Hãy bật tính năng tự động tìm kiếm để yêu cầu thông tin về
 Tính năng khám phá nhận diện siêu dữ liệu cửa sổ ngữ cảnh rõ ràng, gồm `limit.context` lồng nhau của OpenCode Go/Zen, `context_length` của OpenRouter, `max_model_len` của vLLM và `inputTokenLimit` của Gemini. Nếu chỉ có độ dài đầu vào tối đa thì dùng làm giá trị dự phòng; giới hạn đầu ra và tên mô hình không xác định dung lượng ngữ cảnh. Nếu thiếu cả hai thông tin thì cửa sổ ngữ cảnh vẫn chưa xác định.
 
 Hãy xác định rõ cửa sổ con của từng mô hình khi chúng được biết đến. Giá trị cụ thể cho từng mô hình sẽ thay thế các thông tin meta trong cơ sở dữ liệu, hoặc bù đắp cho những giá trị còn thiếu. Trình soạn thảo chấp nhận việc sử dụng từ 1 đến 2.000.000 ký tự; đây chỉ là phạm vi cấu hình, chứ không phải là đảm bảo rằng nhà cung cấp hỗ trợ khả năng xử lý như vậy. Hãy sử dụng giới hạn thực tế cho việc triển khai của bạn, đồng thời xem xét đến các thiết lập trên phía máy chủ và những giới hạn của chính mô hình đó.
+
+Với các điểm cuối chính thức được nhận diện, giới hạn ngữ cảnh còn thiếu có thể được bổ sung từ danh mục công khai models.dev bằng ID nhà cung cấp và mô hình khớp chính xác. Siêu dữ liệu từ nhà cung cấp được ưu tiên hơn nguồn dự phòng này, còn thiết lập thủ công được ưu tiên hơn cả hai. Bộ điều khiển dùng chung bộ nhớ đệm danh mục trong RAM trong sáu giờ; nếu tải thất bại, giữ bản hợp lệ cuối cùng và thử lại sau mười phút. Thông tin xác thực kênh, URL và ID mô hình không được gửi tới models.dev. Điểm cuối không xác định và ID không khớp vẫn không có giới hạn đã biết nếu nhà cung cấp không báo cáo.
 
 ## Phép lấy mẫu dữ liệu, quá trình suy luận và cách sử dụng dữ liệu thu được
 
