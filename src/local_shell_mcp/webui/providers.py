@@ -16,6 +16,8 @@ from urllib.parse import quote, urlsplit
 
 from local_shell_mcp import __version__
 
+from .provider_errors import ProviderStreamError
+
 MODEL_USER_AGENT = f"local-shell-mcp/{__version__}"
 
 
@@ -430,10 +432,10 @@ async def stream_model(
                 event = json.loads(frame)
             except json.JSONDecodeError:
                 continue
-            if "error" in event:
+            if event.get("error") is not None or event.get("type") == "error":
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Model provider rejected the generation request")
+                raise ProviderStreamError.from_event(event, response=response, credentials=(config.token,))
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "openai":
                 for choice in event.get("choices", []):
@@ -571,10 +573,10 @@ async def stream_model_with_tools(
                 event = json.loads(frame)
             except json.JSONDecodeError:
                 continue
-            if "error" in event:
+            if event.get("error") is not None or event.get("type") == "error":
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Model provider rejected the generation request")
+                raise ProviderStreamError.from_event(event, response=response, credentials=(config.token,))
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             for choice in event.get("choices", []):
                 delta = choice.get("delta") or {}

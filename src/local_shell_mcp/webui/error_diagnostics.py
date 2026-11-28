@@ -8,13 +8,12 @@ reported separately with known credentials redacted.
 from __future__ import annotations
 
 import json
-import re
 import traceback
 from pathlib import Path
 
 from .agent_runtime import RuntimeSafetyError
 from .compaction import CompactionFailed, SummaryResponseError
-from .provider_responses import ResponsesStreamError
+from .provider_errors import ProviderStreamError, redact_provider_value, request_credentials
 
 _KNOWN_SAFETY_REASONS = frozenset({
     "Authentication grant expired",
@@ -54,8 +53,8 @@ def _classify(exc: BaseException) -> tuple[str, str]:
     elif isinstance(exc, SummaryResponseError):
         reason = str(exc)
         headline = reason
-    elif isinstance(exc, ResponsesStreamError):
-        reason = str(exc)  # Typed exception contains only classified fields.
+    elif isinstance(exc, ProviderStreamError):
+        reason = str(exc)  # Credential-redacted code and event type only.
         headline = reason
     elif isinstance(exc, TimeoutError):
         reason = "The operation timed out"
@@ -94,39 +93,20 @@ def _provider_details(exc: BaseException, credentials: tuple[str, ...]) -> list[
     envelope = payload.get("error", payload)
     if not isinstance(envelope, dict):
         return []
-    secrets = list(credentials)
-    # The actual request can use a refreshed OAuth token or a different channel.
-    try:
-        request = getattr(exc, "request", None) or response.request
-        for name in ("authorization", "x-api-key", "api-key", "x-goog-api-key", "cookie"):
-            value = request.headers.get(name)
-            if value:
-                secrets.append(value)
-                if name == "authorization":
-                    secrets.append(value.split(" ", 1)[-1])
-                elif name == "cookie":
-                    secrets.extend(item.partition("=")[2].strip() for item in value.split(";"))
-        for key, value in request.url.params.multi_items():
-            if re.search(r"key|token|secret|password|auth|signature", key, re.I):
-                secrets.append(value)
-    except (AttributeError, RuntimeError):
-        pass
-
-    def redact(value: str) -> str:
-        for secret in sorted(set(filter(None, secrets)), key=len, reverse=True):
-            value = value.replace(secret, "[REDACTED]")
-        value = re.sub(r"(?i)\bBearer\s+[^\s,;\"']+", "Bearer [REDACTED]", value)
-        value = re.sub(r"(?i)([\w-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization)[\w-]*[\"']?\s*[:=]\s*[\"']?)[^\s,;\"'&}]+", r"\1[REDACTED]", value)
-        return value
-
-    return [f"Provider {key}: {redact(str(envelope[key]))}"
-            for key in ("type", "code", "param", "message")
+    secrets = request_credentials(response, credentials)
+    return [f"Provider {key}: {redact_provider_value(str(envelope[key]), secrets)}"
+            for key in ("type", "code", "status", "param", "message", "request_id")
             if isinstance(envelope.get(key), (str, int))]
 
 
 def _exception_details(exc: BaseException, credentials: tuple[str, ...]) -> list[str]:
     _, reason = _classify(exc)
+    if isinstance(exc, ProviderStreamError):
+        reason = redact_provider_value(reason, credentials)
     lines = [f"Exception: {type(exc).__name__}", f"Reason: {reason}"]
+    if isinstance(exc, ProviderStreamError):
+        lines.extend(f"Provider {key}: {redact_provider_value(value, credentials)}"
+                     for key, value in exc.fields.items())
     status = _http_status(exc)
     if status is not None:
         lines.append(f"HTTP status: {status}")
@@ -141,6 +121,8 @@ def _exception_details(exc: BaseException, credentials: tuple[str, ...]) -> list
 def generation_failure(exc: Exception, run_id: str, *, credentials: tuple[str, ...] = ()) -> str:
     """Serialize the visible exception chain, including each cause's own stack."""
     headline, _ = _classify(exc)
+    if isinstance(exc, ProviderStreamError):
+        headline = redact_provider_value(headline, credentials)
     lines = [f"Run: {run_id}"]
     current: BaseException | None = exc
     seen = set()

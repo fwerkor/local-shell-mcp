@@ -13,6 +13,7 @@ import secrets
 from collections.abc import AsyncIterator
 
 from .approval_runtime import truncate_approval_result
+from .provider_errors import ProviderStreamError
 from .providers import (
     ModelFinish,
     ModelThought,
@@ -231,10 +232,10 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
                 event = json.loads(frame)
             except json.JSONDecodeError:
                 continue
-            if "error" in event or event.get("type") == "error":
+            if event.get("error") is not None or event.get("type") == "error":
                 if image_input_rejected(json.dumps(event)):
                     raise UnsupportedImageInput("Provider does not support image input")
-                raise RuntimeError("Model provider rejected the generation request")
+                raise ProviderStreamError.from_event(event, response=response, credentials=(config.token,))
             usage_snapshot = _usage_frame(config.provider, event, usage_snapshot)
             if config.provider == "anthropic":
                 kind = event.get("type")

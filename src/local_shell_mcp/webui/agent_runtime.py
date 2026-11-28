@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC
 from typing import Any
 
-from .provider_responses import ResponsesStreamError
+from .provider_errors import ProviderStreamError
 from .providers import ModelThought, ModelToolCall, ModelUsage, ProviderConfig
 from .semantic_index import SemanticSnapshot
 
@@ -42,7 +42,7 @@ def _model_retry_delay(error: Exception, attempt: int) -> float:
     import httpx
 
     delay = _MODEL_RETRY_DELAYS[attempt]
-    if isinstance(error, ResponsesStreamError):
+    if isinstance(error, ProviderStreamError):
         # Parallel children should not all reconnect on the same boundary.
         import random
 
@@ -87,11 +87,11 @@ def _retryable_model_error(error: Exception) -> bool:
     """Retry transient transport failures and classified provider-side failures."""
     import httpx
 
-    if isinstance(error, ResponsesStreamError):
+    if isinstance(error, ProviderStreamError):
         return error.retryable
 
     if isinstance(error, httpx.HTTPStatusError):
-        return error.response.status_code in {408, 429, 500, 502, 503, 504}
+        return error.response.status_code in {408, 429, 500, 502, 503, 504, 529}
     return isinstance(error, (
         httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError,
         httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.PoolTimeout,
@@ -283,7 +283,7 @@ async def run_agent_loop(
 
                 retry_delay = _model_retry_delay(error, attempt)
                 status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
-                diagnostic = str(error) if isinstance(error, ResponsesStreamError) else type(error).__name__
+                diagnostic = type(error).__name__
                 log.warning("Model transport %s (HTTP %s) before first event; retry %d/%d in %.1fs (model=%s)",
                             diagnostic, status, attempt + 1, len(_MODEL_RETRY_DELAYS),
                             retry_delay, context.profile.model)
